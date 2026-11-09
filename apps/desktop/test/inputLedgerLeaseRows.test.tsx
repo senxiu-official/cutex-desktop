@@ -105,11 +105,11 @@ describe("timeline working line and Composer delegation context", () => {
 });
 
 describe("delegation identity tooltips", () => {
-  it.each([false, true])("link=%s uses the visible number instead of a raw id in the title", linked => {
+  it.each([false, true])("link=%s uses the visible tag instead of the whole id in the title", linked => {
     const askId = "ask-private-identity";
     const html = renderToStaticMarkup(h(DelegationTag, { askId, ...(linked ? { onJump: () => {} } : {}) }));
     expect(html).not.toContain(askId);
-    expect(html).toMatch(/title="#\d+"/);
+    expect(html).toContain('title="#privat"');
     expect(html).toContain("data-delegation-tag");
   });
 });

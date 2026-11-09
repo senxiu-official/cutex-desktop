@@ -85,6 +85,8 @@ export function AgentInfoDialog({ name, color, seed, initial, options, resolve }
   const [error, setError] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const [note, setNote] = useState(initial.note ?? "");
+  // cutex agent-memory-injection: shown when the caller passes the current value.
+  const [memoryOn, setMemoryOn] = useState(initial.memoryInjection ?? true);
   const avatar: SessionAvatar | null = kind === "inherit" ? null : combineColor ? combinedAvatar(face, emoji, face === "portrait" ? portrait : icon, tint) :
     kind === "emoji" ? cleanAvatar({ kind: "emoji", value: emoji }) : kind === "color" ? { kind: "color", value: swatch } : kind === "picture" && icon ? { kind: "icon", value: icon.value } :
     kind === "portrait" && portrait ? { kind: "icon", value: portrait.value } : null;
@@ -109,7 +111,7 @@ export function AgentInfoDialog({ name, color, seed, initial, options, resolve }
     }
     const baseAvatar = shown === "default" && resetStyle && look?.hostId ? shownStyleAvatar(seed, look.hostId) : avatar;
     const savedAvatar = baseAvatar && shown === "default" && resetStyle && combineColor && isHexColor(tint) ? { ...baseAvatar, color: tint.toLowerCase() } : baseAvatar;
-    done({ avatar: avatarMode === "inherit" && options.editAvatarMode ? null : savedAvatar, ...(options.editAvatarMode ? { avatarMode } : {}), note, ...(options.editBadge ? { badge } : {}), ...(editName ? { displayName: alias } : {}) });
+    done({ avatar: avatarMode === "inherit" && options.editAvatarMode ? null : savedAvatar, ...(options.editAvatarMode ? { avatarMode } : {}), note, ...(options.editBadge ? { badge } : {}), ...(editName ? { displayName: alias } : {}), ...(initial.memoryInjection !== undefined ? { memoryInjection: memoryOn } : {}) });
   };
   const shownName = (editName ? alias.trim() : "") || (editName ? realName : name);
   const resetPreview = shown === "default" && resetStyle && look?.hostId ? shownStyleAvatar(seed, look.hostId) : avatar;
@@ -282,6 +284,16 @@ export function AgentInfoDialog({ name, color, seed, initial, options, resolve }
         onChange={(e) => setNote(e.target.value)}
         className={FIELD}
       />
+      {initial.memoryInjection !== undefined && (
+        <label className="mt-3 flex cursor-pointer items-start gap-2 text-sm">
+          <input type="checkbox" data-testid="agent-info-memory" checked={memoryOn} onChange={(e) => setMemoryOn(e.target.checked)} className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--accent)]" />
+          <span className="min-w-0">
+            <span className="text-foreground">{t("agent-config.memoryInjection.label")}</span>
+            {memoryOn !== initial.memoryInjection && <span className="ml-1.5 rounded bg-attention-soft px-1 text-caption text-warn-text" data-testid="agent-info-memory-pending">{t("agent-config.memoryInjection.nextLaunch")}</span>}
+            <span className="block text-xs text-subtle">{t("agent-config.memoryInjection.infoHint")}</span>
+          </span>
+        </label>
+      )}
       <div className="mt-4 flex justify-end gap-2">
         <button type="button" onClick={() => done(null)} className="rounded-md px-3 py-1 text-sm text-muted hover:bg-surface-2">
           {t("dialog.cancel")}

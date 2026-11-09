@@ -4,7 +4,8 @@
 import { useMemo } from "react";
 import type { SidebarSnapshot } from "../../../shared/ipc";
 import { sidebarOf, useApp } from "../store";
-import { useConvSidebar } from "./conversationScope";
+import { convHostOf, useConvScope, useConvSidebar } from "./conversationScope";
+import { realNameTip } from "./agentAlias";
 
 export type SessionRow = SidebarSnapshot["active"][number];
 
@@ -29,4 +30,19 @@ export function useViewRows(): SessionRow[] {
 export function viewRow(s: Parameters<typeof sidebarOf>[0], hostId: string, id: string): SessionRow | undefined {
   const find = (sidebar: SidebarSnapshot | null) => [...(sidebar?.active ?? []), ...(sidebar?.retired ?? [])].find((r) => r.cutexSessionId === id);
   return find(sidebarOf(s, hostId)) ?? find(s.sidebar);
+}
+
+/**
+ * The name the owner knows a sender by: its sidebar name (alias > formal name, read fresh), with the formal
+ * name under an alias as `real` (a tooltip). Anyone the sidebar does not hold (a service, another host's
+ * agent, a deleted one) keeps `name`, what the host reported. Display only: agents still see the formal name.
+ */
+export function useSenderName(id: string | null | undefined, name: string): { name: string; real: string | null } {
+  const conv = useConvScope();
+  const shown = useApp((s) => (id ? viewRow(s, convHostOf(conv, s), id)?.displayName : undefined));
+  const real = useApp((s) => {
+    const row = id ? viewRow(s, convHostOf(conv, s), id) : undefined;
+    return row ? realNameTip(row) : null;
+  });
+  return { name: shown || name, real };
 }

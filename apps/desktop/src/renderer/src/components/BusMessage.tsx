@@ -11,6 +11,7 @@ import { convFeaturesOf, useConvScope } from "../lib/conversationScope";
 import { useUiPrefs } from "../lib/prefs";
 import { AGENT_MESSAGES_V2, deliveryKindOf, stripLegacyPrefix, type AgentEnvelope, type DeliveryKind } from "../lib/legacyDelivery/agentMessages";
 import { senderLabel } from "../lib/systemSenders";
+import { useSenderName } from "../lib/viewHost";
 import { SenderAvatar } from "./SystemAvatar";
 import { useWakeHint } from "../lib/wakeBusyWaitView";
 import { EnvelopeBadges, KindTag, SentStatus } from "./AgentMessageParts";
@@ -37,7 +38,8 @@ export function BusMessage({ direction, name: rawName, mode, text: raw, preview 
   const [open, setOpen] = useState(agentMessages === "full");
   const incoming = direction === "in";
   const id = incoming ? senderId : recipientId;
-  const name = incoming ? senderLabel(t, id, sourceKind, rawName) : rawName;
+  const sender = useSenderName(incoming ? id : null, rawName);
+  const name = incoming ? senderLabel(t, id, sourceKind, sender.name) : rawName;
   const Arrow = incoming ? ArrowDownLeft : ArrowUpRight;
   const shownKind = kind ?? deliveryKindOf(null, mode);
   const wakeHint = useWakeHint(v2 && shownKind === "wake", recipientRuntime);
@@ -47,7 +49,7 @@ export function BusMessage({ direction, name: rawName, mode, text: raw, preview 
         <Arrow size={13} className="shrink-0 text-subtle" />
         <span className="shrink-0">{t(incoming ? "conversation.from" : "conversation.to")}</span>
         <SenderAvatar id={id} sourceKind={incoming ? sourceKind : null} name={name} size={20} agent />
-        <span data-testid="bus-message-name" className="min-w-0 max-w-[16em] shrink-0 truncate whitespace-nowrap font-medium text-foreground" title={name}>{name}</span>
+        <span data-testid="bus-message-name" className="min-w-0 max-w-[16em] shrink-0 truncate whitespace-nowrap font-medium text-foreground" title={sender.real ?? name}>{name}</span>
         {v2 ? <KindTag kind={shownKind} downgraded={downgraded || !!envelope?.downgraded} wakeHint={wakeHint} /> : <DeliveryTag mode={mode} />}
         {v2 && envelope && <EnvelopeBadges envelope={envelope} reveal={open ? "" : "hidden group-hover/msg:inline group-focus-within/msg:inline"} />}
         {v2 && !incoming && messageId && <SentStatus messageId={messageId} />}

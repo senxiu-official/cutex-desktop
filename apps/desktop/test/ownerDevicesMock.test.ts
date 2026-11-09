@@ -1,18 +1,31 @@
 // The browser preview's owner devices (dev/mockBridge.ts + modules/users, remote-access, peers mocks;
 // docs/research/owner-devices-desktop-api-20261019.md "Mock"): who this desktop is on each host, new
 // owner devices and their event, scopes on tokens, owner-local refusals, an older cutex.
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { PreloadBridge } from "../src/shared/ipc";
 import { accessRefusalOf, hostUserAccessOf, ownerLocalActionsAllowed } from "../src/shared/users";
 
-async function install(search = ""): Promise<PreloadBridge> {
-  vi.resetModules();
-  vi.useFakeTimers();
+function stubs(search: string) {
   const win: { cutex?: PreloadBridge } = {};
   vi.stubGlobal("window", win);
   vi.stubGlobal("location", { search });
   vi.stubGlobal("document", { title: "" });
   vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => {} });
+  return win;
+}
+
+// The first import loads the bridge's whole module graph (5 s on an idle machine, all of the first test's budget);
+// after that an install() only re-evaluates it (~50 ms). Same as moduleMocks.test.ts.
+beforeAll(async () => {
+  stubs("");
+  await import("../src/renderer/src/dev/mockBridge");
+  vi.unstubAllGlobals();
+}, 60_000);
+
+async function install(search = ""): Promise<PreloadBridge> {
+  vi.resetModules();
+  vi.useFakeTimers();
+  const win = stubs(search);
   const { installMockBridge } = await import("../src/renderer/src/dev/mockBridge");
   installMockBridge();
   return win.cutex!;

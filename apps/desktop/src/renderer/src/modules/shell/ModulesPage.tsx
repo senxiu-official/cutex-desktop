@@ -5,12 +5,12 @@ import { useI18n } from "../../i18n";
 import { Button, ListRow, Section, SettingsGroup, Toggle } from "../../components/settings/Form";
 import { appModules } from "../app";
 import { useModuleStatuses } from "../react";
-import { listedInSettings, revealUnlistedModules } from "../settingsVisibility";
-import { isExternalModuleId } from "../external";
-import { ExternalBadge } from "../ExternalBadge";
 import type { ModuleState } from "../types";
 import { packRow, usePackRuntime } from "../packs";
-import { PackActions, PackBelow, PackIndexHeader, PackOnlyRows, PackSourceTag } from "./ModulePacks";
+import { useModuleDevView } from "../devModules";
+import { DevModulesGroup } from "./DevModules";
+import { ModuleDataGroup } from "./ModuleData";
+import { LocalPacksGroup, PackActions, PackBelow, PackIndexHeader, PackOnlyRows, PackSourceTag } from "./ModulePacks";
 import { Tag } from "../../components/Tag";
 import { settingsAnchorId } from "../../lib/settingsNav";
 import { keyVar, MODULE_COMMANDS } from "../../lib/keybindings";
@@ -52,18 +52,23 @@ export function ModulesPage() {
     const def = host.modules.find((m) => m.id === id);
     return def ? (def.displayName ?? t(def.titleKey)) : id;
   };
-  const reveal = revealUnlistedModules();
   const packs = usePackRuntime();
   // Signed packs (§23.9): only with a module-pack bridge (Electron, or the preview's mock).
+  // A module you added is the one you came here for: above the long list of the app's own.
+  const devView = useModuleDevView();
+  const added = new Set<string>([...(packs.view?.installed ?? []).filter((p) => p.local).map((p) => p.id), ...(devView?.modules ?? []).flatMap((m) => (m.id ? [m.id] : []))]);
   const packRowOf = (id: string) => (packs.view ? packRow(id, packs, packs.bundled ? id in packs.bundled : true, packs.bundled?.[id] ?? null) : null);
   return (
     <Section>
       <PackIndexHeader />
-      {host.modules.filter((def) => listedInSettings(def.id, host.isEnabled(def.id), reveal)).map((def) => {
+      <LocalPacksGroup />
+      <DevModulesGroup />
+      <ModuleDataGroup />
+      {[...host.modules].sort((a, b) => Number(added.has(b.id)) - Number(added.has(a.id))).map((def) => {
         const status = statuses.get(def.id);
         const state = status?.state ?? { kind: "disabled" as const };
         const title = def.displayName ?? t(def.titleKey);
-        const pack = def.required || isExternalModuleId(def.id) ? null : packRowOf(def.id);
+        const pack = def.required ? null : packRowOf(def.id);
         return (
           <div key={def.id} id={settingsAnchorId(`module-${def.id}`)}>
           {/* Only the browser module serves agents: off = its relay refuses agent browser calls at once (main/browser/install.ts moduleEnabled). */}
@@ -73,7 +78,6 @@ export function ModulesPage() {
             title={
               <span className="flex min-w-0 items-center gap-2">
                 <span className="truncate">{title}</span>
-                {isExternalModuleId(def.id) && <ExternalBadge />}
                 {pack && <PackSourceTag row={pack} />}
                 {state.kind !== "active" && state.kind !== "disabled" && (
                   <span className={`shrink-0 text-xs ${state.kind === "failed" ? "text-danger" : "text-subtle"}`} title={stateText(state)}>

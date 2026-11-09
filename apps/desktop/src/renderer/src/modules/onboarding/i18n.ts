@@ -254,7 +254,7 @@ export const zhCN = {
   "onboarding.guide.update.title": "更新",
   "onboarding.guide.update.text": "Cutex 自己的更新在「设置 → 更新与诊断」里。\n每台主机上的 cutex 要分别更新，在「设置 → 主机后端更新」里。\n更新前就在运行的{{agents}}，重启之前可能还显示旧版本。",
   "onboarding.guide.remote.title": "远程主机和配对设备",
-  "onboarding.guide.remote.text": "远程主机上的{{agents}}和这里的用法一样：会话、委托、服务都可以，文件在那台机器上。\n配对的设备（比如手机）按你给的权限连到主机；在「设置 → 用户 → 已登录设备」里管理或撤销。",
+  "onboarding.guide.remote.text": "远程主机上的{{agents}}和这里的用法一样：会话、委托、服务都可以，文件在那台机器上。\n配对的设备（比如手机）按你给的权限连到主机；在「设置 → 主机」里管理或撤销。",
   "onboarding.guide.help.title": "帮助",
   "onboarding.guide.help.hint": "重看入门引导和提示，或打开文档、反馈问题。",
   "onboarding.guide.help.onboarding": "引导",

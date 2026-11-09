@@ -24,9 +24,11 @@ before larger changes.
 - `packages/protocol` — generated protocol types (`pnpm gen:protocol`; never hand-written).
 - `packages/cutex-client` — Management v2 client (bootstrap, SSE with resume, commands).
 - `packages/plugin-sdk`, `packages/plugin-host` — module contract and lifecycle only.
-- `packages/opaque-frame`, `packages/plugin-sandbox` — the opaque frame shape and sandbox.
+- `packages/module-api` — the public API and build tool for writing modules.
+- `packages/opaque-frame` — the opaque frame agent pages and HTML files show in.
+- `packages/plugin-sandbox` — frozen frame-plugin sandbox; nothing in the app imports it.
 - `packages/browser-protocol`, `packages/browser-cdp` — in-app browser plumbing.
-- `examples/plugins` — development examples of desktop plugins.
+- `examples/` — points to the module template; write modules with `cutex-module new`.
 
 ## Working on the UI
 

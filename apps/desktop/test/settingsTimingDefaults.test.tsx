@@ -36,13 +36,12 @@ it("uses uniform card summaries in a mixed page and row icons only inside mixed 
   expect(chips(card("Uniform"))).toEqual(["next"]);
   expect(card("Uniform").querySelector('[data-timing-presentation="header"]')).not.toBeNull();
   expect(chips(row("Model"))).toEqual([]); expect(chips(row("API key"))).toEqual([]);
-  expect(chips(card("Mixed"))).toEqual(["none", "offNowOnNext"]);
+  expect(chips(card("Mixed"))).toEqual(["offNowOnNext"]);
   expect(card("Mixed").querySelector('[data-timing-presentation="header"]')).toBeNull();
   expect(row("Search").getAttribute("data-effect-timing")).toBe("offNowOnNext");
   const marker = row("Search").querySelector("button[data-settings-agents]")!;
   expect(marker.textContent).toBe("");
   expect(marker.querySelector("svg")?.getAttribute("width")).toBe("14");
-  expect(row("Display").querySelector("button[data-settings-agents]")!.className).toContain("text-subtle");
 });
 
 it("states both uniform page axes once and suppresses all lower markers", () => {
@@ -62,7 +61,7 @@ it("places timing and source independently from explicit row declarations", () =
   expect(row("Local runtime").getAttribute("data-effect-source")).toBe("local");
   expect(scopes(card("Source uniform"))).toEqual(["codex:local"]);
   expect(scopes(row("Display"))).toEqual([]);
-  expect(chips(card("Source uniform"))).toEqual(["none", "now"]);
+  expect(chips(card("Source uniform"))).toEqual(["now"]);
   expect(host.querySelector("[data-settings-scope]")?.getAttribute("data-settings-scope")).toBe("mixed");
 });
 
@@ -70,9 +69,9 @@ it("recomputes both axes after conditional mount, declaration changes and unmoun
   const tree = (exception?: boolean) => page(section("Rows", [field("Display", "none", "local"),
     exception !== undefined && field("Behavior", exception ? "next" : "none", exception ? "host" : "local"),
   ]));
-  render(tree(false)); expect(chips(host)).toEqual(["none"]); expect(scopes(host)).toEqual(["local"]);
-  render(tree(true)); expect(chips(host)).toEqual(["mixed", "none", "next"]); expect(scopes(host)).toEqual(["mixed", "local", "host:local"]);
-  render(tree()); expect(chips(host)).toEqual(["none"]); expect(scopes(host)).toEqual(["local"]);
+  render(tree(false)); expect(chips(host)).toEqual([]); expect(scopes(host)).toEqual(["local"]);
+  render(tree(true)); expect(chips(host)).toEqual(["mixed", "next"]); expect(scopes(host)).toEqual(["mixed", "local", "host:local"]);
+  render(tree()); expect(chips(host)).toEqual([]); expect(scopes(host)).toEqual(["local"]);
   expect(row("Behavior")).toBeUndefined();
 });
 
@@ -84,7 +83,7 @@ it("summarizes nested cards at the highest uniform ancestor without repeats", ()
   expect(chips(card("Outer uniform"))).toEqual(["next"]); expect(scopes(card("Outer uniform"))).toEqual(["host:local"]);
   expect(chips(card("Inner"))).toEqual([]); expect(scopes(card("Inner"))).toEqual([]); expect(chips(row("Nested"))).toEqual([]);
   render(page(section("Outer mixed", [field("Outer", "none", "local"), section("Inner", field("Nested", "next", "host"))])));
-  expect(chips(row("Outer"))).toEqual(["none"]);
+  expect(chips(row("Outer"))).toEqual([]);
   expect(chips(card("Inner"))).toEqual(["next"]); expect(scopes(card("Inner"))).toEqual(["host:local"]);
   expect(chips(row("Nested"))).toEqual([]);
 });
@@ -96,7 +95,7 @@ it("registers a custom SettingsGroup as one logical control", () => {
   ])));
   const group = row("Delivery matrix");
   expect(group.getAttribute("data-effect-timing")).toBe("none"); expect(group.getAttribute("data-effect-source")).toBe("local");
-  expect(chips(group)).toEqual(["none"]); expect(scopes(group)).toEqual(["local"]); expect(chips(row("Runtime"))).toEqual(["next"]);
+  expect(chips(group)).toEqual([]); expect(scopes(group)).toEqual(["local"]); expect(chips(row("Runtime"))).toEqual(["next"]);
 });
 
 it("includes logical controls in card actions when computing and placing both summaries", () => {
@@ -128,7 +127,7 @@ it("treats an unknown timing declaration as mixed while preserving known row ico
   // Intentionally emulate an unreviewed legacy row despite the required TypeScript declaration.
   render(page(section("Partial", [field("Known", "none", "local"), field("Unknown", undefined as never, "local")])));
   expect(chips(host.querySelector("[data-settings-header]")!)).toEqual(["mixed"]);
-  expect(chips(row("Known"))).toEqual(["none"]); expect(chips(row("Unknown"))).toEqual([]); expect(scopes(host)).toEqual(["local"]);
+  expect(chips(row("Known"))).toEqual([]); expect(chips(row("Unknown"))).toEqual([]); expect(scopes(host)).toEqual(["local"]);
 });
 
 it("reveals the full row timing explanation on hover/click and dismisses with Escape", () => {
@@ -176,7 +175,7 @@ it("applies the same highest uniform rule to an existing dashboard card", () => 
   ]));
   const custom = host.querySelector("section")!;
   expect(chips(host.querySelector("[data-settings-header]")!)).toEqual(["mixed"]);
-  expect(chips(custom.querySelector("[data-effect-card-summary]")!)).toEqual(["none"]);
+  expect(chips(custom.querySelector("[data-effect-card-summary]")!)).toEqual([]);
   expect(chips(row("Price"))).toEqual([]);
 });
 
@@ -201,7 +200,7 @@ it("keeps the Profile common host once and labels only differing local scope", (
   expect(scopes(card("Host"))).toEqual([]);
   expect(scopes(card("Local").querySelector("[data-effect-card-summary]")!)).toEqual(["local"]);
   expect(scopes(row("Claim"))).toEqual([]);
-  expect(chips(row("Name"))).toEqual(["none"]);
+  expect(chips(row("Name"))).toEqual([]);
 });
 
 
@@ -223,8 +222,8 @@ it("Profile uses one timing per uniform editable card and row markers only in mi
     section("Mixed runtime", [field("Model", "next"), field("Admission", "now")]),
   ], "profiles"));
   expect(chips(host.querySelector("[data-settings-header]")!)).toEqual(["mixed"]);
-  expect(chips(card("Appearance"))).toEqual(["none"]); expect(chips(row("Avatar"))).toEqual([]);
-  expect(chips(card("Quota reader"))).toEqual(["none"]); expect(chips(row("Reader"))).toEqual([]);
+  expect(chips(card("Appearance"))).toEqual([]); expect(chips(row("Avatar"))).toEqual([]);
+  expect(chips(card("Quota reader"))).toEqual([]); expect(chips(row("Reader"))).toEqual([]);
   expect(chips(row("Model"))).toEqual(["next"]); expect(chips(row("Admission"))).toEqual(["now"]);
   expect(scopes(host)).toEqual(["host:local"]);
 });
@@ -247,7 +246,7 @@ it("card summary markers share the title row and never float above an untitled c
   expect(marker.parentElement).toBe(card("Display").querySelector("h3")!.parentElement);
   render(page([section("", field("Untitled", "none", "local")), section("Runtime", field("Model", "next", "host"))]));
   expect(host.querySelector("section")!.querySelector("[data-effect-card-summary]")).toBeNull();
-  expect(chips(row("Untitled"))).toEqual(["none"]);
+  expect(chips(row("Untitled"))).toEqual([]);
 });
 
 

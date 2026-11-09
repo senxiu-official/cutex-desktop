@@ -1,0 +1,18 @@
+{
+  "name": "my-module",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc --noEmit && cutex-module build",
+    "dev": "cutex-module dev",
+    "pack": "tsc --noEmit && cutex-module pack"
+  },
+  "devDependencies": {
+    "@cutex-desktop/module-api": "file:MODULE_API_PATH",
+    "@types/react": "^19.3.0",
+    "lucide-react": "^1.17.0",
+    "react": "^19.3.0",
+    "typescript": "^7.0.2"
+  }
+}

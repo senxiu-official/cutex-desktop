@@ -43,8 +43,19 @@ import { AgentMentionChip } from "./AgentMentionChip";
 import { CodeBlockScope, fenceLanguage } from "../lib/codeBlockScope";
 import { ReplyCodeBlock } from "./ReplyCodeBlock";
 import { useStreamdownTranslations } from "../lib/streamdownTranslations";
+import { mathKindOf, remarkMarkdownMath } from "../lib/markdownMath";
+import { preloadKatex } from "../lib/katexRender";
+import { MathNode } from "./MathNode";
 
-const plugins = { cjk, code };
+// Markdown math (lib/markdownMath.ts → components/MathNode.tsx): the parser goes in streamdown's math slot (after
+// the CJK plugins); KaTeX renders in MarkdownCode, so the slot's rehype step is empty. A streaming reply's
+// parser leaves an opener without its closer at the end of the text as plain source (pending).
+const mathPlugin = (streaming: boolean) => ({ name: "katex" as const, type: "math" as const, remarkPlugin: [remarkMarkdownMath, { streaming }] as [typeof remarkMarkdownMath, { streaming: boolean }], rehypePlugin: () => undefined });
+const plugins = { cjk, code, math: mathPlugin(false) };
+const streamingPlugins = { cjk, code, math: mathPlugin(true) };
+// remend would close an unfinished `$$` while it streams, typesetting half a formula: math waits for its own closer.
+const remendOptions = { katex: false, inlineKatex: false };
+preloadKatex();
 // Default rehype plugins minus `harden`: with no defaultOrigin it blocks relative hrefs, which are
 // exactly our workspace file links. Link safety is enforced in `FileAwareLink` instead.
 // `D:/x`, `file:///x` and `README.md:12` would lose their href (or an image its src) in `sanitize`
@@ -331,6 +342,7 @@ function MarkdownImage(props: ImgHTMLAttributes<HTMLImageElement> & { node?: unk
 }
 
 type CodeProps = HTMLAttributes<HTMLElement> & { node?: unknown; "data-block"?: string };
+const textOf = (node: ReactNode): string => (typeof node === "string" ? node : Array.isArray(node) ? node.map(textOf).join("") : "");
 const DefaultCode = defaultComponents.code as ComponentType<CodeProps>;
 
 /**
@@ -341,6 +353,8 @@ const DefaultCode = defaultComponents.code as ComponentType<CodeProps>;
  */
 function MarkdownCode(props: CodeProps) {
   const scope = useContext(CodeBlockScope);
+  const math = "data-block" in props ? null : mathKindOf(props.className);
+  if (math) return <MathNode kind={math} source={textOf(props.children)} />;
   const language = fenceLanguage(props.className);
   if (!scope || !("data-block" in props) || language.toLowerCase() === "mermaid") return <DefaultCode {...props} />;
   return <ReplyCodeBlock {...props} scope={scope} language={language} />;
@@ -375,7 +389,8 @@ export const Markdown = memo(function Markdown({ text, streaming = false, compac
           isAnimating={streaming}
           parseIncompleteMarkdown={streaming}
           {...(blockMode ? { parseMarkdownIntoBlocksFn: blocks } : {})}
-          plugins={plugins}
+          plugins={streaming ? streamingPlugins : plugins}
+          remend={remendOptions}
           components={components}
           rehypePlugins={blockMode ? rehypePlugins : staticRehypePlugins}
           shikiTheme={["github-light", "github-dark"]}

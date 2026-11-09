@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { checkDefaultsPatch } from "../src/shared/sessionDefaults";
 
 describe("checkDefaultsPatch", () => {
-  it("accepts only the Claude tool switches", () => {
+  it("accepts only the Claude tool switches and memoryInjection", () => {
     expect(() => checkDefaultsPatch({ patch: { claudeAllowWrite: true } })).not.toThrow();
     expect(() => checkDefaultsPatch({ patch: { claudeAllowExec: false }, expectedRevision: 3 })).not.toThrow();
   });

@@ -3,6 +3,7 @@ import type { SidebarSnapshot } from "../../../shared/ipc";
 import { agentMentionMarkdown, parseAgentMentionHref } from "./agentMentions";
 import { realAgentName } from "./agentAlias";
 import { compareNames } from "./rosterOrder";
+import { isQuickChat } from "./sidebar";
 
 export interface MentionHost {
   id: string;
@@ -23,8 +24,18 @@ export interface AgentMentionCandidate {
   session: SessionResource;
 }
 
-/** Only identities already returned in the user's authorized host snapshots are offered. */
-export function agentMentionCandidates(hosts: readonly MentionHost[], currentHost: string, currentAgent: string, query: string, limit = 50): AgentMentionCandidate[] {
+/** The recent-mention key of an agent (lib/agentPickerOptions recent memory, context "mention", host "*"). */
+export const mentionRecentKey = (hostId: string, id: string): string => `${hostId}
+${id}`;
+
+/**
+ * Only identities already returned in the user's authorized host snapshots are offered. Order (owner 2026-11-09):
+ * the current agent's project, then recent mentions (`recent`: mentionRecentKey values, newest first), then by
+ * name. The query also matches the agent's project; quick chats outside a project show only when searched (or recent).
+ */
+export function agentMentionCandidates(hosts: readonly MentionHost[], currentHost: string, currentAgent: string, query: string, limit = 50, recent: readonly string[] = []): AgentMentionCandidate[] {
+  const recentRank = new Map(recent.map((key, i) => [key, i]));
+  const rankOf = (c: AgentMentionCandidate) => recentRank.get(mentionRecentKey(c.hostId, c.id)) ?? Infinity;
   const project = hosts.find(host => host.id === currentHost)?.sidebar?.hostRows?.[currentAgent]?.projectId;
   const needle = query.toLocaleLowerCase();
   const seen = new Set<string>();
@@ -35,14 +46,18 @@ export function agentMentionCandidates(hosts: readonly MentionHost[], currentHos
     seen.add(id);
     const name = session.displayName || session.formalAgentName || id;
     const label = host.id === currentHost ? name : `${name}@${host.label}`;
-    if (needle && ![label, name, session.formalAgentName, id].some(value => value?.toLocaleLowerCase().includes(needle))) continue;
+    const row = host.sidebar?.hostRows?.[id];
+    const projectId = row?.projectId ?? null;
+    const projectName = projectId ? row?.projectName || host.sidebar?.projects?.projects.find(p => p.project_id === projectId)?.presentation.display_name || null : null;
+    if (needle && ![label, name, session.formalAgentName, id, projectName].some(value => value?.toLocaleLowerCase().includes(needle))) continue;
+    if (!needle && !projectId && isQuickChat(session, row) && !recentRank.has(mentionRecentKey(host.id, id))) continue;
     candidates.push({ id, name, wireName: realAgentName(session) || name, label, hostId: host.id, hostLabel: host.label,
       sameProject: !!project && host.id === currentHost && host.sidebar?.hostRows?.[id]?.projectId === project,
       presence: !host.connected ? "unknown" : session.runtime.status === "online" ? "online" : session.runtime.status === "offline" ? "offline" : "unknown",
       session,
     });
   }
-  return candidates.sort((a, b) => Number(b.sameProject) - Number(a.sameProject) || compareNames(a.label, b.label) || a.id.localeCompare(b.id)).slice(0, Math.max(0, Math.min(100, limit)));
+  return candidates.sort((a, b) => Number(b.sameProject) - Number(a.sameProject) || rankOf(a) - rankOf(b) || compareNames(a.label, b.label) || a.id.localeCompare(b.id)).slice(0, Math.max(0, Math.min(100, limit)));
 }
 
 /**

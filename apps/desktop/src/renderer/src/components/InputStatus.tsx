@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { InputRecord } from "@cutex-desktop/protocol";
 import { useI18n, type MessageKey } from "../i18n";
-import { inputLabel } from "../lib/inputLedger/labels";
+import { inputLabel, stalledMinutes } from "../lib/inputLedger/labels";
 import { useApp } from "../store";
 import { bridge } from "../bridge";
 import { useNow } from "../lib/time";
@@ -39,8 +39,11 @@ export function InputStatus({ record, sessionId, hostId, readOnly = false, timel
   const status = label.kind === "unknown" ? label.code : silent ? "" : unread ? t("inputLedger.record.unread") : t(`inputLedger.record.${label.id}` as MessageKey);
   const diagnostics = [record.reason, record.stage, record.error?.code, record.error && JSON.stringify(record.error.details), record.details.nativeReason].filter(Boolean).join(" · ");
   const waitingHint = record.state === "waiting" && label.kind === "label";
-  const detail = waitingHint && label.id !== "uncertain" ? status : diagnostics;
-  const minutes = record.stalled ? Math.max(0, Math.floor((now - Date.parse(record.stalled.since)) / 60000)) : 0;
+  // A Claude Task notice of unconfirmed delivery: retry only sends the notice again, the task does not restart.
+  const noticeOnly = record.details.retryEffect === "redeliverNotice" && record.details.taskRestartsOnRetry === false;
+  const noticeHint = noticeOnly ? t("inputLedger.taskNotice.hint") : "";
+  const detail = waitingHint && label.id !== "uncertain" ? status : [noticeHint, diagnostics].filter(Boolean).join(" · ");
+  const minutes = stalledMinutes(record, now);
   const offered = readOnly ? [] : (record.actions ?? []).filter(action => action === "retry" || action === "dismiss" || action === "interruptSend");
   const failedCode = (record.state === "failed" || record.state === "rejected") && (record.error?.code || record.reason);
   if (silent && !failedCode && !Number.isFinite(countdown) && !record.stalled && !offered.length)
@@ -50,9 +53,9 @@ export function InputStatus({ record, sessionId, hostId, readOnly = false, timel
     {failedCode && <span className="truncate" data-tip={detail}>{record.error?.code ?? record.reason}</span>}
     {Number.isFinite(countdown) && <span className="tabular-nums">{t("queue.meta.countdown", { n: Math.max(0, Math.ceil((countdown - now) / 1000)) })}</span>}
     {label.kind === "unknown" && <span role="img" aria-label={t("inputLedger.unknown")} data-tip={t("inputLedger.unknown")}>⚠</span>}
-    {record.stalled && <span className="truncate text-warn-text" data-tip={waitingHint ? status : record.stalled.reason}>{t("inputLedger.stalled", { n: minutes, reason: waitingHint ? status : record.stalled.reason })}</span>}
-    {!readOnly && record.actions?.includes("retry") && <button type="button" disabled={pending} onClick={() => void act("retry")} className="h-5 shrink-0 rounded px-1 hover:bg-surface-2 disabled:opacity-50">{t("inputLedger.retry")}</button>}
-    {!readOnly && record.actions?.includes("dismiss") && <button type="button" disabled={pending} onClick={() => void act("dismiss")} className="h-5 shrink-0 rounded px-1 hover:bg-surface-2 disabled:opacity-50">{t(record.kind === "delegationStatus" ? "inputLedger.ignoreNotification" : "inputLedger.dismiss")}</button>}
+    {record.stalled && <span className="truncate text-warn-text" data-tip={waitingHint ? status : record.stalled.reason}>{waitingHint ? t("inputLedger.stalledFor", { n: minutes }) : t("inputLedger.stalled", { n: minutes, reason: record.stalled.reason })}</span>}
+    {!readOnly && record.actions?.includes("retry") && <button type="button" disabled={pending} onClick={() => void act("retry")} data-tip={noticeHint || undefined} className="h-5 shrink-0 rounded px-1 hover:bg-surface-2 disabled:opacity-50">{t(noticeOnly ? "inputLedger.taskNotice.retry" : "inputLedger.retry")}</button>}
+    {!readOnly && record.actions?.includes("dismiss") && <button type="button" disabled={pending} onClick={() => void act("dismiss")} className="h-5 shrink-0 rounded px-1 hover:bg-surface-2 disabled:opacity-50">{t(noticeOnly || record.kind === "delegationStatus" ? "inputLedger.ignoreNotification" : "inputLedger.dismiss")}</button>}
     {!readOnly && record.actions?.includes("interruptSend") && <button type="button" disabled={pending} onClick={() => void act("interruptSend")} className="h-5 shrink-0 rounded px-1 hover:bg-surface-2 disabled:opacity-50">{t("steer.interruptSend")}</button>}
   </span>;
 }

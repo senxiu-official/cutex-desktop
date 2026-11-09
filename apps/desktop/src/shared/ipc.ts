@@ -1,4 +1,6 @@
 import type { SessionForkRequest, SessionForkResult, SessionForkPreview, SessionForkPreviewRequest } from "./sessionFork";
+import type { AgentMcpResult } from "./sessionMcp";
+import type { FilesRevertRequest, FilesRevertResult } from "./filesRevert";
 import type { AskReviewFields } from "./delegationReviews";
 import type { ApprovalPage, OwnerStorePageQuery } from "./notificationPaging";
 // IPC contract between Electron main and the renderer. The renderer never sees the cutex token
@@ -170,7 +172,7 @@ export interface QuotaConfigView {
 
 export interface CapabilitiesView {
   /** r260 non-durable text opt-in (normalized into featureList by main). */
-  features?: { runtimePruneV1?: boolean; liveTextDeltas?: boolean; ownerAdmissionHeldV1?: boolean; ownerAdmissionStateV1?: boolean; ownerAdmissionBusyV1?: boolean; formalAgentNameRenameV1?: boolean };
+  features?: { runtimePruneV1?: boolean; liveTextDeltas?: boolean; ownerAdmissionHeldV1?: boolean; ownerAdmissionStateV1?: boolean; ownerAdmissionBusyV1?: boolean; formalAgentNameRenameV1?: boolean; quickChatPromoteV1?: boolean };
   /** r258 native event media references (also advertised in featureList). */
   eventMediaBlobs?: boolean;
   /** Build identity (cutex r224+; absent on older cutex). */
@@ -1049,6 +1051,29 @@ export interface PairingCodeView {
   ownerDevice?: boolean;
 }
 
+/** Pairing v2 (QR invites, cutex-client pairingInvites.ts): one owner-list row; never a secret. */
+export type PairingInviteView = import("@cutex-desktop/cutex-client").PairingInvite;
+/** Pairing v2: a new invite; `qr` (= the paste string) is its one-time secret: shown, never logged. */
+export type CreatedPairingInviteView = import("@cutex-desktop/cutex-client").CreatedPairingInvite;
+/** 公网扫码配对 (cutex `relay-pairing-switch-v1`): the switch and whether the relay pairing entry listens. */
+export type RelayPairingStatusView = import("@cutex-desktop/cutex-client").RelayPairingStatus;
+/**
+ * Main's native confirm before allowing a device with full control. Main fills `{host}`, `{device}`,
+ * `{platform}`, `{user}` and `{code}` from the host's own list (the code is always shown, also when a template
+ * leaves it out).
+ */
+export interface PairingApproveTexts {
+  title: string;
+  message: string;
+  detail: string;
+  allow: string;
+  cancel: string;
+  /** Platform names by id (android / ios / web / other). */
+  platforms: Record<string, string>;
+}
+/** Allow: done, the owner said no in the dialog (`canceled`), or the request is no longer the one shown (`changed`). */
+export type PairingApproveResult = { ok: true; invite: PairingInviteView | null } | { ok: false; canceled: true } | { ok: false; changed: true } | { ok: false; error: import("./users").UsersRefusal };
+
 /** `GET /v2/client-tokens` row: metadata only, the token itself never leaves cutex. */
 export interface ClientTokenView {
   tokenId: string;
@@ -1686,7 +1711,7 @@ export interface DaemonApi extends StorageCleanupApi {
   /** `POST /v2/human/agents` (human-create-agent): new agent, optionally in a project and started. */
   /** `effortFallback` (cutex agent-create-effort-fallback): the profile default effort the model does not offer was replaced. */
   /** `profile: "auto:<providerFamily>"` (cutex profile-auto-pick): cutex picks the profile; `profilePick` says which and why. */
-  createAgent(request: { name: string; projectId?: string; cwd?: string; profile?: string; variantId?: string; start: boolean; launch?: LaunchOverrides }): Promise<{ cutexSessionId: string; effortFallback?: EffortFallback | null; profilePick?: import("./profileAutoPick").ProfilePick | null }>;
+  createAgent(request: { name: string; projectId?: string; cwd?: string; profile?: string; variantId?: string; start: boolean; launch?: LaunchOverrides; /** cutex agent-memory-injection: false = no project memory (sent only when false). */ memoryInjection?: boolean }): Promise<{ cutexSessionId: string; effortFallback?: EffortFallback | null; profilePick?: import("./profileAutoPick").ProfilePick | null }>;
   /** `GET /v2/profile-auto-pick` (cutex profile-auto-pick): per-provider ranking of the opted-in profiles, nothing created. */
   profileAutoPick(query: { provider?: string | null; model?: string | null; effort?: string | null }): Promise<import("./profileAutoPick").AutoPickPreview>;
   /** Owner abandon of an unfinished agent_create (cutex agent-create-abandon); `dryRun` lists what would be removed. */
@@ -1695,6 +1720,8 @@ export interface DaemonApi extends StorageCleanupApi {
   createHumanSession(request: { cwd?: string; profile?: string; variantId?: string; displayName?: string; start: boolean; launch?: LaunchOverrides }): Promise<{ cutexSessionId: string }>;
   /** `POST /v2/human/agents/{id}/rename` (formal-agent-name-rename-v1): the agent's own name; refusals and transport errors come back as `ok: false`. */
   renameFormalAgent(cutexSessionId: string, request: import("./agentRename").FormalRenameRequest): Promise<import("./agentRename").FormalRenameResult>;
+  /** `POST /v2/human/sessions/{id}/promote` (quick-chat-promote-v1): quick chat → agent; refusals and transport errors come back as `ok: false`. */
+  promoteQuickChat(cutexSessionId: string, request: import("./quickChatPromote").PromoteRequest): Promise<import("./quickChatPromote").PromoteResult>;
   /** `GET /v2/human/agents/{id}/name-history`: permanent rename log, newest first. */
   formalNameHistory(cutexSessionId: string, before: number | null): Promise<import("./agentRename").NameHistoryPage>;
   /** Per-native-thread attention level (cutex /v2/notifications/session; the TUI's Alt+N). */
@@ -1851,6 +1878,24 @@ export interface DaemonApi extends StorageCleanupApi {
    * token with `owner_local_only` (shared/users.ts accessRefusalOf(error, {action: "pairingCode"})).
    */
   createPairingCode(label?: string, userId?: string, scope?: import("./users").DeviceScope): Promise<PairingCodeView>;
+  /** Pairing v2 owner list (`GET /v2/pairing/invites`, owner-local). Refusals as values. */
+  pairingInvites(): Promise<import("./users").UsersResult<PairingInviteView[]>>;
+  /** Pairing v2: a 5-minute invite for this user / scope (owner-local). */
+  createPairingInvite(options: { userId?: string; scope?: import("./users").DeviceScope; label?: string }): Promise<import("./users").UsersResult<CreatedPairingInviteView>>;
+  /** 公网扫码配对 (`relay-pairing-switch-v1`, owner-local): `GET /v2/relay/pairing`. Refusals as values. */
+  relayPairing(): Promise<import("./users").UsersResult<RelayPairingStatusView>>;
+  /** 公网扫码配对 on / off (`POST /v2/relay/pairing` {enabled}); no restart. Refusals (bootstrap_not_configured, bootstrap_bind_unavailable, bootstrap_unavailable, owner_local_only) as values. */
+  setRelayPairing(enabled: boolean): Promise<import("./users").UsersResult<RelayPairingStatusView>>;
+  /** Pairing v2: cancel an invite that is not approved yet. */
+  cancelPairingInvite(inviteId: string): Promise<import("./users").UsersResult<null>>;
+  /**
+   * Pairing v2: allow the device that applied to this invite. Main re-reads the host's list, checks it is still
+   * `requestId`, and for a full-control device asks the owner in a native dialog showing the 6-digit code; then
+   * approves with the code the host listed (the renderer never sends one).
+   */
+  approvePairingRequest(inviteId: string, requestId: string, texts: PairingApproveTexts): Promise<PairingApproveResult>;
+  /** Pairing v2: refuse it. */
+  denyPairingRequest(inviteId: string, requestId: string): Promise<import("./users").UsersResult<null>>;
   /** `GET /v2/client-tokens` (client + device tokens, metadata only). */
   clientTokens(): Promise<ClientTokenView[]>;
   /** `DELETE /v2/client-tokens/{id}`. */
@@ -1923,6 +1968,8 @@ export interface DaemonApi extends StorageCleanupApi {
    * `rewindFiles` (Claude agents, cutex `claude-rewind-files`): also restore files from Claude Code's checkpoint.
    */
   revertHistory(sessionId: string, beforeTurnId: string, expectedRevision: number, options?: { rewindFiles?: boolean }): Promise<unknown>;
+  /** `cutex/session/files/revert` (Codex agents, feature `session-files-revert`): a turn's file changes only, never history. */
+  filesRevert(sessionId: string, turnId: string, request: FilesRevertRequest): Promise<FilesRevertResult>;
   /** cute-codex `thread/backgroundTerminals/list` (long-running commands of this thread). */
   backgroundTerminals(sessionId: string, threadId: string): Promise<BackgroundTerminal[]>;
   /** cute-codex `thread/backgroundTerminals/terminate` (needs the cutex allowlist entry). */
@@ -1963,6 +2010,10 @@ export interface DaemonApi extends StorageCleanupApi {
   projectMemoryFile(projectId: string, file: string): Promise<{ file: string; content: string; bytes: number; updatedAt: string | null }>;
   /** `GET /v2/projects/{id}/mcp` (project layer of scoped MCP); null on older cutex. */
   projectMcp(projectId: string): Promise<{ servers: Record<string, unknown>; revision: number; updatedAt: string | null } | null>;
+  /** cutex `scoped-mcp`: the MCP servers this agent launches with (merged layers) and its own on / off list. */
+  agentMcp(sessionId: string): Promise<AgentMcpResult>;
+  /** cutex `scoped-mcp`: this agent's `disabled` names (inherited servers it turns off); applies at its next launch. */
+  setAgentMcpDisabled(sessionId: string, disabled: string[], expectedRevision: number): Promise<AgentMcpResult>;
   /** Delegations (`GET /v2/asks`, feature agent-asks), newest first; null when the daemon predates it. */
   asks(filter: AskFilter): Promise<AskSummary[] | null>;
   /** One delegation (`GET /v2/asks/{id}`); null when unknown (purged after 30 days). */
@@ -2570,6 +2621,11 @@ export interface DesktopEvents {
   sshPrompts: { prompts: import("./sshPrompt").SshPromptView[] };
   /** Signed module packs: the whole view after any change (check / install progress / remove; main/modulePacks.ts, §23). */
   modulePacks: import("./modulePacks").ModulePacksView;
+  /** Modules loaded from a folder: the whole view after any change (main/moduleDev.ts, §30.5). */
+  moduleDev: import("./moduleDev").ModuleDevView;
+  /** The desk pet window service (main/deskPet.ts, §29): its whole view after any change, and 设置 in its menu. */
+  deskPet: import("./deskPet").DeskPetView;
+  deskPetOpenSettings: Record<string, never>;
   /** A host asked this desktop to close (cutex `client-remote-close`, main/clientPresence.ts): the countdown, null when it ended. */
   remoteClose: { view: import("./remoteClose").RemoteCloseView | null };
 }
@@ -2596,12 +2652,16 @@ export interface PreloadBridge {
    * every call rejects.
    */
   apiFor?(hostId: string): DaemonApi;
-  /** Local isolated plugin resources. Absent in ordinary browser previews. */
-  plugins?: import("./plugins").PluginBridge;
   /** Agent pages: one-use opaque frame documents of HTML artifacts (shared/frames.ts, §10.2). */
   frames?: import("./frames").FramesBridge;
   /** Signed first-party module packs (shared/modulePacks.ts, docs/desktop-modules.md §23). Absent in plain browser previews unless mocked. */
   modulePacks?: import("./modulePacks").ModulePacksBridge;
+  /** Developer mode for modules (shared/moduleDev.ts, docs/desktop-modules.md §30.5). Absent in plain browser previews unless mocked. */
+  moduleDev?: import("./moduleDev").ModuleDevBridge;
+  /** A module's own data folder and the native file pick / save (shared/moduleData.ts, §30.6). Absent in plain browser previews unless mocked. */
+  moduleData?: import("./moduleData").ModuleDataBridge;
+  /** The desk pet window service (shared/deskPet.ts, §29). Absent in plain browser previews unless mocked. */
+  deskPet?: import("./deskPet").DeskPetBridge;
   on<K extends keyof DesktopEvents>(event: K, listener: (payload: DesktopEvents[K]) => void): () => void;
   platform: NodeJS.Platform;
   /** Window chrome (custom title bar). Absent in the browser preview. */
@@ -2922,12 +2982,12 @@ export const SESSION_ACTION_METHODS = [
   "cutex/session/visibility/show",
   "cutex/runtime/offline",
   "cutex/runtime/online",
-  // Only the Claude tool switches (`patch` is checked in main: SESSION_DEFAULTS_KEYS).
+  // Only the Claude tool switches and memoryInjection (`patch` is checked in main: SESSION_DEFAULTS_KEYS).
   "cutex/session/defaults/update",
   MESSAGES_WAKE_METHOD,
 ] as const;
-/** The `cutex/session/defaults/update` patch keys the renderer may send (boolean values). */
-export const SESSION_DEFAULTS_KEYS = ["claudeAllowWrite", "claudeAllowExec"] as const;
+/** The `cutex/session/defaults/update` patch keys the renderer may send (boolean values; memoryInjection: cutex agent-memory-injection). */
+export const SESSION_DEFAULTS_KEYS = ["claudeAllowWrite", "claudeAllowExec", "memoryInjection"] as const;
 export type SessionActionMethod = (typeof SESSION_ACTION_METHODS)[number];
 
 /** cute-codex ThreadBackgroundTerminal (rssKb narrowed to number for IPC). */
@@ -3073,6 +3133,8 @@ export interface AskJobView {
 
 /** `GET /v2/asks` row. Fields after `revision` come with cutex `delegation-views` (absent before). */
 export interface AskSummary extends AskReviewFields {
+  /** The requester's own tool result said this wait can be resumed (`waiting.can_resume`); owner rows don't carry it. */
+  canResume?: boolean;
   askId: string;
   title: string;
   requester: AskRequester;
@@ -3183,8 +3245,8 @@ export interface ArtifactView {
 }
 
 /** Owner commands on a delegation (`POST /v2/sessions/{id}/cutex/requests`). */
-export type AskCommandMethod = "cutex/ask/stop" | "cutex/ask/close" | "cutex/ask/retry";
-export const ASK_COMMAND_METHODS: readonly AskCommandMethod[] = ["cutex/ask/stop", "cutex/ask/close", "cutex/ask/retry"];
+export type AskCommandMethod = "cutex/ask/stop" | "cutex/ask/close" | "cutex/ask/retry" | "cutex/ask/resume";
+export const ASK_COMMAND_METHODS: readonly AskCommandMethod[] = ["cutex/ask/stop", "cutex/ask/close", "cutex/ask/retry", "cutex/ask/resume"];
 
 // ---------- jobs (cutex Job Service, wire names kept) ----------
 
@@ -3230,6 +3292,8 @@ export interface JobRow {
   lastSourceEventAt?: number | null;
   /** External job without a source event for longer than the stale interval (state unchanged). */
   stale?: boolean | null;
+  /** Job Service 0.1.2+, a running local job on Linux: what its process was last seen doing. Not a job state or an outcome. */
+  observedProcessState?: { state: string; observedAtEpochMillis: number } | null;
 }
 
 export interface JobListPage {

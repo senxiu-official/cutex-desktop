@@ -26,14 +26,14 @@ export default defineModule({
       // client-remote-close: the cutex desktops registered on the host, 「关闭」 for each (after 已登录设备, 110).
       {
         id: "remote-access.onlineDesktops",
-        page: "users",
+        page: "access",
         order: 115,
         requires: { capabilities: [REMOTE_CLOSE_FEATURE] },
         titleKey: "remoteClose.list",
         sections: [{ anchor: ONLINE_DESKTOPS_ANCHOR, titleKey: "remoteClose.list", keywords: ["remoteClose.close", "remoteClose.thisComputer", "remoteClose.listHint"] }],
         Section: OnlineDesktopsSection,
       },
-      { id: "remote-access.pairing", page: "users", order: 120, requires: { capabilities: [PAIRING_FEATURE] }, unavailable: "notice", titleKey: "remote.pair.title", keywords: ["remote.pair.label", "remote.pair.devicesInUsers"], Section: PairingSection },
+      { id: "remote-access.pairing", page: "access", order: 120, requires: { capabilities: [PAIRING_FEATURE] }, unavailable: "notice", titleKey: "remote.pair.title", keywords: ["remote.pair.label", "remote.pair.devicesInUsers"], Section: PairingSection },
     ],
   },
 });

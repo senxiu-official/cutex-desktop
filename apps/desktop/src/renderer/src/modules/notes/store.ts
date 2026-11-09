@@ -4,13 +4,13 @@ import { NOTE_CHANGED_EVENT, type NoteAnchor, type NoteScope, type NotesQuery } 
 import { bridge } from "../../bridge";
 import { sidebarOf, useApp } from "../../store";
 import { services } from "../app";
-import type { AppModuleContext, CutexRef } from "../slots";
+import type { ModuleContext, CutexRef } from "../slots";
 import { createNotesCache, notesQueryKey } from "./cache";
 import { openTurnNotes } from "./floating";
 import { useModulePref } from "../react";
 
 export const notesCache = createNotesCache((hostId) => services.daemonFor(hostId));
-export function startNotesSync(ctx: AppModuleContext): void {
+export function startNotesSync(ctx: ModuleContext): void {
   if (typeof bridge?.on !== "function") return;
   const off = bridge.on("hostEvent", ({ hostId, envelope }) => {
     if (envelope.cutex?.method !== NOTE_CHANGED_EVENT) return;

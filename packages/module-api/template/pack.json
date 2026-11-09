@@ -1,0 +1,6 @@
+{
+  "id": "my-module",
+  "version": "0.1.0",
+  "moduleApi": "^1.31",
+  "author": "Your name"
+}

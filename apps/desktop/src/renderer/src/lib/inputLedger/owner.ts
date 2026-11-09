@@ -96,6 +96,8 @@ export interface TimelineHistoryWindow {
 /** Join by ids only; text, native turn activity and elapsed time never prove delivery.
  * A bound, in-context record before the loaded history window belongs behind the older-page
  * control, not after the newest turn. This only scopes presentation; it never settles a record.
+ * Turn startedAt is whole seconds and a note read into an older turn can enter context at that
+ * turn's end, inside the second the next turn starts; the boundary is the end of that second.
  */
 export function missingTimelineRecords(records: ReadonlyMap<string, InputRecord> | undefined, entries: readonly TimelineEntry[], index = timelineRecordIndex(records), history?: TimelineHistoryWindow): InputRecord[] {
   if (!records) return [];
@@ -111,10 +113,24 @@ export function missingTimelineRecords(records: ReadonlyMap<string, InputRecord>
   return [...index.byInputId.values()].filter(record => !joined.has(record.inputId))
     .filter(record => !(hasTurn && oldestStart != null && Number.isFinite(oldestStart)
       && record.state === "inContext" && record.timelineItemId && record.turnId
-      && !hasTurn(record.turnId) && Date.parse(record.since) < oldestStart! * 1000))
+      && !hasTurn(record.turnId) && Date.parse(record.since) < (oldestStart! + 1) * 1000))
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.inputId.localeCompare(b.inputId));
 }
 
 export function ownerOutboxTimelineEntry(entry: LedgerOwnerOutbox): Extract<TimelineEntry, { kind: "user" }> {
   return { kind: "user", id: entry.inputId, clientId: entry.inputId, turnId: "", text: entry.text, images: messageImages(entry.extra), skills: messageSkills(entry.extra) };
+}
+
+/**
+ * `cutex/input/retry` answers normally when the resend itself was refused: `redelivery.ok` is false.
+ * `nothingSent`: cutex says so (`user_input_in_progress` says it on a host before that flag). `null`: it went on.
+ * `offline`: the runtime is away, the request never left this host.
+ * `onlyDismiss`: cutex says no later resend can change this (`retryCannotHelp`).
+ */
+export function retryRefusal(result: unknown): { code: string; nothingSent: boolean; offline: boolean; onlyDismiss: boolean } | null {
+  const redelivery = (result as { redelivery?: { ok?: unknown; error?: { code?: unknown; details?: { retryCannotHelp?: unknown; nothingSent?: unknown } } | null } } | null | undefined)?.redelivery;
+  if (redelivery?.ok !== false) return null;
+  const code = typeof redelivery.error?.code === "string" ? redelivery.error.code : "unknown";
+  const offline = code === "app_server_unavailable" || code === "session_offline";
+  return { code, nothingSent: offline || redelivery.error?.details?.nothingSent === true || code === "user_input_in_progress", offline, onlyDismiss: redelivery.error?.details?.retryCannotHelp === true };
 }

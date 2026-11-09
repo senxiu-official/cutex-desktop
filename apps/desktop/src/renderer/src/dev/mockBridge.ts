@@ -1,3 +1,4 @@
+import type { BrowserSitePermissionForget } from "../../../shared/browser";
 import { mockLayoutInstance, mockUserLayoutApi, prepareMockLayout } from "./mockUserLayout";
 import { mockNotificationPage, mockNotificationRows, registerMockOwnerNotes } from "./mockNotificationPages";
 import { createMockInputLedger, inputLedgerMockEnabled, LEDGER_SCENES, type LedgerScene } from "./mockInputLedger";
@@ -20,7 +21,7 @@ import type { ProfileAppearanceRevisions, ProfilePatch } from "../../../shared/i
 import type { CutexBuild, LiveDeltaFrame, ProfileImageKind } from "@cutex-desktop/cutex-client";
 import type { EventEnvelope, GuidesPreferences, QueueItem, SessionBootstrap, SessionResource } from "@cutex-desktop/protocol";
 import { mockFrames } from "./mockFrames";
-import { mockModulePacks } from "./mockModulePacks";
+import { mockModuleDev, mockModulePacks } from "./mockModulePacks";
 import type { DesktopApi, ExtraInput, SubmitOptions, DesktopEvents, ModelOption, PreloadBridge, ProfilePreset, QuotaGauge, QuotaReaderConfig, SessionSandboxExtras, ShellState, SidebarSnapshot, UnavailableModel, UpdateStatus } from "../../../shared/ipc";
 import { HOST_TAGGED_EVENTS, MESSAGES_WAKE_METHOD } from "../../../shared/ipc";
 import { multiWindowChange } from "../../../shared/shell";
@@ -34,6 +35,7 @@ import type { ProfileTransferWarning } from "../../../shared/profileTransfer";
 import { classifySshPrompt, type SshPromptAnswer, type SshPromptView } from "../../../shared/sshPrompt";
 import { MOCK_BASE_FEATURES, MOCK_NEW_FEATURES, mockScenarioFeatures } from "./mockFeatures";
 import { mockNameHistory, mockRename, mockRestoreRefusal, seedMockNames } from "./mockAgentRename";
+import { mockPromote } from "./mockQuickChatPromote";
 import { mockProjectColor } from "./mockProjectColor";
 import { bindNewSession, variantApi, variantCreate, variantFields, variantPatch, VARIANTS_SCENE } from "./mockProfileVariants";
 import type { ResetCredit, ResetCreditsView } from "../../../shared/resetCredits";
@@ -650,6 +652,14 @@ const mockSecurity: import("../../../shared/ipc").AgentSecurity = {
   links: [["project:desktop", "agent:scratch"]], maxLinks: 256,
   externalAgents: [{ project: "desktop", agent: "wave" }], maxExternalAgents: 256,
 };
+// `?settingslists` (with `?rosterscale` for the project names): long lists on the 协作 page.
+const SETTINGS_LISTS = typeof location !== "undefined" && new URLSearchParams(location.search).has("settingslists");
+if (SETTINGS_LISTS) {
+  const ids = ["desktop", "waveline", "proto", "demo", "ifm-ema", "kks", "notes", "demo2026", "reader", "chores", "demo-cs", "vcc-2026"];
+  const agents = ["eva", "lead", "mika", "sora", "rei", "alden", "helper"];
+  mockSecurity.externalAgents = Array.from({ length: 14 }, (_, i) => ({ project: ids[i % 10]!, agent: agents[i % agents.length]! }));
+  mockSecurity.links = ids.flatMap((a, i) => ids.slice(i + 1).map((b) => [`project:${a}`, `project:${b}`] as [string, string])).slice(0, 29);
+}
 const clonePerms = (d: LaunchPermissions): LaunchPermissions => ({ ...d, writableRoots: [...d.writableRoots] });
 // The mock host is a current cutex (fresh-agent-auto-permissions): its built-in agent default is the
 // composer's 自动 mode; the configured agent default is full access, as an existing home keeps it.
@@ -1782,8 +1792,9 @@ function mockThread(id: string): MockThread {
 // ---- perf baseline (scripts/qa-perf-baseline.mjs; only with `?perf`) ----
 // `?perf&perfturns=N`: Eva's thread gets N synthetic older turns (5 items each: prompt, reasoning,
 // command, Markdown reply with a code block, file change). `window.__cutexMockPerf.stream(id, perSecond,
-// seconds, { plan })`: a turn whose reply streams as agentMessage deltas at that rate (`plan`: the turn
-// first posts an `update_plan` snapshot, so the status capsule has a line while the reply streams).
+// seconds, { plan, text })`: a turn whose reply streams as agentMessage deltas at that rate (`plan`: the turn
+// first posts an `update_plan` snapshot, so the status capsule has a line while the reply streams; `text`:
+// stream that reply once, in 4-character deltas, instead of repeating the sample for `seconds`).
 const PERF_Q = typeof location !== "undefined" ? new URLSearchParams(location.search) : new URLSearchParams();
 const PERF_TURNS = PERF_Q.has("perf") ? Math.max(0, Number(PERF_Q.get("perfturns")) || 0) : 0;
 // `&perfagent=<id>`: whose thread gets the synthetic turns (default Eva).
@@ -1833,7 +1844,7 @@ function perfTurns(n: number): { id: string }[] {
   return perfTurnsCache;
 }
 const PERF_REPLY = "好的，我把这次改动拆成三步：\n\n1. 在 `dispatch_queue_flush` 里先读 **revision**，不一致就返回 `conflict`；\n2. composer 的「立即发送」改走新字段；\n3. 补并发测试。\n\n```ts\nexport async function flush(rev: number) {\n  const r = await api.flush({ expectedRevision: rev });\n  if (r.conflict) return retry();\n}\n```\n\n";
-async function perfStream(sessionId: string, perSecond = 30, seconds = 10, opts: { plan?: boolean } = {}): Promise<{ sent: number; ms: number }> {
+async function perfStream(sessionId: string, perSecond = 30, seconds = 10, opts: { plan?: boolean; text?: string } = {}): Promise<{ sent: number; ms: number }> {
   const turnId = `perf-turn-${++seq}`;
   const itemId = `perf-a-${seq}`;
   nativeEvent(sessionId, "turn/started", { turn: { id: turnId, status: "inProgress", startedAt: Date.now() / 1000 } });
@@ -1846,8 +1857,8 @@ async function perfStream(sessionId: string, perSecond = 30, seconds = 10, opts:
     nativeEvent(sessionId, "turn/plan/updated", { threadId: `thread-${sessionId}`, turnId, explanation: null, plan });
   }
   nativeEvent(sessionId, "item/started", { turnId, item: { type: "agentMessage", id: itemId, text: "" } });
-  const chunks = PERF_REPLY.match(/.{1,4}/gsu) ?? [];
-  const total = Math.round(perSecond * seconds);
+  const chunks = (opts.text ?? PERF_REPLY).match(/.{1,4}/gsu) ?? [];
+  const total = opts.text ? chunks.length : Math.round(perSecond * seconds);
   const start = performance.now();
   let text = "";
   for (let i = 0; i < total; i++) {
@@ -2796,6 +2807,24 @@ if (NO_LOCAL && !FRESH) {
     groups: mockHosts.groups.map((g) => ({ ...g, hosts: g.hosts.filter((id) => id !== "local") })),
   };
 }
+/**
+ * `?routes=lan|relay|tailscale|exhausted`: workstation as a host with three SSH routes (LAN, relay,
+ * Tailscale), shown and on that route; `exhausted` = every route failed.
+ */
+const ROUTE_SCENE = typeof location !== "undefined" ? new URLSearchParams(location.search).get("routes") : null;
+if (ROUTE_SCENE && !FRESH) {
+  const targets = ["remote-lan", "remote-ovh", "remote"];
+  const routes = [{ target: "remote-lan", host: "10.0.0.17", kind: "lan" as const }, { target: "remote-ovh", host: "relay.example.test", kind: "relay" as const }, { target: "remote", host: "100.64.0.7", kind: "tailscale" as const }];
+  const exhausted = ROUTE_SCENE === "exhausted";
+  const index = ROUTE_SCENE === "relay" ? 1 : ROUTE_SCENE === "tailscale" || exhausted ? 2 : 0;
+  const tunnel = { ...sshTunnel(exhausted ? "retrying" : "up", targets[index]), routeIndex: index, localPort: 53122, ...(exhausted ? { routesExhausted: true, attempt: 2, retryAt: Date.now() + 8000, error: { code: "timeout" as const, detail: "ssh: connect to host 100.64.0.7 port 22: Connection timed out" } } : {}) };
+  mockHosts = {
+    ...mockHosts,
+    scope: { kind: "host", id: WORKSTATION },
+    active: WORKSTATION,
+    hosts: mockHosts.hosts.map((h) => (h.id === WORKSTATION ? { ...h, label: "remote", target: targets[0]!, targets, routes, autoConnect: true, conn: { epoch: mockEpoch(WORKSTATION), tunnel, daemon: exhausted ? { kind: "unreachable" as const, baseUrl: `http://127.0.0.1:${MOCK_PORT}`, message: "ssh" } : { kind: "connected" as const, baseUrl: `http://127.0.0.1:${MOCK_PORT}`, hostId: "WORKSTATION" }, cutexBuild: WORKSTATION_CUTEX_BUILD } } : h)),
+  };
+}
 if (OLD_SERVICES && !FRESH && !NO_LOCAL) mockHosts = { ...mockHosts, scope: { kind: "group", id: "grp-work0001" } };
 /** The focus host of a scope without a member: this machine, or (no local host) the first host. */
 const mockFallbackFocus = () => (mockHosts.hosts.some((h) => h.id === "local") ? "local" : (mockHosts.hosts[0]?.id ?? "local"));
@@ -3649,6 +3678,7 @@ export function installMockBridge(): void {
       },
       async setHostAppearance(hostId, patch) {
         if (patch.color) patchMockHost(hostId, () => ({ color: patch.color!.toLowerCase() }));
+        if (patch.label !== undefined) patchMockHost(hostId, () => ({ label: patch.label!.trim() || "HOST-A" }));
         emit("hostsState", mockHostsOut());
         return mockHostsOut();
       },
@@ -4270,6 +4300,12 @@ export function installMockBridge(): void {
       },
       async formalNameHistory(id, before) {
         return mockNameHistory(snapshot, id, before);
+      },
+      async promoteQuickChat(id, request) {
+        await new Promise((r) => setTimeout(r, 300));
+        const { snapshot: next, reply } = mockPromote(snapshot, id, request);
+        snapshot = next;
+        return reply;
       },
       async createAgent(request) {
         if (request.launch) console.info("[mock] POST /v2/human/agents launch", request.launch);
@@ -4997,6 +5033,20 @@ export function installMockBridge(): void {
   }, (input, maxBytes) => (input.scope ? bridge.apiFor!(input.hostId).fsFile(input.scope, input.path, maxBytes) : bridge.apiFor!(input.hostId).hostFile(input.path, maxBytes)));
   // Signed module packs: the preview plays main's store; the pilot pack is really built + imported (dev/mockModulePacks.ts).
   bridge.modulePacks = mockModulePacks();
+  bridge.moduleDev = mockModuleDev();
+  for (const { mock } of MODULE_MOCKS) if (mock.bridge) Object.assign(bridge, mock.bridge(core));
+  if (SETTINGS_LISTS) {
+    let sites = Array.from({ length: 12 }, (_, i) => ({ pool: i % 4 === 3 ? "agent" as const : "owner" as const, origin: `https://site-${String(i + 1).padStart(2, "0")}.example`, permission: i % 2 ? "camera" as const : "notifications" as const, allow: i % 3 !== 0, updatedAt: 0 }));
+    const known: Record<string, unknown> = {
+      externalPages: async () => ({ stored: true, forced: false }),
+      sitePermissions: async (forget?: BrowserSitePermissionForget) => {
+        sites = forget === "all" ? [] : forget ? sites.filter((s) => s.pool !== forget.pool || s.origin !== forget.origin) : sites;
+        return structuredClone(sites);
+      },
+    };
+    // Only this page's calls answer; the module's other calls start it and do nothing.
+    bridge.browser = new Proxy(known, { get: (target, key: string) => target[key] ?? (() => Promise.resolve(undefined)) }) as unknown as NonNullable<typeof bridge.browser>;
+  }
   window.cutex = bridge;
   if (INPUT_LEDGER) { Object.assign(window, { __cutexMockInputLedger: mockInputLedger }); console.info(mockInputLedger.notice, mockInputLedger.scene); }
   void import("./mockCopies").then(m => m.startCopyPreview());

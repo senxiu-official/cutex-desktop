@@ -7,8 +7,7 @@ import { Fragment, type ReactNode } from "react";
 import { ChevronRight } from "lucide-react";
 import { services } from "../modules/app";
 import { ItemBoundary } from "../modules/Outlet";
-import { isExternalModuleId } from "../modules/external";
-import { ExternalBadge } from "../modules/ExternalBadge";
+import { LocalBadge } from "../modules/LocalBadge";
 import { useOpenPage } from "../modules/react";
 import type { AppSlotEntry, PageParams } from "../modules/slots";
 import { contextMenu } from "../lib/contextMenu";
@@ -45,7 +44,7 @@ function Crumbs({ entry, params }: { entry: AppSlotEntry<"main.page">; params: P
   };
   return (
     <div className="flex min-w-0 items-center gap-0.5" onContextMenu={referable ? contextMenu(menu) : undefined}>
-      {isExternalModuleId(entry.moduleId) && <ExternalBadge />}
+      <LocalBadge moduleId={entry.moduleId} />
       {crumbs.map((c, i) => {
         const last = i === crumbs.length - 1;
         const to = c.to;

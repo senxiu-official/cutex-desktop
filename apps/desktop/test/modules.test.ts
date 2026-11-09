@@ -1,6 +1,6 @@
 // Built-in module registry (docs/desktop-modules.md §8): validity, i18n prefixes, import
 // boundaries, and the gating snapshot of every slot under the mock's new and `?legacy` featureLists.
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { stubServices } from "./serviceStub";
@@ -279,8 +279,14 @@ describe("module i18n", () => {
     const dirs = readdirSync(MODULES_DIR).filter((n) => statSync(join(MODULES_DIR, n)).isDirectory());
     const withI18n = dirs.filter((d) => statSync(join(MODULES_DIR, d)).isDirectory() && readdirSync(join(MODULES_DIR, d)).includes("i18n.ts"));
     expect(withI18n.sort()).toEqual(dirs.sort());
-    expect(Object.keys(MODULE_DICTIONARIES).sort()).toEqual(["modules", ...dirs].sort());
-    expect(Object.keys(MODULE_DICTIONARIES_EN).sort()).toEqual(["modules", ...dirs].sort());
+    // A pack-only module brings its own strings when it loads: they are not in the app's catalogs.
+    const packOnly = dirs.filter((d) => existsSync(join(MODULES_DIR, d, "pack.json")) && JSON.parse(readFileSync(join(MODULES_DIR, d, "pack.json"), "utf8")).packOnly === true);
+    const catalogued = dirs.filter((d) => !packOnly.includes(d));
+    expect(Object.keys(MODULE_DICTIONARIES).sort()).toEqual(["modules", ...catalogued].sort());
+    expect(Object.keys(MODULE_DICTIONARIES_EN).sort()).toEqual(["modules", ...catalogued].sort());
+    for (const file of ["i18nCatalog.ts", "i18nCatalogEn.ts", "i18nCatalogLocales.ts"]) {
+      expect([...readFileSync(join(MODULES_DIR, file), "utf8").matchAll(/"!\.\/([a-z0-9-]+)\/\*\*"/g)].map((m) => m[1]).sort(), file).toEqual([...packOnly].sort());
+    }
     for (const m of MODULES) expect(MODULE_DICTIONARIES[m.id], m.id).toBeTruthy();
     for (const d of dirs) {
       const code = readFileSync(join(MODULES_DIR, d, "i18n.ts"), "utf8");
@@ -519,7 +525,6 @@ describe("module gating snapshot (mock featureLists)", () => {
     "shell.me",
     "connection.hosts",
     "shell.access",
-    "shell.users",
     "proxy.page",
     "agent-config.profiles",
     "agent-config.defaults",
@@ -624,14 +629,14 @@ describe("module gating snapshot (mock featureLists)", () => {
     // Profile list (claude-accounts) and 从 CC Switch 导入 after it (profile-import); on 协作 轮换主管 (owner-rotation), 服务 (services-persistent-approval), 消息投递
     // and the 高级 card (消息总线 + 卡住的消息 with agent-bus-stuck-messages) last — page order is by `order`.
     // Design 006 v1: 会话 takes 宽度 / 输入区 / 留白 / 书签条 / 只看 Shelf; 桌面 the home's card; 性能记录 is on 更新与诊断.
-    expect(sections).toEqual(["shell.convWidth", "shell.composer", "shell.gutter", "bookmarks.settings", "side-chat.settings", "side-chat.summarySettings", "shell.shelfOnly", "status-capsule.settings", "workspace.viewerSettings", "artifacts.settings", "artifacts.pageData", "remote-copies.settings", "home.desktopSettings", "owner-notify.settings", "peers.access", "users.peers", "remote-access.listen", "remote-access.cors", "users.people", "users.devices", "remote-access.onlineDesktops", "remote-access.pairing", "proxy.update", "proxy.host", "claude-accounts.accounts", "kimi-accounts.accounts", "profile-import.ccSwitch", "projects.rotation.settings", "approvals.rules.settings", "services.persistApproval.settings", "agent-bus.delivery", "shell.queueOrder", "shell.imageBusy", "agent-bus.advanced", "runtime-packages.settings", "runtimes.installed", "perf-log.section", "about.debug", "onboarding.section", "about.knownIssues", "about.changelog", "about.links"]);
+    expect(sections).toEqual(["shell.convWidth", "shell.composer", "shell.gutter", "bookmarks.settings", "side-chat.settings", "side-chat.summarySettings", "shell.shelfOnly", "status-capsule.settings", "workspace.viewerSettings", "artifacts.settings", "artifacts.pageData", "remote-copies.settings", "home.desktopSettings", "owner-notify.settings", "users.people", "users.devices", "users.allDevices", "remote-access.onlineDesktops", "remote-access.pairing", "peers.access", "users.peers", "remote-access.listen", "remote-access.cors", "proxy.update", "proxy.host", "claude-accounts.accounts", "kimi-accounts.accounts", "profile-import.ccSwitch", "projects.rotation.settings", "approvals.rules.settings", "approvals.rules.auditAll", "services.persistApproval.settings", "agent-bus.delivery", "shell.queueOrder", "shell.imageBusy", "agent-bus.advanced", "runtime-packages.settings", "runtimes.installed", "perf-log.section", "about.debug", "onboarding.section", "about.knownIssues", "about.changelog", "about.links"]);
     expect(status).toEqual([...BASE_STATUS, "delegations.status", "jobs.status", "alarms.status"]);
   });
 
   it("?legacy: same pages but 跨主机; owner-notify / runtime packages / CORS hidden; listen + pairing + installed runtimes say 需要升级; no 委托 / 作业", async () => {
     const { host, pages, sections, status } = await gated([...MOCK_REMOTE, ...MOCK_BASE_FEATURES]);
     expect(pages).toEqual(BASE_PAGES);
-    expect(sections).toEqual(["shell.convWidth", "shell.composer", "shell.gutter", "bookmarks.settings", "shell.shelfOnly", "status-capsule.settings", "workspace.viewerSettings", "remote-copies.settings", "home.desktopSettings", "remote-access.listen (notice: listen-settings)", "remote-access.pairing (notice: device-pairing)", "proxy.update", "proxy.host (notice: proxy-modes)", "agent-bus.delivery", "shell.queueOrder", "shell.imageBusy", "agent-bus.advanced", "runtimes.installed (notice: runtimes-view)", "perf-log.section", "about.debug", "onboarding.section", "about.knownIssues", "about.changelog", "about.links"]);
+    expect(sections).toEqual(["shell.convWidth", "shell.composer", "shell.gutter", "bookmarks.settings", "shell.shelfOnly", "status-capsule.settings", "workspace.viewerSettings", "remote-copies.settings", "home.desktopSettings", "remote-access.pairing (notice: device-pairing)", "remote-access.listen (notice: listen-settings)", "proxy.update", "proxy.host (notice: proxy-modes)", "agent-bus.delivery", "shell.queueOrder", "shell.imageBusy", "agent-bus.advanced", "runtimes.installed (notice: runtimes-view)", "perf-log.section", "about.debug", "onboarding.section", "about.knownIssues", "about.changelog", "about.links"]);
     expect(status).toEqual(BASE_STATUS);
     expect(host.statuses().get("owner-notify")!.state).toEqual({ kind: "unavailable", missing: { capabilities: ["owner-messages"], modules: [], hostKind: false, waiting: false } });
     expect(host.statuses().get("runtime-packages")!.state.kind).toBe("unavailable");
@@ -643,7 +648,7 @@ describe("module gating snapshot (mock featureLists)", () => {
   it("before capabilities load: capability modules wait, notices are flagged waiting", async () => {
     const { host, pages, sections, status } = await gated(null);
     expect(pages).toEqual(BASE_PAGES);
-    expect(sections).toEqual(["shell.convWidth", "shell.composer", "shell.gutter", "bookmarks.settings", "shell.shelfOnly", "status-capsule.settings", "workspace.viewerSettings", "remote-copies.settings", "home.desktopSettings", "remote-access.listen (notice, waiting: listen-settings)", "remote-access.pairing (notice, waiting: device-pairing)", "proxy.update", "proxy.host (notice, waiting: proxy-modes)", "agent-bus.delivery", "shell.queueOrder", "shell.imageBusy", "agent-bus.advanced", "runtimes.installed (notice, waiting: runtimes-view)", "perf-log.section", "about.debug", "onboarding.section", "about.knownIssues", "about.changelog", "about.links"]);
+    expect(sections).toEqual(["shell.convWidth", "shell.composer", "shell.gutter", "bookmarks.settings", "shell.shelfOnly", "status-capsule.settings", "workspace.viewerSettings", "remote-copies.settings", "home.desktopSettings", "remote-access.pairing (notice, waiting: device-pairing)", "remote-access.listen (notice, waiting: listen-settings)", "proxy.update", "proxy.host (notice, waiting: proxy-modes)", "agent-bus.delivery", "shell.queueOrder", "shell.imageBusy", "agent-bus.advanced", "runtimes.installed (notice, waiting: runtimes-view)", "perf-log.section", "about.debug", "onboarding.section", "about.knownIssues", "about.changelog", "about.links"]);
     expect(status).toEqual(BASE_STATUS);
     expect(host.statuses().get("owner-notify")!.state).toMatchObject({ kind: "unavailable", missing: { waiting: true } });
   });

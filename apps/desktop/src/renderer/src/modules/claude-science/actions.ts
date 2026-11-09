@@ -5,16 +5,16 @@
 import { api, apiFor } from "../../bridge";
 import { LOCAL_HOST_ID } from "../../../../shared/hosts";
 import { useApp } from "../../store";
-import type { AppModuleContext } from "../slots";
+import type { ModuleContext } from "../slots";
 import { registerRequest, slugOf, type AccountSpec } from "./model";
 
 const SERVICE_TAB = "browser.service";
-let context: AppModuleContext | null = null;
+let context: ModuleContext | null = null;
 
 /** Daemon calls of `hostId`: the focus host keeps `api`, others go through `apiFor`. */
 const daemon = (hostId: string) => (hostId === (useApp.getState().hosts?.active ?? LOCAL_HOST_ID) ? api : apiFor(hostId));
 
-export function activateClaudeScience(ctx: AppModuleContext): void {
+export function activateClaudeScience(ctx: ModuleContext): void {
   context = ctx;
   ctx.signal.addEventListener("abort", () => {
     if (context === ctx) context = null;

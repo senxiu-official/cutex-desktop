@@ -19,6 +19,19 @@ describe("far rows", () => {
     expect(farGaps(list, [])).toEqual([]);
   });
 
+  it("measures past siblings without a box (an empty attachments list), never to their all-zero rect", () => {
+    document.body.innerHTML = `<div id="list"><div id="a"></div><div id="none1" style="display: none"></div><div id="b"></div><div id="none2" style="display: none"></div></div>`;
+    const list = document.getElementById("list")!;
+    const [a, none1, b, none2] = ["a", "none1", "b", "none2"].map((id) => document.getElementById(id)!);
+    // The column is scrolled far down: rows sit at large negative viewport offsets, a hidden sibling reports 0.
+    rect(list, -9000, 200);
+    rect(a!, -8000, -7976);
+    rect(none1!, 0, 0);
+    rect(b!, -7968, -7900);
+    rect(none2!, 0, 0);
+    expect(farGaps(list, [a!, b!])).toEqual([[1000, 8], [8, 8100]]);
+  });
+
   it("drawRow undoes a far row (attribute and the kept margins)", () => {
     document.body.innerHTML = `<div id="list"><div id="r" data-tl-row ${FAR_ATTR} style="margin-top: 8px; margin-bottom: 12px; contain-intrinsic-block-size: 351px"><p><button id="btn">x</button></p></div></div>`;
     drawRow(document.getElementById("btn")!);

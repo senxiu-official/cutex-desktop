@@ -132,7 +132,7 @@ export interface BrowserTabMount {
 export interface BrowserClaimOpenIntent { tabKey: string; url: string; sessionId: string }
 export type BrowserEvent = HostTag & BrowserTabView & { kind: "changed" | "new-tab" | "diagnostic" | "reveal" | "agent-open" | "agent-open-cancel" | "agent-open-confirm" | "claim-open" | "claim-granted" | "blocked" | "thumbnail" | "pressed"; newTabUrl?: string;
   /** pressed: the owner pressed the mouse in this tab's page (never the agent's own dispatch); the renderer takes it as a press in its pane (design 017). */
-  /** thumbnail: a bounded data:image/jpeg of a background agent tab (at most ~1 per second). */
+  /** thumbnail: a bounded data:image/jpeg of a background agent tab (at most ~1 per second, MAX_BROWSER_THUMBNAIL_URL_LENGTH). */
   thumbnail?: string;
   /** new-tab: the opener's agent caused this popup (its own click), not the owner. */
   newTabAgent?: true;
@@ -350,3 +350,7 @@ export const BROWSER_TOOL_SURFACES = ["auto", "command", "script", "legacy"] as 
 export type BrowserToolSurface = typeof BROWSER_TOOL_SURFACES[number];
 export const isBrowserToolSurface = (value: unknown): value is BrowserToolSurface => BROWSER_TOOL_SURFACES.some(surface => surface === value);
 export interface BrowserProfileTools { enabled: boolean; surface?: BrowserToolSurface }
+
+/** A background tab's thumbnail frame: JPEG bytes at most this long (main keeps it under, renderer checks the URL). */
+export const MAX_BROWSER_THUMBNAIL_BYTES = 1024 * 1024;
+export const MAX_BROWSER_THUMBNAIL_URL_LENGTH = "data:image/jpeg;base64,".length + Math.ceil(MAX_BROWSER_THUMBNAIL_BYTES / 3) * 4;

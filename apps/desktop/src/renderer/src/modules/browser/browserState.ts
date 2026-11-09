@@ -1,6 +1,7 @@
 // Small, credential-free state / references. URL policy and service tickets remain in main.
 import type { Json } from "../types";
 import { SERVICE_COMPONENT } from "../../lib/sideKinds";
+import { MAX_BROWSER_THUMBNAIL_URL_LENGTH } from "../../../../shared/browser";
 
 export const BROWSER_TAB = "browser.tab";
 export const SERVICE_TAB = SERVICE_COMPONENT;
@@ -205,7 +206,7 @@ export function browserExternalUrl(raw: unknown): string | null {
 
 /** A background agent tab's live thumbnail: only main's bounded JPEG data URL, never a remote URL. */
 export function safeBrowserThumbnail(raw: unknown): string | undefined {
-  return typeof raw === "string" && raw.length <= 256 * 1024 && /^data:image\/jpeg;base64,[A-Za-z0-9+/]+={0,2}$/.test(raw) ? raw : undefined;
+  return typeof raw === "string" && raw.length <= MAX_BROWSER_THUMBNAIL_URL_LENGTH && /^data:image\/jpeg;base64,[A-Za-z0-9+/]+={0,2}$/.test(raw) ? raw : undefined;
 }
 
 /** No favicon request may run in the privileged app session. Main supplies bounded image bytes. */

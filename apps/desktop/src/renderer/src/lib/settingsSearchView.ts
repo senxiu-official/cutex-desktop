@@ -7,7 +7,6 @@ import { useEnglishCatalog, useI18n, type MessageKey } from "../i18n";
 import { zhCN as zhCatalog } from "../i18n/zh-CN";
 import { useModuleStatuses, useSlot } from "../modules/react";
 import { appModules } from "../modules/app";
-import { listedInSettings, revealUnlistedModules } from "../modules/settingsVisibility";
 import { flashElement } from "./focusRequest";
 import { cleanText, type SearchText, type SettingsSearchDoc } from "./settingsSearch";
 import { settingsNavGroups, settingsAnchorId } from "./settingsNav";
@@ -60,7 +59,7 @@ export function settingsSearchDocs({ pages, sections, text, t, hostTarget, appTa
   const upgrade = (missing: readonly string[]) => t("modules.needsUpgrade", { feature: missing.join(", ") });
   const docs: SettingsSearchDoc[] = [];
   // Nav order: group, then slot order inside the group (= SettingsNav).
-  const ordered = settingsNavGroups(pages).flatMap((g) => g.entries);
+  const ordered = settingsNavGroups(pages, true).flatMap((g) => g.entries);
   ordered.forEach((entry, pageOrder) => {
     const { item } = entry;
     if (entry.mode !== "show" && entry.waiting) return; // capabilities still loading
@@ -133,8 +132,7 @@ export function useSettingsSearchIndex(): SettingsSearchDoc[] {
     const otherTerms = resolveTerms(overrides, otherLocale);
     const text = (key: MessageKey): SearchText => ({ current: cleanText(t(key)), other: cleanText(applyTerms(otherCatalog[key] ?? enCatalog?.[key] ?? zhCatalog[key] ?? key, otherTerms, otherLocale)) });
     const modules = appModules();
-    const reveal = revealUnlistedModules();
-    const moduleEntries = modules.modules.filter((m) => listedInSettings(m.id, modules.isEnabled(m.id), reveal)).map((m) => ({
+    const moduleEntries = modules.modules.map((m) => ({
       id: m.id, title: m.displayName ? { current: m.displayName, other: m.displayName } : text(m.titleKey), keywords: [text(m.titleKey)],
     }));
     return settingsSearchDocs({ pages, sections, text, t, hostTarget, appTarget, hostLabel, capabilitiesOf,

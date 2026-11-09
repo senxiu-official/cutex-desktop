@@ -31,7 +31,6 @@ import nci from "./nci";
 import notifications from "./notifications";
 import ownerNotify from "./owner-notify";
 import plan from "./plan";
-import plugins from "./plugins";
 import projects from "./projects";
 import projectView from "./project-view";
 import quickChats from "./quick-chats";
@@ -147,5 +146,4 @@ export const MODULES: readonly AppModule[] = [
   kimiAccounts,
   // 从 CC Switch 导入 (cutex profile-import-cc-switch): a section of Settings → Profile after Claude 账户.
   profileImport,
-  plugins,
 ];

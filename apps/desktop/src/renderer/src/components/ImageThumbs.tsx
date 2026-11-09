@@ -3,7 +3,7 @@
 // is; a host path (a picked file, an attachment cutex stored) is read through cutex fs-file-read
 // (lib/fileThumbnails, the cache Markdown thumbnails share) — never the local disk — when a `hostId`
 // is given and the host has it; otherwise the caller's fallback (a file chip) shows.
-import { useEffect, useState, type ReactNode, type MouseEventHandler } from "react";
+import { useEffect, useReducer, useState, type ReactNode, type MouseEventHandler } from "react";
 import { createPortal } from "react-dom";
 import { Copy, Download, Image as ImageIcon, X } from "lucide-react";
 import { PanZoomImage, usePanZoom } from "./PanZoom";
@@ -22,6 +22,7 @@ import { displayKey } from "../lib/shortcuts";
 import { contextMenu } from "../lib/contextMenu";
 import { fileActions } from "../lib/fileActions";
 import { imageBox, imageDimensions, zoomImageBox, type ImageBounds } from "../lib/imageDimensions";
+import { rememberedImageSize, rememberImageSize } from "../lib/imageSizes";
 import { useLazyDataSrc } from "../lib/lazyImageSrc";
 import { useOwnerWindow } from "../lib/ownerContext";
 
@@ -153,8 +154,9 @@ function imageMetadata(image: MessageImage): string {
 /**
  * One image as a thumbnail button (click → ImageZoom). `className` sizes the button, `imgClassName`
  * the image; `fallback` shows when there is nothing to render (a path the host cannot read).
+ * `rememberSize`: a host path without a size from cutex reserves the box it had when it last loaded here (lib/imageSizes).
  */
-export function ImageThumb({ image, hostId, title, className, imgClassName, fallback, bounds, loadingPreview }: { image: MessageImage; hostId?: string | null; title?: string; className: string; imgClassName: string; fallback: ReactNode; bounds?: ImageBounds; loadingPreview?: string }) {
+export function ImageThumb({ image, hostId, title, className, imgClassName, fallback, bounds, loadingPreview, rememberSize = false }: { image: MessageImage; hostId?: string | null; title?: string; className: string; imgClassName: string; fallback: ReactNode; bounds?: ImageBounds; loadingPreview?: string; rememberSize?: boolean }) {
   const { t } = useI18n();
   const pathText = image.kind === "path" && image.delivery === "pathText";
   const [retry, setRetry] = useState(0);
@@ -164,7 +166,10 @@ export function ImageThumb({ image, hostId, title, className, imgClassName, fall
   const src = loadedSrc ?? (loading ? loadingPreview : null);
   // An inline image far off screen: a same-size placeholder until it comes near (lib/lazyImageSrc).
   const { lazyRef, shownSrc, pending } = useLazyDataSrc(src ?? null);
-  const dimensions = imageDimensions(image);
+  const recorded = imageDimensions(image);
+  const sizePath = rememberSize && !recorded && image.kind === "path" && hostId ? image.path : null;
+  const [, followSize] = useReducer((n: number) => n + 1, 0);
+  const dimensions = recorded ?? (sizePath ? rememberedImageSize(hostId!, sizePath) : undefined);
   const box = imageBox(dimensions, bounds);
   const [zoom, setZoom] = useState(false);
   const [broken, setBroken] = useState<string | null>(null);
@@ -227,7 +232,10 @@ export function ImageThumb({ image, hostId, title, className, imgClassName, fall
         data-image-box={dimensions ? "reserved" : undefined}
         data-testid="image-thumb"
       >
-        <img ref={lazyRef} src={shownSrc ?? src} data-image-pending={pending ? "" : undefined} alt="" width={dimensions?.width} height={dimensions?.height} style={dimensions ? { width: "100%", height: "100%", objectFit: "contain", position: "absolute", inset: 0, maxWidth: "100%", maxHeight: "100%" } : undefined} draggable={false} onError={() => !pending && setBroken(src)} className={imgClassName} />
+        <img ref={lazyRef} src={shownSrc ?? src} data-image-pending={pending ? "" : undefined} alt="" width={dimensions?.width} height={dimensions?.height} style={dimensions ? { width: "100%", height: "100%", objectFit: "contain", position: "absolute", inset: 0, maxWidth: "100%", maxHeight: "100%" } : undefined} draggable={false} onLoad={(e) => {
+          // The host read's own bytes only: a send's preview may be scaled down, and the lazy placeholder is not the image.
+          if (sizePath && !pending && loadedSrc && rememberImageSize(hostId!, sizePath, e.currentTarget.naturalWidth, e.currentTarget.naturalHeight)) followSize();
+        }} onError={() => !pending && setBroken(src)} className={imgClassName} />
       </button>
       {actionNotice && <span role="status" className="text-xs text-muted">{actionNotice}</span>}
       {zoom && <ImageZoom key={src} src={src} dimensions={dimensions} onContextMenu={menu} onClose={() => setZoom(false)} onCopy={() => copy(src)} onSave={save && (() => void save())} />}
@@ -266,6 +274,7 @@ export function MessageImages({ images, hostId, messageId, pending = false, sent
           className="rounded-xl border border-border"
           imgClassName="max-h-40 max-w-60 object-cover"
           bounds={{ maxWidth: 240, maxHeight: 160, contentBox: true }}
+          rememberSize
           fallback={
             img.kind === "path" && (
               <span className="flex items-center gap-1 rounded-lg border border-border bg-surface-2 px-2 py-1 text-xs text-muted" title={img.path} data-testid={pathText ? "path-text-image-unavailable" : "message-image-chip"}>

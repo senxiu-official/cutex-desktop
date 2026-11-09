@@ -4,5 +4,5 @@ import type { zhCN } from "./i18n";
 
 export const en: Record<keyof typeof zhCN, string> = {
   "remote-access.title": "Access",
-  "remote-access.description": "Settings → Access: listen addresses, CORS and device pairing",
+  "remote-access.description": "Settings → Hosts → Advanced: listen addresses, CORS and device pairing",
 };

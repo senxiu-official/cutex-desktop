@@ -16,7 +16,7 @@ import { sideShowsHost } from "../../lib/sideServices";
 import { openRef, screenOf } from "../../lib/workspaces";
 import { agentEffect, refEffect } from "../../lib/workspaceEffects";
 import type { Foretell } from "../../lib/foretell";
-import type { AppModuleContext } from "../slots";
+import type { ModuleContext } from "../slots";
 import { isQuickSwitchKey, parseRecent, planOpen, pushRecent, type OpenPlan, type QsItem, type QsScreen } from "./model";
 import { runOpen } from "./open";
 import { Palette } from "./Palette";
@@ -28,7 +28,7 @@ import { isHTMLElement } from "../../lib/ownerWindow";
 const RECENT_PREF = "recent";
 
 let mounted: { root: Root; el: HTMLElement; opener: Element | null } | null = null;
-let current: AppModuleContext | null = null;
+let current: ModuleContext | null = null;
 
 export function isQuickSwitchOpen(): boolean {
   return mounted !== null;
@@ -86,7 +86,7 @@ export function openQuickSwitch(view: Window = activeAppWindow()): void {
   root.render(createElement(OwnerDocumentContext.Provider, { value: doc }, createElement(I18nProvider, null, createElement(Palette, { recent, mac: isMac(), screen: paletteScreen(), showsHost: sideShowsHost, onClose: () => closeQuickSwitch(), onOpen: (item: QsItem, beside: boolean) => void openItem(ctx, item, beside), onDragOut: () => closeQuickSwitch(false), foretellOf: itemForetell, view }))));
 }
 
-async function openItem(ctx: AppModuleContext, item: QsItem, beside: boolean): Promise<void> {
+async function openItem(ctx: ModuleContext, item: QsItem, beside: boolean): Promise<void> {
   closeQuickSwitch(false);
   if (item.disabled) return;
   try {
@@ -108,7 +108,7 @@ async function openItem(ctx: AppModuleContext, item: QsItem, beside: boolean): P
 }
 
 /** 「打不开 X：原因」 (`why`: "not-opened", a `side.reason.*` id, or an error message). */
-function notifyFailed(ctx: AppModuleContext, item: QsItem, why: string): void {
+function notifyFailed(ctx: ModuleContext, item: QsItem, why: string): void {
   if (why === "not-opened") {
     ctx.services.ui.notice(ctx.t("quick-switch.failed", { name: item.title, reason: ctx.t("quick-switch.notOpened") }), "error");
     return;
@@ -118,7 +118,7 @@ function notifyFailed(ctx: AppModuleContext, item: QsItem, why: string): void {
   ctx.services.ui.notice(ctx.t("quick-switch.failed", { name: item.title, reason: reason === known ? why : reason }), "error");
 }
 
-export function startQuickSwitch(ctx: AppModuleContext): void {
+export function startQuickSwitch(ctx: ModuleContext): void {
   current = ctx;
   if (typeof window === "undefined") return;
   const onKey = (e: KeyboardEvent) => {

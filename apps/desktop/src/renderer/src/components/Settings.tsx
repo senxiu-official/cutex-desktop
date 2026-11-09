@@ -12,12 +12,13 @@ import { ArrowLeft, Check, Search, SlidersHorizontal, X } from "lucide-react";
 import { bridge } from "../bridge";
 import { useI18n, type MessageKey } from "../i18n";
 import { resetDragonSize } from "../lib/aboutDragon";
-import { settingsNavGroups, settingsTab } from "../lib/settingsNav";
+import { settingsNavGroups, settingsNavPage, settingsTab, subPageOfAnchor } from "../lib/settingsNav";
 import { firstResult, flattenResults, highlightParts, resultCount, searchSettings, type Ranges, type SettingsSearchHit } from "../lib/settingsSearch";
 import { requestSettingsReveal, useSettingsReveal, useSettingsSearchIndex } from "../lib/settingsSearchView";
 import { profileSearchAnchor } from "../lib/settingsProfileSearch";
 import { en as searchEn, zhCN as searchZh } from "../lib/settingsSearchIaMessages";
 import { hostPickerMode } from "../lib/hostPick";
+import { openSettingsShelf } from "../lib/settingsShelf";
 import { AllHostsContext, SETTINGS_HOST_PAGES, SETTINGS_MEMBER_PAGES, setSettingsHost, useSettingsHost, useSettingsTarget } from "../lib/settingsHost";
 import { useSettingsAllHosts } from "../lib/settingsAllHosts";
 import { TargetHostContext } from "../lib/targetHost";
@@ -149,7 +150,7 @@ export function SettingsNav({ params }: { params: PageParams }) {
                 <div className="px-2 pt-1 pb-1 text-sm text-subtle">{t(`settings.group.${group}` as MessageKey)}</div>
                 {entries.map((e) => (
                   <ItemBoundary key={e.item.id} moduleId={e.moduleId}>
-                    <NavRow entry={e} current={tab === e.item.page} />
+                    <NavRow entry={e} current={settingsNavPage(pages, tab) === e.item.page} />
                   </ItemBoundary>
                 ))}
               </div>
@@ -190,6 +191,7 @@ function Highlight({ text, ranges }: { text: string; ranges: Ranges }) {
 export function SettingsSearchResults({ query, input, current, onNavigate }: { query: string; input: RefObject<HTMLInputElement | null>; current: string; /** Shelf replaces results with the destination page after a valid selection. */ onNavigate?(): void }) {
   const { t } = useI18n();
   const openSettings = useApp((s) => s.openSettings);
+  const pages = useSlot("settings.page");
   const docs = useSettingsSearchIndex();
   // Host page results say whose settings they open (RFC §9.3) when another host could be picked.
   const scope = useHostScope();
@@ -212,7 +214,8 @@ export function SettingsSearchResults({ query, input, current, onNavigate }: { q
     if (!row || row.disabled) return;
     setActive(i);
     const profileAnchor = row.page === "profiles" ? profileSearchAnchor(row.anchor) : null;
-    openSettings(row.page, profileAnchor ? { anchor: profileAnchor } : undefined);
+    const subPage = subPageOfAnchor(pages.find((e) => e.item.page === row.page)?.item, row.anchor);
+    openSettings(row.page, profileAnchor ? { anchor: profileAnchor } : subPage ? { sub: subPage } : undefined);
     if (row.anchor && !profileAnchor) requestSettingsReveal(row.anchor);
     onNavigate?.();
   };
@@ -375,6 +378,12 @@ export function Settings({ params }: { params: PageParams }) {
   const allHosts = useSettingsAllHosts(entry?.moduleId, entry && SETTINGS_HOST_PAGES.has(entry.item.page) ? entry.item.allHosts?.capability : undefined);
   // A settings search result: scroll to + flash its card once the page has rendered it.
   useSettingsReveal();
+  // An old link to a card that moved to a sub-page lands on that sub-page (which scrolls to the card).
+  const focusAnchor = useApp((s) => s.settingsFocus?.anchor);
+  const anchorSub = subPageOfAnchor(entry?.item, focusAnchor);
+  useEffect(() => {
+    if (anchorSub && params.sub !== anchorSub) openSettingsShelf({ tab, sub: anchorSub });
+  }, [anchorSub, tab]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!entry) {
     return (
       <main className="flex min-w-0 flex-1">
@@ -387,10 +396,12 @@ export function Settings({ params }: { params: PageParams }) {
     );
   }
   const { item } = entry;
-  const Page = item.Page;
+  const sub = params.sub ? item.subPages?.[params.sub] : undefined;
+  const Page = sub?.Page ?? item.Page;
   const hostPage = isSettingsHostPage(item);
-  // Another page, sub-page (Profile detail / 添加) or host opens at the top, not at the last page's offset.
-  const scrollKey = [tab, hostPage ? hostId : "", params.profile ?? "", params.create ?? ""].join("|");
+  const pageTitle = item.hostTitle ? hostLabel : t(item.titleKey);
+  // Another page, sub-page (Profile detail / 添加 / subPages) or host opens at the top, not at the last page's offset.
+  const scrollKey = [tab, hostPage || item.hostTitle ? hostId : "", params.profile ?? "", params.create ?? "", sub ? params.sub : ""].join("|");
   return (
     <main className="flex min-w-0 flex-1">
       <PageBody
@@ -407,11 +418,11 @@ export function Settings({ params }: { params: PageParams }) {
           <AllHostsContext.Provider value={hostPage && allHosts.on ? allHosts.offered : null}>
             {/* A page per host: switching hosts starts the page over (no state of one host shown for another). */}
             <SettingsPage
-              key={hostPage ? `${tab}|${allHosts.on ? "*" : hostId}` : tab}
+              key={hostPage ? `${tab}|${allHosts.on ? "*" : hostId}` : sub ? `${tab}|${params.sub}` : tab}
               page={tab}
-              title={t(item.titleKey)}
-              hint={item.hintKey ? t(item.hintKey) : undefined}
-              back={back ? <BackLink onClick={() => openSettings(back.page)}>{t(back.labelKey)}</BackLink> : undefined}
+              title={sub ? t(sub.titleKey) : pageTitle}
+              hint={sub ? (sub.hintKey ? t(sub.hintKey) : undefined) : item.hintKey ? t(item.hintKey) : undefined}
+              back={sub ? <BackLink onClick={() => openSettings(tab)}>{pageTitle}</BackLink> : back ? <BackLink onClick={() => openSettings(back.page)}>{t(back.labelKey)}</BackLink> : undefined}
               link={
                 linked || customize ? (
                   <span className="flex min-w-0 max-w-full items-center gap-3">

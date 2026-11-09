@@ -20,8 +20,13 @@ const WORD_TONE = { danger: "text-danger", warn: "text-warn", green: "text-muted
 export function JobStatusMark({ job, trailing, className = "" }: { job: JobRow; trailing?: string | null; className?: string }) {
   const status = jobStatus(job);
   const word = useJobWord()(status);
+  const { t } = useI18n();
+  const observedAt = job.observedProcessState?.observedAtEpochMillis;
+  const tip = status.key === "processStopped" || status.key === "processExited"
+    ? t(`jobs.status.${status.key}.tip`, { time: typeof observedAt === "number" ? formatAbsolute(observedAt / 1000) : "" })
+    : undefined;
   return (
-    <span className={`inline-flex min-w-0 items-center gap-1 ${className}`}>
+    <span className={`inline-flex min-w-0 items-center gap-1 ${className}`} data-tip={tip}>
       <DelegationGlyph glyph={status.glyph} tone={status.tone} />
       <span className={`truncate ${WORD_TONE[status.tone]}`}>{word}</span>
       {trailing && <span className="shrink-0 text-subtle tabular-nums">· {trailing}</span>}

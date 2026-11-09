@@ -1,0 +1,10 @@
+{
+  "format": 1,
+  "name": {
+    "en": "GPT",
+    "zh-CN": "GPT"
+  },
+  "family": "gpt",
+  "scale": 1,
+  "pixel": true
+}

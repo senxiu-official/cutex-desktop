@@ -10,6 +10,7 @@ function staticSubmenu(entries: MenuAction["submenu"]): MenuEntry[] {
   return entries;
 }
 const env = vi.hoisted(() => ({ locale: "en", calls: [] as string[], listeners: new Set<() => void>(), entries: [] as MenuEntry[] }));
+vi.mock("../src/renderer/src/modules/react", async (importOriginal) => ({ ...(await importOriginal<object>()), useSlot: () => [] }));
 vi.mock("../src/renderer/src/i18n", async (importOriginal) => ({
   ...(await importOriginal<object>()),
   useI18n: () => ({

@@ -19,7 +19,7 @@ import { observeSync } from "../lib/syncResize";
 import { ArrowLeftRight, ChevronRight, Maximize2, Minimize2, PanelLeftClose, PanelLeftOpen, Search, X } from "lucide-react";
 import { useI18n, type MessageKey } from "../i18n";
 import { resetDragonSize } from "../lib/aboutDragon";
-import { settingsNavGroups, settingsTab } from "../lib/settingsNav";
+import { settingsNavGroups, settingsNavPage, settingsTab } from "../lib/settingsNav";
 import { setSettingsHost } from "../lib/settingsHost";
 import { useSettingsAffectsHover } from "../lib/panelSettings";
 import {
@@ -137,9 +137,10 @@ function useGroups() {
 }
 
 /** Maximised (the old full-window Settings): the wide nav with the group names, outside the card on the window. */
-function WideNav({ tab }: { tab: string }) {
+function WideNav({ tab: shown }: { tab: string }) {
   const { t } = useI18n();
   const groups = useGroups();
+  const tab = settingsNavPage(useSlot("settings.page"), shown);
   return (
     <nav data-settings-rail="wide" aria-label={t("settingsShelf.rail")} className="flex shrink-0 flex-col overflow-y-auto pt-1 pr-2 pb-2 select-none" style={{ width: SETTINGS_NAV_W }}>
       {groups.map(({ group, entries }) => (
@@ -161,9 +162,10 @@ function WideNav({ tab }: { tab: string }) {
  * search on top, then the categories by group (a thin line between groups), the names toggle at the bottom.
  * `named`: icon + name rows (the default); else icons with the names in the tooltips.
  */
-function CategoryNav({ tab, named, labels, width, onSearch }: { tab: string; named: boolean; labels: boolean; width: number; onSearch(): void }) {
+function CategoryNav({ tab: shown, named, labels, width, onSearch }: { tab: string; named: boolean; labels: boolean; width: number; onSearch(): void }) {
   const { t } = useI18n();
   const groups = useGroups();
+  const tab = settingsNavPage(useSlot("settings.page"), shown);
   const search = t("shell.settingsSearch.placeholder");
   return (
     <nav data-settings-rail={named ? "named" : ""} aria-label={t("settingsShelf.rail")} className="flex shrink-0 flex-col border-r border-border/60 select-none" style={{ width }}>

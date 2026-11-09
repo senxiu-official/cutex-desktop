@@ -9,7 +9,7 @@ export const JOB_SERVICE_FEATURE = "job-service";
 
 /** in progress / waiting for a slot (no Job Service scheduler yet) / finished. */
 export type JobGroup = "active" | "queued" | "done";
-export type JobStatusKey = "starting" | "running" | "queued" | "registered" | "succeeded" | "exitCode" | "failed" | "cancelled" | "interrupted" | "unknown" | "other";
+export type JobStatusKey = "starting" | "running" | "queued" | "registered" | "succeeded" | "exitCode" | "failed" | "cancelled" | "interrupted" | "unknown" | "other" | "processStopped" | "processExited";
 
 interface StateRow {
   group: JobGroup;
@@ -41,12 +41,16 @@ export interface JobStatus extends StateRow {
 }
 
 /** Status of a job. A non-zero exit is a failure with its code; an unknown state stays "in progress". */
-export function jobStatus(job: Pick<JobRow, "state" | "exitCode">): JobStatus {
+export function jobStatus(job: Pick<JobRow, "state" | "exitCode"> & Partial<Pick<JobRow, "observedProcessState">>): JobStatus {
   const raw = String(job.state ?? "");
   const exitCode = typeof job.exitCode === "number" ? job.exitCode : null;
   const row = JOB_STATES[raw];
   if (!row) return { group: "active", key: "other", glyph: "hollow", tone: "muted", raw, exitCode };
   if (raw === "exited" && exitCode !== null && exitCode !== 0) return { group: "done", key: "exitCode", glyph: "cross", tone: "danger", raw, exitCode };
+  // The observed process only colours a running job: the job stays in progress until Job Service says otherwise.
+  const observed = raw === "running" ? job.observedProcessState?.state : undefined;
+  if (observed === "stopped") return { ...row, key: "processStopped", glyph: "ring", tone: "warn", raw, exitCode };
+  if (observed === "exited") return { ...row, key: "processExited", glyph: "ring", tone: "muted", raw, exitCode };
   return { ...row, raw, exitCode };
 }
 

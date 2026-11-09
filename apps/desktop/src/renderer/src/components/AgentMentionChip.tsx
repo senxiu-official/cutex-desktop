@@ -10,6 +10,7 @@ import { copyText } from "../lib/menus";
 import { Avatar } from "./Avatar";
 import { stripSelectionChrome } from "../lib/contentSelection";
 import { isElement } from "../lib/ownerWindow";
+import { replaceMathSources } from "../lib/mathCopy";
 
 const documents = new WeakMap<Document, { elements: Set<HTMLElement>; copy(event: ClipboardEvent): void }>();
 const blocks = new Set(["P", "DIV", "LI", "PRE", "BLOCKQUOTE", "H1", "H2", "H3", "H4", "H5", "H6", "TR"]);
@@ -51,6 +52,7 @@ function retainMentionCopy(doc: Document, chip: HTMLElement): () => void {
         changed = true;
       }
       if (!changed) return;
+      replaceMathSources(fragment, range);
       stripSelectionChrome(fragment);
       const last = fragment.lastChild;
       const text = last?.nodeType === 1 && blocks.has((last as Element).tagName) ? plainSelection(fragment).replace(/\n$/, "") : plainSelection(fragment);

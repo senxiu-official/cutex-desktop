@@ -49,6 +49,12 @@ const jobs: JobRow[] = [
   job("eva", "Eva", "running", 31 * 3600, { actionId: "", command: null, cwd: null, source: "nci", remoteId: "148011870.gadi-pbs", remoteName: `cx${"07de".repeat(8)}`, lastSourceEventAt: T0 - 30 * 3600, stale: true, revision: 2 }),
   job("eva", "Eva", "exited", 9 * 3600, { actionId: "", command: null, cwd: null, source: "nci", remoteId: "147998201.gadi-pbs", remoteName: "md-npt-cx2b3e9a0b7e3d2c1f6a5b4c3d2e1f0a9b", exitCode: 0, tookSeconds: 5 * 3600, lastSourceEventAt: T0 - 4 * 3600, revision: 4 }),
 ];
+// `?jobprocess`: Job Service 0.1.2 reports the observed process of running jobs.
+if (typeof location !== "undefined" && new URLSearchParams(location.search).has("jobprocess")) {
+  jobs[0]!.observedProcessState = { state: "stopped", observedAtEpochMillis: (T0 - 40) * 1000 };
+  jobs[1]!.observedProcessState = { state: "exited", observedAtEpochMillis: (T0 - 3) * 1000 };
+  jobs.push(job("mika", "Mika", "running", 90, { actionId: "index", command: "python index.py --all", observedProcessState: { state: "sleeping", observedAtEpochMillis: T0 * 1000 } }));
+}
 // `?projectview` (modules/project-view/mock.ts): three running jobs of the cutex-dev project's agents.
 if (typeof location !== "undefined" && new URLSearchParams(location.search).has("projectview"))
   jobs.push(

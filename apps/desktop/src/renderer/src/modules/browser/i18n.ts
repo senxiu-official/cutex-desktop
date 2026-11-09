@@ -101,6 +101,7 @@ export const zhCN = {
   "browser.sitePermissions.agentPool": "{{agent}}登录池",
   "browser.sitePermissions.forget": "忘记",
   "browser.sitePermissions.forgetAll": "全部忘记",
+  "browser.sitePermissions.all": "全部 {n} 个",
   "browser.sitePermissions.separator": "、",
   "browser.sitePermission.waiting": "{origin} 想使用{permissions}：请在系统对话框里选择「允许」或「阻止」，网页会等你回答。对话框在 Cutex 窗口上方，被挡住时先切回 Cutex；2 分钟不回答按阻止处理（不记住）。",
   "browser.sitePermission.camera": "摄像头",

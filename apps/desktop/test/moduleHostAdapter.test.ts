@@ -2,7 +2,7 @@
 // Existing moduleHost.test.ts and modules.test.ts remain unchanged.
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { stubServices } from "./serviceStub";
-import type { AppModuleContext, AppModuleHost } from "../src/renderer/src/modules/slots";
+import type { ModuleContext, AppModuleHost } from "../src/renderer/src/modules/slots";
 import type { KeyValueStorage } from "../src/renderer/src/modules/types";
 
 vi.mock("../src/renderer/src/bridge", () => ({ api: {}, bridge: {}, onEvent: () => () => {}, cleanIpcMessage: (message: string) => message }));
@@ -116,13 +116,13 @@ describe("mainline package adapter: actual settings modules", () => {
   });
 
   it("fences every current UI service immediately on host changes and on disposal", async () => {
-    const captured: AppModuleContext[] = [];
+    const captured: ModuleContext[] = [];
     const original = useApp.getState();
     const effects = { notify: vi.fn(), openSettings: vi.fn(), openPage: vi.fn(), closePage: vi.fn() };
     useApp.setState({ ...effects, featuresKnown: true, features: new Set(ALL_FEATURES) });
     const host = startAppModules([...MODULES, { id: "scope-probe", titleKey: "shell.title", activate(ctx) { captured.push(ctx); } }]);
     hosts.push(host);
-    const invoke = (ctx: AppModuleContext) => {
+    const invoke = (ctx: ModuleContext) => {
       ctx.services.ui.notice("scope", "info"); ctx.services.ui.openSettings("general");
       ctx.services.ui.openPage("projects.page", { project: "original" }); ctx.services.ui.closePage();
     };
@@ -205,10 +205,10 @@ describe("current page/navigation contract", () => {
 describe("renderer facade dynamic registration", () => {
   it("publishes a live registry and Map status removal without replacing unrelated pages", async () => {
     const host = await fixture(), oldModules = host.modules, page = host.snapshot("main.page").find(row => row.item.id === "projects.page")!;
-    const renders = vi.fn(), capture: AppModuleContext[] = [];
+    const renders = vi.fn(), capture: ModuleContext[] = [];
     const definition = { id: "registration-probe", titleKey: "shell.title" as const,
       contributes: { "main.page": [{ id: "registration-probe.page" as const, Page: () => null, useTitle: () => [] }] },
-      activate(ctx: AppModuleContext) { capture.push(ctx); } };
+      activate(ctx: ModuleContext) { capture.push(ctx); } };
     const off = host.subscribe(renders);
     await host.addModules([definition]);
     expect(host.modules).not.toBe(oldModules); expect(host.modules.at(-1)).toBe(definition);

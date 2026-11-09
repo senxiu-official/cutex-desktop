@@ -1,5 +1,7 @@
 import { isImeComposing } from "../lib/ime";
 import { ForkProfileDialog } from "./ForkProfileDialog";
+import { QuickChatPromoteDialog } from "./QuickChatPromoteDialog";
+import { AgentMcpDialog } from "./AgentMcpDialog";
 // Renders the global context menu and confirm / prompt dialogs (state in lib/contextMenu.ts).
 import { createContext, memo, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ChevronRight, Info } from "lucide-react";
@@ -50,7 +52,11 @@ function ContextMenuView({ x, y, items, above, minWidth, trigger }: { x: number;
   const [armedText, setArmedText] = useState<string | null>(null);
   const [note, setNote] = useState<RowNote | null>(null);
   const alive = useRef(true);
-  useEffect(() => () => void (alive.current = false), []);
+  // Set again on mount: StrictMode's dev remount runs the cleanup once, which left every `prepare` row on 查看中….
+  useEffect(() => {
+    alive.current = true;
+    return () => void (alive.current = false);
+  }, []);
   const [flipped, setFlipped] = useState<ReadonlyMap<MenuToggle, boolean>>(new Map());
   const toggles: Toggles = {
     on: (toggle) => flipped.get(toggle) ?? toggle.on,
@@ -306,8 +312,9 @@ const MenuRow = memo(function MenuRow({ item, i, base, active, flyoutClosed, set
         aria-describedby={info ? `${base}-${i}` : undefined}
         data-armed={armed === item || undefined}
         onClick={() => (item.submenu || item.flyout !== undefined ? setActive(i) : select(item))}
-        className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left outline-none focus:bg-surface-2 disabled:opacity-40 ${
-          armed === item ? `${ARMED_COUNTDOWN} bg-danger-solid text-white` : `${active && !item.disabled ? "bg-surface-2" : ""} ${item.danger ? "text-danger" : ""}`
+        // Armed keeps the danger face while focused (it always is, after its first click): no focus:bg-* with it.
+        className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left outline-none disabled:opacity-40 ${
+          armed === item ? `${ARMED_COUNTDOWN} bg-danger-solid text-white` : `focus:bg-surface-2 ${active && !item.disabled ? "bg-surface-2" : ""} ${item.danger ? "text-danger" : ""}`
         }`}
       >
         {/* A rich row without an icon (e.g. the identity menu's avatar header) starts at the left edge. */}
@@ -514,13 +521,17 @@ export function Overlays() {
         <OwnerLayer doc={dialogDoc}>
         <div className={`fixed inset-0 z-[150] flex items-start justify-center bg-black/30 ${dialog.kind === "folder" ? "pt-[10vh]" : dialog.kind === "agentInfo" ? "pt-[5vh]" : "pt-[20vh]"}`} onMouseDown={(e) => e.target === e.currentTarget && (dialog.kind === "confirm" ? dialog.resolve(false) : dialog.resolve(null), closeDialog())}>
           {/* role: Esc anywhere else stops the running turn unless a dialog is open (lib/escInterrupt). */}
-          <div role="dialog" aria-modal="true" className={`${dialog.kind === "folder" ? "w-[34rem] max-w-[calc(100vw-2rem)]" : dialog.kind === "forkProfile" || dialog.kind === "folderLook" ? "w-96 max-w-[calc(100vw-2rem)] max-h-[75vh] overflow-y-auto" : dialog.kind === "agentInfo" ? "w-96 max-w-[calc(100vw-2rem)] max-h-[90vh] overflow-y-auto" : "w-96"} rounded-xl border border-border bg-surface p-4 shadow-2xl`}>
+          <div role="dialog" aria-modal="true" className={`${dialog.kind === "folder" ? "w-[34rem] max-w-[calc(100vw-2rem)]" : dialog.kind === "agentMcp" ? "w-[30rem] max-w-[calc(100vw-2rem)] max-h-[80vh] overflow-y-auto" : dialog.kind === "forkProfile" || dialog.kind === "folderLook" || dialog.kind === "promoteChat" ? "w-96 max-w-[calc(100vw-2rem)] max-h-[75vh] overflow-y-auto" : dialog.kind === "agentInfo" ? "w-96 max-w-[calc(100vw-2rem)] max-h-[90vh] overflow-y-auto" : "w-96"} rounded-xl border border-border bg-surface p-4 shadow-2xl`}>
             {dialog.kind === "confirm" ? (
               <ConfirmView {...dialog} />
             ) : dialog.kind === "folder" ? (
               <FolderBrowser start={dialog.start} hostId={dialog.hostId} resolve={dialog.resolve} />
             ) : dialog.kind === "forkProfile" ? (
               <ForkProfileDialog {...dialog} />
+            ) : dialog.kind === "agentMcp" ? (
+              <AgentMcpDialog {...dialog} />
+            ) : dialog.kind === "promoteChat" ? (
+              <QuickChatPromoteDialog {...dialog} />
             ) : dialog.kind === "agentInfo" ? (
               <AgentInfoDialog {...dialog} />
             ) : dialog.kind === "folderLook" ? (

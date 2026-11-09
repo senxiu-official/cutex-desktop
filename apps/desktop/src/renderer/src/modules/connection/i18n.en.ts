@@ -4,7 +4,7 @@ import type { zhCN } from "./i18n";
 
 export const en: Record<keyof typeof zhCN, string> = {
   "connection.title": "Connection",
-  "connection.description": "Host list, host switching, startup host and diagnostics (Settings → Devices)",
+  "connection.description": "Host list, host switching, startup host and diagnostics (Settings → Hosts)",
   // ---- settings (moved from the base catalog, 2026-10-09) ----
   "connection.diagnostics": "Diagnostics",
   "connection.page": "Hosts",
@@ -15,11 +15,6 @@ export const en: Record<keyof typeof zhCN, string> = {
   // ---- Device management (connection restructure 2026-10-19) ----
   "connection.pageHint": "Every host this computer connects to, and desktop settings for all hosts.",
   "connection.openHost": "See the connection and access of {host}",
-  "connection.mine": "My hosts",
-  "connection.mineHint": "Hosts whose {{owner}} is you.",
-  "connection.others": "Hosts I can access",
-  "connection.othersHint": "Hosts whose {{owner}} is someone else, including those where SSH gives you full control.",
-  "connection.othersNone": "None",
   "connection.thisDevice": "This machine",
   "connection.member": "You are a member",
   "connection.add": "Add a host",

@@ -46,9 +46,8 @@ describe("openPage routing", () => {
     expect(useApp.getState().settingsFocus).toEqual({ anchor: "host-groups" });
   });
 
-  it("接入 / 互联 links land on 主机; 用户 is its own page (连接 D plan 2026-10-19)", () => {
-    for (const tab of ["remote", "peers"]) expect(settingsTab({ tab })).toBe("access");
-    expect(settingsTab({ tab: "users" })).toBe("users");
+  it("接入 / 互联 / 用户 links land on the host page (owner 2026-11-07)", () => {
+    for (const tab of ["remote", "peers", "users"]) expect(settingsTab({ tab })).toBe("access");
     expect(settingsTab({ tab: "access" })).toBe("access");
     expect(settingsTab({ tab: "hosts" })).toBe("hosts");
   });

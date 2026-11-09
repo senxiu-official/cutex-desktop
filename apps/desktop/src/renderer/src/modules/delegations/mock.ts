@@ -303,6 +303,16 @@ function leadThread() {
             ...(ROUTING_SCENE ? [delegateCall("ld-route", a("ask-route-pending")), delegateCall("ld-denied", a("ask-route-denied")), delegateCall("ld-grant", a("ask-route-grant"))] : []),
             delegateCall("ld3", a("ask-accept")),
             { type: "mcpToolCall", id: "lw1", server: "cutex", tool: "delegation_wait", status: "completed", durationMs: 3300, arguments: { delegations: ["ask-done"] }, result: { content: [], structuredContent: { ok: true, reason: "result", results: [{ kind: "answer", delegation: "ask-done", title: a("ask-done").title, answer: a("ask-done").answerPreview, awaiting_acceptance: false }], delegations: [] } } },
+            // `?askawait`: a wait whose requester result offers resuming, and a newer agent_list with pending notices.
+            ...(byId.has("ask-await") ? [
+              delegateCall("ld-await", a("ask-await")),
+              { type: "mcpToolCall", id: "lw-await", server: "cutex", tool: "delegation_wait", status: "completed", durationMs: 40, arguments: { delegations: ["ask-await"] }, result: { content: [], structuredContent: { ok: true, reason: "timeout", delegations: [{ delegation: "ask-await", state: "running", waiting: { jobs: ["job_ce374c4941e4484dadb99b57ab9bbbcb"], can_resume: true, resume_action: { tool: "delegation_resume", arguments: { delegation: "ask-await" } } } }] } } },
+              { type: "mcpToolCall", id: "ll-notices", server: "cutex", tool: "agent_list", status: "completed", durationMs: 30, arguments: {}, result: { content: [], structuredContent: { ok: true, agents: [{ id: "scratch", name: "scratch", status: "busy" }], unclaimed_results: 3, pending_notices: { total: 3, counts: { answer: 1, question: 1, state: 1 }, more: false, entries: [
+                { delivery_id: "n1", delegation: "ask-done", kind: "answer", ref_id: "a1", passive: false, created_at: "2026-11-06T00:00:00Z", title: a("ask-done").title },
+                { delivery_id: "n2", delegation: "ask-review", kind: "question", ref_id: "q1", passive: false, created_at: "2026-11-06T00:00:00Z", title: a("ask-review").title },
+                { delivery_id: "n3", delegation: "ask-await", kind: "state", ref_id: "s1", passive: true, created_at: "2026-11-06T00:00:00Z", title: a("ask-await").title },
+              ] } } } },
+            ] : []),
             { type: "agentMessage", id: "la2", text: "Helper 找到 3 处调用，两处没校验 revision。接下来让它直接改。" },
           ],
         },
@@ -506,6 +516,8 @@ function mockDelegationApi() {
       if (method === "cutex/ask/stop") {
         if (d.execution === "running" || d.execution === "admitted") update(d.askId, { execution: "interrupted", hold: null, attempt: { ...(d.attempt ?? { n: 1 }), state: "interrupted", interruptReason: "ownerStopped", endedAt: new Date().toISOString() } });
         else update(d.askId, { execution: "cancelled", hold: null, closed: "cancelled", closedAt: new Date().toISOString() });
+      } else if (method === "cutex/ask/resume") {
+        update(d.askId, { hold: null, await: null, holdSince: null });
       } else if (method === "cutex/ask/retry") {
         update(d.askId, { execution: "queued", hold: { reason: "targetBusy", position: 1 }, attempts: d.attempts + 1, attempt: null });
       } else {

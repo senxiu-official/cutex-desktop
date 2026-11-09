@@ -29,6 +29,7 @@ import { AgentTimingIcon } from "./AgentTimingIcon";
 import { placeTip } from "../../lib/tips";
 import { useOwnerWindow } from "../../lib/ownerContext";
 import { ownerWindowOf } from "../../lib/ownerWindow";
+import { FILTER_FROM } from "../../lib/listFilter";
 
 const FOCUS = "outline-none focus-visible:ring-2 focus-visible:ring-accent/60 focus-visible:ring-offset-1 focus-visible:ring-offset-surface";
 const FIELD = "rounded-md border border-border bg-background px-2 py-1 text-sm outline-none focus:border-accent focus-visible:ring-2 focus-visible:ring-accent/30 disabled:opacity-50";
@@ -227,10 +228,12 @@ function WhereChip({ source, short, except, shown, hostId: scopedHostId }: { sou
 
 /**
  * Whether (and when) agents feel a setting. Uniform pages use one header label; mixed pages use row icons.
- * Display settings stay grey; behavior settings use the robot with a timing badge and a full popover.
+ * Behavior settings use the robot with a timing badge and a full popover. A setting agents do not feel
+ * says nothing (owner 2026-11-07): the declaration stays, for the aggregation and the audit.
  */
 function AgentsChip({ agents, presentation = "header" }: { agents: Timing; presentation?: "header" | "row" }) {
   const { t } = useI18n();
+  if (agents === "none") return null;
   return <ScopeChip tone="plain" timing={{ kind: agents, presentation, short: t(`settings.scope.agents.${agents}.short`) }} icon={<AgentTimingIcon timing={agents} />} label={t(`settings.scope.agents.${agents}`)} title={t(`settings.scope.agents.${agents}.title`)} body={t(`settings.scope.agents.${agents}.body`)} />;
 }
 
@@ -280,7 +283,7 @@ function EffectMarkers({ agents, source, allHosts, readOnly, row = false }: RowM
   const hostId = useTargetHostId();
   const scope = scopeOf({source, allHosts, hostId});
   const showScope = !!scope && !placement.scopeStated && scope !== placement.scopeBaseline;
-  const showTiming = !!agents && !placement.timingStated;
+  const showTiming = !!agents && agents !== "none" && !placement.timingStated;
   if (form || readOnly || (!showScope && !showTiming)) return null;
   return <span className="relative z-10 col-span-full ml-1 inline-flex flex-wrap items-center gap-1 align-middle" data-effect-markers={row ? "row" : "card"}>
     {showScope && scope && <EffectScope scope={scope} />}
@@ -704,7 +707,25 @@ export function TextLink({ children, onClick }: { children: ReactNode; onClick()
   );
 }
 
-/** A link-styled way back with a leading ‹, e.g. 主机's 「‹ 所有设备」. */
+/** The entry to a sub-page: its name, what is there (or how many), and ›. The whole row opens it. */
+export function SubPageRow({ title, summary, effect, onOpen }: { title: ReactNode; summary?: ReactNode; /** What the card's rows do, so its header keeps its tags. */ effect?: Pick<SettingEffect, "agents" | "source">; onOpen(): void }) {
+  return (
+    <SettingsGroup navigation={!effect} agents={effect?.agents ?? "none"} source={effect?.source ?? "local"}><button type="button" data-settings-subpage="" onClick={onOpen} className={`-mx-4 flex w-[calc(100%+2rem)] min-w-0 items-center gap-3 border-b border-border px-4 py-2.5 text-left last:border-b-0 hover:bg-surface-2/60 ${FOCUS}`}>
+      <span className="shrink-0 text-sm text-foreground">{title}</span>
+      {summary && <span className="min-w-0 flex-1 truncate text-xs text-subtle">{summary}</span>}
+      <ChevronRight size={14} aria-hidden className="ml-auto shrink-0 text-subtle" />
+    </button></SettingsGroup>
+  );
+}
+
+/** The filter of a sub-page's list: only once the list is long (lib/listFilter). */
+export function ListFilter({ count, value, onChange }: { count: number; value: string; onChange(value: string): void }) {
+  const { t } = useI18n();
+  if (count <= FILTER_FROM && !value) return null;
+  return <div className="py-2" data-settings-list-filter=""><TextInput value={value} onChange={onChange} width="w-56" label={t("settings.filter")} placeholder={t("settings.filter")} /></div>;
+}
+
+/** A link-styled way back with a leading ‹, e.g. a host's page's 「‹ 主机」. */
 export function BackLink({ children, onClick }: { children: ReactNode; onClick(): void }) {
   return (
     <button type="button" data-settings-back onClick={onClick} className={`-ml-0.5 inline-flex items-center gap-0.5 rounded text-xs text-accent hover:underline ${FOCUS}`}>
@@ -793,13 +814,17 @@ export function RefreshButton({ onClick, disabled, label }: { onClick(): void; d
 }
 
 /** Remove with click-twice confirmation: the first click arms (red "click again"), the second removes. */
-export function ArmedRemove({ title, disabled, onRemove, armedLabel }: { title: string; disabled?: boolean; onRemove(): void; armedLabel?: string }) {
+export function ArmedRemove({ title, disabled, onRemove, armedLabel, label }: { title: string; disabled?: boolean; onRemove(): void; armedLabel?: string; label?: string }) {
   const { t } = useI18n();
   const [armed, setArmed] = useArmed();
   return armed ? (
     <button disabled={disabled} onClick={() => (setArmed(false), onRemove())} className={`${ARMED_BUTTON} flex h-6 shrink-0 items-center whitespace-nowrap ${FOCUS}`}>
       {armedLabel ?? t("settings.removeArmed")}
     </button>
+  ) : label ? (
+    <Button title={title} disabled={disabled} onClick={() => setArmed(true)}>
+      {label}
+    </Button>
   ) : (
     <IconButton label={title} danger disabled={disabled} onClick={() => setArmed(true)}>
       <X size={14} />
@@ -825,13 +850,13 @@ type ListRowProps = { leading?: ReactNode; title: ReactNode; detail?: ReactNode;
 export function ListRow({ leading, title, detail, actions, below, frame, effect }: ListRowProps) {
   return (
     <div {...effect?.attributes} className={`-mx-4 border-b border-border px-4 py-2 last:border-b-0 ${frame ?? ""}`}>
-      <div className="flex min-h-7 items-center gap-2.5">
+      <div className="flex min-h-7 flex-wrap items-center gap-2.5">
         {leading}
-        <div className="min-w-0 flex-1">
+        <div className="min-w-40 flex-1">
           <div className="flex min-w-0 items-center gap-1 text-sm" data-list-row-title><span className="min-w-0 truncate">{title}</span>{effect?.marker}</div>
           {detail && <div className="truncate text-xs text-subtle">{detail}</div>}
         </div>
-        {actions && <div className="flex shrink-0 items-center gap-1.5">{actions}</div>}
+        {actions && <div className="flex max-w-full flex-wrap items-center justify-end gap-1.5">{actions}</div>}
       </div>
       {below}
     </div>

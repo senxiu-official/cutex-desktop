@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.2.3 "Beautiful World" (2026-11-09)
+
+- Git status reads for one repository share a request; filesystem identity checks are cached and git work uses a separate worker pool. Slow repositories no longer occupy the workers used by other management requests.
+  同一仓库的 Git 状态读取合并处理；文件系统身份检查使用缓存，Git 工作使用独立线程池。较慢的仓库不会再占用其他管理请求的工作线程。
+
+- Agent pickers support searching and keyboard selection across the agents available to the current host or project.
+  智能体选择器支持搜索和键盘选择，可查找当前主机或项目下可用的智能体。
+
+- Codex file actions include undo when the selected runtime supports it.
+  所选运行时支持时，Codex 文件操作中可使用撤销。
+
+- Per-agent MCP switches control which MCP servers are enabled for that agent.
+  可按智能体控制启用哪些 MCP 服务器。
+
+- Memory instructions can be enabled or disabled per agent, and a quick chat can become a persistent agent. These actions appear only when the connected host supports them.
+  可按智能体启用或停用记忆指令，也可将快速聊天转为持久智能体；仅在连接的主机支持时显示这些操作。
+
+- Desk pet art format 2 supports scene animation and a book pile. The module includes an original example; custom art is supplied by the user.
+  桌宠画面格式 2 支持场景动画和书堆。模块附带原创示例，自定义画面由用户提供。
+
+- Desk pet keeps a pending-token balance, avoids duplicate credit after reconnecting, and consumes tokens only while visible. Book capacity and reading speed are configurable.
+  桌宠保存待消耗 token 余额，重连后不重复入账，仅在可见时消耗；每本书的容量和阅读速度均可设置。
+
+- Updates the Codex protocol to 0.167.0 and supports native runtime 0.167.0-r60. Existing agents retain their selected runtime until explicitly upgraded.
+  Codex 协议更新至 0.167.0，支持原生运行时 0.167.0-r60；已有智能体保持所选运行时，直到明确升级。
+
 ## 0.2.2 "Beautiful World" (2026-11-06)
 
 - Remote sidebars display agents progressively and show the last known list during startup synchronization. Archived agents load on demand; hosts outside the current view poll less frequently. A failed session read retains entries already loaded.

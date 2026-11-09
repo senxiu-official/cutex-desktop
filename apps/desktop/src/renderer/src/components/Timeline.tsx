@@ -51,7 +51,7 @@ import { agentState, useApp } from "../store";
 import { convNotify, useConvFeatures, useConvHost, useConvScope, useConvView } from "../lib/conversationScope";
 import { CodeBlockScope } from "../lib/codeBlockScope";
 import { isArchived } from "../lib/archivedAgent";
-import { viewRow } from "../lib/viewHost";
+import { useSenderName, viewRow } from "../lib/viewHost";
 import { BusMessage } from "./BusMessage";
 import { BusyDots } from "./BusyDots";
 import { Markdown } from "./Markdown";
@@ -260,6 +260,13 @@ function TurnTime({ startedAt, completedAt }: { startedAt: number; completedAt: 
       {formatWhen(completedAt ?? startedAt, now, locale)}
     </span>
   );
+}
+
+/** A ledger row's sender, by the name the owner knows it (lib/viewHost useSenderName). */
+function LedgerSenderName({ record }: { record: InputRecord }) {
+  const fallback = record.sender?.name ?? record.kind;
+  const agent = record.sender?.kind === "agent" ? record.sender.cutexSessionId ?? record.sender.id : null;
+  return <>{useSenderName(agent, fallback).name}</>;
 }
 
 /** A sent row: the kind cutex reported last (a wake may be downgraded to a note) wins over the event's. */
@@ -693,7 +700,7 @@ export function TimelineBody({ timeline, entries: suppliedEntries, version, sess
   }, [ledgerEntries, ledgerIndex, carries]);
   // A non-owner ledger record without a native row: sender, preview and its status.
   const ledgerInputRow = (record: InputRecord) => <div className="my-2" data-input-id={record.inputId} data-carried-input-id={carries.inputIds.has(record.inputId) ? record.inputId : undefined}>
-    <div className="text-xs text-subtle">{record.sender?.name ?? record.kind}</div><div className="whitespace-pre-wrap text-sm">{record.preview}</div>
+    <div className="text-xs text-subtle"><LedgerSenderName record={record} /></div><div className="whitespace-pre-wrap text-sm">{record.preview}</div>
     <InputStatus record={record} sessionId={sessionId} hostId={view.hostId} readOnly={readOnly} timeline />
   </div>;
   const carriedRows = (ownerId: string | undefined) => ownerId && carries.byOwner.has(ownerId)

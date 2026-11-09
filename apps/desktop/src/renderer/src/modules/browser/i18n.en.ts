@@ -105,6 +105,7 @@ export const en: Record<keyof typeof zhCN, string> = {
   "browser.sitePermissions.agentPool": "{{agents}}' login pool",
   "browser.sitePermissions.forget": "Forget",
   "browser.sitePermissions.forgetAll": "Forget all",
+  "browser.sitePermissions.all": "All {n}",
   "browser.sitePermissions.separator": ", ",
   "browser.sitePermission.waiting": "{origin} wants to use {permissions}: choose Allow or Block in the system dialog; the page waits for your answer. The dialog sits on the Cutex window (switch back to Cutex if it is covered); no answer within 2 minutes blocks it, nothing remembered.",
   "browser.sitePermission.camera": "Camera",

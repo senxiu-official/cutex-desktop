@@ -1,5 +1,5 @@
 /** Desktop module contract version (docs/desktop-modules.md). */
-export const MODULE_API_VERSION = "1.26" as const;
+export const MODULE_API_VERSION = "1.31" as const;
 export * from './modules';
 export * from './renderer';
 export * from './packs';

@@ -19,11 +19,13 @@ import { confirmSettingsRisk } from "../../lib/settingsRisk";
 import { settingsRiskText as riskText } from "../../lib/settingsRiskText";
 import { SettingsRiskConfirmation } from "./SettingsRiskConfirmation";
 import { settingsAnchorId } from "../../lib/settingsNav";
+import { useScrollToSettingsAnchor } from "../../lib/settingsFocus";
+import { matchesFilter } from "../../lib/listFilter";
 import { useApp } from "../../store";
 import { Avatar } from "../Avatar";
 import { SettingsSections } from "../../modules/Outlet";
 import { MessageTemplatesSection } from "./GlobalSettings";
-import { AddButton, ArmedRemove, Button, EmptyState, ErrorNote, Loading, Notice, ResetButton, SettingRow, Section, Segmented, SettingsGroup } from "./Form";
+import { AddButton, ArmedRemove, Button, EmptyState, ErrorNote, ListFilter, Loading, Notice, ResetButton, SettingRow, Section, Segmented, SettingsGroup, SubPageRow } from "./Form";
 import { useTargetFeatures, useTargetHostId, useTargetHostLabel, useTargetSelect, useTargetSidebar } from "../../lib/targetHost";
 import { projectIcon } from "../../lib/projectIcons";
 import { useUiPrefs } from "../../lib/prefs";
@@ -152,7 +154,7 @@ export function ExternalAgentsSection({ projectId }: { projectId: string }) {
   const { security, error, saving, patch } = useAgentSecurity(supported);
   if (!supported) return null;
   return (
-    <SettingsGroup agents="none" source="local"><Section title={t("security.external")} hint={t("security.external.hint")} actions={<Button onClick={() => openSettings("collab")}>{t("security.openSettings")}</Button>}>
+    <SettingsGroup agents="none" source="local"><Section title={t("security.external")} hint={t("security.external.hint")} actions={<Button onClick={() => openSettings("collab", { sub: "external" })}>{t("security.openSettings")}</Button>}>
       {error && <ErrorNote>{error}</ErrorNote>}
       {security?.crossProjectAccess === "host" && <Notice>{t("security.hostModeNote")}</Notice>}
       {security ? <ProjectGrants projectId={projectId} security={security} patch={patch} saving={saving} showProject={false} /> : !error && <Loading rows={1} />}
@@ -173,6 +175,8 @@ function LinksEditor({ security, patch, saving }: { security: AgentSecurity; pat
   const { projectOrder } = useUiPrefs();
   const selectOptions = linkPickerOptions(sidebar, securityProjectIds(sidebar, projectOrder ?? [], hostId), t("security.domain.project"), t("security.independent"));
   const max = security.maxLinks ?? DEFAULT_MAX_LINKS;
+  const [filter, setFilter] = useState("");
+  const shown = security.links.filter((link) => matchesFilter(filter, domainLabel(link[0], sidebar).label, domainLabel(link[1], sidebar).label));
   const add = () => {
     const next = addLink(security.links, a, b, max);
     if (typeof next === "string") return setError(t(listErrorKey[next], { max }));
@@ -184,16 +188,6 @@ function LinksEditor({ security, patch, saving }: { security: AgentSecurity; pat
   };
   return (
     <>
-      {security.links.length === 0 && <p className="py-2 text-xs text-subtle">{t("security.links.none")}</p>}
-      {security.links.map((link) => (
-        <div key={link.join("|")} className="flex items-center gap-2 border-b border-border py-2 text-sm">
-          <DomainName domain={link[0]} />
-          <ArrowLeftRight size={13} className="shrink-0 text-subtle" />
-          <DomainName domain={link[1]} />
-          <span className="ml-auto" />
-          <SettingsGroup agents="now" source="host"><ArmedRemove title={t("security.links.remove")} disabled={saving} onRemove={() => void patch({ links: removeLink(security.links, link) })} /></SettingsGroup>
-        </div>
-      ))}
       <div className="flex flex-wrap items-center gap-2 py-2.5">
         <SettingsGroup agents="now" source="host"><SearchableSelect value={a} options={selectOptions} onChange={setA} width="w-56" label={t("security.links.pick")} triggerText={t("security.links.pick")} placeholder={t("security.picker.search")} emptyLabel={t("security.picker.empty")} /></SettingsGroup>
         <ArrowLeftRight size={13} className="shrink-0 text-subtle" />
@@ -210,14 +204,42 @@ function LinksEditor({ security, patch, saving }: { security: AgentSecurity; pat
         }} />}
       {/* Reserved line: an error never moves the section below. */}
       <p className="h-5 truncate text-xs text-danger">{error}</p>
+      <div role="search" className="contents"><ListFilter count={security.links.length} value={filter} onChange={setFilter} /></div>
+      {security.links.length > 0 && shown.length === 0 && <p className="py-2 text-xs text-subtle">{t("settings.filterNone")}</p>}
+      {security.links.length === 0 && <p className="py-2 text-xs text-subtle">{t("security.links.none")}</p>}
+      {shown.map((link) => (
+        <div key={link.join("|")} className="flex items-center gap-2 border-b border-border py-2 text-sm">
+          <DomainName domain={link[0]} />
+          <ArrowLeftRight size={13} className="shrink-0 text-subtle" />
+          <DomainName domain={link[1]} />
+          <span className="ml-auto" />
+          <SettingsGroup agents="now" source="host"><ArmedRemove title={t("security.links.remove")} disabled={saving} onRemove={() => void patch({ links: removeLink(security.links, link) })} /></SettingsGroup>
+        </div>
+      ))}
     </>
   );
 }
 
+/** 可见的外部 agent on the page: how many and the first few; the list and 添加 are on its sub-page. */
+function ExternalEntry({ security, host }: { security: AgentSecurity; host: boolean }) {
+  const { t } = useI18n();
+  const sidebar = useTargetSidebar();
+  const openSettings = useApp((s) => s.openSettings);
+  const grants = security.externalAgents ?? [];
+  const all = [...(sidebar?.active ?? []), ...(sidebar?.retired ?? [])];
+  const first = grants.slice(0, 3).map((g) => all.find((s) => s.cutexSessionId === g.agent)?.displayName ?? g.agent).join(" · ");
+  return (
+    <Section id={settingsAnchorId("external")} title={t("security.external")} hint={t("security.external.hint")}>
+      {host && <p className="border-b border-border py-2 text-xs text-warn">{t("security.hostModeNote")}</p>}
+      <SubPageRow effect={{ agents: "now", source: "host" }} title={t("security.external.total", { n: grants.length })} summary={first || t("security.external.none")} onOpen={() => openSettings("collab", { sub: "external" })} />
+    </Section>
+  );
+}
+
 /**
- * 可见的外部 agent on the collab page (settings audit 2026-10-15, lead decision 5): only the projects
- * that have grants (in sidebar order, then ids the sidebar does not know); the header's 添加 picks a
- * project, then the external agent; no grants at all = one sentence.
+ * 协作 → 可见的外部 agent (settings audit 2026-10-15, lead decision 5): only the projects that have
+ * grants (in sidebar order, then ids the sidebar does not know); the header's 添加 picks a project,
+ * then the external agent; no grants at all = one sentence.
  */
 function ExternalGrantsSection({ security, patch, saving, host }: { security: AgentSecurity; patch: Patch; saving: boolean; host: boolean }) {
   const { t } = useI18n();
@@ -229,6 +251,12 @@ function ExternalGrantsSection({ security, patch, saving, host }: { security: Ag
   const projects = sidebar?.projects?.projects ?? [];
   const { projectOrder } = useUiPrefs();
   const listed = grantedProjects(sidebar, security.externalAgents);
+  const grants = security.externalAgents ?? [];
+  const everyone = [...(sidebar?.active ?? []), ...(sidebar?.retired ?? [])];
+  const [filter, setFilter] = useState("");
+  // A project stays whole: by its name, or by the name of an agent granted to it.
+  const shown = listed.filter((id) => matchesFilter(filter, projects.find((p) => p.project_id === id)?.presentation.display_name ?? id,
+    ...grantsFor(grants, id).map((g) => everyone.find((s) => s.cutexSessionId === g.agent)?.displayName ?? g.agent)));
   const activeProjects = securityProjectIds(sidebar, projectOrder ?? [], hostId).flatMap(id => projects.filter(p => p.project_id === id && (p.lifecycle ?? "active") === "active"));
   const pick = (el: HTMLElement) =>
     openMenuFrom(
@@ -243,8 +271,7 @@ function ExternalGrantsSection({ security, patch, saving, host }: { security: Ag
   return (
     <Section
       id={settingsAnchorId("external")}
-      title={t("security.external")}
-      hint={t("security.external.hint")}
+      title={t("security.external.totalMax", { n: grants.length, max: security.maxExternalAgents ?? DEFAULT_MAX_EXTERNAL })}
       actions={
         <SettingsGroup agents="now" source="host"><AddButton disabled={saving || activeProjects.length === 0} title={activeProjects.length === 0 ? t("security.external.noProjects") : undefined} onClick={(e) => pick(e.currentTarget)}>
           {t("security.external.add")}
@@ -252,8 +279,10 @@ function ExternalGrantsSection({ security, patch, saving, host }: { security: Ag
       }
     >
       {host && <p className="border-b border-border py-2 text-xs text-warn">{t("security.hostModeNote")}</p>}
+      <div role="search" className="contents"><ListFilter count={listed.length} value={filter} onChange={setFilter} /></div>
       {listed.length === 0 && <EmptyState>{t("security.external.none")}</EmptyState>}
-      {listed.map((id) => (
+      {listed.length > 0 && shown.length === 0 && <p className="py-2 text-xs text-subtle">{t("settings.filterNone")}</p>}
+      {shown.map((id) => (
         <ProjectGrants key={id} projectId={id} security={security} patch={patch} saving={saving} showProject />
       ))}
       {error && <p className="py-1 text-xs text-danger">{error}</p>}
@@ -266,12 +295,21 @@ function ExternalGrantsSection({ security, patch, saving, host }: { security: Ag
   );
 }
 
+/** 规则审计's full list is a `settings.section` of the approvals module, placed on its sub-page. */
+const AUDIT_SECTIONS = ["approvals.rules.auditAll"];
+
+export function CollabAuditSubPage() {
+  useScrollToSettingsAnchor();
+  return <SettingsSections page="collab" only={AUDIT_SECTIONS} />;
+}
+
 export function CollabPage() {
+  useScrollToSettingsAnchor();
   return (
     <>
       <BoundarySections />
       <MessageTemplatesSection />
-      <SettingsSections page="collab" />
+      <SettingsSections page="collab" except={AUDIT_SECTIONS} />
     </>
   );
 }
@@ -331,9 +369,66 @@ function BoundarySections() {
           />
         </SettingRow>
       </Section>
-      {grantsSupported && <ExternalGrantsSection security={security} patch={patch} saving={saving} host={host} />}
-      <Section id={settingsAnchorId("links")} title={t("security.links")} hint={t("security.links.hint")}>
-        {host && <p className="border-b border-border py-2 text-xs text-warn">{t("security.hostModeNote")}</p>}
+      {grantsSupported && <ExternalEntry security={security} host={host} />}
+      <LinksEntry security={security} host={host} />
+    </>
+  );
+}
+
+/** 互通的项目 on the page: how many and the first few; the list and 添加 are on its sub-page. */
+function LinksEntry({ security, host }: { security: AgentSecurity; host: boolean }) {
+  const { t } = useI18n();
+  const sidebar = useTargetSidebar();
+  const openSettings = useApp((s) => s.openSettings);
+  const first = security.links.slice(0, 3).map(([a, b]) => `${domainLabel(a, sidebar).label} ⇄ ${domainLabel(b, sidebar).label}`).join(" · ");
+  return (
+    <Section id={settingsAnchorId("links")} title={t("security.links")} hint={t("security.links.hint")}>
+      {host && <p className="border-b border-border py-2 text-xs text-warn">{t("security.hostModeNote")}</p>}
+      <SubPageRow effect={{ agents: "now", source: "host" }} title={t("security.links.count", { n: security.links.length })} summary={first || t("security.links.none")} onOpen={() => openSettings("collab", { sub: "links" })} />
+    </Section>
+  );
+}
+
+/** 协作 → 可见的外部 agent. */
+export function CollabExternalSubPage() {
+  const { t } = useI18n();
+  useScrollToSettingsAnchor();
+  const features = useTargetFeatures();
+  const supported = features.has(BOUNDARY_FEATURE) && features.has(EXTERNAL_GRANTS_FEATURE);
+  const { security, error, saving, patch } = useAgentSecurity(supported);
+  useArchivedAgents(useTargetHostId());
+  if (!supported || !security)
+    return (
+      <Section id={settingsAnchorId("external")}>
+        {!supported ? <p className="py-2 text-sm text-subtle">{t("security.unsupported")}</p> : error ? <p className="py-2 text-sm text-danger">{error}</p> : <Loading rows={3} />}
+      </Section>
+    );
+  return (
+    <>
+      {error && <p className="mb-3 text-xs text-danger">{error}</p>}
+      <ExternalGrantsSection security={security} patch={patch} saving={saving} host={security.crossProjectAccess === "host"} />
+    </>
+  );
+}
+
+/** 协作 → 互通的项目: every linked pair, 添加 first. */
+export function CollabLinksSubPage() {
+  const { t } = useI18n();
+  useScrollToSettingsAnchor();
+  const boundary = useTargetFeatures().has(BOUNDARY_FEATURE);
+  const { security, error, saving, patch } = useAgentSecurity(boundary);
+  useArchivedAgents(useTargetHostId());
+  if (!boundary || !security)
+    return (
+      <Section id={settingsAnchorId("links")}>
+        {!boundary ? <p className="py-2 text-sm text-subtle">{t("security.unsupported")}</p> : error ? <p className="py-2 text-sm text-danger">{error}</p> : <Loading rows={3} />}
+      </Section>
+    );
+  return (
+    <>
+      {error && <p className="mb-3 text-xs text-danger">{error}</p>}
+      <Section id={settingsAnchorId("links")} title={t("security.links.countMax", { n: security.links.length, max: security.maxLinks ?? DEFAULT_MAX_LINKS })}>
+        {security.crossProjectAccess === "host" && <p className="border-b border-border py-2 text-xs text-warn">{t("security.hostModeNote")}</p>}
         <LinksEditor security={security} patch={patch} saving={saving} />
       </Section>
     </>

@@ -12,7 +12,8 @@ vi.mock("../src/renderer/src/bridge", () => ({ api: {}, bridge: {}, apiFor: () =
 const { SLOT_SPECS } = await import("../src/renderer/src/modules/slots");
 const { createModuleHost } = await import("../src/renderer/src/modules/host");
 const { createPackLoader, packDecision, packRow, validatePackEntry } = await import("../src/renderer/src/modules/packs");
-const { checkHostImports, installPackHost, PACK_HOST_MODULES } = await import("../src/renderer/src/modules/packHost");
+const { checkHostImports, installPackHost, PACK_HOST_MODULES, PUBLIC_HOST_MODULES } = await import("../src/renderer/src/modules/packHost");
+const { isPublicHostSpecifier, readsAppInternals } = await import("../src/shared/modulePacks");
 const { BUNDLED_PACK_VERSIONS } = await import("../src/renderer/src/modules/packVersions");
 const { registerModuleMessages, translate, unregisterModuleMessages } = await import("../src/renderer/src/i18n");
 const React = await import("react");
@@ -42,9 +43,10 @@ function pack(version: string, extra: Partial<InstalledPackView> = {}): Installe
 }
 
 function view(installed: InstalledPackView[], extra: Partial<ModulePacksView> = {}): ModulePacksView {
-  return { appModuleApi: "1.16", testKey: true, installed, broken: [], index: null, checking: false, check: null, operation: null, lastError: null, ...extra };
+  return { appModuleApi: "1.16", testKey: true, installed, broken: [], index: null, checking: false, check: null, operation: null, lastError: null, local: { allowed: false, internal: false, safeStart: null, held: [], error: null }, ...extra };
 }
 
+const reports: { id: string; version: string; reason: string }[] = [];
 function fakeBridge(initial: ModulePacksView): ModulePacksBridge & { push(v: ModulePacksView): void } {
   const listeners = new Set<(v: ModulePacksView) => void>();
   return {
@@ -52,6 +54,9 @@ function fakeBridge(initial: ModulePacksView): ModulePacksBridge & { push(v: Mod
     check: async () => initial,
     install: async () => initial,
     remove: async () => initial,
+    installLocal: async () => initial,
+    allowLocal: async () => initial,
+    localFailed: async (input) => { reports.push(input); return initial; },
     onState: (l) => {
       listeners.add(l);
       return () => listeners.delete(l);
@@ -105,7 +110,7 @@ describe("host object", () => {
     const target: Record<string, unknown> = {};
     const host = installPackHost(target);
     expect(installPackHost(target)).toBe(host);
-    expect(host.apiVersion).toBe("1.26");
+    expect(host.apiVersion).toBe("1.31");
     expect(host.get("react").useState).toBe(React.useState);
     expect(() => host.get("fs")).toThrow(/not provided/);
     expect(() => host.get("__proto__")).toThrow(/not provided/);
@@ -223,5 +228,60 @@ describe("Settings rows", () => {
     });
     expect(packRow("pilot", rt([], [{ version: "0.1.0" }]), false, null).offer).toEqual({ kind: "download", version: "0.1.0" });
     expect(packRow("pilot", rt([], [{ version: "2.0.0" }]), true, null).offer).toBeNull();
+  });
+});
+
+describe("local modules in the loader (§23.14)", () => {
+  it("a local pack never replaces a bundled module, even if main were to let one through", () => {
+    expect(packDecision(pack("9.0.0", { local: true }), "1.0.0")).toEqual({ use: false, reason: "notPackable" });
+    expect(packDecision(pack("9.0.0", { local: true }), undefined)).toEqual({ use: true });
+  });
+
+  const loaderWith = (installed: InstalledPackView) => {
+    const host = createModuleHost({ modules: [] as AppModule[], slots: SLOT_SPECS, host: { id: "local", kind: "local", features: new Set<string>() }, storage: storage(), services: () => ({}) as never, log() {} });
+    hosts.push(host);
+    return createPackLoader({ host, bundled: [], bundledVersions: {}, bridge: fakeBridge(view([installed])), importEntry: async () => ({ moduleApi: "^1.16", module: { id: "other" } }) });
+  };
+
+  it("a local pack that fails to load is reported to main, which turns it off", async () => {
+    reports.length = 0;
+    await loaderWith(pack("1.0.0", { local: true })).start();
+    expect(reports).toHaveLength(1);
+    expect(reports[0]).toMatchObject({ id: "pilot", version: "1.0.0" });
+  });
+
+  it("a local pack reading the app's own files: a public build refuses it, a dev build loads it", async () => {
+    const internal = pack("1.0.0", { local: true, host: { react: ["useState"], "@cutex-desktop/app/store": ["useApp"] } });
+    const run = async (dev: boolean) => {
+      reports.length = 0;
+      const host = createModuleHost({ modules: [] as AppModule[], slots: SLOT_SPECS, host: { id: "local", kind: "local", features: new Set<string>() }, storage: storage(), services: () => stubServices(), log() {} });
+      hosts.push(host);
+      const imported: string[] = [];
+      const loader = createPackLoader({ host, bundled: [], bundledVersions: {}, bridge: fakeBridge(view([internal], { local: { allowed: true, internal: dev, safeStart: null, held: [], error: null } })), importEntry: async (url) => (imported.push(url), { moduleApi: "^1.16", module: def("1.0.0") }) });
+      await loader.start();
+      await loader.idle();
+      return { imported, ids: host.modules.map((m) => m.id) };
+    };
+    const pub = await run(false);
+    expect(pub.imported).toEqual([]);
+    expect(pub.ids).toEqual([]);
+    const dev = await run(true);
+    expect(dev.imported).toEqual([internal.entry]);
+    expect(dev.ids).toEqual(["pilot"]);
+    expect(reports).toEqual([]);
+  });
+
+  it("readsAppInternals: the public part of the host table and nothing else", () => {
+    for (const spec of Object.keys(PUBLIC_HOST_MODULES)) expect(isPublicHostSpecifier(spec)).toBe(true);
+    for (const spec of Object.keys(PACK_HOST_MODULES)) if (!(spec in PUBLIC_HOST_MODULES)) expect(isPublicHostSpecifier(spec)).toBe(false);
+    expect(readsAppInternals({ react: [], "@cutex-desktop/module-api/ui": ["Button"] })).toBe(false);
+    expect(readsAppInternals({ "@cutex-desktop/app/bridge": ["bridge"] })).toBe(true);
+    expect(readsAppInternals({ zustand: ["create"] })).toBe(true);
+  });
+
+  it("a signed pack that fails to load is not reported: it just falls back for this run", async () => {
+    reports.length = 0;
+    await loaderWith(pack("1.0.0")).start();
+    expect(reports).toEqual([]);
   });
 });

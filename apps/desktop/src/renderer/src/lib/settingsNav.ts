@@ -39,10 +39,10 @@ export function navGroupOf(item: { page: string; group: SettingsGroupId }): Sett
   return PANEL_PAGES.includes(item.page) ? "panels" : item.group;
 }
 
-/** The settings pages by nav group, in nav order (面板 in PANEL_PAGES order, the others as given); empty groups left out. */
-export function settingsNavGroups<T extends { item: { page: string; group: SettingsGroupId } }>(pages: readonly T[]): { group: SettingsNavGroupId; entries: T[] }[] {
+/** The settings pages by nav group, in nav order (面板 in PANEL_PAGES order, the others as given); empty groups left out. `details`: also the pages without a nav row (settings search finds those). */
+export function settingsNavGroups<T extends { item: { page: string; group: SettingsGroupId; navParent?: string } }>(pages: readonly T[], details = false): { group: SettingsNavGroupId; entries: T[] }[] {
   return SETTINGS_NAV_GROUP_ORDER.map((group) => {
-    const entries = pages.filter((e) => navGroupOf(e.item) === group);
+    const entries = pages.filter((e) => navGroupOf(e.item) === group && (details || !e.item.navParent));
     if (group === "panels") entries.sort((a, b) => PANEL_PAGES.indexOf(a.item.page) - PANEL_PAGES.indexOf(b.item.page));
     return { group, entries };
   }).filter((g) => g.entries.length > 0);
@@ -54,11 +54,22 @@ export function settingsNavGroups<T extends { item: { page: string; group: Setti
  */
 export const PAGE_ALIASES: Readonly<Record<string, SettingsTab>> = { composer: "conversation" };
 
+/** The page the nav marks while `tab` shows (a detail page marks its parent). */
+export function settingsNavPage(pages: readonly { item: { page: string; navParent?: string } }[], tab: string): string {
+  return pages.find((e) => e.item.page === tab)?.item.navParent ?? tab;
+}
+
+/** The sub-page a card lives on (`SettingsPageItem.subPages`), if it moved to one. */
+export function subPageOfAnchor(item: { subPages?: Readonly<Record<string, { anchors?: readonly string[] }>> } | undefined, anchor: string | null | undefined): string | undefined {
+  if (!item?.subPages || !anchor) return undefined;
+  return Object.entries(item.subPages).find(([, s]) => s.anchors?.includes(anchor))?.[0];
+}
+
 /**
- * Pages folded into 主机 (连接 D plan 2026-10-19): 接入 and 互联 are its cards now (用户 is its own page
- * again). Old links (`openSettings("peers", { anchor })`, saved params) land there; anchors unchanged.
+ * Pages folded into a host's page (owner 2026-11-07, one 主机 entry): 接入, 互联 and 用户 are its cards and
+ * sub-pages now. Old links (`openSettings("peers", { anchor })`, saved params) land there; anchors unchanged.
  */
-const FOLDED_INTO_ACCESS: ReadonlySet<string> = new Set(["remote", "peers"]);
+const FOLDED_INTO_ACCESS: ReadonlySet<string> = new Set(["remote", "peers", "users"]);
 
 /** The settings page of the `shell.settings` main page params (default 通用). */
 export function settingsTab(params: Readonly<Record<string, string | undefined>>): SettingsTab {

@@ -45,8 +45,10 @@ import {
   CircleArrowUp,
   CircleDot,
   SlidersHorizontal,
+  Plug,
   Smile,
   AppWindow,
+  Bot,
 } from "lucide-react";
 import { desksEnabled } from "./deskWindows";
 import { openInNewDesk, openInWindow, windowChoices } from "./deskActions";
@@ -57,7 +59,10 @@ import { agentHost, featuresOf, hostApi, pinnedOn, sidebarOf, useApp, viewHostOf
 import type { FileRef } from "./workspace";
 import { apiFor } from "../bridge";
 import { LOCAL_HOST_ID } from "../../../shared/hosts";
-import { agentInfoDialog, confirmDialog, noticeDialog, promptDialog, type MenuAction, type MenuEntry } from "./contextMenu";
+import { MEMORY_INJECTION_FEATURE, memoryInjectionOf } from "../../../shared/memoryInjection";
+import { promoteOffered } from "./quickChatPromote";
+import { agentInfoDialog, agentMcpDialog, promoteChatDialog, confirmDialog, noticeDialog, promptDialog, type MenuAction, type MenuEntry } from "./contextMenu";
+import { showsAgentMcp } from "./agentMcp";
 import { refActionEntries } from "./refActions";
 import { agentRef } from "./refs";
 import { AVATAR_COLOR_FEATURE, agentInfoPatch, isHexColor } from "./avatar";
@@ -303,10 +308,12 @@ export async function editAgentInfo(session: SessionResource, host: string): Pro
   const features = featuresOf(app, host);
   const style = sidebarOf(app, host)?.hostRows[session.cutexSessionId]?.profileStyle as { color?: unknown } | null | undefined;
   const editName = features.has("session-metadata");
+  // agent-memory-injection: the switch rides along; it is a runtime default, saved apart from the metadata.
+  const memory = features.has(MEMORY_INJECTION_FEATURE) && session.lifecycle !== "retired" ? memoryInjectionOf(session) : undefined;
   const before = { avatar: session.avatar ?? null, ...(features.has("session-avatar-mode") ? { avatarMode: session.avatarMode ?? null } : {}), note: session.note ?? null, ...(features.has("session-badge") ? { badge: session.badge ?? null } : {}), ...(editName ? { displayName: session.displayNameOverride ?? null } : {}) };
   const options = { editAvatarMode: features.has("session-avatar-mode"), realName: realAgentName(session), ownName: session.formalAgentName?.trim() || null, combineColor: features.has(AVATAR_COLOR_FEATURE), editName, editBadge: features.has("session-badge"),
     rename: canRenameFormal(features, session) ? { host, sessionId: session.cutexSessionId, revision: session.revision, archived: session.lifecycle === "retired" } : null };
-  const after = await agentInfoDialog(session.displayName, typeof style?.color === "string" ? style.color : null, session.cutexSessionId, before, options);
+  const after = await agentInfoDialog(session.displayName, typeof style?.color === "string" ? style.color : null, session.cutexSessionId, memory === undefined ? before : { ...before, memoryInjection: memory }, options);
   if (!after || !current()) return;
   const patch: Record<string, unknown> = agentInfoPatch(before, after);
   if ("avatar" in patch && !("avatarMode" in patch) && features.has("session-avatar-mode")) patch.avatarMode = "fixed";
@@ -314,6 +321,10 @@ export async function editAgentInfo(session: SessionResource, host: string): Pro
     const fields: Record<string, unknown> = {};
     for (const field of Object.keys(patch)) fields[field === "displayName" ? "displayNameOverride" : field] = field === "displayName" ? session.displayNameOverride ?? null : before[field as keyof typeof before];
     await updateMetadata(session, host, patch, fields);
+  }
+  // Applies at the agent's next launch; no confirm (owner 2026-11-06).
+  if (memory !== undefined && after.memoryInjection !== undefined && after.memoryInjection !== memory && current()) {
+    await app.sessionAction(session.cutexSessionId, "cutex/session/defaults/update", { patch: { memoryInjection: after.memoryInjection } }, host);
   }
 }
 
@@ -441,8 +452,13 @@ function claudeToolRows(session: SessionResource, t: T, host: string): MenuActio
 function settingsEntries(session: SessionResource, t: T, host: string): MenuEntry[] {
   const claude = claudeToolRows(session, t, host);
   const quota = quotaContinueItem(session, t, host);
-  if (!claude.length) return quota ? [quota] : [];
-  return [{ label: t("menu.agentSettings"), icon: <SlidersHorizontal size={ICON} />, onSelect: () => {}, submenu: quota ? [...claude, "separator", quota] : claude }];
+  // MCP 服务器… (cutex scoped-mcp): this agent's MCP switches in a dialog (components/AgentMcpDialog).
+  const mcp: MenuAction | null = showsAgentMcp(session, featuresOf(useApp.getState(), host))
+    ? { label: t("agent-config.mcp.menu"), icon: <Plug size={ICON} />, onSelect: () => void agentMcpDialog(session.cutexSessionId, host) }
+    : null;
+  const own = [quota, mcp].filter((e): e is MenuAction => !!e);
+  if (!claude.length) return own.length > 1 ? [{ label: t("menu.agentSettings"), icon: <SlidersHorizontal size={ICON} />, onSelect: () => {}, submenu: own }] : own;
+  return [{ label: t("menu.agentSettings"), icon: <SlidersHorizontal size={ICON} />, onSelect: () => {}, submenu: own.length ? [...claude, "separator", ...own] : claude }];
 }
 
 /** 打开 › (owner 2026-11-05): 打开文件面板, 打开所在项目 and the window rows; one row alone stays at the top level. */
@@ -697,6 +713,12 @@ export function agentMenu(session: SessionResource, t: T, hostId?: string): Menu
     // ── who it is (one-off actions): 编辑信息… holds the display name (first field), avatar, badge and note ──
     { label: t("menu.editInfo"), icon: <Pencil size={ICON} />, onSelect: guarded(() => editAgentInfo(session, host)) },
     !retired && avatarItem(session, t, host, features, pinned),
+    // 转为智能体… (quick-chat-promote-v1): the same conversation, now an agent with an own name, standalone or in a project.
+    promoteOffered(features, session, sidebarOf(app, host)?.hostRows?.[id]) && {
+      label: t("promote.menu"),
+      icon: <Bot size={ICON} />,
+      onSelect: () => void promoteChatDialog(id, host),
+    },
     canFork && {
       // Ellipsis rule (docs/GLOSSARY.md): … only when a dialog asks for a choice first, here the Profile.
       label: t("menu.forkAgent") + (features.has(FORK_PROFILE_FEATURE) ? "…" : ""),

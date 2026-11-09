@@ -690,6 +690,23 @@ describe("runtime recovery after an offline-start conflict", () => {
     expect(sidebar?.active[0]?.runtime).toMatchObject({ status: "online", runtimeGeneration: 4 });
   });
 
+  it.each(["local", WORKSTATION])("keeps an agent created on %s when an older sidebar reply lands after, and can start it", async (host) => {
+    await open();
+    const before = host === "local" ? "a1" : "w1";
+    let finish!: (v: ReturnType<typeof snapshot>) => void;
+    mock.responses.set(`${host}:sidebar`, () => new Promise((resolve) => { finish = resolve; }));
+    const older = store.getState().refreshHostSidebar(host);
+    await Promise.resolve();
+    mock.responses.set(`${host}:sidebar`, () => ({ ...snapshot(before), active: [...snapshot(before).active, ...snapshot("created").active] }));
+    await store.getState().refreshHostSidebar(host);
+    finish(snapshot(before));
+    await older;
+    const sidebar = host === "local" ? store.getState().sidebar : store.getState().byHost[host]?.sidebar;
+    expect(sidebar?.active.map((row) => row.cutexSessionId)).toContain("created");
+    await store.getState().sessionAction("created", "cutex/runtime/online", { openVisibleTerminal: false }, host);
+    expect(mock.calls.some((c) => c.host === host && c.method === "sessionAction" && c.args[0] === "created")).toBe(true);
+  });
+
   it("accepts a completed sidebar read while a newer one is pending on a slow host", async () => {
     await open();
     const replies: ((v: ReturnType<typeof snapshot>) => void)[] = [];

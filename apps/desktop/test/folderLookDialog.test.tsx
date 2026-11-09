@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("../src/renderer/src/i18n", () => ({ useI18n: () => ({ locale: "en", t: (key: string, vars?: Record<string, unknown>) => (vars ? `${key}${JSON.stringify(vars)}` : key) }) }));
 
 import { FolderLookDialog } from "../src/renderer/src/components/FolderLookDialog";
-import { FOLDER_COLORS } from "../src/renderer/src/lib/folderLook";
+import { FOLDER_COLORS, FOLDER_EXTRA_COLORS } from "../src/renderer/src/lib/folderLook";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let host: HTMLDivElement;
@@ -54,10 +54,36 @@ describe("FolderLookDialog", () => {
     click(button((b) => b.textContent === "dialog.cancel"));
     expect(cancelled).toHaveBeenCalledWith(null);
   });
-  it("offers no free colour: only 自动 and the folder palette", () => {
-    render();
+  it("offers the palette, the extra swatches and a custom colour (native picker or hex); a custom pick saves as #RRGGBB", () => {
+    const resolve = render();
     const swatches = host.querySelectorAll("button[aria-label^='section.color.']");
-    expect(swatches.length).toBe(FOLDER_COLORS.length);
-    expect(host.querySelector("input")).toBeNull();
+    expect(swatches.length).toBe(FOLDER_COLORS.length + FOLDER_EXTRA_COLORS.length);
+    const picker = host.querySelector<HTMLInputElement>("input[type=color]")!;
+    expect(picker).not.toBeNull();
+    const hex = host.querySelector<HTMLInputElement>("[data-folder-custom-color] input[type=text]")!;
+    const type = (value: string) => act(() => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(hex, value);
+      hex.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    type("#12");
+    expect(host.querySelector("[aria-invalid=true]")).not.toBeNull();
+    type("#1a2");
+    expect(host.querySelector<HTMLElement>("[data-folder-look-preview]")!.style.getPropertyValue("--folder-ink-light")).not.toBe("");
+    expect(host.querySelector("[data-folder-ink-hint]")).not.toBeNull();
+    click(button((b) => b.textContent === "settings.save"));
+    expect(resolve).toHaveBeenCalledWith({ look: { color: "#11AA22" } });
+  });
+
+  it("icons come in groups, filtered by the search; the grid keeps a fixed height", () => {
+    render();
+    const grid = host.querySelector<HTMLElement>("[data-folder-icon-grid]")!;
+    expect(grid.className).toContain("h-[208px]");
+    expect(grid.querySelectorAll("[data-icon-group]").length).toBeGreaterThan(8);
+    const search = host.querySelector<HTMLInputElement>("input[aria-label='section.lookIconSearch']")!;
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(search, "plane");
+      search.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    expect([...grid.querySelectorAll("button")].map((b) => b.getAttribute("aria-label"))).toEqual(["plane"]);
   });
 });

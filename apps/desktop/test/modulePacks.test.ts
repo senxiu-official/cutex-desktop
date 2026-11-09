@@ -354,7 +354,7 @@ describe("request guard (main's onBeforeRequest)", () => {
   it("is installed in the one onBeforeRequest listener of the default session (a second call would replace the first)", () => {
     const src = readFileSync(join(__dirname, "../src/main/index.ts"), "utf8");
     expect(src.match(/defaultSession\.webRequest\.onBeforeRequest\(/g)).toHaveLength(1);
-    expect(src).toMatch(/onBeforeRequest\(\{ urls: \[`\$\{MODULE_PACK_SCHEME\}:\/\/\*\/\*`, `\$\{PLUGIN_SCHEME\}:\/\/\*\/\*`\] \}/);
+    expect(src).toMatch(/onBeforeRequest\(\{ urls: \[`\$\{MODULE_PACK_SCHEME\}:\/\/\*\/\*`, `\$\{FRAME_SCHEME\}:\/\/\*\/\*`\] \}/);
   });
 });
 

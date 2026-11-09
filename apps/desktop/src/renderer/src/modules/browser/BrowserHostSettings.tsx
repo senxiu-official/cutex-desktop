@@ -1,8 +1,12 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { bridge } from "../../bridge";
 import { Section, Select, SettingRow } from "../../components/settings/Form";
 import { useI18n } from "../../i18n";
-import { useTargetFeatures, useTargetHostId } from "../../lib/targetHost";
+import { useTargetFeatures, useTargetHostId, useTargetSidebar } from "../../lib/targetHost";
+import { SearchableSelect } from "../../components/SearchablePicker";
+import { agentPickerOptions, listPickerRows, pickerProjectRank } from "../../lib/agentPickerOptions";
+import { useAgentPickerLabels } from "../../lib/useAgentPicker";
+import { useUiPrefs } from "../../lib/prefs";
 import { afterBrowserHostsDelivered, browserHostCurrent, useBrowserHostEpoch } from "./hosts";
 import { useBrowserEnabled } from "./tabs";
 import { browserErrorKey } from "./browserState";
@@ -43,6 +47,11 @@ export function BrowserHostSettings() {
   const fullAccessOpens = useTargetFeatures().has("browser-open-full-access");
   const [agents, setAgents] = useState<{ sessionId: string; name: string }[]>([]);
   const [clearTarget, setClearTarget] = useState("all"), [confirming, setConfirming] = useState(false);
+  const sidebar = useTargetSidebar(), labels = useAgentPickerLabels(), { projectOrder } = useUiPrefs();
+  const targetOptions = useMemo(() => [{ value: "all", label: t("browser.idempotency.all"), group: "" },
+    ...agentPickerOptions(listPickerRows(agents.map(agent => ({ id: agent.sessionId, name: agent.name })), sidebar), labels, { rank: pickerProjectRank(sidebar, projectOrder ?? [], hostId) })],
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  [agents, sidebar, projectOrder, hostId, labels.top, t]);
   const [clearing, setClearing] = useState(false), [cleared, setCleared] = useState<{ outcomeUnknown: number; abandonedForwarded: number } | null>(null);
   const [clearFailed, setClearFailed] = useState<ReturnType<typeof browserErrorKey> | null>(null);
   useEffect(() => {
@@ -68,8 +77,7 @@ export function BrowserHostSettings() {
     </SettingRow>
     {canClear && <SettingRow agents="now" source="host" label={t("browser.idempotency.clear")} hint={t("browser.idempotency.clearHint")}>
       <div className="flex flex-wrap items-center justify-end gap-2">
-        <Select value={clearTarget} disabled={!state.available || clearing}
-          options={[{ value: "all", label: t("browser.idempotency.all") }, ...agents.map(agent => ({ value: agent.sessionId, label: agent.name }))]}
+        <SearchableSelect value={clearTarget} disabled={!state.available || clearing} options={targetOptions} placeholder={labels.search} emptyLabel={labels.empty} hiddenNote={labels.hiddenNote}
           onChange={value => { setClearTarget(value); setConfirming(false); setCleared(null); setClearFailed(null); }} label={t("browser.idempotency.target")} />
         <button type="button" disabled={!state.available || clearing} onClick={() => setConfirming(true)}
           className="rounded-md border border-danger/40 px-3 py-1.5 text-xs text-danger disabled:opacity-40">{t("browser.idempotency.clear")}</button>

@@ -79,6 +79,13 @@ describe("browser agent picker", () => {
     expect(pickerGroups(agents, { query: "bob", current: "a1" }).flatMap(g => g.agents.map(a => a.name))).toEqual(["Bob"]);
   });
 
+  it("quick chats: left out until searched (their own group after 独立), kept when current", () => {
+    const chat = { ...agent("c1", "Fix the build"), quickChat: true };
+    expect(pickerGroups([...agents, chat]).flatMap(g => g.agents.map(a => a.sessionId))).not.toContain("c1");
+    expect(pickerGroups([...agents, chat], { query: "build" }).map(g => [g.kind, g.agents.map(a => a.sessionId)])).toEqual([["chats", ["c1"]]]);
+    expect(pickerGroups([...agents, chat], { current: "c1" })[0]!.agents.map(a => a.sessionId)).toEqual(["c1"]);
+  });
+
   describe("recent grants", () => {
     const store = new Map<string, string>();
     const local = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => { store.set(k, v); } };

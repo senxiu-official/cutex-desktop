@@ -126,6 +126,21 @@ describe("delegation 放弃 confirms in place (DelegationDetailBody)", () => {
     expect(run).toHaveBeenCalledWith("remote", expect.objectContaining({ askId: "ask-1" }), "cutex/ask/close", t, "abandoned");
   });
 
+  it("结束等待 shows only when the requester's result offered it, arms in place and sends resume", async () => {
+    const waiting = { execution: "running", review: null, hold: { reason: "waitingForEvent", jobs: ["j"], until: "all" }, attempt: { n: 1, state: "yielded", turnId: "t1", startedAt: "2026-10-28T00:00:00Z" } } as Partial<AskSummary>;
+    act(() => root.render(h(DelegationDetailBody, { d: ask(waiting), brief: null, here: null, host: "local", layout: "side" })));
+    await flush();
+    expect(byTestId("delegation-resume")).toBeNull();
+    act(() => root.render(h(DelegationDetailBody, { d: ask({ ...waiting, canResume: true }), brief: null, here: null, host: "local", layout: "side" })));
+    await flush();
+    const resume = byTestId("delegation-resume")!;
+    act(() => resume.click());
+    expect(hint()).toContain("delegation.resumeWaitConfirm delegation.again");
+    expect(run).not.toHaveBeenCalled();
+    act(() => resume.click());
+    expect(run).toHaveBeenCalledWith("local", expect.objectContaining({ askId: "ask-1" }), "cutex/ask/resume", t);
+  });
+
   it("停止 on a running delegation arms in place too", async () => {
     act(() => root.render(h(DelegationDetailBody, { d: ask({ execution: "running", review: null, attempt: { n: 1, state: "running", turnId: "t1", startedAt: "2026-10-28T00:00:00Z" } as AskSummary["attempt"] }), brief: null, here: null, host: "local", layout: "side" })));
     await flush();

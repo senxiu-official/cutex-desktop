@@ -9,7 +9,7 @@ import { TargetHostContext } from "../../lib/targetHost";
 // known row (lib/hostAccess lastAccessOf). This machine's own host is hidden while cutex is not
 // installed here and other hosts exist (the 主机 page handles setup). A row switches to that host.
 // On the right of a row its manager (连接 restructure 2026-10-19): 管理访问 → (you own it: picks that host
-// as the Settings target and opens 访问管理) or 由主人管理. The page ends with 我的设备 → 设备管理.
+// as the Settings target and opens 访问管理) or 由主人管理. The page ends with 我的设备 across your hosts (MyDevices.tsx).
 import { useState } from "react";
 import { bridge } from "../../bridge";
 import { useI18n, type MessageKey } from "../../i18n";
@@ -27,18 +27,16 @@ import { useApp } from "../../store";
 import type { HostClaimView } from "../../../../shared/personIdentity";
 import { IdentitySection } from "./IdentitySettings";
 import { DeviceLineText, RoleLine } from "./MyHostLines";
-import { Button, LinkRow, Section, SettingsGroup } from "./Form";
+import { MyDevicesSection } from "./MyDevices";
+import { Button, Section, SettingsGroup } from "./Form";
 
 /** Settings → 你. */
 export function MePage() {
-  const { t } = useI18n();
   return (
     <>
       <IdentitySection />
       <AccessSection />
-      <Section>
-        <LinkRow agents="none" source="local" label={t("shell.me.devices.label")} hint={t("shell.me.devices.hint")} link={t("shell.me.devices.link")} onClick={() => useApp.getState().openSettings("hosts")} />
-      </Section>
+      <MyDevicesSection />
     </>
   );
 }

@@ -1,18 +1,20 @@
 import { isImeComposing } from "../lib/ime";
 // Title bar host switcher (multi-host RFC §7, P1): the button shows the view scope (one host, a group,
-// or 所有设备); the menu picks the scope and switches hosts' connections (⏻) without changing it.
+// or 所有主机); the menu picks the scope, connects a host without changing it, and › opens a host's page.
 // Ctrl+Shift+H opens it (★ Q19); ↑ / ↓ / Enter / Esc inside. Model: lib/hostScope, actions:
 // lib/useHostScope.
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Check, ChevronDown, Layers, MonitorSmartphone, Power, Server, Settings as SettingsIcon } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Layers, MonitorSmartphone, Server, Settings as SettingsIcon } from "lucide-react";
 import type { ViewScope } from "../../../shared/hosts";
 import { useI18n, type MessageKey } from "../i18n";
 import { ALL_HOSTS, singleHostScope, scopeTitle, versionOutliers, hostVersionTitle, type HostLook } from "../lib/hostScope";
-import { sameScope, switcherGroups } from "../../../shared/hosts";
+import { displaySshTarget, sameScope, switcherGroups } from "../../../shared/hosts";
 import { useTrackOverlay } from "../lib/openOverlays";
-import { hasNoHost } from "../lib/hosts";
+import { hasNoHost, routesExhausted } from "../lib/hosts";
+import { routeLabel } from "../lib/hostRoute";
 import { matchesCommand } from "../lib/keybindings";
 import { useBindingLabel, withKey } from "../lib/useKeybindings";
+import { setSettingsHost } from "../lib/settingsHost";
 import { setHostConnected, setViewScope, useHostScope } from "../lib/useHostScope";
 import { useApp } from "../store";
 import { HostDot, HostPlatformIcon } from "./HostMark";
@@ -50,7 +52,7 @@ export function HostSwitcher() {
   const versionText = { dev: t("cutexBuild.dev"), legacy: t("cutexBuild.legacy") };
   const statusText = (h: HostLook) => (h.indicator.status === "online" ? null : t(`host.status.${h.indicator.status}` as MessageKey));
   const hostTip = (h: HostLook) =>
-    [`${h.label} · ${t(`host.status.${h.indicator.status}` as MessageKey)}`, h.connected && h.indicator.status === "online" ? `cutex ${hostVersionTitle(h.build, versionText)}` : null, h.view.kind === "ssh" ? `ssh ${h.view.conn?.tunnel?.target ?? h.view.target ?? ""}` : null, h.indicator.problem ? t(`host.problem.${h.indicator.problem}` as MessageKey) : null, h.indicator.detail]
+    [`${h.label} · ${t(`host.status.${h.indicator.status}` as MessageKey)}`, h.connected && h.indicator.status === "online" ? `cutex ${hostVersionTitle(h.build, versionText)}` : null, h.view.kind === "ssh" ? `ssh ${(h.view.conn?.tunnel?.status === "up" ? routeLabel(t, h.view) : null) ?? displaySshTarget(h.view.conn?.tunnel?.target ?? h.view.target ?? "")}` : null, routesExhausted(h.view.conn?.tunnel) ? t("host.routesFailedHint") : h.indicator.problem ? t(`host.problem.${h.indicator.problem}` as MessageKey) : null, h.indicator.detail]
       .filter(Boolean)
       .join("\n");
   const outliers = useMemo(() => versionOutliers(scope.hosts), [scope.hosts]);
@@ -115,22 +117,35 @@ export function HostSwitcher() {
               {h.local && <span className="text-subtle"> · {t("titlebar.local")}</span>}
             </span>
             {statusText(h) && <span className={`shrink-0 text-xs ${h.indicator.status === "error" ? "text-danger" : h.indicator.status === "disconnected" || h.indicator.status === "offline" ? "text-subtle" : "text-warn"}`}>{statusText(h)}</span>}
-            {h.version && (
-              <Tag tone={outliers.has(h.id) ? "attention" : "neutral"} data-tip={outliers.has(h.id) ? t("hostSwitcher.versionDiffers") : hostVersionTitle(h.build, versionText)} className="font-mono">
+            {h.version && outliers.has(h.id) && (
+              <Tag tone="attention" data-tip={t("hostSwitcher.versionDiffers")} className="font-mono">
                 {h.version}
               </Tag>
             )}
             {tick(sameScope(scope.scope, singleHostScope(h.id)))}
+            {!h.connected && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void setHostConnected(h.id, true);
+                }}
+                className="shrink-0 rounded px-1.5 py-0.5 text-xs text-accent hover:bg-surface"
+              >
+                {t("host.connect")}
+              </button>
+            )}
             <button
-              data-tip={h.connected ? t("hostSwitcher.disconnect") : t("hostSwitcher.connect")} aria-label={h.connected ? t("hostSwitcher.disconnect") : t("hostSwitcher.connect")}
-              aria-pressed={h.connected}
+              data-tip={t("hostSwitcher.manageHost")}
+              aria-label={t("hostSwitcher.manageHost")}
               onClick={(e) => {
                 e.stopPropagation();
-                void setHostConnected(h.id, !h.connected);
+                setOpen(false);
+                setSettingsHost(h.id);
+                openSettings("access");
               }}
-              className={`shrink-0 rounded p-1 hover:bg-surface ${h.connected ? "text-ok" : "text-subtle hover:text-foreground"}`}
+              className="shrink-0 rounded p-1 text-subtle hover:bg-surface hover:text-foreground"
             >
-              <Power size={13} />
+              <ChevronRight size={13} />
             </button>
           </>
         ),

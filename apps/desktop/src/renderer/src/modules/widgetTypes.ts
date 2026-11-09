@@ -62,7 +62,7 @@ export interface WidgetCellSizes {
 /** [width, height] in grid steps. */
 export type WidgetSteps = readonly [w: number, h: number];
 
-export interface WidgetSizeSpec {
+export interface WidgetStepSizes {
   /** Smallest / largest / initial size, in grid steps. */
   min: WidgetSteps;
   max: WidgetSteps;
@@ -79,13 +79,24 @@ export interface WidgetSizeSpec {
   units?: WidgetUnitSizes;
 }
 
+/** v1.29: a kind that gives its sizes in units need not give the older steps (the public API has only units). */
+export type WidgetSizeSpec = WidgetStepSizes | { units: WidgetUnitSizes; ratio?: number; resizable?: boolean };
+
+/** A kind's initial size in 8 px steps; from its units when it gives no steps (n units = n × 56 − 16 px). */
+export function defaultStepsOf(size: WidgetSizeSpec): WidgetSteps {
+  if ("default" in size) return size.default;
+  const one = (n: number) => (n * (WIDGET_UNIT + WIDGET_GAP) - WIDGET_GAP) / WIDGET_STEP;
+  return [one(size.units.default[0]), one(size.units.default[1])];
+}
+
 /**
  * A kind's sizes in units (1.24): its own `units`, else its 1.23 `cells` doubled, else its 1.22 step sizes mapped —
  * never rejected; every size at least WIDGET_MIN_UNITS, the max at least the min, the default between them.
  */
 export function unitSizesOf(size: WidgetSizeSpec): WidgetUnitSizes {
   const two = (c: WidgetCells): WidgetUnits => [c[0] * 2, c[1] * 2];
-  const raw: WidgetUnitSizes = size.units ?? (size.cells ? { min: two(size.cells.min), max: two(size.cells.max), default: two(size.cells.default), ...(size.cells.presets ? { presets: Object.fromEntries(Object.entries(size.cells.presets).map(([k, v]) => [k, two(v)])) } : {}) } : { min: unitsOfSteps(size.min), max: unitsOfSteps(size.max), default: unitsOfSteps(size.default), ...(size.presets ? { presets: Object.fromEntries(Object.entries(size.presets).map(([k, v]) => [k, unitsOfSteps(v)])) } : {}) });
+  const steps = size as WidgetStepSizes;
+  const raw: WidgetUnitSizes = steps.units ?? (steps.cells ? { min: two(steps.cells.min), max: two(steps.cells.max), default: two(steps.cells.default), ...(steps.cells.presets ? { presets: Object.fromEntries(Object.entries(steps.cells.presets).map(([k, v]) => [k, two(v)])) } : {}) } : { min: unitsOfSteps(steps.min), max: unitsOfSteps(steps.max), default: unitsOfSteps(steps.default), ...(steps.presets ? { presets: Object.fromEntries(Object.entries(steps.presets).map(([k, v]) => [k, unitsOfSteps(v)])) } : {}) });
   const lo = (v: WidgetUnits): WidgetUnits => [Math.max(WIDGET_MIN_UNITS, Math.round(v[0])), Math.max(WIDGET_MIN_UNITS, Math.round(v[1]))];
   const min = lo(raw.min);
   const m = lo(raw.max);
@@ -96,7 +107,7 @@ export function unitSizesOf(size: WidgetSizeSpec): WidgetUnitSizes {
 }
 
 /** A kind's sizes in cells: its own `cells`, else its 1.22 step sizes mapped (never rejected). */
-export function cellSizesOf(size: WidgetSizeSpec): WidgetCellSizes {
+export function cellSizesOf(size: WidgetStepSizes): WidgetCellSizes {
   if (size.cells) return size.cells;
   const presets = size.presets ? Object.fromEntries(Object.entries(size.presets).map(([k, v]) => [k, cellsOfSteps(v)])) : undefined;
   const min = cellsOfSteps(size.min);

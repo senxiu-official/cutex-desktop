@@ -11,6 +11,10 @@ import { useI18n } from "../i18n";
 import { Section } from "./settings/Form";
 import { Tag } from "./Tag";
 import { nativeVersionText } from "../lib/runtimeVersion";
+import { splitPinnedAgents } from "../lib/runtimeAgents";
+import { useArchivedAgents } from "../lib/useArchivedAgents";
+import type { PinnedAgent } from "../../../shared/runtimes";
+import type { SidebarSnapshot } from "../../../shared/ipc";
 
 /** Shared presentation only; host stores supply all runtime state. */
 export function RuntimeGroup({ hostId: suppliedHost, kind, title, list, currentVersion, status, dependencies, children }: { hostId?: string; kind: "native" | "claude" | "dsh" | "kimi" | "acp"; title: string; list: readonly InstalledRuntime[]; currentVersion?: string | null; status?: ReactNode; dependencies?: ReactNode; children?: ReactNode }) {
@@ -18,6 +22,7 @@ export function RuntimeGroup({ hostId: suppliedHost, kind, title, list, currentV
   const targetHost = useTargetHostId();
   const hostId = suppliedHost ?? targetHost;
   const data = useHostData(hostId);
+  useArchivedAgents(hostId);
   const plan = useRuntimePruneStore(s => s.byHost[hostId]?.plan);
   const pruneEnabled = kind !== "acp" && data?.daemon.kind === "connected" && data.features.has(RUNTIME_PRUNE_FEATURE);
   if (pruneEnabled)
@@ -35,7 +40,7 @@ export function RuntimeGroup({ hostId: suppliedHost, kind, title, list, currentV
         {status}
       </div>
       {dependencies && <div className="space-y-1 text-xs leading-relaxed text-subtle">{dependencies}</div>}
-      {visible.length > 0 && <ul className="divide-y divide-border/60">{visible.map(r => <RuntimeRow key={`${r.release}:${r.sha256Prefix ?? ""}`} runtime={r} native={kind === "native"} />)}</ul>}
+      {visible.length > 0 && <ul className="divide-y divide-border/60">{visible.map(r => <RuntimeRow key={`${r.release}:${r.sha256Prefix ?? ""}`} runtime={r} native={kind === "native"} lists={data?.sidebar} />)}</ul>}
       {unused.length > 0 && <details className="border-t border-border/60 pt-2" data-unused-runtimes=""><summary className="cursor-pointer text-xs text-muted hover:text-foreground">{t(pruneEnabled ? "runtimes.unreferenced" : "runtimes.unused", { n: unused.length })}</summary><ul className="mt-2 divide-y divide-border/60">{unused.map(r => <RuntimeRow key={`${r.release}:${r.sha256Prefix ?? ""}`} runtime={r} native={kind === "native"} />)}</ul></details>}
       {kind !== "acp" && <RuntimeCleanup key={`${hostId}:${kind}`} hostId={hostId} kind={kind} />}
       {children}
@@ -43,20 +48,33 @@ export function RuntimeGroup({ hostId: suppliedHost, kind, title, list, currentV
   </Section>;
 }
 
-function RuntimeRow({ runtime: r, native }: { runtime: InstalledRuntime; native: boolean }) {
+function AgentNames({ agents, more }: { agents: readonly PinnedAgent[]; more: number }) {
   const { t, locale } = useI18n();
+  return <>{agents.map((a, i) => <span key={a.id} title={a.id}>{i > 0 ? locale.startsWith("zh") ? "、" : ", " : ""}{a.name}</span>)}{more > 0 && <span> · {t("runtimes.moreAgents", { n: more })}</span>}</>;
+}
+
+function RuntimeRow({ runtime: r, native, lists }: { runtime: InstalledRuntime; native: boolean; lists?: SidebarSnapshot | null }) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const expandable = r.agentCount > 0 && r.agents.length > 0;
   const Chevron = open ? ChevronDown : ChevronRight;
-  const shown = r.agents.slice(0, 60);
-  const more = r.agentCount - shown.length;
+  const pinned = splitPinnedAgents(r, lists);
+  const archived = pinned.archived.length;
+  const shown = pinned.agents.slice(0, 60);
+  const shownArchived = pinned.archived.slice(0, 60);
+  const headline = !archived ? t("runtimes.agents", { n: r.agentCount })
+    : pinned.agentCount > 0 ? t("runtimes.agentsSplit", { n: pinned.agentCount, archived })
+    : t("runtimes.agentsAllArchived", { n: archived });
   return <li className="py-1">
     <button disabled={!expandable} aria-expanded={expandable ? open : undefined} onClick={() => setOpen(!open)} className="flex w-full flex-wrap items-start gap-x-2 gap-y-1 rounded py-1 text-left text-xs enabled:hover:bg-hover focus-visible:ring-2 focus-visible:ring-accent/60 focus-visible:outline-none">
       <span className="flex min-w-0 flex-1 basis-36 items-start gap-2"><span className="mt-0.5 flex w-3.5 shrink-0 justify-center text-subtle">{expandable && <Chevron size={13} />}</span><span className="min-w-0 font-mono break-all text-foreground" title={r.path ?? undefined}>{native ? nativeVersionText(r.version, r.sha256Prefix, t("runtimes.unknownVersion")) : r.version || r.release}</span></span>
       {r.selected && <Tag tone="accent">{t("runtimes.selected")}</Tag>}
       {r.missing && <Tag tone="attention" title={t("runtimes.missingHint")}>{t("runtimes.missing")}</Tag>}
-      <span className="ml-auto shrink-0 text-muted">{t("runtimes.agents", { n: r.agentCount })}</span>
+      <span className="ml-auto shrink-0 text-muted" data-tip={archived ? t("runtimes.archivedHint") : undefined}>{headline}</span>
     </button>
-    {open && expandable && <p className="pl-[1.375rem] text-xs leading-relaxed break-words text-muted select-text">{shown.map((a, i) => <span key={a.id} title={a.id}>{i > 0 ? locale.startsWith("zh") ? "、" : ", " : ""}{a.name}</span>)}{more > 0 && <span> · {t("runtimes.moreAgents", { n: more })}</span>}</p>}
+    {open && expandable && <div className="pl-[1.375rem] text-xs leading-relaxed break-words text-muted select-text">
+      {(shown.length > 0 || pinned.agentCount > 0) && <p><AgentNames agents={shown} more={pinned.agentCount - shown.length} /></p>}
+      {archived > 0 && <details data-archived-agents=""><summary className="cursor-pointer text-subtle hover:text-foreground">{t("runtimes.archivedAgents", { n: archived })}</summary><p><AgentNames agents={shownArchived} more={archived - shownArchived.length} /></p></details>}
+    </div>}
   </li>;
 }

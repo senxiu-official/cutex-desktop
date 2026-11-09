@@ -282,6 +282,26 @@
   cursor: pointer;
   transition: transform var(--motion-short) var(--ease-standard);
 }
+.tray-item[data-tray-text] {
+  width: auto;
+  min-width: 40px;
+  gap: 4px;
+  padding: 0 8px;
+}
+[data-vertical] .tray-item[data-tray-text] {
+  flex-direction: column;
+  gap: 0;
+  height: auto;
+  min-height: 40px;
+  padding: 2px;
+}
+.tray-item-text {
+  max-width: 6ch;
+  overflow: hidden;
+  white-space: nowrap;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
 .tray-item:hover {
   transform: translateY(-2px) scale(1.08);
 }

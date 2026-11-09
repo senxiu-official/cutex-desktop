@@ -1,0 +1,10 @@
+{
+  "format": 1,
+  "name": {
+    "en": "GLM",
+    "zh-CN": "GLM"
+  },
+  "family": "glm",
+  "scale": 1,
+  "pixel": true
+}

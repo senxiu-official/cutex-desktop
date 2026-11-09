@@ -36,20 +36,26 @@ import { resolveUpdateRemote } from "../shared/update";
 import { resolveQuickstart, type QuickstartTarget } from "../shared/quickstart";
 import { errorFields, logDir, logError } from "./errorLog";
 import { setWindowAppDetails, setWindowsAppId, syncWindowsShortcuts } from "./winShortcuts";
+import { DeskPetService } from "./deskPet";
+import { packArtOf } from "./deskPetPackArt";
 import { demoOwnerAlertRequested, OwnerAlerts } from "./ownerAlert";
 import { DesktopNotifications } from "./notifications";
 import { sanitizeEventAlert, sanitizeRetract, sanitizeShellNotification } from "../shared/notificationLevels";
-import { createPluginResourceService, PLUGIN_SCHEME } from "./plugins";
 import { createPluginNetworkLockdown, PLUGIN_WEBRTC_POLICY } from "./pluginNetwork";
-import { PLUGINS_CHANNEL, type PluginRequest } from "../shared/plugins";
 import { FRAMES_CHANNEL, type FrameRequest } from "../shared/frames";
 import { createFrameDocumentStore, type FrameDocumentStore } from "@cutex-desktop/opaque-frame/documents";
-import { createArtifactPageService, preparePlaced } from "./frames";
+import { createArtifactPageService, FRAME_SCHEME, preparePlaced } from "./frames";
 import { createPageStorage, type PageStorage } from "./pageStorage";
 import { MODULE_API_VERSION } from "@cutex-desktop/plugin-sdk";
-import { ModulePackService, modulePackRequestAllowed, modulePackSource, PackError } from "./modulePacks";
+import { localPacksDefault, ModulePackService, modulePackRequestAllowed, modulePackSource, PackError } from "./modulePacks";
+import { localModulePrompts } from "./localModulePrompts";
+import { MODULE_DEV_HOST, ModuleDevService, moduleDevPrompts } from "./moduleDev";
+import { MODULE_DEV_CHANNEL, parseModuleDevRequest } from "../shared/moduleDev";
+import { ModuleDataService } from "./moduleData";
+import { moduleDataPrompts } from "./moduleDataPrompts";
+import { MODULE_DATA_CHANNEL, MODULE_DATA_DIR, parseModuleDataRequest } from "../shared/moduleData";
 import { createUpdateNet } from "./updateNet";
-import { MODULE_PACK_SCHEME, MODULE_PACKS_CHANNEL, parseModulePacksRequest } from "../shared/modulePacks";
+import { BUILT_IN_MODULE_IDS, LOCAL_SAFE_START_ARG, MODULE_PACK_SCHEME, MODULE_PACKS_CHANNEL, parseModulePacksRequest } from "../shared/modulePacks";
 import { parseReleaseInfo } from "../shared/update";
 
 import type { HostBinding } from "../shared/hosts";
@@ -64,15 +70,19 @@ import { confirmParent, frameRequestAllowed } from "./deskWindows";
 guardStdio([process.stdout, process.stderr]);
 
 let mainWindow: BrowserWindow | null = null;
-let pluginResources: ReturnType<typeof createPluginResourceService> | null = null;
 // One store for every opaque frame document (plugin pages and agent pages, §10.2): one scheme, one lease check.
 let frameDocuments: FrameDocumentStore | null = null;
 let artifactPages: ReturnType<typeof createArtifactPageService> | null = null;
 /** Channel A of agent pages (pageStorage.ts), in userData/artifact-pages. */
 let pageStorage: PageStorage | null = null;
 let pluginNetwork: ReturnType<typeof createPluginNetworkLockdown> | null = null;
+let deskPet: DeskPetService | null = null;
 // Signed first-party module packs (main/modulePacks.ts, docs/desktop-modules.md §23).
 let modulePacks: ModulePackService | null = null;
+// Modules loaded from a folder (main/moduleDev.ts, §30.5).
+let moduleDev: ModuleDevService | null = null;
+// A module's own data folder and the native file pick / save (main/moduleData.ts, §30.6).
+let moduleData: ModuleDataService | null = null;
 // This scheme serves only one-use, main-owned documents. It never bypasses CSP.
 // Loopback (cutex, SSH tunnels) never through a proxy: explicit NO_PROXY for Node and child processes.
 applyLoopbackNoProxy(process.env);
@@ -80,7 +90,7 @@ applyLoopbackNoProxy(process.env);
 // cutex-module serves only files of verified signed packs to the app window's main frame (§23.5): CORS
 // for module scripts, no fetch API, no CSP bypass.
 protocol.registerSchemesAsPrivileged([
-  { scheme: PLUGIN_SCHEME, privileges: { standard: true, secure: true } },
+  { scheme: FRAME_SCHEME, privileges: { standard: true, secure: true } },
   { scheme: MODULE_PACK_SCHEME, privileges: { standard: true, secure: true, corsEnabled: true } },
 ]);
 
@@ -178,6 +188,14 @@ function createDaemon(hostId: string, epoch: string): DaemonService {
     }
     sendEvent(event, { ...tag, ...(payload as object) } as DesktopEvents[typeof event]);
   });
+  // Pairing v2: allowing a full-control device asks here, in a native dialog that shows its code (main/pairingInvites.ts).
+  daemon.pairingHostLabel = () => hosts?.state().hosts.find((h) => h.id === hostId)?.label ?? hostId;
+  daemon.pairingConfirm = async (options) => {
+    const win = ownerWindow(mainWindow);
+    const box = { type: "warning" as const, title: options.title, message: options.message, detail: options.detail, buttons: options.buttons, defaultId: 1, cancelId: 1, noLink: true };
+    const answer = win && !win.isDestroyed() ? await dialog.showMessageBox(win, box) : await dialog.showMessageBox(box);
+    return answer.response === 0;
+  };
   return daemon;
 }
 
@@ -333,6 +351,7 @@ const ALLOWED: ReadonlySet<InvokeMethod> = new Set<InvokeMethod>([
   "abandonAgentCreate",
   "createHumanSession",
   "renameFormalAgent",
+  "promoteQuickChat",
   "formalNameHistory",
   "patchNewThreadDefaults",
   "services",
@@ -415,6 +434,7 @@ const ALLOWED: ReadonlySet<InvokeMethod> = new Set<InvokeMethod>([
   "pickFolder",
   "revealPath",
   "revertHistory",
+  "filesRevert",
   "forkSession",
   "forkPreview",
   "deleteSession",
@@ -426,6 +446,8 @@ const ALLOWED: ReadonlySet<InvokeMethod> = new Set<InvokeMethod>([
   "projectMemory",
   "projectMemoryFile",
   "projectMcp",
+  "agentMcp",
+  "setAgentMcpDisabled",
   "asks",
   "ask",
   "askAnswer",
@@ -551,6 +573,13 @@ const ALLOWED: ReadonlySet<InvokeMethod> = new Set<InvokeMethod>([
   "patchProxySettings",
   "getSettings",
   "createPairingCode",
+  "pairingInvites",
+  "createPairingInvite",
+  "cancelPairingInvite",
+  "relayPairing",
+  "setRelayPairing",
+  "approvePairingRequest",
+  "denyPairingRequest",
   "clientTokens",
   "revokeClientToken",
   "renameClientToken",
@@ -823,28 +852,6 @@ ipcMain.handle(PORTRAIT_PACKS_CHANNEL, (event, request: PortraitPacksRequest) =>
   return handlePortraitPacksRequest(portraitPacks, request, (dir) => shell.openPath(dir));
 });
 
-ipcMain.handle(PLUGINS_CHANNEL, async (event, request: PluginRequest) => {
-  if (!isAppSender(event)) throw new Error("untrusted sender");
-  if (!pluginResources || !pluginNetwork) throw new Error("plugin catalog unavailable");
-  if (!request || typeof request !== "object" || Array.isArray(request)) throw new Error("invalid plugin request");
-  switch (request.op) {
-    case "list":
-      if (Object.keys(request).length !== 1) throw new Error("invalid plugin request");
-      return pluginResources.list();
-    case "prepare": {
-      const { op: _op, ...input } = request;
-      // No plugin document exists before Chromium networking is contained (pluginNetwork.ts).
-      await pluginNetwork.ensure();
-      return pluginResources.prepare(event.sender.id, input);
-    }
-    case "release":
-      if (Object.keys(request).length !== 2 || typeof request.id !== "string") throw new Error("invalid plugin request");
-      return pluginResources.release(event.sender.id, request.id);
-    default:
-      throw new Error("invalid plugin request");
-  }
-});
-
 ipcMain.handle(MODULE_PACKS_CHANNEL, async (event, raw: unknown) => {
   if (!isAppSender(event)) throw new Error("untrusted sender");
   if (!modulePacks) throw new Error("module packs unavailable");
@@ -859,10 +866,60 @@ ipcMain.handle(MODULE_PACKS_CHANNEL, async (event, raw: unknown) => {
         return await modulePacks.install(request);
       case "remove":
         return await modulePacks.remove(request);
+      case "installLocal":
+        return await modulePacks.installLocal();
+      case "allowLocal":
+        return await modulePacks.allowLocal(request.allow);
+      case "localFailed":
+        return modulePacks.localFailed(request);
     }
   } catch (error) {
     // Only "busy" reaches here (operation failures come back in the view's lastError).
     throw new Error(error instanceof PackError ? `${error.code}: ${error.message}` : "module pack request failed");
+  }
+});
+
+ipcMain.handle(MODULE_DEV_CHANNEL, async (event, raw: unknown) => {
+  if (!isAppSender(event)) throw new Error("untrusted sender");
+  if (!moduleDev) throw new Error("module developer mode unavailable");
+  const request = parseModuleDevRequest(raw);
+  switch (request.op) {
+    case "state":
+      return moduleDev.view();
+    case "setEnabled":
+      return await moduleDev.setEnabled(request.enabled);
+    case "addFolder":
+      return await moduleDev.addFolder();
+    case "removeFolder":
+      return moduleDev.removeFolder(request.folder);
+    case "report":
+      return moduleDev.report(request.folder, request.rev, request.error);
+  }
+});
+
+ipcMain.handle(MODULE_DATA_CHANNEL, async (event, raw: unknown) => {
+  if (!isAppSender(event)) throw new Error("untrusted sender");
+  if (!moduleData) throw new Error("unavailable: module data is not ready");
+  const request = parseModuleDataRequest(raw);
+  switch (request.op) {
+    case "read":
+      return await moduleData.read(request.id, request.path);
+    case "write":
+      return await moduleData.write(request.id, request.path, request.data);
+    case "remove":
+      return await moduleData.remove(request.id, request.path);
+    case "list":
+      return await moduleData.list(request.id, request.path);
+    case "usage":
+      return await moduleData.usage(request.id);
+    case "pick":
+      return await moduleData.pick(request.id, request.filters);
+    case "save":
+      return await moduleData.save(request.id, request.data, request.suggestedName, request.filters);
+    case "folders":
+      return moduleData.folders();
+    case "clear":
+      return await moduleData.clear(request.id);
   }
 });
 
@@ -1025,15 +1082,28 @@ function createWindow(): void {
     artifactPages?.releaseOwner(ownerId);
   };
   contents.on("did-start-navigation", (_event, _url, isInPlace, isMainFrame) => {
-    if (isMainFrame && !isInPlace) releaseFrames();
+    if (isMainFrame && !isInPlace) {
+      releaseFrames();
+      // A reload or a crash says no stop to anyone: the pet's module has to claim it again.
+      deskPet?.rendererGone();
+    }
   });
-  contents.on("render-process-gone", releaseFrames);
+  // Half a minute up with no crash or hang: local modules did not break this start (§23.14).
+  const healthy = setTimeout(() => modulePacks?.localStartHealthy(), 30_000);
+  mainWindow.on("unresponsive", () => clearTimeout(healthy));
+  contents.on("render-process-gone", () => {
+    clearTimeout(healthy);
+    releaseFrames();
+    deskPet?.rendererGone();
+  });
   contents.on("destroyed", releaseFrames);
   installEditMenu(mainWindow);
   markOwnerWindow(mainWindow);
   setWindowAppDetails(mainWindow);
   desktopShell.attach(mainWindow);
   mainWindow.on("closed", () => {
+    // Every window counts for window-all-closed: the pet must not keep the app alive.
+    deskPet?.dispose();
     desks.closeAll();
     mainWindow = null;
   });
@@ -1073,6 +1143,14 @@ function installEditMenu(win: BrowserWindow): void {
 }
 
 /** The release page the packaged app records (package.json), for the module index's repository. */
+function ownPackageJson(): unknown {
+  try {
+    return JSON.parse(readFileSync(join(app.getAppPath(), "package.json"), "utf8"));
+  } catch {
+    return null;
+  }
+}
+
 function ownReleasePage(): string | null {
   try {
     const info = parseReleaseInfo(JSON.parse(readFileSync(join(app.getAppPath(), "package.json"), "utf8")));
@@ -1090,8 +1168,7 @@ app.on("web-contents-created", (_event, contents) => contents.setWebRTCIPHandlin
 app.whenReady().then(async () => {
   if (!primaryInstance) return;
   debugMode.setEnabled(desktopShell.state().prefs.debugMode === true);
-  frameDocuments = createFrameDocumentStore({ scheme: PLUGIN_SCHEME, limitMessage: "Too many prepared frame documents" });
-  pluginResources = createPluginResourceService(join(app.getPath("userData"), "plugins"), { documents: frameDocuments });
+  frameDocuments = createFrameDocumentStore({ scheme: FRAME_SCHEME, limitMessage: "Too many prepared frame documents" });
   pluginNetwork = createPluginNetworkLockdown({
     setProxy: config => session.defaultSession.setProxy(config),
     configureHostResolver: options => app.configureHostResolver(options),
@@ -1144,21 +1221,47 @@ app.whenReady().then(async () => {
       locale: () => desktopShell.locale,
     },
   });
-  protocol.handle(PLUGIN_SCHEME, request => frameDocuments!.respond(request));
+  protocol.handle(FRAME_SCHEME, request => frameDocuments!.respond(request));
+  const dataPrompts = moduleDataPrompts(() => mainWindow, () => desktopShell.locale);
+  const data = (moduleData = new ModuleDataService({
+    root: join(app.getPath("userData"), MODULE_DATA_DIR),
+    known: (id) => BUILT_IN_MODULE_IDS.includes(id) || !!modulePacks?.installedIds().includes(id) || !!moduleDev?.ids().includes(id),
+    prompts: dataPrompts,
+  }));
+  // An unpackaged run or a self-built package; never a CI release package (the owner's stored switch does not change it).
+  const devBuild = localPacksDefault({ packaged: app.isPackaged, packageJson: ownPackageJson() });
   modulePacks = new ModulePackService({
     root: join(app.getPath("userData"), "modules"),
     source: modulePackSource({ releasePage: app.isPackaged ? ownReleasePage() : null, packaged: app.isPackaged, env: process.env }),
     // The updater's own Chromium session (system / manual update proxy); Node once plugin containment is engaged.
     transport: createUpdateNet({ contained: () => pluginNetwork?.engaged() ?? false, proxy: () => desktopShell.updateProxyConfig() }).transport,
     appModuleApi: MODULE_API_VERSION,
+    local: {
+      defaultAllowed: devBuild,
+      internal: devBuild,
+      skip: process.argv.includes(LOCAL_SAFE_START_ARG),
+      reservedIds: BUILT_IN_MODULE_IDS,
+      prompts: localModulePrompts(() => mainWindow, () => desktopShell.locale),
+      data: { has: (id) => data.has(id), bytes: (id) => data.bytes(id), delete: (id) => data.delete(id), confirmRemove: (id, bytes) => dataPrompts.confirmRemove(id, bytes) },
+    },
     onChange: (view) => sendEvent("modulePacks", view),
     log: (text) => console.log(`[module-packs] ${text}`),
   });
   const packs = modulePacks;
-  protocol.handle(MODULE_PACK_SCHEME, request => packs.respond(request));
+  const devModules = new ModuleDevService({
+    file: join(app.getPath("userData"), "module-dev.json"),
+    appModuleApi: MODULE_API_VERSION,
+    reservedIds: BUILT_IN_MODULE_IDS,
+    skip: process.argv.includes(LOCAL_SAFE_START_ARG),
+    internal: devBuild,
+    prompts: moduleDevPrompts(() => mainWindow, () => desktopShell.locale),
+    onChange: (view) => sendEvent("moduleDev", view),
+  });
+  moduleDev = devModules;
+  protocol.handle(MODULE_PACK_SCHEME, request => (new URL(request.url).hostname === MODULE_DEV_HOST ? devModules.respond(request) : packs.respond(request)));
   // Electron keeps ONE onBeforeRequest listener per session (a second call replaces the first), so both
   // privileged schemes share this one; each branch decides only for its own scheme.
-  session.defaultSession.webRequest.onBeforeRequest({ urls: [`${MODULE_PACK_SCHEME}://*/*`, `${PLUGIN_SCHEME}://*/*`] }, (request, callback) => {
+  session.defaultSession.webRequest.onBeforeRequest({ urls: [`${MODULE_PACK_SCHEME}://*/*`, `${FRAME_SCHEME}://*/*`] }, (request, callback) => {
     if (request.url.startsWith(`${MODULE_PACK_SCHEME}:`)) {
       // Pack code is for the app window's own document: no plugin / agent-page frame, worker, fetch or other window.
       const main = mainWindow?.webContents;
@@ -1177,6 +1280,20 @@ app.whenReady().then(async () => {
   desktopShell.start();
   desks.watchDisplays();
   ownerAlerts.start();
+  deskPet = new DeskPetService({
+    dir: join(app.getPath("userData"), "desk-pet"),
+    isAppSender,
+    packArt: () => modulePacks && packArtOf({ paths: (prefix) => modulePacks!.dataPaths("desk-pet", prefix), read: (path) => modulePacks!.dataFile("desk-pet", path) }),
+    locale: () => desktopShell.locale,
+    sendView: (view) => sendEvent("deskPet", view),
+    openSettings: () => {
+      desktopShell.show();
+      sendEvent("deskPetOpenSettings", {});
+    },
+    openPath: (dir) => shell.openPath(dir),
+    log: (message) => console.warn(message),
+  });
+  deskPet.register();
   updater.schedule(desktopShell.state().prefs.updateCheckMinutes);
   createWindow();
   syncWindowsShortcuts();
@@ -1246,6 +1363,7 @@ app.on("will-quit", (event) => {
     return;
   }
   ownerAlerts.dispose();
+  deskPet?.dispose();
   remoteClose.dispose();
   desktopShell.dispose();
 });

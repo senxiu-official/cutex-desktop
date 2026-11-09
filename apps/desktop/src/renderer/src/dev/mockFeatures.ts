@@ -122,5 +122,6 @@ export function mockScenarioFeatures(search: string): string[] {
   if (q.has("overloadretry") && !q.has("no-retry-visible")) return ["model-overload-retry-visible", ...ledgerFeatures];
   // ?turnerror: cutex turn-error-surface (dev/mockTurnError.ts). ?variants: cutex profile-runtime-variants (r265; dev/mockProfileVariants.ts).
   // ?rename: cutex formal-agent-name-rename-v1 (dev/mockAgentRename.ts); without it the host lacks it, as today.
-  return [...(q.has("rename") ? ["formal-agent-name-rename-v1"] : []), ...(q.has("turnerror") && !q.has("no-turn-error-surface") ? ["turn-error-surface"] : []), ...ledgerFeatures, ...(q.has("live-deltas") ? ["live-text-deltas"] : []), ...(q.has("variants") ? ["profile-runtime-variants"] : []), ...(q.has("relay") ? ["profile-relay-runtimes"] : [])];
+  // ?promote: cutex quick-chat-promote-v1 (dev/mockQuickChatPromote.ts).
+  return [...(q.has("rename") ? ["formal-agent-name-rename-v1"] : []), ...(q.has("promote") ? ["quick-chat-promote-v1"] : []), ...(q.has("turnerror") && !q.has("no-turn-error-surface") ? ["turn-error-surface"] : []), ...ledgerFeatures, ...(q.has("live-deltas") ? ["live-text-deltas"] : []), ...(q.has("variants") ? ["profile-runtime-variants"] : []), ...(q.has("relay") ? ["profile-relay-runtimes"] : [])];
 }

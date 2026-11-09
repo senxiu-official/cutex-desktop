@@ -4,17 +4,17 @@ import { expect, expectTypeOf, it } from "vitest";
 import { SLOT_SPECS } from "../src/renderer/src/modules/slots";
 import type * as SDK from "@cutex-desktop/plugin-sdk";
 import type { MessageKey } from "../src/renderer/src/i18n";
-import type { AppModule, AppModuleContext, AppModuleHost, ModuleServices, SideBodyProps, SlotMap } from "../src/renderer/src/modules/slots";
-import type { HostInput, ModuleContext, ModuleDefinition, ModuleHost, PageParams } from "../src/renderer/src/modules/types";
+import type { AppModule, AppModuleHost, ModuleContext, ModuleServices, SideBodyProps, SlotMap } from "../src/renderer/src/modules/slots";
+import type { HostInput, ModuleContext as EngineModuleContext, ModuleDefinition, ModuleHost, PageParams } from "../src/renderer/src/modules/types";
 
 it("uses the SDK as the one definition of neutral contracts", () => {
   expectTypeOf<HostInput>().toEqualTypeOf<SDK.ModuleHostTarget>();
   expectTypeOf<PageParams>().toEqualTypeOf<SDK.PageParams>();
   expectTypeOf<AppModule>().toEqualTypeOf<SDK.ModuleDefinition<SlotMap, ModuleServices, MessageKey>>();
-  expectTypeOf<AppModuleContext>().toEqualTypeOf<SDK.ModuleContext<SlotMap, ModuleServices, MessageKey>>();
+  expectTypeOf<ModuleContext>().toEqualTypeOf<SDK.ModuleContext<SlotMap, ModuleServices, MessageKey>>();
   expectTypeOf<AppModuleHost>().toEqualTypeOf<SDK.ModuleHost<SlotMap, ModuleServices, MessageKey>>();
   expectTypeOf<ModuleDefinition<SlotMap>>().toEqualTypeOf<SDK.ModuleDefinition<SlotMap>>();
-  expectTypeOf<ModuleContext<SlotMap>>().toEqualTypeOf<SDK.ModuleContext<SlotMap>>();
+  expectTypeOf<EngineModuleContext<SlotMap>>().toEqualTypeOf<SDK.ModuleContext<SlotMap>>();
   expectTypeOf<ModuleHost<SlotMap>>().toEqualTypeOf<SDK.ModuleHost<SlotMap>>();
 });
 
@@ -27,17 +27,17 @@ export const componentRequiresListProbe: AppModule = { id: "probe", titleKey: "j
 export const packEntryProbe: SDK.ModulePackEntry<SlotMap, ModuleServices, MessageKey> = { moduleApi: "^1.16", module: componentRequiresProbe, messages: { en: { "probe.title": "Probe" } } };
 // @ts-expect-error A pack entry must say which MODULE_API_VERSION range it was built for.
 export const packEntryNoRangeProbe: SDK.ModulePackEntry<SlotMap, ModuleServices, MessageKey> = { module: componentRequiresProbe };
-it("v1.16 pack ranges: ^ / ~ / comparator sets, and which side must update (through v1.26: additive, ^1.16 packs still load)", async () => {
+it("v1.16 pack ranges: ^ / ~ / comparator sets, and which side must update (through v1.31: additive, ^1.16 packs still load)", async () => {
   const { moduleApiSatisfies, moduleApiVerdict, MODULE_API_VERSION, MODULE_PACK_HOST_GLOBAL } = await import("@cutex-desktop/plugin-sdk");
-  expect(MODULE_API_VERSION).toBe("1.26");
+  expect(MODULE_API_VERSION).toBe("1.31");
   expect(MODULE_PACK_HOST_GLOBAL).toBe("__CUTEX_MODULE_HOST__");
   expect(moduleApiSatisfies(`^${MODULE_API_VERSION}`, MODULE_API_VERSION)).toBe(true);
   expect(moduleApiSatisfies("^1.16", MODULE_API_VERSION)).toBe(true);
-  expect(moduleApiVerdict("^1.27", MODULE_API_VERSION)).toBe("needsNewerApp");
+  expect(moduleApiVerdict("^1.32", MODULE_API_VERSION)).toBe("needsNewerApp");
   expect(moduleApiVerdict("~1.15", MODULE_API_VERSION)).toBe("needsNewerModule");
 });
 
-function compileContract(ctx: AppModuleContext) {
+function compileContract(ctx: ModuleContext) {
   ctx.contribute("main.page", { id: "probe.page", Page: () => null, useTitle: () => [] });
   ctx.contribute("timeline.received", { id: "probe.received", schemas: ["probe.v1"], Row: () => null });
   ctx.contribute("timeline.tool", { id: "probe.tool", match: () => true, Row: () => null });
@@ -257,6 +257,9 @@ it("pins the declared slot defaults and placement choices", () => {
   }]))).toEqual({
     "settings.page": { unavailable: "hide" },
     "settings.section": { unavailable: "hide" },
+    // v1.27 (§29): module entries in the tray and the identity menu.
+    "tray.entry": { unavailable: "hide" },
+    "identity.menu": { unavailable: "hide" },
     // Renderer-internal (not in the SDK): 在主界面调整 panels.
     "customize.region": { unavailable: "hide" },
     "conversation.status": { unavailable: "hide", placement: { values: ["bar", "capsule", "both", "off"], default: "bar" } },

@@ -54,6 +54,10 @@ export const zhCN = {
   "runtimes.missing": "文件已删除",
   "runtimes.missingHint": "有{{agent}}固定在这个版本上，但它的文件已经不在了；在「升级{{agent}}」里修复",
   "runtimes.agents": "{n} 个{{agent}}",
+  "runtimes.agentsSplit": "{n} 个{{agent}} · {archived} 个已归档",
+  "runtimes.agentsAllArchived": "{n} 个已归档{{agent}}",
+  "runtimes.archivedHint": "已归档的{{agent}}不在「升级{{agent}}」的范围内，留在这个版本不代表没升级",
+  "runtimes.archivedAgents": "已归档的{{agent}}（{n}）",
   "runtimes.noAgents": "没有{{agent}}",
   "runtimes.moreAgents": "还有 {n} 个",
 } as const;

@@ -5,6 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { RuntimePrunePlan, RuntimePruneVersion } from "../src/shared/runtimes";
 const env = vi.hoisted(() => ({ host: "a", enabled: true, get: vi.fn(), post: vi.fn(), runtimes: vi.fn(), components: vi.fn(), calls: [] as string[] }));
 vi.mock("../src/renderer/src/bridge", () => ({ api: {}, apiFor: (host: string) => ({ runtimePrunePlan: () => { env.calls.push(`GET:${host}`); return env.get(host); }, pruneRuntimes: (ids: string[]) => { env.calls.push(`POST:${host}`); return env.post(host, ids); } }) }));
+vi.mock("../src/renderer/src/lib/useArchivedAgents", () => ({ useArchivedAgents: () => {} }));
 vi.mock("../src/renderer/src/store", () => ({ useApp: { getState: () => ({ hosts: { active: env.host }, daemon: { kind: "connected" }, features: new Set(env.enabled ? ["runtime-prune-v1"] : []), byHost: { a: { daemon: { kind: "connected" }, features: new Set(["runtime-prune-v1"]) }, b: { daemon: { kind: "connected" }, features: new Set(["runtime-prune-v1"]) } } }) } }));
 vi.mock("../src/renderer/src/lib/runtimesStore", () => ({ refreshRuntimes: (host: string) => env.runtimes(host) }));
 vi.mock("../src/renderer/src/lib/componentStore", () => ({ loadComponents: (host: string) => env.components(host) }));

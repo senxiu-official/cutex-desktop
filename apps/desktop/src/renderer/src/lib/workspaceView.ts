@@ -6,6 +6,7 @@ import { LOCAL_HOST_ID } from "../../../shared/hosts";
 import type { DaemonApi, GitStatus, WorkspaceScope } from "../../../shared/ipc";
 import { api, bridge } from "../bridge";
 import { agentHost, hostApi, selectedSidebar, sidebarOf, useApp } from "../store";
+import { gitStatusFlight } from "./gitStatusFlight";
 import { hostKey } from "./hostKeys";
 import { onHostSwitch } from "./hostSwitch";
 import { rootFor, scopeFor, scopeKey, workspaceErrorText } from "./workspace";
@@ -60,7 +61,7 @@ function sessionInScope(scope: WorkspaceScope, hostId: string, sessionId: string
 /**
  * Watch the scope on `hostId` while mounted: `revision` bumps on any file change, `dirs` says which
  * open folders of the 文件 tree to reload (lib/workspaceRefresh.ts), git status reloads when files or
- * `.git` change. Sources: cutex's watch (re-opened after the host reconnects, everything reloaded
+ * `.git` change (one read at a time per workspace, lib/gitStatusFlight.ts). Sources: cutex's watch (re-opened after the host reconnects, everything reloaded
  * then), and the agents of this workspace: a completed `fileChange` item reloads its folders, a turn's
  * end everything open (shell commands; hosts whose watcher misses changes). Errors (e.g. old cutex
  * without workspace routes) surface as `error`.
@@ -83,19 +84,16 @@ export function useWorkspace(scope: WorkspaceScope | null, hostId: string) {
     const daemon = hostApi(hostId);
     let watchId: string | null = null;
     let cancelled = false;
-    const loadGit = () =>
-      daemon.gitStatus(scope).then(
-        // The same status again (each reload after a turn) keeps the object: App and every consumer of the
-        // workspace context would re-render for nothing (perf §9).
-        (g) => !cancelled && setGit((prev) => (prev && JSON.stringify(prev) === JSON.stringify(g) ? prev : g)),
-        (e: unknown) => !cancelled && setError(workspaceError(e)),
-      );
-    void loadGit();
-    let gitTimer: ReturnType<typeof setTimeout> | null = null;
-    const reloadGitSoon = () => {
-      if (gitTimer) clearTimeout(gitTimer);
-      gitTimer = setTimeout(() => void loadGit(), 300);
-    };
+    const gitFlight = gitStatusFlight(hostKey(hostId, scopeKey(scope)), () => daemon.gitStatus(scope));
+    const offGit = gitFlight.subscribe((result) => {
+      if (cancelled) return;
+      // The same status again (each reload after a turn) keeps the object: App and every consumer of the
+      // workspace context would re-render for nothing (perf §9).
+      if (result.ok) setGit((prev) => (prev && JSON.stringify(prev) === JSON.stringify(result.status) ? prev : result.status));
+      else setError(workspaceError(result.error));
+    });
+    gitFlight.ensure();
+    const reloadGitSoon = () => gitFlight.request();
     const batcher = new ChangeBatcher((change) => {
       if (cancelled) return;
       versions.invalidate(change);
@@ -161,7 +159,7 @@ export function useWorkspace(scope: WorkspaceScope | null, hostId: string) {
       offSession();
       offState();
       batcher.dispose();
-      if (gitTimer) clearTimeout(gitTimer);
+      offGit();
       if (watchId) void daemon.unwatchWorkspace(watchId).catch(() => {});
     };
   }, [scope, hostId]);

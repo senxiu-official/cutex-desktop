@@ -10,7 +10,9 @@ import type { SessionForkPreview } from "../../../../shared/sessionFork";
 // `session-claude-runtime`: the agent list carries Sora's pin and the selected release, so the item shows
 // on the first right-click, before Sora was ever opened.
 import type { AgentHarnessPreview, SidebarSnapshot, ClaudeCodeLaunchSummary, ClaudeCodeServer, ClaudeCodeSources, ClaudeSettingSource, ClaudeSkillImportItem, ClaudeSkillsImportResult } from "../../../../shared/ipc";
-import type { ModuleMock, MockProfileRef } from "../../dev/mockTypes";
+import type { ModuleMock, MockProfileRef, MockCore } from "../../dev/mockTypes";
+import { agentMcpView, SCOPED_MCP_FEATURE } from "../../../../shared/sessionMcp";
+import { MEMORY_INJECTION_FEATURE } from "../../../../shared/memoryInjection";
 import { SESSION_CLAUDE_RUNTIME_FEATURE, type ClaudeRepinResult, type ClaudeRuntimeView } from "../../../../shared/claudeRepin";
 
 /** Claude agents of the core mock (dev/mockBridge.ts claudeSession). */
@@ -150,7 +152,9 @@ function previewFork(id: string, afterTurnId: string | null, profile: string | u
     boundaryNote: "Copied delegations, jobs and approvals remain with the source session." };
 }
 export const mock: ModuleMock = {
-  features: { new: ["session-fork-profile", "session-fork-preview", "session-badge", "project-badge-wide", "agent-harness", "claude-code-sources", "claude-launch-permission-mode", `claude-skills-import`, "claude-runtime-repin", "claude-compaction", "claude-compaction-models", "prompt-cache-key", SESSION_CLAUDE_RUNTIME_FEATURE] },
+  features: { new: ["session-fork-profile", "session-fork-preview", "session-badge", "project-badge-wide", "agent-harness", "claude-code-sources", "claude-launch-permission-mode", `claude-skills-import`, "claude-runtime-repin", "claude-compaction", "claude-compaction-models", "prompt-cache-key", SESSION_CLAUDE_RUNTIME_FEATURE, SCOPED_MCP_FEATURE, MEMORY_INJECTION_FEATURE] },
+  // scoped-mcp: 设置 › MCP 服务器… (components/AgentMcpDialog); the live statuses as an agent start would report them.
+  start: (core) => { if (!core.legacy) setTimeout(() => mcpStartupReplay(core), 1500); },
   // session-claude-runtime (not under ?legacy): each Claude agent's pin and the host's selected release.
   sidebar(snapshot, core) {
     for (const s of [...snapshot.active, ...snapshot.retired]) forkSources.set(s.cutexSessionId, s);
@@ -160,7 +164,13 @@ export const mock: ModuleMock = {
       const pin = pinOf(s.cutexSessionId);
       return { ...s, runtime: { ...s.runtime, claudeRuntime: { release: pin.release, pendingRelease: pin.pending?.release ?? null } } };
     };
-    return { ...snapshot, active: snapshot.active.map((s, i) => withPin(i === 0 && s.badge === undefined ? { ...s, badge: { text: "挂件", tint: "violet" } } : s)), retired: snapshot.retired.map(withPin), claudeRuntime: { selectedRelease: SELECTED_CLAUDE_RUNTIME } };
+    // agent-memory-injection: Rei was created without project memory (an independent reviewer); a later
+    // cutex/session/defaults/update (编辑信息) writes runtimeDefaults.memoryInjection, which then wins.
+    const withMemory = (s: SidebarSnapshot["active"][number]) => {
+      const defaults = s.runtimeDefaults as Record<string, unknown> | undefined;
+      return s.cutexSessionId === "rei" && defaults?.memoryInjection === undefined ? { ...s, runtimeDefaults: { ...(defaults ?? {}), memoryInjection: false } } as typeof s : s;
+    };
+    return { ...snapshot, active: snapshot.active.map((s, i) => withMemory(withPin(i === 0 && s.badge === undefined ? { ...s, badge: { text: "挂件", tint: "violet" } } : s))), retired: snapshot.retired.map(withPin), claudeRuntime: { selectedRelease: SELECTED_CLAUDE_RUNTIME } };
   },
   profile: {
     fields: (profile, core) => {
@@ -212,6 +222,14 @@ export const mock: ModuleMock = {
     newRuntimesOnlyFields: [...((core.settings.newRuntimesOnlyFields as string[] | undefined) ?? []), "agentHarness"],
   }),
   api: (core) => ({
+      agentMcp: async (sessionId) => (core.legacy ? { ok: false, code: "unsupported", message: "" } : { ok: true, view: mcpView(sessionId) }),
+      async setAgentMcpDisabled(sessionId, disabled, expectedRevision) {
+        const scope = mcpScope(sessionId);
+        if (expectedRevision !== scope.revision) return { ok: false, code: "revision_conflict", message: "the scoped MCP config changed; reload and retry" };
+        scope.disabled = [...new Set(disabled)];
+        scope.revision++;
+        return { ok: true, view: mcpView(sessionId) };
+      },
       async forkPreview(sessionId, request = {}) {
         if (core.legacy) throw new Error("unknown_method: fork-preview unavailable");
         return previewFork(sessionId, request.afterTurnId ?? null, request.profile);
@@ -284,3 +302,51 @@ export const mock: ModuleMock = {
     },
   }),
 };
+
+// ---------- scoped-mcp (per-agent MCP switches) ----------
+
+/** The shared CODEX_HOME servers (one off in config.toml), a project server, and Eva's own server. */
+const MCP_GLOBAL: Record<string, Record<string, unknown>> = {
+  github: { url: "https://api.githubcopilot.com/mcp/", bearer_token_env_var: "<redacted>" },
+  playwright: { command: "npx", args: ["@playwright/mcp@latest"] },
+  linear: { url: "https://mcp.linear.app/sse", enabled: false },
+};
+const MCP_PROJECT: Record<string, Record<string, unknown>> = { "kks-docs": { command: "kks-docs-mcp", args: ["--stdio"] } };
+const MCP_OWN: Record<string, Record<string, Record<string, unknown>>> = { eva: { notes: { command: "notes-mcp" } } };
+const mcpScopes = new Map<string, { revision: number; disabled: string[] }>();
+
+function mcpScope(sessionId: string) {
+  let scope = mcpScopes.get(sessionId);
+  if (!scope) mcpScopes.set(sessionId, (scope = { revision: 1, disabled: sessionId === "eva" ? ["linear"] : [] }));
+  return scope;
+}
+
+/** cutex's two answers (GET /mcp, GET /mcp/effective) for the session, read like the daemon does. */
+function mcpView(sessionId: string) {
+  const scope = mcpScope(sessionId);
+  const own = MCP_OWN[sessionId] ?? {};
+  const layers: [string, Record<string, Record<string, unknown>>][] = [["global", MCP_GLOBAL], ["project", MCP_PROJECT], ["agent", own]];
+  const names = [...new Set(layers.flatMap(([, servers]) => Object.keys(servers)))].sort();
+  const servers = [
+    { name: "cutex", layer: "builtin", layers: ["builtin"], enabled: true, disabledBy: null, config: null },
+    { name: "cutex_job", layer: "builtin", layers: ["builtin"], enabled: false, disabledBy: "cutex", config: null },
+    ...names.map((name) => {
+      const defined = layers.filter(([, s]) => name in s);
+      const config = Object.assign({}, ...defined.map(([, s]) => s[name]));
+      const off = scope.disabled.includes(name);
+      const configOff = config.enabled === false;
+      return { name, layer: defined.at(-1)![0], layers: defined.map(([l]) => l), enabled: !off && !configOff, disabledBy: off ? "agent" : configOff ? "config" : null, config };
+    }),
+  ];
+  return agentMcpView(sessionId, { revision: scope.revision, disabled: scope.disabled, servers: own }, { appliesOn: "next launch", servers })!;
+}
+
+/** What Eva's running app-server reported at start: github / kks-docs / cutex connected, playwright failed. */
+function mcpStartupReplay(core: MockCore) {
+  const status = (name: string, s: string, error: string | null = null) => core.nativeEvent("eva", "mcpServer/startupStatus/updated", { threadId: null, name, status: s, error, failureReason: null });
+  status("cutex", "ready");
+  status("github", "ready");
+  status("kks-docs", "ready");
+  status("notes", "ready");
+  status("playwright", "failed", "spawn npx ENOENT");
+}

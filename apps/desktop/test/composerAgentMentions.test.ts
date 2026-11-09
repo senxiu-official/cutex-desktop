@@ -46,3 +46,24 @@ describe("agentMentionInsert", () => {
     expect(agentMentionInsert(rows[0]!, "ws")).toBe("[@astra-composer@local](cutex:agent/cutex.ag-astra@local)");
   });
 });
+
+describe("owner 2026-11-09: recent mentions, project names, quick chats", () => {
+  const withProjects = () => {
+    const source = hosts();
+    source[0]!.sidebar!.active.push(session("cutex.ag-b", "Bea"), session("cutex.ag-chat", "Fix the build", "online", { registrationClass: "local_only" }));
+    (source[0]!.sidebar as { projects: unknown }).projects = { projects: [{ project_id: "other", presentation: { display_name: "Kestrel Studio" } }] };
+    return source;
+  };
+  it("same project first, then recent mentions (newest first), then by name", () => {
+    const rows = agentMentionCandidates(withProjects(), "local", "cutex.ag-self", "", 50, ["remote\ncutex.ag-remote", "local\ncutex.ag-b"]);
+    expect(rows.map((row) => row.id)).toEqual(["cutex.ag-z", "cutex.ag-remote", "cutex.ag-b", "cutex.ag-a"]);
+  });
+  it("matches the agent's project name", () => {
+    expect(agentMentionCandidates(withProjects(), "local", "cutex.ag-self", "kestrel").map((row) => row.id)).toEqual(["cutex.ag-a"]);
+  });
+  it("a quick chat outside any project shows only when searched or recently mentioned", () => {
+    expect(agentMentionCandidates(withProjects(), "local", "cutex.ag-self", "").map((row) => row.id)).not.toContain("cutex.ag-chat");
+    expect(agentMentionCandidates(withProjects(), "local", "cutex.ag-self", "build").map((row) => row.id)).toEqual(["cutex.ag-chat"]);
+    expect(agentMentionCandidates(withProjects(), "local", "cutex.ag-self", "", 50, ["local\ncutex.ag-chat"]).map((row) => row.id)).toContain("cutex.ag-chat");
+  });
+});

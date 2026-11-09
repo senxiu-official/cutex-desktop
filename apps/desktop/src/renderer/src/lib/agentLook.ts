@@ -242,6 +242,13 @@ export function useAgentLook(seed: string | null | undefined): AgentLook | null 
 }
 
 /** Outside React (menus): the 头像主题 agent `seed` draws its default emoji from now (null = unknown agent: the whole set, like Avatar). */
+/** The agent's model family right now; null = not known here (the same facts as `useAgentLook`). */
+export function agentFamilyNow(seed: string): ModelFamily | null {
+  const entry = agentIndex(useApp.getState()).get(seed);
+  if (!entry) return null;
+  return lookOf(entry, profileLookOf(entry.hostId, sessionProfileName(entry.session)), null).family;
+}
+
 export function agentThemesNow(seed: string): AvatarThemeId[] | null {
   const entry = agentIndex(useApp.getState()).get(seed);
   if (!entry) return null;

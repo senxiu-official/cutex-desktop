@@ -1,0 +1,35 @@
+{
+  "name": "@cutex-desktop/module-api",
+  "version": "1.31.0",
+  "description": "The public API for writing Cutex desktop modules",
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/senxiu-official/cutex-desktop",
+  "repository": "github:senxiu-official/cutex-desktop",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./ui": "./src/ui.ts",
+    "./experimental": "./src/experimental.ts",
+    "./exports.json": "./exports.json"
+  },
+  "bin": {
+    "cutex-module": "./bin/cutex-module.mjs"
+  },
+  "files": [
+    "bin",
+    "template","src", "tools", "exports.json"],
+  "dependencies": {
+    "vite": "^7.3.6"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "generate": "node scripts/generate-host.mjs"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0"
+  }
+}

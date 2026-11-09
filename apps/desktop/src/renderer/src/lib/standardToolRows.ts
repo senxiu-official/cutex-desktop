@@ -16,6 +16,15 @@ export interface StandardToolModel {
   fields: { name: string; value: string }[];
   agentCount: number | null;
   agents: { id: string; name: string; status: string | null }[];
+  /** Delegation notices waiting for this agent (`pending_notices` of a newer agent_list); absent on older hosts. */
+  pendingNotices?: PendingNotices | null;
+}
+export type PendingNoticeKind = "answer" | "question" | "state";
+export interface PendingNotices {
+  total: number;
+  counts: Record<PendingNoticeKind, number>;
+  entries: { id: string; delegation: string; kind: PendingNoticeKind | null; title: string }[];
+  more: boolean;
 }
 const record = (v: unknown): Record<string, unknown> | null => v !== null && typeof v === "object" && !Array.isArray(v) ? v as Record<string, unknown> : null;
 const text = (v: unknown): string | null => typeof v === "string" && v.trim() ? v : null;
@@ -58,7 +67,22 @@ export function standardToolRow(item: RawItem): StandardToolModel | null {
     const id = text(agent?.id);
     return agent && id ? [{ id, name: text(agent.name) ?? id, status: text(agent.status) }] : [];
   }) : [];
-  return { kind, summary: summary ?? "", fields, agents, agentCount: Array.isArray(result?.agents) ? agents.length : null };
+  return { kind, summary: summary ?? "", fields, agents, agentCount: Array.isArray(result?.agents) ? agents.length : null, pendingNotices: pendingNoticesOf(result) };
+}
+
+function pendingNoticesOf(result: Record<string, unknown> | null): PendingNotices | null {
+  const p = record(result?.pending_notices);
+  if (!p || typeof p.total !== "number" || p.total <= 0) return null;
+  const counts = record(p.counts);
+  const count = (k: PendingNoticeKind) => typeof counts?.[k] === "number" ? counts[k] as number : 0;
+  const entries = Array.isArray(p.entries) ? p.entries.flatMap((v, i) => {
+    const e = record(v);
+    const delegation = text(e?.delegation);
+    if (!e || !delegation) return [];
+    const kind: PendingNoticeKind | null = e.kind === "answer" || e.kind === "question" || e.kind === "state" ? e.kind : null;
+    return [{ id: text(e.delivery_id) ?? `${delegation}:${i}`, delegation, kind, title: text(e.title) ?? delegation }];
+  }) : [];
+  return { total: p.total, counts: { answer: count("answer"), question: count("question"), state: count("state") }, entries, more: p.more === true };
 }
 
 function dynamicResult(item: RawItem): Record<string, unknown> | null {

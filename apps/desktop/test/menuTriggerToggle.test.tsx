@@ -7,6 +7,7 @@ import { Overlays } from "../src/renderer/src/components/Overlays";
 import { Popover } from "../src/renderer/src/components/Menu";
 import { I18nProvider } from "../src/renderer/src/i18n";
 import { closeMenu, openMenuAbove, openMenuFrom, openMenuAt, useOverlayState } from "../src/renderer/src/lib/contextMenu";
+vi.mock("../src/renderer/src/modules/react", async (importOriginal) => ({ ...(await importOriginal<object>()), useSlot: () => [] }));
 vi.mock("../src/renderer/src/lib/identityView", () => ({ useIdentity: () => ({ name: "Test owner", role: "owner", picture: null, color: null, words: { line: "identity.owner" } }), useShellInfo: () => null }));
 vi.mock("../src/renderer/src/lib/update", () => ({ useUpdateStatus: () => null, updateButtonVisible: () => false }));
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;

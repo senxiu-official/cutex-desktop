@@ -55,6 +55,9 @@ function graph(entry: string): { files: Set<string>; external: Map<string, strin
   return { files, external };
 }
 
+// Reads the whole import graph from disk: slow under a parallel full-workspace run (flaky at the 5 s default).
+const GRAPH_TIMEOUT_MS = 60_000;
+
 describe("browser entry", () => {
   it("has no Node built-ins or third-party imports in its import graph", () => {
     const { files, external } = graph(resolve(here, "../src/index.ts"));
@@ -64,11 +67,11 @@ describe("browser entry", () => {
     // Nothing outside the workspace either: the package is dependency-free by design.
     expect([...external.keys()]).toEqual([]);
     expect([...files].some((f) => f.endsWith("discovery.ts"))).toBe(false);
-  });
+  }, GRAPH_TIMEOUT_MS);
 
   it("the node entry is where discovery lives", () => {
     const { files, external } = graph(resolve(here, "../src/node.ts"));
     expect([...files].some((f) => f.endsWith("discovery.ts"))).toBe(true);
     expect([...external.keys()].every((spec) => spec.startsWith("node:"))).toBe(true);
-  });
+  }, GRAPH_TIMEOUT_MS);
 });

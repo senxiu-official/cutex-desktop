@@ -26,13 +26,14 @@ import { ColumnPickLayer } from "./components/ColumnPickLayer";
 import { ShelfToast } from "./components/side/ShelfToast";
 import { SettingsShelf } from "./components/SettingsShelf";
 import { WidthTip } from "./components/WidthTip";
+import { setSettingsHost } from "./lib/settingsHost";
 import { useSettingsShelf } from "./lib/settingsShelf";
 import { useSettingsShelfMaximized } from "./lib/portrait";
 import { useFullscreen } from "./lib/panelFull";
 import { FullscreenHint, WindowBarFrame } from "./components/PanelFullscreen";
 import { LOCAL_HOST_ID } from "../../shared/hosts";
 import { api, bridge } from "./bridge";
-import { activeHost, hasLocalHost, hasNoHost, hostIndicator, isRemote } from "./lib/hosts";
+import { activeHost, hasLocalHost, hasNoHost, hostIndicator, isRemote, routesExhausted } from "./lib/hosts";
 import { useTurnMarkUpkeep } from "./lib/attentionView";
 import { useDesktopShell } from "./lib/shell";
 import { useTermsSync } from "./lib/termsSync";
@@ -78,10 +79,12 @@ function DaemonBanner() {
     return <div className="border-b border-border bg-warn/10 px-4 py-1.5 text-xs text-warn">{text}</div>;
   }
   const host = activeHost(hosts)?.label ?? "";
-  const problem = indicator.problem ? t(`host.problem.${indicator.problem}` as MessageKey) : null;
+  // Every route failed: only the owner can fix it, so the whole hint stays readable (wraps; opaque over a wallpaper).
+  const hint = routesExhausted(hosts?.tunnel);
+  const problem = hint ? t("host.routesFailedHint") : indicator.problem ? t(`host.problem.${indicator.problem}` as MessageKey) : null;
   return (
-    <div className="flex items-center gap-2 border-b border-border bg-warn/10 px-4 py-1 text-xs text-warn">
-      <span className="min-w-0 flex-1 truncate" title={indicator.detail ?? undefined}>
+    <div className={`flex items-center gap-2 border-b border-border px-4 py-1 text-xs text-warn ${hint ? "bg-surface" : "bg-warn/10"}`}>
+      <span className={`min-w-0 flex-1 ${hint ? "" : "truncate"}`} title={indicator.detail ?? undefined}>
         {t(`host.banner.${indicator.status}` as MessageKey, { host })}
         {problem && ` — ${problem}`}
       </span>
@@ -95,7 +98,7 @@ function DaemonBanner() {
           {t("host.backToLocal")}
         </button>
       )}
-      <button className={BANNER_BUTTON} onClick={() => openSettings("hosts")}>
+      <button className={BANNER_BUTTON} onClick={() => { setSettingsHost(activeHost(hosts)?.id ?? null); openSettings("access"); }}>
         {t("titlebar.connectionSettings")}
       </button>
     </div>

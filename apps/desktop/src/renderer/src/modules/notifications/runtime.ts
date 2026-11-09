@@ -8,7 +8,7 @@ import { loadDeviceOff, deviceOff } from "../../lib/notifyDevice";
 import { rememberClick, runClick, setNotifyHandler, setRetractHandler, type NotifyOccurrence, type NotifyRetraction } from "../../lib/notifyEvents";
 import { decideLocally, devicePlan, isNotificationLevel, LEGACY_NOTIFY_KEY, localText, migrationPatch, NOTIFICATION_LEVELS_FEATURE, retractMatches, type DeviceMethod, type NotificationLevel, type NotificationLevelsView, type RetractRequest } from "../../../../shared/notificationLevels";
 import { appModules } from "../app";
-import type { AppModuleContext, NotifyDelivery, NotifyMethodItem } from "../slots";
+import type { ModuleContext, NotifyDelivery, NotifyMethodItem } from "../slots";
 import { loadMethodSupport, retractDelivered } from "./methods";
 
 /** Available device method items by method id (slot order; the first one per method wins). */
@@ -111,7 +111,7 @@ export function markWanted(decision: Pick<OccurrenceDecision, "actions" | "table
  * Host decision for an occurrence: the tables of the host it happened on (v1.5 `ctx.hosts`: the focus
  * host, or a connected host outside the scope — multi-host RFC §9.4).
  */
-export async function decide(occ: NotifyOccurrence, ctx: Pick<AppModuleContext, "hosts" | "services">): Promise<OccurrenceDecision | null> {
+export async function decide(occ: NotifyOccurrence, ctx: Pick<ModuleContext, "hosts" | "services">): Promise<OccurrenceDecision | null> {
   if (occ.decided) return { ...occ.decided, event: occ.events[0] ?? "", tables: true };
   const focus = ctx.hosts.list().find((h) => h.focus);
   const other = occ.hostId !== undefined && occ.hostId !== focus?.id;
@@ -153,7 +153,7 @@ async function migrateLegacyPrefs(view: NotificationLevelsView): Promise<void> {
 }
 
 /** activate(): everything the module runs is tied to ctx.signal (host / capability change restarts it). */
-export function startNotifications(ctx: AppModuleContext): void {
+export function startNotifications(ctx: ModuleContext): void {
   const supported = !!ctx.hosts.list().find((h) => h.focus)?.features.has(NOTIFICATION_LEVELS_FEATURE);
   resetNotificationLevels(supported);
   void loadDeviceOff();

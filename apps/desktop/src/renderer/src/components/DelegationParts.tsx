@@ -73,7 +73,7 @@ export function DelegationStatusMark({ status, name, trailing, error, className 
   );
 }
 
-/** "#N" of a delegation; with `onJump` a link (to the card). Design 040 §2: accent text, not a chip. */
+/** The short tag of a delegation (lib/tasks taskTag); with `onJump` a link (to the card). Design 040 §2: accent text, not a chip. */
 export function DelegationTag({ askId, onJump }: { askId: string; onJump?: () => void }) {
   const tag = taskTag(askId);
   const className = "shrink-0 font-medium text-accent tabular-nums";

@@ -203,6 +203,8 @@ export const zhCN = {
   "approvals.rules.audit": "规则审计",
   "approvals.rules.audit.hint": "创建、修改、撤销、自动匹配和拒绝匹配都由 cutex 记录。",
   "approvals.rules.audit.empty": "还没有审计记录",
+  "approvals.rules.audit.all": "全部 {n} 条",
+  "approvals.rules.audit.latest": "最近 {n} 条",
   "approvals.rules.audit.created": "已创建规则",
   "approvals.rules.audit.updated": "已修改规则",
   "approvals.rules.audit.revoked": "已撤销规则",

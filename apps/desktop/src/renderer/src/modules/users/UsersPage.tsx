@@ -15,16 +15,18 @@ import { ChevronDown, ChevronRight, Fingerprint } from "lucide-react";
 import { PEERS_FEATURE } from "../../../../shared/peers";
 import { shownUserName, USERS_P2_ACCESS_FEATURE, type PersonKeyRecord, type UserGrant, type UserRecord, type UsersList } from "../../../../shared/users";
 import { ProjectColorPicker } from "../../components/ProjectColorPicker";
-import { AddButton, ArmedRemove, Button, Checkbox, ErrorNote, FormFields, IconButton, ListRow, Loading, Notice, RefreshButton, Section, SettingRow, SettingsGroup, TextField, TextInput, Toggle } from "../../components/settings/Form";
+import { AddButton, ArmedRemove, Button, ErrorNote, FormFields, IconButton, ListRow, Loading, Notice, RefreshButton, Section, SettingRow, SettingsGroup, TextField, TextInput, Toggle } from "../../components/settings/Form";
 import { useI18n } from "../../i18n";
+import { useApp } from "../../store";
 import { settingsAnchorId } from "../../lib/settingsNav";
 import { useTargetApi, useTargetFeatures, useTargetHostId, useTargetSidebar } from "../../lib/targetHost";
 import { usePersonIdentity } from "../../lib/personIdentity";
+import { Checklist } from "../../components/settings/Checklist";
 import { DevicesSection, KeyPrint } from "./DevicesSection";
 import { ThisComputerBadge } from "../../components/settings/TokenName";
 import { useUsers, useUsersWrite } from "./hooks";
 import { bindingsOf, deviceName, EMPTY_GRANT, grantChoices, grantSummary, isUnassigned, personKeyOwners, rebaseGrantDraft, sameGrant, toggleAllProjects, selfKeyUnknown, sortedUsers, toggleId, unknownKeysOf, withoutPersonKey, withPersonKey, type DeviceFilter, type GrantChoice } from "./model";
-import { DEVICES_ANCHOR, nameIn, openPairing, PEERS_ANCHOR, USERS_ANCHOR, useT, type Write } from "./shared";
+import { DEVICES_ANCHOR, nameIn, PEERS_ANCHOR, USERS_ANCHOR, useT, type Write } from "./shared";
 import { changePersonKeys } from "./personKeyWrites";
 import { PeersSection } from "./PeersSection";
 import { UserDot } from "./UserDot";
@@ -44,7 +46,10 @@ interface SharedUsers {
   /** A user's 「1 个对端主机」 narrows 对端主机 to that user (null: every linked host). */
   peerUser: string | null;
 }
-const FRESH: SharedUsers = { list: null, load: null, filter: { kind: "all" }, peerUser: null };
+const ALL_DEVICES: DeviceFilter = { kind: "all" };
+/** How many devices the host's page shows besides the waiting ones; the rest are on 全部设备. */
+const FIRST_DEVICES = 8;
+const FRESH: SharedUsers = { list: null, load: null, filter: ALL_DEVICES, peerUser: null };
 const useShared = createStore<SharedUsers>(() => FRESH);
 const noLoad = async () => {};
 
@@ -56,18 +61,22 @@ export function UsersPeoplePart() {
   const write = useUsersWrite(load);
   const withPeers = useTargetFeatures().has(PEERS_FEATURE);
   useEffect(() => useShared.setState({ list, load }), [list, load]);
-  useEffect(() => () => useShared.setState(FRESH, true), []);
+  // Leaving for a sub-page: its filter stays (that sub-page clears it when it closes).
+  useEffect(() => () => useShared.setState({ list: null, load: null }), []);
   if (error && !list) return <Section><ErrorNote>{error}</ErrorNote></Section>;
   if (unsupported) return <Section><Notice>{t("users.unsupported")}</Notice></Section>;
   if (!list) return <Section><Loading rows={3} /></Section>;
-  // A user's 「2 台设备」 shows that user's devices in 设备.
+  // A user's 「2 台设备」 shows that user's devices on 全部设备; waiting devices are always in 设备 here.
   const showDevices = (next: DeviceFilter) => {
-    useShared.setState({ filter: next });
+    if (next.kind === "user") {
+      useShared.setState({ filter: next });
+      return useApp.getState().openSettings("access", { sub: "devices" });
+    }
     win.requestAnimationFrame(() => win.document.getElementById(settingsAnchorId(DEVICES_ANCHOR))?.scrollIntoView({ block: "start", behavior: "smooth" }));
   };
   const showPeers = (userId: string) => {
     useShared.setState({ peerUser: userId });
-    win.requestAnimationFrame(() => win.document.getElementById(settingsAnchorId(PEERS_ANCHOR))?.scrollIntoView({ block: "start", behavior: "smooth" }));
+    useApp.getState().openSettings("access", { anchor: PEERS_ANCHOR });
   };
   const waiting = list.tokens.filter(isUnassigned).length;
   return (
@@ -83,18 +92,31 @@ export function UsersPeoplePart() {
   );
 }
 
-/** 设备: every device with its user (the 人 part's listing). */
+/** 设备 on the host's page: waiting devices and the first few (the 人 part's listing). */
 export function UsersDevicesPart() {
-  const { list, load, filter } = useShared();
+  const { list, load } = useShared();
   const write = useUsersWrite(load ?? noLoad);
   if (!list) return null;
-  return <DevicesSection list={list} write={write} filter={filter} onFilter={(next) => useShared.setState({ filter: next })} />;
+  return <DevicesSection list={list} write={write} filter={ALL_DEVICES} limit={FIRST_DEVICES} onFilter={() => {}} />;
 }
 
-/** 别的主机 → 对端主机: each linked host with the user it belongs to (the 人 part's listing). */
+/** 全部设备 (a sub-page): every device with its user, filtered by user. */
+export function UsersAllDevicesPart() {
+  const { list, error, load } = useUsers();
+  const write = useUsersWrite(load);
+  const filter = useShared((s) => s.filter);
+  useEffect(() => () => useShared.setState({ filter: ALL_DEVICES }), []);
+  if (error && !list) return <Section><ErrorNote>{error}</ErrorNote></Section>;
+  if (!list) return <Section><Loading rows={3} /></Section>;
+  return <div id={settingsAnchorId("users-all-devices")}><DevicesSection list={list} write={write} filter={filter} onFilter={(next) => useShared.setState({ filter: next })} /></div>;
+}
+
+/** 跨机协作 → 互联主机: each linked host with the user it belongs to. */
 export function UsersPeersPart() {
-  const { list, load, peerUser } = useShared();
-  const write = useUsersWrite(load ?? noLoad);
+  const { list, load } = useUsers();
+  const peerUser = useShared((s) => s.peerUser);
+  const write = useUsersWrite(load);
+  useEffect(() => () => useShared.setState({ peerUser: null }), []);
   if (!list) return null;
   return <PeersSection list={list} write={write} userId={peerUser} onAll={() => useShared.setState({ peerUser: null })} />;
 }
@@ -108,6 +130,8 @@ function UsersSection({ list, write, reload, onShowDevices, onShowPeers }: { lis
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const bindings = useMemo(() => bindingsOf(list), [list]);
+  const sidebar = useTargetSidebar();
+  const projects = useMemo(() => grantChoices(sidebar).projects, [sidebar]);
   // Enter and the button share one guard (a ref: a second Enter can come before the re-render).
   const creating = useRef(false);
   const create = async () => {
@@ -133,7 +157,7 @@ function UsersSection({ list, write, reload, onShowDevices, onShowPeers }: { lis
       actions={
         <>
           <RefreshButton label={t("users.refresh")} onClick={() => void reload()} />
-          <AddButton primary onClick={() => setAdding((v) => !v)}>{t("users.add")}</AddButton>
+          {!onlyOwner && <AddButton primary onClick={() => setAdding((v) => !v)}>{t("users.add")}</AddButton>}
         </>
       }
     >
@@ -165,7 +189,7 @@ function UsersSection({ list, write, reload, onShowDevices, onShowPeers }: { lis
             }
             detail={
               <span className="flex min-w-0 items-center gap-1.5">
-                <span className="truncate">{user.isOwner ? t("users.ownerHint") : grantSummary(user.grant, (k, v) => t(k as never, v))}</span>
+                <span className="truncate">{user.isOwner ? t("users.ownerHint") : grantSummary(user.grant, (k, v) => t(k as never, v), projects)}</span>
                 {tokens.length > 0 && <CountLink onClick={() => onShowDevices({ kind: "user", userId: user.id })}>{t("users.summary.devices", { n: tokens.length })}</CountLink>}
                 {peers.length > 0 && onShowPeers && <CountLink onClick={() => onShowPeers(user.id)}>{t("users.summary.peers", { n: peers.length })}</CountLink>}
               </span>
@@ -182,8 +206,7 @@ function UsersSection({ list, write, reload, onShowDevices, onShowPeers }: { lis
       {onlyOwner && !adding && (
         <div className="-mx-4 flex flex-wrap items-center gap-2 border-t border-border px-4 py-2.5 text-xs text-subtle" data-testid="users-only-owner">
           <span className="min-w-0 flex-1">{t("users.onlyOwner")}</span>
-          <Button onClick={() => setAdding(true)}>{t("users.add")}</Button>
-          <Button onClick={openPairing}>{t("users.devices.pair")}</Button>
+          <Button onClick={() => setAdding(true)}>{t("users.share")}</Button>
         </div>
       )}
     </Section>
@@ -313,19 +336,6 @@ function SubList({ title, empty, count, children }: { title: string; empty: stri
     <div>
       <div className="mb-1 text-xs font-medium text-muted">{title}</div>
       {count ? <div className="px-4">{children}</div> : <p className="text-xs text-subtle">{empty}</p>}
-    </div>
-  );
-}
-
-function Checklist({ choices, chosen, disabled, onToggle, label }: { choices: GrantChoice[]; chosen: readonly string[]; disabled?: boolean; onToggle(id: string, on: boolean): void; label: string }) {
-  return (
-    <div role="group" aria-label={label} className="grid max-h-44 grid-cols-[repeat(auto-fill,minmax(11rem,1fr))] gap-x-3 gap-y-1 overflow-y-auto pr-1">
-      {choices.map((c) => (
-        <label key={c.id} className={`flex min-w-0 items-center gap-1.5 text-sm ${disabled ? "opacity-50" : "cursor-pointer"}`} title={c.id}>
-          <Checkbox disabled={disabled} checked={chosen.includes(c.id)} onChange={(on) => onToggle(c.id, on)} />
-          <span className="truncate">{c.name}</span>
-        </label>
-      ))}
     </div>
   );
 }

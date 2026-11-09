@@ -6,6 +6,15 @@ import { agentDelegations } from "../src/renderer/src/lib/delegations";
 const row = (jobId: string, state: string, createdAt: number, extra: Partial<JobRow> = {}): JobRow => ({ jobId, actionId: `a-${jobId}`, sessionId: "eva", state, createdAt, updatedAt: createdAt, revision: 1, ...extra });
 
 describe("jobs", () => {
+  it("the observed process only changes a running job's word; the job stays in progress and an absent field reads as today", () => {
+    const at = { observedAtEpochMillis: 1 };
+    expect(jobStatus({ state: "running", observedProcessState: { state: "stopped", ...at } })).toMatchObject({ group: "active", key: "processStopped", glyph: "ring", tone: "warn", raw: "running" });
+    expect(jobStatus({ state: "running", observedProcessState: { state: "exited", ...at } })).toMatchObject({ group: "active", key: "processExited", glyph: "ring", tone: "muted" });
+    const plain = jobStatus({ state: "running" });
+    for (const state of ["running", "sleeping", "somethingNew"]) expect(jobStatus({ state: "running", observedProcessState: { state, ...at } })).toEqual(plain);
+    expect(jobStatus({ state: "running", observedProcessState: null })).toEqual(plain);
+    expect(jobStatus({ state: "failed", observedProcessState: { state: "stopped", ...at } })).toMatchObject({ group: "done", key: "failed" });
+  });
   it("maps Job Service states through one table; unknown states stay in progress with their raw name", () => {
     expect(jobStatus({ state: "launch_pending" })).toMatchObject({ group: "active", key: "starting" });
     expect(jobStatus({ state: "running" })).toMatchObject({ group: "active", key: "running" });

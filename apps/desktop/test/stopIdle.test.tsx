@@ -76,16 +76,15 @@ it("rows: a pinned stoppable agent is a caution, blocked rows cannot be ticked, 
 });
 
 
-it("the menu: one submenu (下线空闲的…) with the quick 30-minute row and 选择…, only with the capability", () => {
+it("the menu: one submenu (下线空闲的…), only with the capability", () => {
   fx.features = new Set();
-  expect(lib.stopIdleMenuEntries({ hostId: "local", label: "HOST-A" }, t)).toEqual([]);
+  expect(lib.stopIdleMenuEntries(lib.hostIdleScope("local", "HOST-A"), t)).toEqual([]);
   expect(lib.hostStopIdleEntries(t)).toEqual([]);
   fx.features = new Set(["stop-idle-agents"]);
-  const entries = lib.stopIdleMenuEntries({ hostId: "local", label: "HOST-A" }, t) as { label: string; submenu?: { label: string }[] }[];
+  const entries = lib.stopIdleMenuEntries(lib.hostIdleScope("local", "HOST-A"), t) as { label: string; title?: string; submenu?: unknown }[];
   expect(entries.map((e) => e.label)).toEqual(["stopIdle.menu"]);
-  expect(entries[0]!.submenu!.map((s) => s.label)).toEqual(["stopIdle.quickHost", "stopIdle.review"]);
-  const project = lib.stopIdleMenuEntries({ hostId: "local", projectId: "p1", label: "W" }, t) as { submenu?: { label: string }[] }[];
-  expect(project[0]!.submenu!.map((s) => s.label)).toEqual(["stopIdle.quickProject", "stopIdle.review"]);
+  expect(entries[0]!.title).toBe("stopIdle.menuHintHost");
+  expect(typeof entries[0]!.submenu).toBe("function");
   expect(lib.hostStopIdleEntries(t).at(-1)).toBe("separator");
 });
 

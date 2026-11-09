@@ -6,10 +6,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { INVOKE_CHANNEL, SHELL_CHANNEL, UPDATE_CHANNEL, WINDOW_CHANNEL } from "../src/shared/ipc";
-import { PLUGINS_CHANNEL } from "../src/shared/plugins";
+import { FRAMES_CHANNEL } from "../src/shared/frames";
+import { MODULE_DATA_CHANNEL } from "../src/shared/moduleData";
 import { KNOWN_ISSUES_CHANNEL } from "../src/shared/knownIssues";
 import { LAUNCH_ART_CHANNEL } from "../src/shared/launchArt";
-import type { PluginCatalog, PluginFrameResource } from "../src/shared/plugins";
 import type { DaemonService } from "../src/main/daemon";
 import type { PreloadBridge } from "../src/shared/ipc";
 import type { HostsState } from "../src/shared/hosts";
@@ -534,7 +534,7 @@ function invokeAs(event: unknown, channel: string, ...args: unknown[]) {
 }
 const senderCases = [
   {
-    name: "opaque plugin subframe",
+    name: "opaque frame subframe",
     event: () => ({ sender: fake.contents, senderFrame: { url: "cutex-plugin://frame/untrusted/index.html" } })
   },
   {
@@ -578,9 +578,10 @@ const channelCases = [
   { name: "launch art import", channel: LAUNCH_ART_CHANNEL, args: [{ op: "import" }] },
   { name: "launch art clear", channel: LAUNCH_ART_CHANNEL, args: [{ op: "clear" }] },
   { name: "window controls", channel: WINDOW_CHANNEL, args: ["control", "minimize"] },
-  { name: "plugin catalog", channel: PLUGINS_CHANNEL, args: [{ op: "list" }] },
-  { name: "plugin preparation", channel: PLUGINS_CHANNEL, args: [{ op: "prepare" }] },
-  { name: "plugin release", channel: PLUGINS_CHANNEL, args: [{ op: "release", id: "foreign-lease" }] }
+  { name: "frame page preparation", channel: FRAMES_CHANNEL, args: [{ op: "filePage", hostId: "page-host", path: "/p/index.html" }] },
+  { name: "frame release", channel: FRAMES_CHANNEL, args: [{ op: "release", id: "foreign-lease" }] },
+  { name: "module data read", channel: MODULE_DATA_CHANNEL, args: [{ op: "read", id: "notes", path: "a.txt" }] },
+  { name: "module file pick", channel: MODULE_DATA_CHANNEL, args: [{ op: "pick", id: "notes", filters: [] }] }
 ];
 
 describe("main IPC authority belongs to the app's exact top frame", () => {
@@ -609,31 +610,26 @@ describe("main IPC authority belongs to the app's exact top frame", () => {
     await expect(invokeAs(appEvent(), LAUNCH_ART_CHANNEL, { op: "import", folder: fake.userData })).rejects.toThrow("unknown launch-art op");
     await expect(invokeAs(appEvent(), WINDOW_CHANNEL, "control", "minimize")).resolves.toBeUndefined();
     expect(fake.windowActions).toEqual(["minimize"]);
-    await expect(fake.bridge!.plugins!.list()).resolves.toEqual({ plugins: [], errors: [] });
+    await expect(fake.bridge!.moduleData!.folders()).resolves.toEqual([]);
+    // The frame plugin catalog is retired: no channel, no bridge.
+    expect(fake.handlers.has("cutex-desktop:plugins")).toBe(false);
+    expect("plugins" in fake.bridge!).toBe(false);
   });
 });
 
-async function preparePlugin(): Promise<PluginFrameResource> {
-  const directory = join(fake.userData, "plugins", "sample");
-  mkdirSync(directory, { recursive: true });
-  writeFileSync(join(directory, "manifest.json"), JSON.stringify({
-    apiVersion: 1,
-    id: "sample",
-    name: "IPC boundary fixture",
-    version: "1.0.0",
-    entry: "index.html",
-    capabilities: ["views"],
-    contributes: { "main.page": [{ id: "sample.page", title: "Fixture" }] }
-  }));
-  writeFileSync(join(directory, "index.html"), "<p>isolated local fixture</p>");
-  const catalog: PluginCatalog = await fake.bridge!.plugins!.list();
-  expect(catalog.errors).toEqual([]);
-  return fake.bridge!.plugins!.prepare({
-    pluginId: "sample",
-    fingerprint: catalog.plugins[0]!.fingerprint,
-    instanceId: randomUUID(),
-    channel: randomUUID()
-  });
+/** An HTML file page (file view): the same one-use frame store, leases and network containment as agent pages. */
+async function preparePage(): Promise<{ id: string; url: string }> {
+  if (!fake.extra.some((conn) => conn.hostId === "page-host")) {
+    const daemon = {
+      currentState: { kind: "connected" },
+      hostFile: async (path: string) => ({ path, size: 29, modifiedAt: "2026-11-08T00:00:00Z", encoding: "utf8", content: "<p>isolated local fixture</p>", truncated: false, mime: "text/html" }),
+      stop() {}
+    };
+    fake.extra.push({ hostId: "page-host", routingEpoch: "epoch-p", daemon: daemon as unknown as DaemonService });
+  }
+  const result = await fake.bridge!.frames!.prepareFilePage({ hostId: "page-host", path: "/p/index.html" });
+  if (!result.ok) throw new Error(`file page refused: ${result.reason}`);
+  return result.frame;
 }
 function requestAllowed(url: string, resourceType = "subFrame", webContentsId = fake.contents!.id): boolean {
   let result: { cancel: boolean } | undefined;
@@ -647,9 +643,9 @@ function navigationAllowed(url: string, isMainFrame = false): boolean {
   return preventDefault.mock.calls.length === 0;
 }
 
-describe("plugin documents use the owning window and a restricted navigation lifetime", () => {
+describe("frame documents use the owning window and a restricted navigation lifetime", () => {
   it("serves the owned document once, only as a subframe, and releases its navigation lease", async () => {
-    const prepared = await preparePlugin();
+    const prepared = await preparePage();
     expect(requestAllowed(prepared.url)).toBe(true);
     expect(navigationAllowed(prepared.url)).toBe(true);
     for (const kind of ["mainFrame", "xhr", "script", "other"]) {
@@ -663,7 +659,7 @@ describe("plugin documents use the owning window and a restricted navigation lif
     expect(response.headers.get("content-security-policy")).toContain("sandbox allow-scripts");
     expect(await response.text()).toContain("isolated local fixture");
     expect(fake.respond!(new Request(prepared.url)).status).toBe(404);
-    await fake.bridge!.plugins!.release(prepared.id);
+    await fake.bridge!.frames!.release(prepared.id);
     expect(requestAllowed(prepared.url)).toBe(false);
     expect(navigationAllowed(prepared.url)).toBe(false);
   });
@@ -679,14 +675,14 @@ describe("plugin documents use the owning window and a restricted navigation lif
   });
 
   it.each(["render-process-gone", "destroyed"])("revokes prepared documents on %s", async event => {
-    const prepared = await preparePlugin();
+    const prepared = await preparePage();
     fake.windowEvents.get(event)!();
     expect(requestAllowed(prepared.url)).toBe(false);
     expect(fake.respond!(new Request(prepared.url)).status).toBe(404);
   });
 
   it("revokes on main reload while preserving leases during child loads and in-place navigation", async () => {
-    const prepared = await preparePlugin();
+    const prepared = await preparePage();
     const navigation = fake.windowEvents.get("did-start-navigation")!;
     navigation({}, prepared.url, false, false);
     expect(requestAllowed(prepared.url)).toBe(true);
@@ -698,7 +694,7 @@ describe("plugin documents use the owning window and a restricted navigation lif
   });
 });
 
-describe("plugin frames cannot reach the network outside CSP (WebRTC, DNS prefetch)", () => {
+describe("opaque frames cannot reach the network outside CSP (WebRTC, DNS prefetch)", () => {
   it("disables non-proxied UDP WebRTC on every webContents", () => {
     const policies: string[] = [];
     const popupGuard = vi.fn();
@@ -712,22 +708,22 @@ describe("plugin frames cannot reach the network outside CSP (WebRTC, DNS prefet
     expect({ listeners: listeners.length, popupGuards: popupGuard.mock.calls.length }).toEqual({ listeners: 2, popupGuards: 1 });
   });
 
-  it("leaves Chromium networking alone until the first plugin document, then contains it before serving one", async () => {
-    await fake.bridge!.plugins!.list();
+  it("leaves Chromium networking alone until the first frame document, then contains it before serving one", async () => {
+    await fake.bridge!.frames!.pageDataUsage();
     expect(fake.proxies).toEqual([]);
     expect(fake.resolvers).toEqual([]);
-    await preparePlugin();
+    await preparePage();
     expect(fake.proxies).toEqual([{ mode: "fixed_servers", proxyRules: "socks5://127.0.0.1:9", proxyBypassRules: "<-loopback>" }]);
     expect(fake.resolvers).toEqual([{ enableBuiltInResolver: true, secureDnsMode: "secure", secureDnsServers: ["https://127.0.0.1:9/dns-query{?dns}"] }]);
-    await preparePlugin();
+    await preparePage();
     expect(fake.proxies).toHaveLength(1);
   });
 
-  it("does not hand out a plugin document when containment fails, and retries next time", async () => {
+  it("does not hand out a frame document when containment fails, and retries next time", async () => {
     fake.proxyFailures = 1;
-    await expect(preparePlugin()).rejects.toThrow("proxy service unavailable");
+    await expect(preparePage()).rejects.toThrow("proxy service unavailable");
     expect(fake.proxies).toEqual([]);
-    const prepared = await preparePlugin();
+    const prepared = await preparePage();
     expect(fake.proxies).toHaveLength(1);
     expect(requestAllowed(prepared.url)).toBe(true);
   });

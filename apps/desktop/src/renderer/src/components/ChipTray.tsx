@@ -49,6 +49,7 @@ import { setTrayPrefs, useTrayPrefs } from "../lib/trayPrefs";
 import { hideTray, holdTray, publishTrayStage, releaseTray, revealTray, toggleTray, useTray, useTrayDrag, useTrayStage } from "../lib/trayStore";
 import type { AppSlotEntry } from "../modules/slots";
 import { ItemBoundary } from "../modules/Outlet";
+import { useSlot } from "../modules/react";
 import { agentHost, useApp } from "../store";
 import { setTrayBandWidth } from "../lib/workspaces";
 import { useInWindow, useWindowKey } from "../lib/windowScope";
@@ -497,6 +498,7 @@ const ChipTray = memo(function ChipTray({ placement, edge, entry, dockCount, ext
   if (placement === "handle") return <TrayHandle label={t("pane.tray.reveal", { key: shortcut })} menu={frameMenu} />;
 
   const Dock = entry?.item.Dock;
+  const moduleEntries = useSlot("tray.entry");
   return (
     <div
       ref={dock}
@@ -565,6 +567,12 @@ const ChipTray = memo(function ChipTray({ placement, edge, entry, dockCount, ext
       {foldOn && overflowOpen && n > 0 && Dock && entry && more.current && (
         <TrayOverflow anchor={more.current} folded={folded} moduleId={entry.moduleId} Dock={Dock} onClose={() => setOverflowOpen(false)} />
       )}
+      {/* `tray.entry` (§29): the frame draws them, so they are there on an empty tray too. */}
+      {moduleEntries.map((e) => (
+        <ItemBoundary key={e.item.id} moduleId={e.moduleId}>
+          <e.item.Button />
+        </ItemBoundary>
+      ))}
     </div>
   );
 });

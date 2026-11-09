@@ -16,6 +16,9 @@
 import type { ComponentType, ReactNode } from "react";
 import type { MessageKey } from "../i18n";
 import type { MenuEntry } from "../lib/contextMenu";
+import type { ActivityListener, UsageListener } from "../lib/activityFeed";
+import type { OwnerWaitingListener } from "../lib/ownerWaiting";
+import type { AgentSummary } from "../lib/agentSummaries";
 import type { AgentFeature } from "../lib/agentFeatures";
 import type { SettingsAgents, SettingsGroupId, SettingsSource } from "../lib/settingsNav";
 import type { ExternalMessage, RawItem } from "../lib/timeline";
@@ -25,8 +28,9 @@ import type { HostPlatform } from "../../../shared/hosts";
 import type { SettingsTab } from "../store";
 import type { CustomizeRegion, CustomizeSide } from "../lib/customize";
 import type { DesktopWidgetItem } from "./widgetTypes";
-export type { DesktopWidgetItem, DesktopWidgetProps, WidgetActions, WidgetInstanceRef, WidgetSettingField, WidgetSettings, WidgetShape, WidgetSizeSpec, WidgetSource, WidgetSteps } from "./widgetTypes";
-import type { ItemId, Json, ModuleContext, ModuleDefinition, ModuleHost, PageParams, SlotEntry, SlotItemBase, SlotSpec } from "./types";
+import type { ModuleData, ModuleFiles } from "@cutex-desktop/module-api";
+export type { DesktopWidgetItem, DesktopWidgetProps, WidgetActions, WidgetInstanceRef, WidgetSettingField, WidgetSettings, WidgetShape, WidgetSizeSpec, WidgetSource, WidgetSteps, WidgetStepSizes } from "./widgetTypes";
+import type { ItemId, Json, ModuleContext as EngineModuleContext, ModuleDefinition, ModuleHost, PageParams, SlotEntry, SlotItemBase, SlotSpec } from "./types";
 
 export type { PageParams } from "./types";
 
@@ -46,8 +50,17 @@ export interface SettingsPageItem extends SlotItemBase {
   Aside?: ComponentType;
   /** A link at the end of the page header to a related page (运行时 → 后端更新); shown only while that page is. */
   headerLink?: { page: SettingsTab; labelKey: MessageKey };
-  /** A way back above the page header (主机 → ‹ 所有设备); shown only while that page is. */
+  /** A way back above the page header (a host's page → ‹ 主机); shown only while that page is. */
   backLink?: { page: SettingsTab; labelKey: MessageKey };
+  /** A detail page without a nav row of its own: the nav marks `navParent`, the breadcrumb goes through it. */
+  navParent?: SettingsTab;
+  /** The page shows one host: its heading and breadcrumb name the Settings target host instead of `titleKey`. */
+  hostTitle?: boolean;
+  /**
+   * Parts on a page of their own (`openSettings(page, { sub })`): title, a way back, their own scroll position.
+   * The page shows an entry to each. `anchors`: the cards that live there, so old deep links and search land on it.
+   */
+  subPages?: Readonly<Record<string, { titleKey: MessageKey; hintKey?: MessageKey; Page: ComponentType; anchors?: readonly string[] }>>;
   /**
    * A host page that can show every host at once (用量): the header picker adds 「全部主机」 while two or
    * more online hosts report `capability`; the page reads the hosts with lib/settingsHost
@@ -959,6 +972,16 @@ export interface RefImage {
   truncated: boolean;
 }
 
+/** v1.27 (§29): a module's button at the far end of the tray. The component decides when it shows (null = nothing). */
+export interface TrayEntryItem extends SlotItemBase {
+  Button: ComponentType;
+}
+
+/** v1.27 (§29): a module's rows in the identity menu (bottom left), read each time the menu opens. */
+export interface IdentityMenuItem extends SlotItemBase {
+  entries(): MenuEntry[];
+}
+
 export interface SlotMap {
   "settings.page": SettingsPageItem;
   "settings.section": SettingsSectionItem;
@@ -999,6 +1022,9 @@ export interface SlotMap {
   "window.search": WindowSearchItem;
   // Contract 1.22: desktop widgets (§27, design 032).
   "desktop.widget": DesktopWidgetItem;
+  // Contract 1.27: module entries in the tray and the identity menu (§29).
+  "tray.entry": TrayEntryItem;
+  "identity.menu": IdentityMenuItem;
 }
 export type SlotId = keyof SlotMap;
 export type SlotItem<S extends SlotId> = SlotMap[S];
@@ -1028,6 +1054,8 @@ export const SLOT_SPECS: { readonly [S in SlotId]: SlotSpec } = {
   "pane.desktop": { unavailable: "hide" },
   "window.search": { unavailable: "hide" },
   "desktop.widget": { unavailable: "hide" },
+  "tray.entry": { unavailable: "hide" },
+  "identity.menu": { unavailable: "hide" },
 };
 
 /** Narrow services handed to modules (§7). Step 1 ships the part the pilot needs; the rest lands with its area. */
@@ -1038,9 +1066,28 @@ export interface ModuleServices {
    * stays `bridge` / `api`.
    */
   daemonFor(hostId: string): DaemonApi;
+  /** v1.29 (§7): the agents on the connected hosts. `list` is the same array until something changes. */
+  agents: {
+    list(): readonly AgentSummary[];
+    get(id: string): AgentSummary | null;
+    subscribe(listener: () => void): () => void;
+    open(id: string): void;
+  };
+  /** v1.27 (§29): the owner sent a message / an agent ran a command or tool, as far as this desktop can see (lib/activityFeed.ts). */
+  activity: {
+    subscribe(listener: ActivityListener): () => void;
+    /** v1.30 (§29): what each token usage report on a connected host adds (non-cached input + output), once each. */
+    subscribeUsage(listener: UsageListener): () => void;
+    /** v1.30 (§29): what waits on the owner on the connected hosts, item by item; called at once, then on each change. */
+    subscribeOwnerWaiting(listener: OwnerWaitingListener): () => void;
+  };
   ui: {
-    notice(text: string, tone?: "info" | "error"): void; // = store.notify
-    openSettings(page: SettingsTab, focus?: { anchor?: string; profile?: string; create?: boolean }): void;
+    notice(text: string, tone?: "info" | "error"): void;
+    /** A short message at the bottom of the window on any screen (the Shelves' toast). */
+    toast(text: string): void; // = store.notify
+    /** v1.29: a modal dialog; resolves true when confirmed. */
+    confirm(message: string, danger?: boolean): Promise<boolean>;
+    openSettings(page: SettingsTab, focus?: { anchor?: string; profile?: string; create?: boolean; /** v1.27: a sub-page (`SettingsPageItem.subPages`). */ sub?: string }): void;
     /**
      * Shows a `main.page` item (step 3); params live in memory only. v1.21 (§24.4): as its own pane in the focused
      * conversation's Shelf (a page already open there shows these params); with 页面打开位置 = 占用会话 (or no Shelf
@@ -1085,6 +1132,12 @@ export interface ModuleServices {
   timeline: {
     focusTurn(hostId: string, sessionId: string, turnId: string, opts?: { back?: boolean }): Promise<FocusTurnResult>;
   };
+  /**
+   * v1.31 (§30.6): the module's own data folder in userData, and main's open / save dialogs. Bound to the module id in
+   * ctx.services; the shared `services` object has no module, so its calls reject.
+   */
+  data: ModuleData;
+  files: ModuleFiles;
   /** v1.4 (§19.9): the one entry point for every stored pointer (bookmarks, note sources, links). */
   refs: {
     open(ref: CutexRef, opts?: { how?: "auto" | "peek" | "page" | "jump" }): Promise<RefOpenResult>;
@@ -1096,7 +1149,9 @@ export interface ModuleServices {
 }
 
 export type AppModule = ModuleDefinition<SlotMap, ModuleServices, MessageKey>;
-export type AppModuleContext = ModuleContext<SlotMap, ModuleServices, MessageKey>;
+export type ModuleContext = EngineModuleContext<SlotMap, ModuleServices, MessageKey>;
+/** @deprecated The old name of `ModuleContext`. */
+export type AppModuleContext = ModuleContext;
 export type AppModuleHost = ModuleHost<SlotMap, ModuleServices, MessageKey>;
 export type AppSlotEntry<S extends SlotId> = SlotEntry<SlotMap[S]>;
 

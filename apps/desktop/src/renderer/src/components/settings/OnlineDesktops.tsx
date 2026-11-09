@@ -97,27 +97,30 @@ export function OnlineDesktopsSection() {
       if (context.current === started) setError(reason);
     }
   };
+  // Launches of one computer read alike: only then does each row spell out which launch it is.
+  const sameComputerTwice = new Set(view.rows.map((row) => row.deviceName)).size < view.rows.length;
   return (
     <Section id={settingsAnchorId(ONLINE_DESKTOPS_ANCHOR)} title={t("remoteClose.list")} hint={t("remoteClose.listHint")}>
-      <p className="mb-3 text-meta text-muted">{t("remoteClose.instancesHint")}</p>
       {error && <ErrorNote>{error}</ErrorNote>}
       {view.error && !view.rows.length && <ErrorNote>{remoteCloseRefusalText(t, view.error)}</ErrorNote>}
       {!view.read && view.loading && <Loading rows={1} />}
       {view.read && !view.error && view.rows.length === 0 && <EmptyState>{t("remoteClose.none")}</EmptyState>}
+      {sameComputerTwice && <p className="mb-3 text-meta text-muted">{t("remoteClose.instancesHint")}</p>}
       {view.rows.map((row) => (
-        <DesktopRow key={row.instanceId} row={row} user={userName(row.userId)} busy={busy === row.instanceId} narrowed={narrowed} onClose={() => void close(row)} />
+        <DesktopRow key={row.instanceId} row={row} user={userName(row.userId)} busy={busy === row.instanceId} narrowed={narrowed} tellApart={sameComputerTwice} onClose={() => void close(row)} />
       ))}
     </Section>
   );
 }
 
-function DesktopRow({ row, user, busy, narrowed, onClose }: { row: OnlineClientRowView; user: string | null; busy: boolean; narrowed: boolean; onClose(): void }) {
+function DesktopRow({ row, user, busy, narrowed, tellApart, onClose }: { row: OnlineClientRowView; user: string | null; busy: boolean; narrowed: boolean; tellApart: boolean; onClose(): void }) {
   const { t, locale } = useI18n();
   const now = useClock();
   const seen = row.lastSeen ? Date.parse(row.lastSeen) : NaN;
   const app = row.appName === DESKTOP_APP_NAME || !row.appName ? t("remoteClose.appName", { version: row.appVersion || "?" }) : `${row.appName} ${row.appVersion}`.trim();
   const connected = row.connectedSince ? Date.parse(row.connectedSince) : NaN;
   const instance = t("remoteClose.instance", { id: row.instanceId.slice(0, 8) });
+  const launch = Number.isFinite(connected) ? `${instance} · ${t("remoteClose.connectedSince", { when: formatAbsolute(connected / 1000) })}` : instance;
   const parts = [app, row.platform ? clientPlatformLabel(row.platform) : null, user, Number.isFinite(seen) ? t("remoteClose.lastSeen", { when: formatWhen(seen / 1000, now, locale) }) : null].filter((p): p is string => !!p);
   const hint =
     row.gate === "disabled" ? t("remoteClose.gate.disabled") : row.gate === "forbidden" ? t(narrowed ? "remoteClose.gate.scope" : "remoteClose.gate.otherUser") : row.gate === "busy" ? t("remoteClose.gate.busy") : t("remoteClose.closeHint");
@@ -136,9 +139,9 @@ function DesktopRow({ row, user, busy, narrowed, onClose }: { row: OnlineClientR
           {!row.allowRemoteClose && !row.self && <Tag>{t("remoteClose.offChip")}</Tag>}
         </span>
       }
-      detail={<span className="block">
+      detail={<span className="block" title={tellApart ? undefined : launch}>
         <span title={Number.isFinite(seen) ? formatAbsolute(seen / 1000) : undefined}>{parts.join(" · ")}</span>
-        <span className="mt-0.5 block" title={row.instanceId}>{instance}{Number.isFinite(connected) ? ` · ${t("remoteClose.connectedSince", { when: formatAbsolute(connected / 1000) })}` : ""}</span>
+        {tellApart && <span className="mt-0.5 block" title={row.instanceId}>{launch}</span>}
       </span>}
       actions={row.self ? undefined : <Button disabled={busy || row.gate !== "ok"} title={hint} onClick={onClose}>{t("remoteClose.close")}</Button>}
     /></SettingsGroup>

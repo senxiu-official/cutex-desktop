@@ -96,7 +96,7 @@ it.each(cases)("renders %s without a boundary fallback and with the correct acco
   const sections = [...container.querySelectorAll("section")];
   const appearance = sections.find(section => section.querySelector("h3")?.textContent?.startsWith("settings.profile.look"));
   expect(appearance).toBeDefined();
-  expect(appearance!.querySelectorAll('[data-timing-presentation="header"][aria-label="settings.scope.agents.none"]')).toHaveLength(1);
+  expect(appearance!.querySelectorAll('[data-timing-presentation="header"][aria-label="settings.scope.agents.none"]')).toHaveLength(0);
   expect(appearance!.querySelectorAll('[data-timing-presentation="row"]')).toHaveLength(0);
   const quota = sections.find(section => section.querySelector("h3")?.textContent?.startsWith("agent-config.quota.title"));
   if (quota) {

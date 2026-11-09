@@ -6,6 +6,7 @@
 // serves its index.js, so the host object / swap / fallback run as in the app.
 // localStorage "cutex-mock-packs" = "none" (no index published yet) | "offline" (check fails) | "broken"
 // (an installed pack failed its start-up verification).
+import type { ModuleDevBridge, ModuleDevView } from "../../../shared/moduleDev";
 import type { InstalledPackView, ModulePacksBridge, ModulePacksView, PackStep } from "../../../shared/modulePacks";
 
 const STEP_MS = 700;
@@ -23,6 +24,7 @@ const INDEX_PACKS: NonNullable<ModulePacksView["index"]>["packs"] = [
   { id: "claude-science", version: "1.1.0", moduleApi: "^1.16", compat: "ok", size: 22746, title: { en: "Claude Science", "zh-CN": "Claude Science" } },
   { id: "claude-science", version: "1.0.1", moduleApi: "^1.16", compat: "ok", size: 22701, title: { en: "Claude Science", "zh-CN": "Claude Science" } },
   { id: "claude-science", version: "2.0.0", moduleApi: "^1.21", compat: "needsNewerApp", size: 23950, title: { en: "Claude Science", "zh-CN": "Claude Science" } },
+  { id: "desk-pet", version: "1.2.1", moduleApi: "^1.30", compat: "ok", size: 21000, title: { en: "Desk pet", "zh-CN": "桌宠" }, description: { en: "A little character that types while your agents use tokens", "zh-CN": "一个小角色：智能体用 token 时它敲得起劲" } },
   {
     id: "lab-notes",
     version: "0.3.0",
@@ -33,6 +35,28 @@ const INDEX_PACKS: NonNullable<ModulePacksView["index"]>["packs"] = [
     description: { en: "A notebook page per host (preview: its download fails verification)", "zh-CN": "每台主机一页实验记录（预览：下载后校验失败）" },
   },
 ];
+
+/** Developer mode in the preview: the switch and the rows, with nothing to load (shared/moduleDev.ts). */
+export function mockModuleDev(): ModuleDevBridge {
+  let view: ModuleDevView = { enabled: false, internal: true, skipped: false, modules: [] };
+  const listeners = new Set<(v: ModuleDevView) => void>();
+  const set = (next: ModuleDevView) => {
+    view = next;
+    for (const l of listeners) l(view);
+    return Promise.resolve(view);
+  };
+  return {
+    state: () => Promise.resolve(view),
+    setEnabled: (enabled) => set({ ...view, enabled }),
+    addFolder: () => set({ ...view, modules: [...view.modules, { folder: `D:/work/module-${view.modules.length + 1}`, id: null, version: null, moduleApi: null, rev: 0, entry: null, styles: [], host: {}, error: "no build in dist/ (run cutex-module build)" }] }),
+    removeFolder: (folder) => set({ ...view, modules: view.modules.filter((m) => m.folder !== folder) }),
+    report: () => Promise.resolve(view),
+    onState: (listener) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+  };
+}
 
 export function mockModulePacks(): ModulePacksBridge {
   const listeners = new Set<(v: ModulePacksView) => void>();
@@ -47,6 +71,7 @@ export function mockModulePacks(): ModulePacksBridge {
     check: null,
     operation: null,
     lastError: null,
+    local: { allowed: true, internal: true, safeStart: null, held: [], error: null },
   };
   const set = (next: Partial<ModulePacksView>) => {
     view = { ...view, ...next };
@@ -56,7 +81,7 @@ export function mockModulePacks(): ModulePacksBridge {
   const entry = (id: string, version: string): InstalledPackView => ({
     id,
     version,
-    moduleApi: "^1.16",
+    moduleApi: INDEX_PACKS.find((p) => p.id === id && p.version === version)?.moduleApi ?? "^1.16",
     compat: "ok",
     entry: `/__mock-pack/${id}/${version}/index.js`,
     styles: [],
@@ -93,6 +118,16 @@ export function mockModulePacks(): ModulePacksBridge {
     },
     async remove({ id }) {
       return set({ installed: view.installed.filter((p) => p.id !== id), broken: view.broken.filter((b) => b.id !== id), lastError: view.lastError?.id === id ? null : view.lastError });
+    },
+    // Stands in for main's file dialog and confirm: the preview always picks the desk pet.
+    async installLocal() {
+      return set({ installed: [...view.installed.filter((p) => p.id !== "desk-pet"), { ...entry("desk-pet", "1.2.1"), local: true }] });
+    },
+    async allowLocal({ allow }) {
+      return set({ local: { ...view.local, allowed: allow } });
+    },
+    async localFailed({ id, version, reason }) {
+      return set({ installed: view.installed.filter((p) => p.id !== id), local: { ...view.local, held: [...view.local.held, { id, version, reason: "failed", detail: reason }] } });
     },
     onState(listener) {
       listeners.add(listener);

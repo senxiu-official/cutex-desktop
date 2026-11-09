@@ -1,0 +1,5 @@
+{
+  "version": "1.2.1",
+  "moduleApi": "^1.30",
+  "packOnly": true
+}

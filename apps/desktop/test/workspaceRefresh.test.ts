@@ -236,7 +236,10 @@ describe("useWorkspace auto refresh", () => {
     expect(dirs.version("docs")).toBe(v.docs);
     expect(dirs.version("")).toBe(v.root);
     expect(render().revision).toBe(1);
+    // Git status rereads too, no sooner than 2 s after the last read started (lib/gitStatusFlight.ts).
     await vi.advanceTimersByTimeAsync(300);
+    expect(env.api.gitReads).toBe(1);
+    await vi.advanceTimersByTimeAsync(1500);
     expect(env.api.gitReads).toBe(2);
   });
 
@@ -324,5 +327,86 @@ describe("useWorkspace auto refresh", () => {
     h.unmount();
     expect(env.unwatched).toContain("w-1");
     expect([...env.listeners.values()].every((s) => s.size === 0)).toBe(true);
+  });
+});
+
+describe("useWorkspace git status: one read at a time per workspace", () => {
+  // The 2026-11-08 EVA lockup: a slow `git/status` and a stream of watch batches / turn ends started a
+  // new read every 300 ms until the host's connection limit was full.
+  let original: typeof env.api.gitStatus;
+  let pending: (() => void)[];
+  let reads: number;
+  let inFlight: number;
+  let maxInFlight: number;
+  const render = () => h.render(() => useWorkspace(SCOPE, "local"));
+  const turnEnd = () => env.emit("sessionEvent", { sessionId: "s1", envelope: { native: { kind: "notification", message: { method: "turn/completed", params: { turn: { id: "t" } } } } } });
+  const batch = () => env.emit("workspaceChanged", { watchId: "w-1", paths: ["src/a.ts"], gitChanged: true, overflow: false });
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    env.reset();
+    original = env.api.gitStatus;
+    pending = [];
+    reads = inFlight = maxInFlight = 0;
+    env.api.gitStatus = () => {
+      reads++;
+      maxInFlight = Math.max(maxInFlight, ++inFlight);
+      return new Promise((resolve) => pending.push(() => { inFlight--; resolve({ branch: `b${reads}`, files: [] }); }));
+    };
+  });
+  afterEach(() => {
+    h.unmount();
+    env.api.gitStatus = original;
+    vi.useRealTimers();
+  });
+
+  it("a burst of changes during a slow read starts no second read, then exactly one rerun", async () => {
+    render();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(reads).toBe(1);
+    for (let i = 0; i < 40; i++) {
+      batch();
+      turnEnd();
+      await vi.advanceTimersByTimeAsync(400);
+    }
+    expect(reads).toBe(1);
+    pending.shift()!();
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(reads).toBe(2);
+    expect(render().git).toMatchObject({ branch: "b1" });
+    pending.shift()!();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(reads).toBe(2);
+    expect(maxInFlight).toBe(1);
+    expect(render().git).toMatchObject({ branch: "b2" });
+  });
+
+  it("while changes keep coming, reads start at most once per 2 s", async () => {
+    env.api.gitStatus = () => {
+      reads++;
+      return Promise.resolve({ branch: "main", files: [] });
+    };
+    render();
+    await vi.advanceTimersByTimeAsync(0);
+    for (let i = 0; i < 40; i++) {
+      batch();
+      await vi.advanceTimersByTimeAsync(250);
+    }
+    // 10 s of changes every 250 ms: the first read plus one per 2 s.
+    expect(reads).toBeGreaterThanOrEqual(5);
+    expect(reads).toBeLessThanOrEqual(6);
+  });
+
+  it("remounting during a slow read joins it; its late result reaches only the live view", async () => {
+    render();
+    await vi.advanceTimersByTimeAsync(0);
+    h.unmount();
+    render();
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(reads).toBe(1);
+    pending.shift()!();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(render().git).toMatchObject({ branch: "b1" });
+    expect(maxInFlight).toBe(1);
   });
 });

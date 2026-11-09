@@ -15,6 +15,8 @@ export const MODULES_INDEX_FILE = "modules.json";
 export const MODULES_INDEX_SIG = "modules.json.minisig";
 /** The directory inside an installed version that holds the signed index it was installed from. */
 export const SIGNED_DIR = ".signed";
+/** Starts the app without any local module (§23.14). */
+export const LOCAL_SAFE_START_ARG = "--no-local-modules";
 
 export const LIMITS = {
   indexBytes: 1024 * 1024,
@@ -27,6 +29,18 @@ export const LIMITS = {
   hostSpecifiers: 128,
   hostNames: 512,
 } as const;
+
+/** Ids of the modules in registry.ts: a local module may not use them (§23.14; test/modulePacksLocal keeps this in step). */
+export const BUILT_IN_MODULE_IDS: readonly string[] = [
+  "about", "agent-bus", "agent-config", "alarms", "approvals", "archive", "artifacts", "backend-upgrade",
+  "background-terminals", "bookmarks", "browser", "claude-accounts", "claude-science", "codex-config",
+  "connection", "conversation", "delegations", "diff", "goal", "home", "intro", "jobs", "kimi-accounts",
+  "nci", "notes", "notifications", "onboarding", "owner-notify", "peers", "perf-log", "plan",
+  "profile-import", "project-view", "projects", "proxy", "quick-chats", "quick-switch", "remote-access",
+  "remote-copies", "running-agents", "runtime-packages", "runtimes", "safety-grants", "services", "shell",
+  "side-chat", "status-capsule", "storage", "subagents", "task-service", "terminal", "thread-search",
+  "updater", "usage", "users", "workflows", "workspace", "world-clock",
+];
 
 /**
  * The module-pack TEST key (minisign public key). Its secret half is derived from the public seed below
@@ -41,7 +55,7 @@ export const PACK_PATH_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}(?:\/[A-Za-z0-9][A
 const VERSION_RE = /^(0|[1-9]\d{0,5})\.(0|[1-9]\d{0,5})\.(0|[1-9]\d{0,5})$/;
 const SHA256_RE = /^[0-9a-f]{64}$/;
 /** A host specifier a pack may read from the host object (modules/packHost.ts lists the provided ones). */
-export const HOST_SPECIFIER_RE = /^(?:react|react\/jsx-runtime|react-dom|react-dom\/client|zustand|@cutex-desktop\/app\/[A-Za-z0-9_-]+(?:\/[A-Za-z0-9._-]+){0,6})$/;
+export const HOST_SPECIFIER_RE = /^(?:react|react\/jsx-runtime|react-dom|react-dom\/client|zustand|@cutex-desktop\/module-api(?:\/ui|\/experimental)?|@cutex-desktop\/app\/[A-Za-z0-9_-]+(?:\/[A-Za-z0-9._-]+){0,6})$/;
 const HOST_NAME_RE = /^(?:\*|default|[A-Za-z_$][A-Za-z0-9_$]{0,127})$/;
 
 /** Pack versions are `M.m.p`. */
@@ -214,6 +228,35 @@ export interface InstalledPackView {
   host: Record<string, string[]>;
   title?: Record<string, string>;
   description?: Record<string, string>;
+  /** Installed from a file by the owner (§23.14): unsigned, publisher unverified. */
+  local?: true;
+}
+
+/** Local modules (§23.14). Only main changes any of this, each time behind its own native dialog. */
+export interface LocalPacksView {
+  allowed: boolean;
+  /**
+   * A dev build (an unpackaged run or a self-built package, `localPacksDefault`): a local module whose imports go beyond
+   * the public API (§30) loads anyway, tagged. A public build refuses it. Not a security boundary: a local module
+   * already runs with the app's trust; the check keeps modules from silently breaking on an app update.
+   */
+  internal: boolean;
+  /** This run skips local modules: the last starts failed, or the app was started with LOCAL_SAFE_START_ARG. */
+  safeStart: { reason: "crashes" | "argument" } | null;
+  /** Installed local modules that this run does not load; "failed" stays until the file is installed again. */
+  held: { id: string; version: string; reason: "off" | "safeStart" | "failed"; detail?: string }[];
+  /** Why the last install from a file failed. */
+  error: string | null;
+}
+
+/** The shared libraries and public entries a module not built from this repository may import (§30). */
+export function isPublicHostSpecifier(spec: string): boolean {
+  return spec === "react" || spec === "react/jsx-runtime" || spec === "react-dom" || spec === "@cutex-desktop/module-api" || spec.startsWith("@cutex-desktop/module-api/");
+}
+
+/** A module's host imports reach beyond the public API (the app's own files, or a library the public API does not share). */
+export function readsAppInternals(host: Readonly<Record<string, readonly string[]>>): boolean {
+  return Object.keys(host).some((spec) => !isPublicHostSpecifier(spec));
 }
 
 export interface AvailablePackView {
@@ -238,19 +281,28 @@ export interface ModulePacksView {
   operation: { id: string; action: "install" | "remove"; version: string | null; step: PackStep | null } | null;
   /** The last failed operation; `retry` = the request that repeats it exactly (same version, same downgrade choice). */
   lastError: { id: string; action: "install" | "remove"; message: string; code: string | null; retry?: { version?: string; allowOlder?: true } } | null;
+  local: LocalPacksView;
 }
 
 export type ModulePacksRequest =
   | { op: "state" }
   | { op: "check" }
   | { op: "install"; id: string; version?: string; allowOlder?: boolean }
-  | { op: "remove"; id: string };
+  | { op: "remove"; id: string }
+  // Requests only: main picks the file and asks the owner itself, so neither carries a path or an answer.
+  | { op: "installLocal" }
+  | { op: "allowLocal"; allow: boolean }
+  // Can only turn a local module off, never on.
+  | { op: "localFailed"; id: string; version: string; reason: string };
 
 export interface ModulePacksBridge {
   state(): Promise<ModulePacksView>;
   check(): Promise<ModulePacksView>;
   install(input: { id: string; version?: string; allowOlder?: boolean }): Promise<ModulePacksView>;
   remove(input: { id: string }): Promise<ModulePacksView>;
+  installLocal(): Promise<ModulePacksView>;
+  allowLocal(input: { allow: boolean }): Promise<ModulePacksView>;
+  localFailed(input: { id: string; version: string; reason: string }): Promise<ModulePacksView>;
   onState(listener: (view: ModulePacksView) => void): () => void;
 }
 
@@ -260,8 +312,17 @@ export function parseModulePacksRequest(raw: unknown): ModulePacksRequest {
   switch (raw.op) {
     case "state":
     case "check":
+    case "installLocal":
       if (Object.keys(raw).length !== 1) throw new Error("invalid module pack request");
       return { op: raw.op };
+    case "allowLocal":
+      onlyKeys(raw, ["op", "allow"], "module pack request");
+      if (typeof raw.allow !== "boolean") throw new Error("invalid module pack request");
+      return { op: "allowLocal", allow: raw.allow };
+    case "localFailed":
+      onlyKeys(raw, ["op", "id", "version", "reason"], "module pack request");
+      if (!isPackModuleId(raw.id) || !parsePackVersion(raw.version) || typeof raw.reason !== "string") throw new Error("invalid module pack request");
+      return { op: "localFailed", id: raw.id, version: raw.version as string, reason: raw.reason.slice(0, 2000) };
     case "install": {
       onlyKeys(raw, ["op", "id", "version", "allowOlder"], "module pack request");
       if (!isPackModuleId(raw.id)) throw new Error("invalid module pack request");

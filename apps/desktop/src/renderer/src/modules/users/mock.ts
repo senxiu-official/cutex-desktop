@@ -239,6 +239,119 @@ let workstationKnowsSelf = false;
 /** workstation's own listing: HOST-A's, plus this desktop's client token there (hosts.json tokenId of workstation). */
 const WORKSTATION_SELF: UserTokenRecord = { tokenId: "mct-4b5c6d7e8f901a2b", label: "desktop-HOST-A-Cutex-9c1d2e", kind: "client", deviceName: null, platform: null, createdAt: iso(30 * 86400), lastUsedAt: iso(30), lastAddress: "100.64.0.2", userId: "owner", pending: false, ...owned("full", "hostCli") };
 
+// Pairing v2 (QR invites, AddDevice.tsx; contract rev 9.1). `?nopairv2`: a cutex without invites (the v1 code in
+// the same panel). `?norelay`: invites carry no relay entry (tailnet / LAN only). `?pairdemo[=s]`: s seconds
+// (default 6) after an invite is made a "Pixel 9 Pro" applies to it. `?pairpending`: a request made from the
+// host's CLI already waits (full control). `?pairdialog=cancel`: the owner cancels main's native dialog (the mock
+// records what it would have shown in `window.__pairingDialogs`). Allowing adds the device to the list.
+const NO_PAIR_V2 = typeof location !== "undefined" && new URLSearchParams(location.search).has("nopairv2");
+const NO_RELAY = typeof location !== "undefined" && new URLSearchParams(location.search).has("norelay");
+type MockInvite = import("../../../../shared/ipc").PairingInviteView;
+// 公网扫码配对 switch (RelayPairing.tsx; contract rev 9.4). Off by default like a fresh relay setup;
+// `?relaypairing=on` listening, `=stuck` on but the port is taken; `?norelay` not configured; `?norelayswitch` an
+// older cutex without the switch. Turning it on while `=stuck` fails like cutex (503, the choice stays on).
+const NO_RELAY_SWITCH = typeof location !== "undefined" && new URLSearchParams(location.search).has("norelayswitch");
+const RELAY_PAIRING_START = (typeof location !== "undefined" && new URLSearchParams(location.search).get("relaypairing")) || "off";
+type MockRelayPairing = import("../../../../shared/ipc").RelayPairingStatusView;
+const relayPairing: MockRelayPairing = NO_RELAY
+  ? { configured: false, enabled: false, listening: false, reason: "not_configured", bootstrapBind: null, bootstrapServerName: null }
+  : { configured: true, enabled: RELAY_PAIRING_START !== "off", listening: RELAY_PAIRING_START === "on", reason: RELAY_PAIRING_START === "on" ? null : RELAY_PAIRING_START === "stuck" ? "bind_unavailable" : "disabled", bootstrapBind: "0.0.0.0:8443", bootstrapServerName: "eva-pair.example.love" };
+function relayPairingApi(): Partial<import("../../../../shared/ipc").DesktopApi> {
+  if (NO_RELAY_SWITCH) return {};
+  return {
+    relayPairing: () => result(() => (pairRefusal(), clone(relayPairing))),
+    setRelayPairing: (enabled) =>
+      result(() => {
+        pairRefusal();
+        if (enabled && !relayPairing.configured) throw new Refusal("bootstrap_not_configured", "no bootstrap bind / name");
+        relayPairing.enabled = enabled;
+        if (!enabled) Object.assign(relayPairing, { listening: false, reason: "disabled" });
+        else if (RELAY_PAIRING_START === "stuck") {
+          Object.assign(relayPairing, { listening: false, reason: "bind_unavailable" });
+          throw new Refusal("bootstrap_bind_unavailable", "address in use");
+        } else Object.assign(relayPairing, { listening: true, reason: null });
+        return clone(relayPairing);
+      }),
+  };
+}
+const invites: MockInvite[] = [];
+const sixDigits = () => String(Math.floor(Math.random() * 1_000_000)).padStart(6, "0");
+const hex64 = (seed: string) => Array.from({ length: 64 }, (_, i) => "0123456789abcdef"[(seed.charCodeAt(i % seed.length) * (i + 7)) % 16]).join("");
+const b64url = (text: string) => btoa(unescape(encodeURIComponent(text))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+function applyTo(invite: MockInvite, deviceName: string, platform: "android" | "ios", route: "direct" | "relay") {
+  if (invite.status !== "invited") return;
+  invite.status = "pending";
+  invite.request = { requestId: `rpr-${invite.inviteId.slice(4)}`, deviceName, platform, shortCode: sixDigits(), csrSha256: hex64(`${deviceName}csr`), keySha256: hex64(`${deviceName}key`), route };
+}
+function liveInvites(): MockInvite[] {
+  const nowMs = Date.now();
+  for (const i of invites) if ((i.status === "invited" || i.status === "pending") && Date.parse(i.expiresAt) <= nowMs) i.status = "expired";
+  return invites.filter((i) => i.status === "invited" || i.status === "pending" || i.status === "approving" || i.status === "approved");
+}
+if (typeof location !== "undefined" && new URLSearchParams(location.search).has("pairpending")) {
+  const invite: MockInvite = { inviteId: "rpi-c11a0000000000000000000000000001", status: "invited", expiresAt: new Date(Date.now() + 240_000).toISOString(), userId: "owner", scope: "full", label: null, deviceId: null, request: null };
+  invites.push(invite);
+  applyTo(invite, "Pixel 9 Pro", "android", "relay");
+}
+const pairRefusal = () => {
+  if (connectionScope() !== "full") throw Object.assign(new Refusal("device_scope_denied", "this device's scope does not allow this"), { access: { scope: connectionScope(), required: "full" } });
+  if (q().has("ownerdevice") && (q().get("ownerdevice") || "local") === "local") throw Object.assign(new Refusal("owner_local_only", "only on the host itself or over SSH"), { access: { action: "pairingCode" } });
+};
+function pairingApi(): Partial<import("../../../../shared/ipc").DesktopApi> {
+  if (NO_PAIR_V2) return {};
+  return {
+    pairingInvites: () => result(() => (pairRefusal(), clone(liveInvites()))),
+    createPairingInvite: (options) =>
+      result(() => {
+        pairRefusal();
+        if (liveInvites().length >= 20) throw new Refusal("bootstrap_rate_limited", "too many live invites");
+        const inviteId = `rpi-${Math.random().toString(16).slice(2).padEnd(32, "0").slice(0, 32)}`;
+        const invite: MockInvite = { inviteId, status: "invited", expiresAt: new Date(Date.now() + 300_000).toISOString(), userId: options.userId ?? "owner", scope: options.scope ?? "full", label: options.label ?? null, deviceId: null, request: null };
+        invites.push(invite);
+        const directUrls = ["http://100.101.102.103:24270", "http://host-a.tail1234.ts.net:24270"];
+        const bootstrapOrigin = NO_RELAY ? null : "https://eva-pair.example.love";
+        const relayFields = bootstrapOrigin ? { bootstrapOrigin, workOrigin: "https://eva.example.love", caDer: "MIIBszCCAVmgAwIBAgIUQmock".padEnd(640, "A"), serverCaSha256: hex64("ca") } : {};
+        const payload = { v: 2, hostId: "ci-0f1e2d3c4b5a69788796a5b4c3d2e1f0", hostName: "HOST-A", directUrls, ...relayFields, inviteId, secret: "mock-secret-not-real-0000000000000000000000", expiresAt: invite.expiresAt, userId: invite.userId, scope: invite.scope };
+        const demo = q().get("pairdemo");
+        if (demo !== null) setTimeout(() => applyTo(invite, "Pixel 9 Pro", "android", NO_RELAY ? "direct" : "relay"), (Number(demo) || 6) * 1000);
+        return { invite: clone(invite), qr: `cutex-pair:v2:${b64url(JSON.stringify(payload))}`, relay: !NO_RELAY, directUrls, bootstrapOrigin };
+      }),
+    cancelPairingInvite: (inviteId) =>
+      result(() => {
+        const invite = invites.find((i) => i.inviteId === inviteId);
+        if (!invite) throw new Refusal("request_not_found", inviteId);
+        if (invite.status === "approving" || invite.status === "approved") throw new Refusal("request_conflict", "already approved");
+        invite.status = "cancelled";
+        return null;
+      }),
+    denyPairingRequest: (inviteId, requestId) =>
+      result(() => {
+        const invite = invites.find((i) => i.inviteId === inviteId);
+        if (!invite?.request || invite.request.requestId !== requestId || invite.status !== "pending") throw new Refusal("request_conflict", "not this request");
+        invite.status = "rejected";
+        return null;
+      }),
+    async approvePairingRequest(inviteId, requestId, texts) {
+      const invite = liveInvites().find((i) => i.inviteId === inviteId);
+      const request = invite?.request;
+      if (!invite || !request || request.requestId !== requestId || (invite.status !== "pending" && invite.status !== "approving")) return { ok: false as const, changed: true as const };
+      if (invite.scope === "full" && invite.status === "pending") {
+        // main/pairingInvites.ts shows this in a native dialog; the preview records it.
+        const code = `${request.shortCode.slice(0, 3)} ${request.shortCode.slice(3)}`;
+        const fill = (s: string) => s.replace("{host}", "HOST-A").replace("{device}", request.deviceName).replace("{code}", code).replace("{user}", "Sam").replace("{platform}", texts.platforms[request.platform] ?? "");
+        const w = window as unknown as { __pairingDialogs?: unknown[] };
+        (w.__pairingDialogs ??= []).push({ title: fill(texts.title), message: fill(texts.message), detail: fill(texts.detail), buttons: [texts.allow, texts.cancel] });
+        if (q().get("pairdialog") === "cancel") return { ok: false as const, canceled: true as const };
+      }
+      invite.status = "approved";
+      const at = now();
+      state.tokens.push({ tokenId: `mct-${invite.inviteId.slice(4, 20)}`, label: request.deviceName, kind: "device", deviceName: request.deviceName, platform: request.platform, createdAt: at, lastUsedAt: at, lastAddress: request.route === "relay" ? "127.0.0.1" : "100.64.0.51", userId: invite.userId, pending: false, ...owned(invite.scope, "pairing") });
+      bump();
+      return { ok: true as const, invite: clone(invite) };
+    },
+  };
+}
+
 export const mock: ModuleMock = {
   remote: (hostId) =>
     hostId === "ssh-7a3f01c2"
@@ -266,7 +379,7 @@ export const mock: ModuleMock = {
       : {},
   // users-p2-access (r236): `?nop2` = an older host (a non-owner gets no files / images / delegation commands).
   // cutex C1 / C2 (user-own-token, user-own-devices): `?noown` = a host without them.
-  features: { new: [...(NO_IDENTITY ? ["users", "users-self-profile"] : ["users", "users-self-profile", "person-identity", "person-identity-ack"]), ...(NO_P2 ? [] : ["users-p2-access"]), ...(NO_OWN ? [] : ["user-own-token", "user-own-devices"]), ...(NO_OWNER_LOCAL ? [] : ["owner-local-only", "owner-device-notice", "device-scope"])] },
+  features: { new: [...(NO_IDENTITY ? ["users", "users-self-profile"] : ["users", "users-self-profile", "person-identity", "person-identity-ack"]), ...(NO_P2 ? [] : ["users-p2-access"]), ...(NO_OWN ? [] : ["user-own-token", "user-own-devices"]), ...(NO_OWNER_LOCAL ? [] : ["owner-local-only", "owner-device-notice", "device-scope"]), ...(NO_PAIR_V2 ? [] : ["relay-pairing-v2"]), ...(NO_RELAY_SWITCH ? [] : ["relay-pairing-switch-v1"])] },
   start(core) {
     // `?ownerdevicedemo[=s]`: a new owner device pairs on HOST-A after s seconds (default 8).
     if (core.legacy || NO_OWNER_LOCAL || OWNER_DEVICE_DEMO === null) return;
@@ -282,6 +395,8 @@ export const mock: ModuleMock = {
   },
   api: (core) => ({
     ...registerTokens(core),
+    ...pairingApi(),
+    ...relayPairingApi(),
     async identityState() {
       return structuredClone(identity);
     },

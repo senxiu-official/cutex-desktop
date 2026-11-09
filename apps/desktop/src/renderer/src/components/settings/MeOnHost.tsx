@@ -126,7 +126,7 @@ export function OwnDevicesSection({ hostId }: { hostId: string }) {
             leading={<TokenIcon token={device} />}
             title={<TokenTitle token={device} editing={false} onSave={async () => false} onCancel={() => {}} extra={device.current ? <ThisComputerBadge /> : undefined} />}
             detail={<TokenDetail token={device} />}
-            actions={<ArmedRemove title={device.current ? t("remote.token.revokeOwn") : `${t("users.revoke")} — ${t("users.revokeHint")}`} armedLabel={t(device.current ? "users.own.removeCurrentArmed" : "users.revokeArmed")} disabled={busy} onRemove={() => void remove(device)} />}
+            actions={<ArmedRemove label={t("users.revoke")} title={device.current ? t("remote.token.revokeOwn") : t("users.revokeHint")} armedLabel={t(device.current ? "users.own.removeCurrentArmed" : "users.revokeArmed")} disabled={busy} onRemove={() => void remove(device)} />}
           /></SettingsGroup>
         ))}
     </Section>

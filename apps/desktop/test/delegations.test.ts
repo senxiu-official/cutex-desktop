@@ -15,6 +15,7 @@ import {
   formatSpan,
   handlerReplies,
   inferDelegations,
+  delegationCanResume,
   isStandalone,
   mergeSummaries,
   needsYouCount,
@@ -370,6 +371,22 @@ describe("transcript", () => {
     expect(isStandalone(queuedA8)).toBe(true);
     const refused = done("agent_delegate", { target: "Helper", text: "x" }, { ok: false, code: "delegation_cycle", delegation: "delegation-1a2b3c" });
     expect(delegateCallOf(itemOf(refused))?.askId).toBeNull();
+  });
+
+  it("resuming a wait needs the requester's own result to offer it and the record to still wait", () => {
+    const offered = (view: Record<string, unknown>) => inferDelegations([done("delegation_wait", {}, { delegations: [{ delegation: "ask-1", state: "running", ...view }] }, "w3", "t3")]).get("ask-1");
+    expect(offered({ waiting: { can_resume: true } })?.canResume).toBe(true);
+    expect(offered({ waiting: null })?.canResume).toBe(false);
+    expect(offered({})?.canResume).toBeUndefined();
+    const read = (view: Record<string, unknown>) => inferDelegations([done("delegation_read", {}, { delegation: "ask-1", ...view }, "r3", "t3")]).get("ask-1");
+    expect(read({ waiting: { can_resume: true } })?.canResume).toBe(true);
+    expect(read({})).toBeUndefined();
+    const waiting = { execution: "running" as const, hold: { reason: "waitingForEvent" } as AskSummary["hold"], closed: null, review: null };
+    expect(delegationCanResume({ ...waiting, canResume: true } as never)).toBe(true);
+    expect(delegationCanResume(waiting as never)).toBe(false);
+    expect(delegationCanResume({ ...waiting, canResume: true, hold: null } as never)).toBe(false);
+    expect(delegationCanResume({ ...waiting, canResume: true, closed: "accepted" } as never)).toBe(false);
+    expect(delegationCanResume({ ...waiting, canResume: true, remote: { host: "x" } } as never)).toBe(false);
   });
 
   it("infers A8 wait results under `delegation`", () => {

@@ -470,6 +470,14 @@ export function delegationActions(d: StatusInput & { closed?: AskClosed | null }
 }
 
 /**
+ * The handler's wait can be ended from here: only when the requester's own tool result offered it
+ * (`waiting.can_resume`, absent on older hosts), and the record still says it waits for an event.
+ */
+export function delegationCanResume(d: StatusInput & Pick<AskSummary, "canResume"> & { closed?: AskClosed | null }): boolean {
+  return !!d.canResume && !d.closed && !TERMINAL.has(d.execution) && d.execution === "running" && d.hold?.reason === "waitingForEvent" && !d.remote;
+}
+
+/**
  * The owner steered text into the delegation's turn (「加入此委托」): the answer's metadata says
  * `ownerSteered` (cutex §5.6), else the latest attempt record does (answer not captured yet).
  * Only the full record has it (`GET /v2/asks/{id}`), not the list summary or the results view.
@@ -654,6 +662,7 @@ function fromRequesterView(r: Record<string, unknown>): Partial<AskSummary> {
   if ("hold" in r) out.hold = (obj(r.hold) as AskHold | null) ?? null;
   if ("review" in r) out.review = (str(r.review) as AskReview | null) ?? null;
   if ("closed" in r) out.closed = (str(r.closed) as AskClosed | null) ?? null;
+  if ("waiting" in r) out.canResume = obj(r.waiting)?.can_resume === true;
   const pos = num(r.queue_position);
   if (pos !== null) out.queuePosition = pos;
   const n = num(r.attempt);
@@ -750,6 +759,9 @@ export function inferDelegations(entries: Iterable<TimelineEntry>): Map<string, 
           ...(answer ? { answerPreview: answer.slice(0, 300) } : {}),
         });
       }
+    } else if (tool === "delegation_read" && r && "waiting" in r) {
+      const id = resultDelegationId(r);
+      if (id) merge(id, { canResume: obj(r.waiting)?.can_resume === true });
     } else if (CLOSE_TOOLS.has(tool) && r && r.ok !== false && obj(e.item.result)?.isError !== true) {
       const a = toolArgs(e.item);
       const id = str(a.delegation) ?? str(a.delegation_id) ?? str(a.ask) ?? str(a.ask_id) ?? resultDelegationId(r);

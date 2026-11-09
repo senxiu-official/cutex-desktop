@@ -1,7 +1,7 @@
 import { BrowserCursorSettings } from "./BrowserCursorSettings";
 import { useEffect, useState } from "react";
 import { DEFAULT_BROWSER_CONTROL_SETTINGS, type BrowserControlSettings, type BrowserExternalPagesView, type BrowserSitePermissionForget, type BrowserSitePermissionView } from "../../../../shared/browser";
-import { LinkRow, NumberField, ResetButton, Section, Select, SettingRow, SettingsGroup, Toggle } from "../../components/settings/Form";
+import { LinkRow, ListFilter, NumberField, ResetButton, Section, Select, SettingRow, SettingsGroup, SubPageRow, Toggle } from "../../components/settings/Form";
 import { useI18n } from "../../i18n";
 import { browserError, browserErrorKey } from "./browserState";
 import { bridge } from "../../bridge";
@@ -15,6 +15,8 @@ import { SettingsRiskConfirmation } from "../../components/settings/SettingsRisk
 import { useSettingsRisk } from "../../lib/useSettingsRisk";
 import { settingsRiskText as riskText } from "../../lib/settingsRiskText";
 import { settingsAnchorId } from "../../lib/settingsNav";
+import { useScrollToSettingsAnchor } from "../../lib/settingsFocus";
+import { matchesFilter } from "../../lib/listFilter";
 import { BrowserDesktopLoopbackSettings } from "./BrowserDesktopLoopbackSettings";
 
 /** The host rows need the relay; a host without it shows 「需要升级 cutex」. */
@@ -48,9 +50,13 @@ function BrowserExternalPagesSettings() {
   </Section>;
 }
 
-/** Remembered per-origin site permissions: main stores them; the owner can only read and forget. */
-function BrowserSitePermissionSettings() {
+/** Sites the 浏览器 page shows; 全部 is its sub-page. */
+const SITES_ON_PAGE = 5;
+
+/** Remembered per-origin site permissions: main stores them; the owner can only read and forget. `all`: the sub-page's whole list. */
+export function BrowserSitePermissionSettings({ all = false }: { all?: boolean }) {
   const { t } = useI18n();
+  const [filter, setFilter] = useState("");
   const [entries, setEntries] = useState<BrowserSitePermissionView[] | null>(null);
   const [busy, setBusy] = useState(false), [error, setError] = useState<string | null>(null);
   useEffect(() => {
@@ -71,11 +77,15 @@ function BrowserSitePermissionSettings() {
     if (!sites.has(id)) sites.set(id, { pool: entry.pool, origin: entry.origin, items: [] });
     sites.get(id)!.items.push(entry);
   }
-  return <Section id={settingsAnchorId("site-permissions")} title={t("browser.sitePermissions.title")} hint={t("browser.sitePermissions.hint")}
+  const listed = [...sites.values()];
+  const rows = all ? listed.filter(site => matchesFilter(filter, site.origin)) : listed.slice(0, SITES_ON_PAGE);
+  return <Section id={all ? settingsAnchorId("site-permissions-all") : settingsAnchorId("site-permissions")} title={all ? t("browser.sitePermissions.all", { n: listed.length }) : t("browser.sitePermissions.title")} hint={all ? undefined : t("browser.sitePermissions.hint")}
     actions={sites.size > 0 ? <button type="button" data-browser-site-permissions-forget-all disabled={busy} onClick={() => void forget("all")} className="rounded text-xs text-accent hover:underline disabled:opacity-40">{t("browser.sitePermissions.forgetAll")}</button> : undefined}>
     <SettingsGroup agents="now" source="local"><div data-browser-site-permissions className="flex flex-col gap-2">
       {entries && sites.size === 0 && <p className="text-xs text-subtle">{t("browser.sitePermissions.empty")}</p>}
-      {[...sites.values()].map(site => <div key={`${site.pool} ${site.origin}`} className="flex items-start justify-between gap-3 text-xs">
+      {all && <div role="search" className="contents"><ListFilter count={listed.length} value={filter} onChange={setFilter} /></div>}
+      {all && listed.length > 0 && rows.length === 0 && <p className="text-xs text-subtle">{t("settings.filterNone")}</p>}
+      {rows.map(site => <div key={`${site.pool} ${site.origin}`} className="flex items-start justify-between gap-3 text-xs">
         <div className="min-w-0">
           <div className="truncate font-medium" title={site.origin}>{site.origin}{site.pool === "agent" && <span className="ml-1.5 font-normal text-subtle">({t("browser.sitePermissions.agentPool")})</span>}</div>
           <div className="text-subtle">{site.items.map(item => `${t(`browser.sitePermission.${item.permission}` as Parameters<typeof t>[0])}: ${t(item.allow ? "browser.sitePermissions.allowed" : "browser.sitePermissions.blocked")}`).join(" · ")}</div>
@@ -83,8 +93,16 @@ function BrowserSitePermissionSettings() {
         <button type="button" disabled={busy} onClick={() => void forget({ pool: site.pool, origin: site.origin })} className="shrink-0 rounded-md border border-border px-2 py-1 disabled:opacity-40">{t("browser.sitePermissions.forget")}</button>
       </div>)}
     </div></SettingsGroup>
+    {!all && listed.length > SITES_ON_PAGE && <SubPageRow title={t("browser.sitePermissions.all", { n: listed.length })} onOpen={() => useApp.getState().openSettings("browser", { sub: "sites" })} />}
     {error && <p role="alert" className="text-xs text-danger">{t("browser.actionFailed", { reason: t(browserErrorKey(error)) })}</p>}
   </Section>;
+}
+
+/** 浏览器 → 网站权限: every site this computer remembers. */
+export function BrowserSitesSubPage() {
+  const { t } = useI18n();
+  useScrollToSettingsAnchor();
+  return <SettingsDevicePart title={t("browser.part.device")} hint={t("browser.part.deviceHint")}><BrowserSitePermissionSettings all /></SettingsDevicePart>;
 }
 
 export function BrowserSettings() {

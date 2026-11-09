@@ -3,7 +3,8 @@
 // turn 3 adds / updates / deletes / moves files and its final reply links an html report marked
 // "open", a localhost URL, a code reference (not a chip), a Markdown file, a missing file (dropped by
 // the existence check) and a web page.
-import type { ModuleMock } from "../../dev/mockTypes";
+import type { MockCore, ModuleMock } from "../../dev/mockTypes";
+import { SESSION_FILES_REVERT_FEATURE, type FilesRevertFile, type FilesRevertPlan, type FilesRevertRequest, type FilesRevertResult } from "../../../../shared/filesRevert";
 
 const ROOT = "D:\\Apps\\cutex-desktop";
 const at = (rel: string) => `${ROOT}\\${rel.replace(/\//g, "\\")}`;
@@ -92,4 +93,63 @@ function mikaThread() {
 
 export const mock: ModuleMock = {
   thread: (sessionId) => (sessionId === "mika" ? mikaThread() : null),
+  // cutex `session-files-revert` (撤销这些改动 in the expanded turn summary; components/TurnFilesRevert).
+  features: { new: [SESSION_FILES_REVERT_FEATURE] },
+  api: (core) => ({ filesRevert: async (sessionId, turnId, request) => filesRevertMock(core, sessionId, turnId, request) }),
 };
+
+/**
+ * The plan of a turn, built from its completed fileChange items in the session's mock history: every file can be
+ * undone once (then it is already as before); a file a later turn also changed conflicts. `?revertConflict`
+ * makes every file conflict (the blocked plan).
+ */
+const reverted = new Set<string>();
+
+type MockTurn = { id: string; items?: { type: string; status?: string; changes?: { path: string; kind?: { type?: string; move_path?: string | null }; diff?: string }[] }[] };
+
+function filesRevertMock(core: MockCore, sessionId: string, turnId: string, request: FilesRevertRequest): FilesRevertResult {
+  const turns = ((core.threadRead(sessionId) as { thread?: { turns?: MockTurn[] } } | null)?.thread?.turns ?? []);
+  const index = turns.findIndex((t) => t.id === turnId);
+  if (index < 0) return { ok: false, code: "turn_not_found", message: "the turn does not exist in the bound thread", plan: null, journalPath: null };
+  const changes = (t: MockTurn) => (t.items ?? []).filter((i) => i.type === "fileChange" && i.status === "completed").flatMap((i) => i.changes ?? []);
+  const later = turns.slice(index + 1).filter((t) => changes(t).length);
+  const laterPaths = new Set(later.flatMap((t) => changes(t).map((c) => c.path)));
+  const conflictAll = typeof location !== "undefined" && new URLSearchParams(location.search).has("revertConflict");
+  const key = `${sessionId}|${turnId}`;
+  const done = reverted.has(key);
+  const lines = (diff: string | undefined, sign: "+" | "-") => (diff ?? "").split("\n").filter((l) => l.startsWith(sign) && !l.startsWith(sign.repeat(3))).length;
+  const byPath = new Map<string, FilesRevertFile>();
+  for (const c of changes(turns[index]!)) {
+    const kind = c.kind?.type ?? "update";
+    const conflict = conflictAll || laterPaths.has(c.path);
+    byPath.set(c.path, {
+      path: c.path,
+      relativePath: c.path.startsWith(`${ROOT}\\`) ? c.path.slice(ROOT.length + 1).replace(/\\/g, "/") : c.path,
+      movePath: c.kind?.move_path ?? null,
+      action: c.kind?.move_path ? "moveBack" : kind === "add" ? "delete" : kind === "delete" ? "recreate" : "restore",
+      status: conflict ? "conflict" : done ? "alreadyReverted" : "ok",
+      reason: conflict ? "the file changed after this turn: the reverse patch no longer applies" : null,
+      // Undo removes what the turn added and puts back what it removed.
+      added: kind === "add" ? 0 : kind === "delete" ? (c.diff ?? "").split("\n").filter(Boolean).length : lines(c.diff, "-"),
+      deleted: kind === "add" ? (c.diff ?? "").split("\n").filter(Boolean).length : kind === "delete" ? 0 : lines(c.diff, "+"),
+    });
+  }
+  const files = [...byPath.values()];
+  const touched = files.filter((f) => laterPaths.has(f.path)).map((f) => f.relativePath ?? f.path);
+  const plan: FilesRevertPlan = {
+    turnId,
+    planDigest: `sha256:mock-${key}-${done ? "done" : "open"}`,
+    applicable: files.some((f) => f.status === "ok") && files.every((f) => f.status === "ok" || f.status === "alreadyReverted"),
+    files,
+    warnings: touched.length ? [{ kind: "laterTurnsTouchedFiles", turnIds: later.map((t) => t.id), paths: touched }] : [],
+    applied: false,
+    actionId: null,
+    journalPath: null,
+    recovered: [],
+  };
+  if (request.dryRun) return { ok: true, plan };
+  if (request.expectedPlanDigest !== plan.planDigest) return { ok: false, code: "plan_changed", message: "plan changed since preview", plan, journalPath: null };
+  if (!plan.applicable) return { ok: false, code: files.some((f) => f.status === "conflict") ? "revert_conflict" : "nothing_to_revert", message: "", plan, journalPath: null };
+  reverted.add(key);
+  return { ok: true, plan: { ...plan, applied: true, actionId: "frv-mock" } };
+}

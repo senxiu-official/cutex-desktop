@@ -22,9 +22,11 @@ import { installLoopPause } from "./lib/loopPause";
 import { installPerfMode } from "./lib/perfMode";
 import { startAppModules } from "./modules/app";
 import { MODULES } from "./modules/registry";
+import { startDevModules } from "./modules/devModules";
 import { startModulePacks } from "./modules/packs";
 import { BUNDLED_PACK_VERSIONS } from "./modules/packVersions";
 import { followActingUsers } from "./lib/actingUsers";
+import { followAgentMcpStatus } from "./lib/agentMcpLive";
 import { startIdentitySync } from "./lib/identitySync";
 import { startPortraitSave } from "./lib/portraitSave";
 import { startAutoEmojiCleanup } from "./lib/autoEmojiCleanup";
@@ -56,7 +58,10 @@ void startLocaleReady.then(() => {
   const moduleHost = startAppModules(MODULES);
   // Signed first-party module packs (§23): a verified newer pack replaces its bundled copy once loaded.
   startModulePacks(moduleHost, MODULES, BUNDLED_PACK_VERSIONS, bridge.modulePacks);
+  // Developer mode (§30.5): modules loaded from a folder, replaced as they are rebuilt.
+  startDevModules(moduleHost, bridge.moduleDev);
   followActingUsers();
+  followAgentMcpStatus();
   // 「你」 (Settings → 用户): publish name + picture to hosts with users-self-profile.
   startIdentitySync();
   startProfileAccountLinks();

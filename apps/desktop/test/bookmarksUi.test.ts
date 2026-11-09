@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
-import type { AppModuleContext, CutexRef, RefOpenResult } from "../src/renderer/src/modules/slots";
+import type { ModuleContext, CutexRef, RefOpenResult } from "../src/renderer/src/modules/slots";
 import { agentRef, parseRef, turnRef } from "../src/renderer/src/lib/refs";
 import { addBookmark, BOOKMARK_LIMIT, checkedRef, EMPTY_BOOKMARKS, groupBookmarks, matchingBookmarks, readBookmarks, refKey, renameBookmark as renameModel, type BookmarkDocument } from "../src/renderer/src/modules/bookmarks/model";
 import { activateBookmarks, currentRefs, editBookmark, openBookmark, removeBookmark, renameBookmark, resetBookmarkData, saveBookmark, toggleBookmark, useBookmarks } from "../src/renderer/src/modules/bookmarks/state";
@@ -18,7 +18,7 @@ function harness(raw: unknown = null) {
   const set = vi.fn((_key: string, next: unknown) => { saved = structuredClone(next); listeners.forEach((l) => l()); });
   const parse = vi.fn(parseRef), open = vi.fn<(ref: CutexRef, opts?: { how?: string }) => Promise<RefOpenResult>>().mockResolvedValue({ status: "opened", where: "peek" });
   const notice = vi.fn(), here = vi.fn(() => [ref()]);
-  const ctx = { signal: controller.signal, host: { id: "local" }, t: (key: string) => key, prefs: { get: () => saved, set, subscribe: (f: () => void) => { listeners.add(f); return () => listeners.delete(f); } }, services: { refs: { parse, open, here }, ui: { notice } } } as unknown as AppModuleContext;
+  const ctx = { signal: controller.signal, host: { id: "local" }, t: (key: string) => key, prefs: { get: () => saved, set, subscribe: (f: () => void) => { listeners.add(f); return () => listeners.delete(f); } }, services: { refs: { parse, open, here }, ui: { notice } } } as unknown as ModuleContext;
   activateBookmarks(ctx);
   return { controller, ctx, set, parse, open, notice, here, saved: () => saved, listenerCount: () => listeners.size };
 }
@@ -119,7 +119,7 @@ describe("Bookmarks scoped state and generic opening", () => {
     const h = harness(); h.set.mockImplementation(() => { throw new Error("quota"); }); h.controller.abort();
     let value: unknown = { version: 1, records: [] };
     const ctl = new AbortController(); controllers.push(ctl);
-    activateBookmarks({ ...h.ctx, signal: ctl.signal, prefs: { get: () => value, set: () => { throw new Error("quota"); }, subscribe: () => () => {} } } as unknown as AppModuleContext);
+    activateBookmarks({ ...h.ctx, signal: ctl.signal, prefs: { get: () => value, set: () => { throw new Error("quota"); }, subscribe: () => () => {} } } as unknown as ModuleContext);
     expect(useBookmarks.getState().storageError).toBe("storage-failed"); expect(saveBookmark(ref())).toBe(false); expect(value).toEqual({ version: 1, records: [] });
   });
   it("open reparses the pointer and delegates to refs.open: no parent selection, history or rendering", async () => {

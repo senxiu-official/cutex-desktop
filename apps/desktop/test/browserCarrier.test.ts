@@ -25,7 +25,8 @@ vi.mock("electron", async () => {
   }
   return { BrowserWindow };
 });
-import { browserCarrierPreferences, BROWSER_CARRIER_FRAME_RATE, BROWSER_THUMBNAIL_INTERVAL_MS, createBrowserCarrier } from "../src/main/browser/carrier";
+import { browserCarrierPreferences, BROWSER_CARRIER_FRAME_RATE, BROWSER_THUMBNAIL_INTERVAL_MS, BROWSER_THUMBNAIL_QUALITY, createBrowserCarrier } from "../src/main/browser/carrier";
+import { MAX_BROWSER_THUMBNAIL_BYTES } from "../src/shared/browser";
 
 afterEach(() => { electron.windows.length = 0; vi.useRealTimers(); });
 
@@ -81,6 +82,37 @@ describe("createBrowserCarrier", () => {
     expect(electron.windows[0].destroyed).toBe(true);
     carrier.destroy(); carrier.destroy();
     expect(electron.windows[0].destroy).toHaveBeenCalledOnce();
+  });
+  it("renders at the owner's display scale and sends the frame at that size, high quality (sharp at 150%)", () => {
+    vi.useFakeTimers();
+    const thumbnail = vi.fn();
+    const carrier = createBrowserCarrier({ hostId: "local", viewport: { width: 1280, height: 720 }, scaleFactor: 1.5, guard: () => {}, thumbnail, wanted: () => true });
+    expect(electron.windows[0].options.webPreferences.offscreen).toEqual({ deviceScaleFactor: 1.5 });
+    const resize = vi.fn(), toJPEG = vi.fn((quality: number) => Buffer.from(`q${quality}`));
+    carrier.guest.emit("paint", {}, {}, { getSize: () => ({ width: 1920, height: 1080 }), resize, toJPEG });
+    vi.advanceTimersByTime(0);
+    expect(resize).not.toHaveBeenCalled();
+    expect(toJPEG).toHaveBeenCalledExactlyOnceWith(BROWSER_THUMBNAIL_QUALITY);
+    expect(BROWSER_THUMBNAIL_QUALITY).toBeGreaterThanOrEqual(85);
+    expect(thumbnail).toHaveBeenCalledExactlyOnceWith(`data:image/jpeg;base64,${Buffer.from(`q${BROWSER_THUMBNAIL_QUALITY}`).toString("base64")}`);
+    // A scale outside 1..3 (or none) renders at 1, as before.
+    for (const scaleFactor of [undefined, 0, Number.NaN, 9]) {
+      createBrowserCarrier({ hostId: "local", viewport: { width: 800, height: 600 }, guard: () => {}, ...(scaleFactor === undefined ? {} : { scaleFactor }) });
+      expect(electron.windows.at(-1).options.webPreferences.offscreen).toBe(true);
+    }
+  });
+  it("keeps a frame within the size bound: lower quality first, then a smaller frame", () => {
+    vi.useFakeTimers();
+    const thumbnail = vi.fn();
+    const carrier = createBrowserCarrier({ hostId: "local", viewport: { width: 1280, height: 720 }, scaleFactor: 2, guard: () => {}, thumbnail, wanted: () => true });
+    const big = Buffer.alloc(MAX_BROWSER_THUMBNAIL_BYTES + 1), small = Buffer.from("ok");
+    const smaller = { toJPEG: vi.fn(() => small) };
+    const image = { getSize: () => ({ width: 2560, height: 1440 }), toJPEG: vi.fn((_quality: number) => big), resize: vi.fn(() => smaller) };
+    carrier.guest.emit("paint", {}, {}, image);
+    vi.advanceTimersByTime(0);
+    expect(image.toJPEG.mock.calls.map(c => c[0])).toEqual([BROWSER_THUMBNAIL_QUALITY, 70]);
+    expect(image.resize).toHaveBeenCalledExactlyOnceWith({ width: 1280, quality: "best" });
+    expect(thumbnail).toHaveBeenCalledExactlyOnceWith(`data:image/jpeg;base64,${small.toString("base64")}`);
   });
   it("sends at most one bounded JPEG thumbnail per interval, only while wanted", () => {
     vi.useFakeTimers();

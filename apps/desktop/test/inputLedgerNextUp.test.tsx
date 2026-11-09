@@ -105,7 +105,7 @@ describe("D4 ledger surfaces", () => {
     expect(el.textContent).not.toContain("Wrong host title");
     expect(el.innerHTML).not.toContain("held@2");
     const tag = el.querySelector<HTMLElement>("[data-delegation-tag]")!;
-    expect(tag.textContent).toMatch(/^#\d+$/);
+    expect(tag.textContent).toBe("#b0");
     await act(async () => tag.click());
     expect(calls.open).toHaveBeenLastCalledWith("new-host", "ask-b0", { title: "Publish public desktop 0.2.1" });
     await click("Publish public desktop 0.2.1");

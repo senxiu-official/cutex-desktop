@@ -60,6 +60,9 @@ export class SessionDeltaCatalog {
   private snapshot: SessionCatalogSnapshot | undefined;
   private revision = 0;
   private membershipRevision = 0;
+  private writes = 0;
+  /** `writes` when the pending read began. */
+  private pendingWrites = 0;
   constructor(private readonly source: SessionCatalogSource, private readonly onProgress?: (loaded: number, total: number) => void) {}
 
   get version(): number { return this.revision; }
@@ -69,6 +72,8 @@ export class SessionDeltaCatalog {
     if (id) this.dirty.add(id);
     else this.refreshAll = true;
   }
+  /** This client's own write has returned: a read asked from now on must begin after it. A read already running may have passed its row. */
+  noteWrite(): void { this.writes++; }
   /** Reads again the active rows read before `before` (default: all of them). Rows read later already show what the gap hid. */
   invalidateActive(before = Number.POSITIVE_INFINITY): void { this.staleBefore = Math.max(this.staleBefore, before); }
   /** While the first read runs: the active rows read so far (shown before the rest arrives). */
@@ -91,7 +96,8 @@ export class SessionDeltaCatalog {
 
   read(): Promise<SessionCatalogSnapshot> {
     this.assertCurrent();
-    if (this.pending) return this.pending;
+    if (this.pending) return this.pendingWrites === this.writes ? this.pending : this.pending.catch(() => undefined).then(() => this.read());
+    this.pendingWrites = this.writes;
     const pending = this.refresh().finally(() => { if (this.pending === pending) this.pending = undefined; });
     this.pending = pending;
     return pending;
@@ -168,29 +174,43 @@ export class SessionDeltaCatalog {
     const state: CatalogState = { rows: new Map(), hostRows: new Map(), cursor: null, retiredIds: new Set() };
     const keys = new Map<string, SessionLifecycle>();
     let first = true;
-    for (const lifecycle of ["active", "retired"] as const) {
-      let cursor: string | undefined;
-      const seen = new Set<string>();
-      do {
-        const page = await this.source.page(lifecycle, cursor);
-        this.assertCurrent();
-        if ("resyncRequired" in page) throw new ResyncRequired(page.reason);
-        // Retain the FIRST head, even when null. Later pages are newer snapshots.
-        if (first) { state.cursor = page.changeCursor; first = false; }
-        if (page.claudeRuntime) state.claudeRuntime = page.claudeRuntime;
-        for (const key of page.sessions) {
-          if (lifecycle === "active") keys.set(key.cutexSessionId, lifecycle);
-          else state.retiredIds.add(key.cutexSessionId);
-        }
-        cursor = page.nextCursor ?? undefined;
-        if (cursor && seen.has(cursor)) throw new Error("session page cursor did not advance");
-        if (cursor) seen.add(cursor);
-      } while (cursor);
-    }
-    this.building = { state, loaded: 0, total: keys.size };
-    this.onProgress?.(0, keys.size);
-    try { await this.hydrate(state, keys); }
-    finally { this.building = undefined; }
+    let loaded = 0, total = 0;
+    try {
+      for (const lifecycle of ["active", "retired"] as const) {
+        let cursor: string | undefined;
+        const seen = new Set<string>();
+        do {
+          // A status gap during this request still requires a reread.
+          const started = Date.now();
+          const page = await this.source.page(lifecycle, cursor);
+          this.assertCurrent();
+          if ("resyncRequired" in page) throw new ResyncRequired(page.reason);
+          // Retain the FIRST head, even when null. Later pages are newer snapshots.
+          if (first) { state.cursor = page.changeCursor; first = false; }
+          if (page.claudeRuntime) state.claudeRuntime = page.claudeRuntime;
+          for (const key of page.sessions) {
+            if (lifecycle === "retired") { state.retiredIds.add(key.cutexSessionId); continue; }
+            total++;
+            if (key.resource !== undefined && key.hostRow !== undefined) {
+              // Null means ineligible. Keep hints arriving during the request dirty.
+              this.applyRow(state, key.cutexSessionId, key.resource, key.hostRow, started);
+              loaded++;
+            } else keys.set(key.cutexSessionId, lifecycle);
+          }
+          if (loaded) {
+            // The known total grows as pages arrive; publish before requesting the next.
+            this.building = { state, loaded, total };
+            this.onProgress?.(loaded, total);
+          }
+          cursor = page.nextCursor ?? undefined;
+          if (cursor && seen.has(cursor)) throw new Error("session page cursor did not advance");
+          if (cursor) seen.add(cursor);
+        } while (cursor);
+      }
+      this.building = { state, loaded, total };
+      if (keys.size || !loaded) this.onProgress?.(loaded, total);
+      await this.hydrate(state, keys);
+    } finally { this.building = undefined; }
     return state;
   }
 
@@ -248,6 +268,19 @@ export class SessionDeltaCatalog {
     return changed;
   }
 
+  private applyRow(state: CatalogState, id: string, row: SessionResource | null, hostRow: HostSessionRow | null, started: number): void {
+    const before = state.rows.has(id) || state.retiredIds.has(id) ? lifecycleOf(state, id) : null;
+    if (before !== (row?.lifecycle ?? null) ||
+        (state.hostRows.get(id)?.projectId ?? null) !== (hostRow?.projectId ?? null)) state.membershipChanged = true;
+    this.writable(state);
+    if (row?.lifecycle === "retired") state.retiredIds.add(id); else state.retiredIds.delete(id);
+    // An archived row is kept only once the archived rows are read; until then its ID is enough.
+    if (row && (row.lifecycle !== "retired" || state.archivedLoaded)) state.rows.set(id, row); else state.rows.delete(id);
+    if (hostRow) state.hostRows.set(id, hostRow); else state.hostRows.delete(id);
+    this.fetchedAt.set(id, started);
+    this.failed.delete(id);
+  }
+
   /**
    * Reads the rows of `keys`. A row whose read fails is tried once more, then left dirty (and counted
    * missing) while every other row is kept: one busy reply never voids a whole host's read. Only when
@@ -270,16 +303,7 @@ export class SessionDeltaCatalog {
             this.assertCurrent();
             const hostRow = row?.lifecycle === "active" ? await this.source.hostRow(id) : null;
             this.assertCurrent();
-            const before = state.rows.has(id) || state.retiredIds.has(id) ? lifecycleOf(state, id) : null;
-            if (before !== (row?.lifecycle ?? null) ||
-                (state.hostRows.get(id)?.projectId ?? null) !== (hostRow?.projectId ?? null)) state.membershipChanged = true;
-            this.writable(state);
-            if (row?.lifecycle === "retired") state.retiredIds.add(id); else state.retiredIds.delete(id);
-            // An archived row is kept only once the archived rows are read; until then its ID is enough.
-            if (row && (row.lifecycle !== "retired" || state.archivedLoaded)) state.rows.set(id, row); else state.rows.delete(id);
-            if (hostRow) state.hostRows.set(id, hostRow); else state.hostRows.delete(id);
-            this.fetchedAt.set(id, started);
-            this.failed.delete(id);
+            this.applyRow(state, id, row, hostRow, started);
             succeeded++;
             if (this.building?.state === state && pass === 0) this.onProgress?.(++this.building.loaded, this.building.total);
           } catch (error) {

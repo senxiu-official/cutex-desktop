@@ -19,6 +19,8 @@ import { WINDOWS_SANDBOX_FEATURE } from "../../../../shared/windowsSandbox";
 import { WindowsSandboxSection } from "../WindowsSandboxNotice";
 import { ACP_RUNTIME_INFO, isAcpRuntime } from "../../lib/acpRuntimes";
 import { useOwnerWindow } from "../../lib/ownerContext";
+import { SearchableSelect } from "../SearchablePicker";
+import { useAgentPicker } from "../../lib/useAgentPicker";
 
 function errorText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
@@ -239,6 +241,7 @@ function HarnessSection() {
     agents.map((a) => a.cutexSessionId),
   );
   const agentName = agents.find((a) => a.cutexSessionId === agentId)?.displayName ?? null;
+  const picker = useAgentPicker(useTargetHostId(), useTargetSidebar(), { context: "harness", current: selectedId });
   const enabled = settings?.agentHarness?.enabled ?? settings?.agentHarnessDefault?.enabled ?? true;
   const [preview, setPreview] = useState<AgentHarnessPreview | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
@@ -271,11 +274,17 @@ function HarnessSection() {
       </SettingRow>
       <SettingRow agents="none" source="local" navigation label={agentName ? t("agent-config.harness.previewFor", { name: agentName }) : t("agent-config.harness.preview")} hint={t("agent-config.harness.previewHint")}>
         {agents.length > 0 && (
-          <Select
+          <SearchableSelect
             label={t("agent-config.harness.agent")}
             value={agentId ?? ""}
-            options={[...(agentId ? [] : [{ value: "", label: t("agent-config.harness.pickPlaceholder") }]), ...agents.map((a) => ({ value: a.cutexSessionId, label: a.displayName }))]}
-            onChange={(v) => setPicked(v || null)}
+            options={picker.options}
+            placeholder={picker.labels.search}
+            emptyLabel={picker.labels.empty} hiddenNote={picker.labels.hiddenNote}
+            triggerText={t("agent-config.harness.pickPlaceholder")}
+            onChange={(v) => {
+              picker.remember(v);
+              setPicked(v || null);
+            }}
           />
         )}
       </SettingRow>

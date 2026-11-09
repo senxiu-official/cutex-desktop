@@ -27,7 +27,7 @@ import {
 const NOFOLLOW = (constants as { O_NOFOLLOW?: number }).O_NOFOLLOW ?? 0;
 
 /** A regular file within the cap, read without following a symlink; null = refused. */
-async function readFileSafe(path: string, maxBytes: number): Promise<{ bytes: Buffer; key: string } | null> {
+export async function readFileSafe(path: string, maxBytes: number): Promise<{ bytes: Buffer; key: string } | null> {
   let info;
   try {
     info = await lstat(path);
@@ -70,7 +70,7 @@ async function isPlainFile(path: string, maxBytes: number): Promise<boolean> {
 }
 
 /** Plain folders only (no symlinks / junctions). */
-async function isPlainDir(path: string): Promise<boolean> {
+export async function isPlainDir(path: string): Promise<boolean> {
   try {
     const info = await lstat(path);
     return !info.isSymbolicLink() && info.isDirectory();

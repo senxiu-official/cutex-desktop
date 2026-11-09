@@ -32,7 +32,8 @@ import { useP2Access } from "../lib/p2Access";
 import { senderLabel } from "../lib/systemSenders";
 import { useComposerDraft } from "../lib/composerDrafts";
 import { candidateIndex, composerCandidateKey, mentionPathsFor, startMentionSearch, type MentionResults } from "../lib/composerMentions";
-import { agentMentionCandidates, agentMentionInsert } from "../lib/composerAgentMentions";
+import { agentMentionCandidates, agentMentionInsert, mentionRecentKey } from "../lib/composerAgentMentions";
+import { recentAgentPicks, rememberAgentPick } from "../lib/agentPickerOptions";
 import { composerMentionTokens } from "../lib/composerMentionTokens";
 import { atAgentRows, useProfileMentions } from "../lib/useProfileMentions";
 import { useNameOrderKey } from "../lib/rosterOrder";
@@ -818,7 +819,7 @@ export function Composer({
     return agentMentionCandidates([...ids].map(id => ({ id, label: mentionHosts?.hosts.find(host => host.id === id)?.label ?? id,
       connected: (id === focus ? mentionDaemon : mentionByHost?.[id]?.daemon)?.kind === "connected",
       sidebar: id === focus ? mentionSidebar : mentionByHost?.[id]?.sidebar ?? null,
-    })), hostId, sessionId, mention?.query ?? "");
+    })), hostId, sessionId, mention?.query ?? "", 50, recentAgentPicks("mention", "*"));
   }, [mentionOpen, mention?.query, mentionSidebar, mentionByHost, mentionHosts, mentionDaemon, hostId, sessionId, mentionNameOrder]);
   useEffect(() => {
     setMentionResults(null);
@@ -895,7 +896,7 @@ export function Composer({
       const md = timelineToMarkdown(name, orderedEntries(full), {
         user: t("export.user"),
         assistant: name,
-        from: (n, sender) => t("export.from", { name: senderLabel(t, sender?.id, sender?.sourceKind, n) }),
+        from: (n, sender) => t("export.from", { name: senderLabel(t, sender?.id, sender?.sourceKind, (sender?.id && names.get(sender.id)) || n) }),
         to: (n) => t("export.to", { name: n }),
         review: t("export.review"),
         reviewTarget: t("export.reviewTarget"),
@@ -965,6 +966,7 @@ export function Composer({
     if (!agent && !path) return;
     const next = agent ? (() => {
       const inserted = agentMentionInsert(agent, hostId);
+      rememberAgentPick("mention", "*", mentionRecentKey(agent.hostId, agent.id));
       const after = text.slice(mention.end);
       const separator = after.startsWith(" ") ? "" : " ";
       return { text: text.slice(0, mention.start) + inserted + separator + after, caret: mention.start + inserted.length + separator.length };

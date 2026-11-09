@@ -13,6 +13,7 @@ import { lazyPage } from "../../lib/lazyPage";
 import { APPROVAL_AUTO_RULES_FEATURE } from "../../lib/approvals";
 
 const ApprovalRulesSettings = lazyPage(() => import("./ApprovalRules").then((m) => m.ApprovalRulesSettings));
+const ApprovalRuleAuditAll = lazyPage(() => import("./ApprovalRules").then((m) => m.ApprovalRuleAuditAll));
 
 export default defineModule({
   id: "approvals",
@@ -35,6 +36,15 @@ export default defineModule({
       titleKey: "approvals.rules.settings",
       keywords: ["approvals.rules.settings.hint", "approvals.rules.audit"],
       Section: ApprovalRulesSettings,
+    }, {
+      // 规则审计's full list: on the 协作 page's sub-page, not on the page (components/settings/SecuritySettings).
+      id: "approvals.rules.auditAll",
+      page: "collab",
+      order: 251,
+      requires: { capabilities: [APPROVAL_AUTO_RULES_FEATURE] },
+      titleKey: "approvals.rules.audit",
+      keywords: ["approvals.rules.audit.hint"],
+      Section: ApprovalRuleAuditAll,
     }],
   },
 });

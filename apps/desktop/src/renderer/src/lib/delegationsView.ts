@@ -67,9 +67,11 @@ export function useCardDelegation(askId: string, call: DelegateCall, sessionId: 
   useEffect(() => {
     if (!record && enabled) void loadCardDelegation(host, askId, sessionId);
   }, [host, askId, sessionId, record, enabled]);
-  // Only scanned while there is no record (purged > 30 days, or before the first load).
-  const version = useConvView(sessionId, (v) => (record ? 0 : (v?.version ?? 0)));
-  const timeline = useConvView(sessionId, (v) => (record ? null : (v?.timeline ?? null)));
+  // Only scanned while there is no record (purged > 30 days, or before the first load), or to see
+  // whether the requester's tool results offered resuming a wait (owner rows don't say).
+  const scan = !record || record.hold?.reason === "waitingForEvent";
+  const version = useConvView(sessionId, (v) => (scan ? (v?.version ?? 0) : 0));
+  const timeline = useConvView(sessionId, (v) => (scan ? (v?.timeline ?? null) : null));
   // A short target from the call result (`cutex.…3f9a1c`): the sidebar's full id, else no link.
   const targetId = useResolvedSessionId(record ? null : call.targetId);
   const fallback = useMemo(() => {
@@ -81,7 +83,12 @@ export function useCardDelegation(askId: string, call: DelegateCall, sessionId: 
     return { ...summary, target: full ?? "", targetName: summary.targetName ?? (full ? null : summary.target) };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [record, askId, call, sessionId, timeline, version, targetId]);
-  return record ? { d: record, live: true } : { d: fallback!, live: false };
+  const live = useMemo(() => {
+    if (!record || !timeline) return record;
+    return findById(inferDelegations(orderedEntries(timeline)), askId)?.canResume ? { ...record, canResume: true } : record;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [record, askId, timeline, version]);
+  return live ? { d: live, live: true } : { d: fallback!, live: false };
 }
 
 /**

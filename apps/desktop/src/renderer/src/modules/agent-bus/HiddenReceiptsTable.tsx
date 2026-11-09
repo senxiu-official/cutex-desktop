@@ -100,7 +100,9 @@ export function HiddenReceiptsTable({ hostId, rows, nameOf = IDENTITY }: { hostI
           const record = onHost ? messages[r.id] : undefined;
           const write = writes[settlementWriteKey(hostId, r.id)];
           const text = record?.body || item?.preview || item?.label || write?.preview || "";
-          const from = record?.senderName ?? (record?.from ? nameOf(record.from) : null) ?? item?.from ?? t("agent-bus.stuck.unknownParty");
+          // nameOf answers the id itself for an agent the sidebar does not hold: then the name cutex reported.
+          const known = record?.from ? nameOf(record.from) : null;
+          const from = (known !== record?.from ? known : record?.senderName ?? known) ?? item?.from ?? t("agent-bus.stuck.unknownParty");
           const settlement = write?.settlement ?? record?.settlement;
           const sent = record?.sentAt ? Math.max(0, Math.floor(Date.now() / 1000 - record.sentAt)) : secondsSince(item?.enqueuedAt, Date.now());
           return {

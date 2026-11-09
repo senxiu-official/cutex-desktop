@@ -16,11 +16,14 @@ async function install(search = "?live-deltas") {
   vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => {} });
   const { installMockBridge } = await import("../src/renderer/src/dev/mockBridge");
   installMockBridge();
+  // The mock loads this by itself and does not wait for it. It brings in the store, which reads `window` while loading, so on a
+  // busy machine it finished after afterEach had removed the stubs: an unhandled rejection that fails the run, though every test passed.
+  await import("../src/renderer/src/dev/devPerf");
   return { bridge: win.cutex!, driver: win.__cutexMockLiveDeltas };
 }
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
-describe("r260 mock live delta preview", () => {
+describe("r260 mock live delta preview", { timeout: 60_000 }, () => {
   it.each(["", "?legacy", "?legacy&live-deltas", "?live-deltas"])("opt-in capability only: %s", async search => {
     const { bridge, driver } = await install(search);
     const expected = search === "?live-deltas";

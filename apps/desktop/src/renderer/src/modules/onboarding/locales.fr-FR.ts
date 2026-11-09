@@ -238,7 +238,7 @@ export const frFR: Record<keyof typeof zhCN, string> = {
   "onboarding.guide.update.title": "Mises à jour",
   "onboarding.guide.update.text": "Les mises à jour de Cutex se trouvent dans Paramètres → Mises à jour et diagnostic.\ncutex se met à jour séparément sur chaque hôte, dans Paramètres → Mises à jour du backend de l’hôte.\nLes {{Agents}} démarrés avant une mise à jour peuvent afficher l’ancienne version jusqu’à leur redémarrage.",
   "onboarding.guide.remote.title": "Hôtes distants et appareils appairés",
-  "onboarding.guide.remote.text": "Les {{Agents}} d’un hôte distant fonctionnent comme ceux d’ici : conversations, délégations et services sont disponibles, et les fichiers restent sur cet ordinateur.\nUn appareil appairé, un téléphone par exemple, se connecte à l’hôte avec les droits accordés ; gérez ou révoquez-les dans Paramètres → Utilisateurs → Appareils connectés.",
+  "onboarding.guide.remote.text": "Les {{Agents}} d’un hôte distant fonctionnent comme ceux d’ici : conversations, délégations et services sont disponibles, et les fichiers restent sur cet ordinateur.\nUn appareil appairé, un téléphone par exemple, se connecte à l’hôte avec les droits accordés ; gérez ou révoquez-les dans Paramètres → Hôtes.",
   "onboarding.guide.help.title": "Aide",
   "onboarding.guide.help.hint": "Revoyez les guides et astuces, consultez la documentation ou signalez un problème.",
   "onboarding.guide.help.onboarding": "Guides",

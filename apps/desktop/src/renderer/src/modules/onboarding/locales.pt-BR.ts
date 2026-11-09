@@ -238,7 +238,7 @@ export const ptBR: Record<keyof typeof zhCN, string> = {
   "onboarding.guide.update.title": "Atualizações",
   "onboarding.guide.update.text": "As atualizações do Cutex ficam em Configurações → Atualizações e diagnóstico.\nO cutex de cada host é atualizado separadamente, em Configurações → Atualizações do backend do host.\nOs {{Agents}} iniciados antes de uma atualização podem mostrar a versão antiga até serem reiniciados.",
   "onboarding.guide.remote.title": "Hosts remotos e dispositivos pareados",
-  "onboarding.guide.remote.text": "Os {{Agents}} em um host remoto funcionam como os daqui: conversas, delegações e serviços estão disponíveis, e os arquivos ficam naquela máquina.\nUm dispositivo pareado, como um celular, se conecta com as permissões que você concedeu; gerencie ou revogue em Configurações → Usuários → Dispositivos conectados.",
+  "onboarding.guide.remote.text": "Os {{Agents}} em um host remoto funcionam como os daqui: conversas, delegações e serviços estão disponíveis, e os arquivos ficam naquela máquina.\nUm dispositivo pareado, como um celular, se conecta com as permissões que você concedeu; gerencie ou revogue em Configurações → Hosts.",
   "onboarding.guide.help.title": "Ajuda",
   "onboarding.guide.help.hint": "Reveja os guias e dicas, abra a documentação ou relate um problema.",
   "onboarding.guide.help.onboarding": "Guias",

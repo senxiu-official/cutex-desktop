@@ -29,6 +29,7 @@ import { agentMenu, runtimeItem } from "../lib/menus";
 import { isQuickChat } from "../lib/sidebar";
 import { projectIcon } from "../lib/projectIcons";
 import { hostListKeys, toggleStarred, useUiPrefs } from "../lib/prefs";
+import { gitStatusFlight } from "../lib/gitStatusFlight";
 import { hostKey } from "../lib/hostKeys";
 import { services as appServices } from "../modules/app";
 import { hostPageParam } from "../lib/targetHost";
@@ -101,16 +102,11 @@ function usePaneGit(hostId: string, sessionId: string | null): GitStatus | null 
     if (selectedHere || !key) return;
     const at = key.indexOf(":");
     const scope = { kind: key.slice(0, at), id: key.slice(at + 1) } as WorkspaceScope;
-    let live = true;
-    hostApi(hostId)
-      .gitStatus(scope)
-      .then(
-        (g) => live && setOwn(g),
-        () => live && setOwn(null),
-      );
-    return () => {
-      live = false;
-    };
+    // The same shared reader as the workspace watch: never a second read of a workspace already being read.
+    const flight = gitStatusFlight(hostKey(hostId, key), () => hostApi(hostId).gitStatus(scope));
+    const off = flight.subscribe((result) => setOwn(result.ok ? result.status : null));
+    flight.ensure();
+    return off;
   }, [selectedHere, key, hostId]);
   return selectedHere ? shared.git : own;
 }

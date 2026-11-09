@@ -125,9 +125,9 @@ describe("lazyPage (lib/lazyPage)", () => {
 const EAGER = new Set(["ApprovalsPage", "DelegationsPage", "JobsPage", "ProjectsPage", "PendingChat", "ServicesPage", "WorkflowsPage", "Settings", "SettingsNav"]);
 describe("module pages are lazy (source)", () => {
   const modules = join(__dirname, "../src/renderer/src/modules");
-  // claude-science is a module pack (scripts/module-packs): it may only import what modules/packHost provides.
+  // Module packs (a pack.json, scripts/module-packs) are one ES module with no dynamic import.
   const files = readdirSync(modules)
-    .filter((m) => m !== "claude-science")
+    .filter((m) => !existsSync(join(modules, m, "pack.json")))
     .map((m) => ["index.ts", "index.tsx"].map((n) => join(modules, m, n)).find(existsSync))
     .filter((f): f is string => !!f);
   it.each(files.map((f) => [f.slice(modules.length + 1).replace(/\\/g, "/"), f]))("%s", (_name, file) => {

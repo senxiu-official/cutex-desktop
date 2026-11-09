@@ -1,4 +1,5 @@
 import { ProfileSessionSwitch } from "./ProfileSessionSwitch";
+import { ProfileAgentsButton } from "./ProfileAgentsButton";
 export { ProfileSessionSwitch } from "./ProfileSessionSwitch";
 // Settings → Profiles → <profile> detail page (DESIGN §4.5), full width, top to bottom:
 //   header (picture, name, kind, status · quota left, agents using it · default / ⋯ actions)
@@ -253,12 +254,14 @@ function Overview({ detail, livePlan, patch, set, picture, onPicture, isDefault,
             </button>
           ))}
           {agents.length > SHOWN_AGENTS && (
-            <button
-              onClick={(e) => openMenuFrom(e.currentTarget, agents.slice(SHOWN_AGENTS).map((a) => ({ label: a.displayName, onSelect: () => void select(a.cutexSessionId) })))}
+            <ProfileAgentsButton
+              agents={agents.slice(SHOWN_AGENTS)}
+              title={t("agent-config.profile.agentsUsing", { n: agents.length })}
+              onPick={(id) => void select(id)}
               className="rounded-full px-1.5 py-0.5 text-muted hover:bg-surface-2 hover:text-foreground"
             >
               +{agents.length - SHOWN_AGENTS}
-            </button>
+            </ProfileAgentsButton>
           )}
         </div>
         <ProfileProxySummary detail={detail} />

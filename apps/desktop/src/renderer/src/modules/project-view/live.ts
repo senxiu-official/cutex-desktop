@@ -10,7 +10,7 @@ import { bridge } from "../../bridge";
 import { receivedAtOf } from "../../lib/liveEvents";
 import { planSnapshotOf } from "../../lib/timeline";
 import { sidebarOf, useApp } from "../../store";
-import type { AppModuleContext } from "../slots";
+import type { ModuleContext } from "../slots";
 import { planSummary, type ArtifactEvent, type PlanEvent } from "./model";
 
 /** Kept per host (newest last). */
@@ -83,7 +83,7 @@ function push(hostId: string, f: (h: HostLive) => HostLive): void {
   useProjectLive.setState((s) => ({ byHost: { ...s.byHost, [hostId]: f(hostLive(s.byHost, hostId)) } }));
 }
 
-export function startLive(ctx: AppModuleContext): void {
+export function startLive(ctx: ModuleContext): void {
   if (typeof bridge?.on !== "function") return;
   const off = bridge.on("hostEvent", ({ hostId, envelope }) => recordEnvelope(hostId, envelope));
   ctx.signal.addEventListener(

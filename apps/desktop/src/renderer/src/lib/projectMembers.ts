@@ -7,15 +7,16 @@
 //   `agent_already_has_active_project`; cutex does not move it, so the picker shows it but disabled).
 // - assign_director (no Director yet) / rotate_director (owner-rotation: replace the Director in one
 //   commit, the old one stays a member): the picker offers this project's members.
-import type { AgentRow, SidebarGroup } from "./sidebar";
+import { isQuickChat, type AgentRow, type SidebarGroup } from "./sidebar";
 import { runtimeOf, type RuntimeFilter } from "./agentList";
 import { agentMatches } from "./agentAlias";
-import { byNameThenId } from "./rosterOrder";
+import { byNameThenId, compareNames } from "./rosterOrder";
 
 export type MemberStatusFilter = "all" | "online" | "offline";
 /** 独立 = in no project (can join); elsewhere = in another project (cutex refuses until it leaves there). */
 export type MembershipFilter = "all" | "independent" | "elsewhere";
-export type MemberPickerSort = "recent" | "name";
+/** project: independent first (they can join), then by the project they are in (owner 2026-11-09). */
+export type MemberPickerSort = "recent" | "name" | "project";
 
 export interface MemberCandidate {
   row: AgentRow;
@@ -25,6 +26,8 @@ export interface MemberCandidate {
   online: boolean;
   /** Can be picked (add: independent; Director: a member that is not the Director already). */
   pickable: boolean;
+  /** A quick chat outside any project: listed only while searching (owner 2026-11-09). */
+  quickChat?: boolean;
 }
 
 export interface MemberPickerQuery {
@@ -50,7 +53,8 @@ export function addCandidates(groups: readonly SidebarGroup[], projectId: string
     const project = g.kind === "project" ? g : null;
     for (const row of [...g.online, ...g.offline]) {
       if (managed && !managed.has(row.id)) continue;
-      out.push({ row, projectId: project?.id ?? null, projectName: project?.name ?? null, online: isOnline(row), pickable: !project });
+      const quickChat = !project && isQuickChat(row.session);
+      out.push({ row, projectId: project?.id ?? null, projectName: project?.name ?? null, online: isOnline(row), pickable: !project, ...(quickChat ? { quickChat } : {}) });
     }
   }
   return out;
@@ -63,7 +67,7 @@ export function directorChoices(groups: readonly SidebarGroup[], projectId: stri
   return [...g.online, ...g.offline].map((row) => ({ row, projectId, projectName: g.name, online: isOnline(row), pickable: row.id !== directorId }));
 }
 
-/** Search (name, note, id) + runtime / status / membership filters, then sort; pickable agents come first (the rest is context). */
+/** Search (name, note, id, the project it is in) + runtime / status / membership filters, then sort; pickable agents come first (the rest is context). */
 export function filterCandidates(list: readonly MemberCandidate[], q: MemberPickerQuery, lastOf: (row: AgentRow) => number): MemberCandidate[] {
   const needle = q.query.trim().toLowerCase();
   const out = list.filter((c) => {
@@ -72,13 +76,19 @@ export function filterCandidates(list: readonly MemberCandidate[], q: MemberPick
     if (q.status === "offline" && c.online) return false;
     if (q.membership === "independent" && c.projectId !== null) return false;
     if (q.membership === "elsewhere" && c.projectId === null) return false;
-    if (!needle) return true;
-    return agentMatches(c.row.session, c.row.name, needle);
+    if (!needle) return !c.quickChat;
+    return agentMatches(c.row.session, c.row.name, needle) || (c.projectName ?? "").toLowerCase().includes(needle);
   });
   const byName = byNameThenId<MemberCandidate>((c) => c.row.name, (c) => c.row.id);
   const pickFirst = (a: MemberCandidate, b: MemberCandidate) => Number(b.pickable) - Number(a.pickable);
   if (q.sort === "name") return out.sort((a, b) => pickFirst(a, b) || byName(a, b));
+  if (q.sort === "project") return out.sort((a, b) => pickFirst(a, b) || compareNames(a.projectName ?? "", b.projectName ?? "") || (a.projectId ?? "").localeCompare(b.projectId ?? "") || byName(a, b));
   return out.sort((a, b) => pickFirst(a, b) || lastOf(b.row) - lastOf(a.row) || byName(a, b));
+}
+
+/** Quick chats the empty search leaves out (the picker says how many). */
+export function hiddenQuickChats(list: readonly MemberCandidate[], q: MemberPickerQuery): number {
+  return q.query.trim() ? 0 : list.filter((c) => c.quickChat).length;
 }
 
 /** Ids of `selected` that `run` may detach: never the Director (cutex: primary_director_requires_rotation). */

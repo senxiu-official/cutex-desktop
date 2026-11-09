@@ -35,6 +35,7 @@ import {
   isSshConnectAs,
   nextHostColor,
   normalizeHostGroups,
+  normalizeSshTarget,
   normalizeSshTargets,
   parseHostsFile,
   parseSshConfigHosts,
@@ -42,6 +43,7 @@ import {
   issueTokenFindingCutex,
   readHostOwner,
   scopeAfterRemoval,
+  sshRouteKind,
   sshTargetStrings,
   tokenRevokeCommand,
   type AddSshHostRequest,
@@ -62,13 +64,14 @@ import {
   type SshErrorView,
   type SshHostConfig,
   type SshHostPatch,
+  type SshRouteView,
   type SshTarget,
   type TunnelView,
   type ViewScope,
 } from "../shared/hosts";
 import type { CapabilitiesView, DaemonState, HostApi } from "../shared/ipc";
 import type { DaemonService } from "./daemon";
-import { SshFailure, SshTunnel, TunnelPidFile, openTemporaryTunnel, runSsh } from "./ssh";
+import { SshFailure, SshTunnel, TunnelPidFile, openTemporaryTunnel, resolveSshHost, runSsh } from "./ssh";
 import { SshAskpass, type AskpassSession } from "./sshAskpass";
 import type { SshPromptAnswer, SshPromptView } from "../shared/sshPrompt";
 import type { ClaimTarget, PersonIdentityService } from "./personIdentity";
@@ -214,6 +217,8 @@ export class HostManager implements HostApi {
   private readonly tokens: TokenStore;
   private readonly pids: TunnelPidFile;
   private readonly conns = new Map<string, HostConnection>();
+  /** Hosts with several routes: what `ssh -G` says about each (display only). */
+  private readonly routeViews = new Map<string, SshRouteView[]>();
   /** SSH prompts (passphrase / password / host key) → the renderer's dialog; created on first use. */
   private askpassBroker: SshAskpass | null = null;
   private scope: ViewScope;
@@ -387,6 +392,7 @@ export class HostManager implements HostApi {
   async addSshHost(request: AddSshHostRequest): Promise<HostResult> {
     const target = typeof request?.target === "string" ? parseSshTarget(request.target) : null;
     if (!target) return { ok: false, error: { code: "badInput", detail: "target" } };
+    const targetText = normalizeSshTarget(request.target)!;
     const remotePort = request.remotePort ?? DEFAULT_REMOTE_PORT;
     if (!isValidPort(remotePort)) return { ok: false, error: { code: "badInput", detail: "remotePort" } };
     const cutexPath = typeof request.cutexPath === "string" && request.cutexPath.trim() ? request.cutexPath.trim() : DEFAULT_CUTEX_PATH;
@@ -395,8 +401,8 @@ export class HostManager implements HostApi {
     const mode = request.connectAs ?? "auto";
     if (mode !== "auto" && !isSshConnectAs(mode)) return { ok: false, error: { code: "badInput", detail: "connectAs" } };
     if (!safeStorage.isEncryptionAvailable()) return { ok: false, error: { code: "noKeyring", detail: "" } };
-    const prompts = this.promptSession(request.target.trim());
-    const issued = await this.issueAs({ target: request.target.trim(), remotePort, cutexPath }, target, mode, prompts);
+    const prompts = this.promptSession(targetText);
+    const issued = await this.issueAs({ target: targetText, remotePort, cutexPath }, target, mode, prompts);
     if (!issued.ok) {
       prompts.close();
       return issued;
@@ -406,7 +412,7 @@ export class HostManager implements HostApi {
     const color = nextHostColor(this.file.hosts.map((h) => h.color));
     this.file = {
       ...this.file,
-      hosts: [...this.file.hosts, { id, label, target: request.target.trim(), targets: [request.target.trim()], daemonHostId: null, remotePort, cutexPath: issued.cutexPath, tokenId: issued.token.tokenId, createdAt: new Date().toISOString(), lastConnectedAt: null, autoConnect: true, color, platform: null, connectAs: issued.connectAs }],
+      hosts: [...this.file.hosts, { id, label, target: targetText, targets: [targetText], daemonHostId: null, remotePort, cutexPath: issued.cutexPath, tokenId: issued.token.tokenId, createdAt: new Date().toISOString(), lastConnectedAt: null, autoConnect: true, color, platform: null, connectAs: issued.connectAs }],
     };
     this.save();
     // No local host: the first host added becomes the scope (it was the never-connected placeholder).
@@ -570,6 +576,14 @@ export class HostManager implements HostApi {
     const color = patch?.color;
     if (color !== undefined && !isHostColor(color)) throw new Error("bad color");
     if (color !== undefined) this.patchLocal(hostId, { color: color.toLowerCase() });
+    const label = patch?.label;
+    if (label !== undefined) {
+      if (hostId !== LOCAL_HOST_ID || typeof label !== "string") throw new Error("bad label");
+      const { label: _old, ...rest } = this.file.local;
+      const name = label.trim().slice(0, 64);
+      this.file = { ...this.file, local: name ? { ...rest, label: name } : rest };
+      this.save();
+    }
     this.publish();
     return this.state();
   }
@@ -725,9 +739,9 @@ export class HostManager implements HostApi {
       return { epoch: conn.routingEpoch, tunnel, daemon: conn.daemon.currentState, cutexBuild: conn.cutexBuild };
     };
     const l = this.file.local;
-    const local: HostView = { id: LOCAL_HOST_ID, kind: "local", label: hostname(), target: null, remotePort: null, cutexPath: null, paired: true, lastConnectedAt: null, autoConnect: l.autoConnect, color: l.color, platform: l.platform, conn: view(LOCAL_HOST_ID) };
+    const local: HostView = { id: LOCAL_HOST_ID, kind: "local", label: l.label || hostname(), target: null, remotePort: null, cutexPath: null, paired: true, lastConnectedAt: null, autoConnect: l.autoConnect, color: l.color, platform: l.platform, conn: view(LOCAL_HOST_ID) };
     const ssh = this.file.hosts.map(
-      (h): HostView => ({ id: h.id, kind: "ssh", label: h.label, target: h.target, targets: sshTargetStrings(h), remotePort: h.remotePort, cutexPath: h.cutexPath, paired: this.tokens.has(h.id), lastConnectedAt: h.lastConnectedAt, tokenId: h.tokenId, autoConnect: h.autoConnect, color: h.color, platform: h.platform, connectAs: h.connectAs ?? "owner", conn: view(h.id) }),
+      (h): HostView => ({ id: h.id, kind: "ssh", label: h.label, target: h.target, targets: sshTargetStrings(h), ...(this.routeViews?.has(h.id) ? { routes: this.routeViews.get(h.id)! } : {}), remotePort: h.remotePort, cutexPath: h.cutexPath, paired: this.tokens.has(h.id), lastConnectedAt: h.lastConnectedAt, tokenId: h.tokenId, autoConnect: h.autoConnect, color: h.color, platform: h.platform, connectAs: h.connectAs ?? "owner", conn: view(h.id) }),
     );
     const dev = this.devHosts().map(
       (h): HostView => ({ id: h.id, kind: "dev-direct", label: h.name, target: h.baseUrl, remotePort: null, cutexPath: null, paired: true, lastConnectedAt: null, autoConnect: h.autoConnect, color: h.color, platform: h.platform, conn: view(h.id) }),
@@ -883,9 +897,41 @@ export class HostManager implements HostApi {
       // The connection's prompts: a reconnect reuses answers given for it; closed with the tunnel.
       askpass: prompts ?? this.promptSession(host.target),
       onChange: (view) => this.onTunnel(conn, tunnel, host, token, view),
+      ...(targets.length > 1 ? { verifyRoute: (port: number, target: string) => this.verifyRoute(conn, host, token, port, target), onRouteSwitched: () => conn.daemon.moveStreams() } : {}),
     });
     conn.tunnel = tunnel;
     tunnel.start();
+    if (targets.length > 1) void this.loadRoutes(host, targets as SshTarget[]);
+  }
+
+  /** A better route's forward, before any traffic moves there: it must answer as the identity already confirmed. */
+  private async verifyRoute(conn: HostConnection, host: SshHostConfig, token: string, port: number, target: string): Promise<SshErrorView | null> {
+    const expected = conn.daemonHostId ?? this.find(host.id)?.daemonHostId ?? null;
+    if (!expected) return { code: "remoteDaemon", detail: `${target}: identity not confirmed yet` };
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5_000);
+    try {
+      const remote = await new CutexClient(this.endpoint(port, token, { target }), { fetch: daemonFetch }).host({ signal: controller.signal });
+      return remote.hostId === expected ? null : { code: "hostMismatch", detail: `${target}: expected cutex hostId ${expected}, got ${remote.hostId}` };
+    } catch (error) {
+      if (error instanceof CutexApiError && (error.status === 401 || error.status === 403)) return { code: "tokenRejected", detail: `${target}: ${error.message}` };
+      return { code: "remoteDaemon", detail: `${target}: ${error instanceof Error ? error.message : String(error)}` };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /** Readable route labels; the routes work without them. */
+  private async loadRoutes(host: SshHostConfig, targets: SshTarget[]): Promise<void> {
+    const texts = sshTargetStrings(host);
+    const hosts = await Promise.all(targets.map((target) => resolveSshHost(target).catch(() => null)));
+    if (JSON.stringify(sshTargetStrings(this.find(host.id) ?? host)) !== JSON.stringify(texts)) return;
+    this.routeViews?.set(host.id, texts.map((target, index) => {
+      const resolved = hosts[index] ?? null;
+      const shown = resolved && resolved.toLowerCase() !== targets[index]!.destination.slice(targets[index]!.destination.lastIndexOf("@") + 1).toLowerCase() ? resolved : null;
+      return { target, host: shown, kind: sshRouteKind(target, resolved) };
+    }));
+    this.publish();
   }
 
   private onTunnel(conn: HostConnection, tunnel: SshTunnel, host: SshHostConfig, token: string, view: TunnelView): void {

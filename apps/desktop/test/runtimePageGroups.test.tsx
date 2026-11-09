@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 import { act, createElement as h } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { adaptRuntimes } from "../src/shared/runtimes";
-const fx = vi.hoisted(() => ({ features: new Set<string>(), components: {} as Record<string, any>, open: vi.fn(), host: vi.fn(), locale: "zh-CN", view: null as any }));
+const fx = vi.hoisted(() => ({ features: new Set<string>(), components: {} as Record<string, any>, open: vi.fn(), host: vi.fn(), locale: "zh-CN", view: null as any, data: null as any, ensureArchived: vi.fn() }));
 vi.mock("../src/renderer/src/i18n", async () => {
   const { zhCN } = await import("../src/renderer/src/modules/runtimes/i18n");
   const { en } = await import("../src/renderer/src/modules/runtimes/i18n.en");
@@ -18,8 +18,8 @@ vi.mock("../src/renderer/src/lib/runtimesStore", () => ({ useHostRuntimes: () =>
 vi.mock("../src/renderer/src/lib/targetHost", () => ({ useTargetHostId: () => "remote-host", useTargetFeatures: () => fx.features }));
 // These presentation/legacy fixtures have no connected host snapshot or runtime-prune-v1.
 // Keep cleanup unavailable without turning the narrow getState-only app stub into a live store.
-vi.mock("../src/renderer/src/lib/useHostScope", () => ({ useHostData: () => null }));
-vi.mock("../src/renderer/src/store", () => ({ useApp: { getState: () => ({ openSettings: fx.open }) } }));
+vi.mock("../src/renderer/src/lib/useHostScope", () => ({ useHostData: () => fx.data }));
+vi.mock("../src/renderer/src/store", () => ({ useApp: Object.assign((select: (s: unknown) => unknown) => select({ sidebar: fx.data?.sidebar }), { getState: () => ({ openSettings: fx.open, ensureArchived: fx.ensureArchived }) }) }));
 vi.mock("../src/renderer/src/lib/settingsHost", () => ({ setSettingsHost: fx.host }));
 import { RuntimeGroup } from "../src/renderer/src/components/RuntimeVersions";
 import { RuntimesSection } from "../src/renderer/src/modules/runtimes/RuntimesSection";
@@ -27,7 +27,7 @@ import { DshRuntimeCard, DshRuntimeSettings } from "../src/renderer/src/componen
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 let node: HTMLDivElement, root: Root;
-beforeEach(() => { node=document.createElement("div");document.body.append(node);root=createRoot(node);fx.locale="zh-CN";fx.open.mockReset();fx.host.mockReset();fx.components={"dsh-runtime":{name:"dsh-runtime",state:"ready",selected:"0.2.1-rc.3",versions:[{version:"0.2.1-rc.3",pinnedBy:3}],dsh:{version:"0.2.1-rc.3",node:{minimum:"24.9.0",version:"24.21.0",ready:true}}},"claude-runtime":{name:"claude-runtime",state:"ready",claudeCli:{selected:"bundled",bundled:{version:"2.1.7"},system:{version:"2.1.9"}}}};fx.view=adaptRuntimes({native:[{release:"r260",version:"0.160.0-r52.4",selected:true,agentCount:0},{release:"r238",missing:true,agentCount:1},{release:"r35",agentCount:0}],claude:[{release:"claude-r29",selected:true,agentCount:2}]}); });
+beforeEach(() => { node=document.createElement("div");document.body.append(node);root=createRoot(node);fx.locale="zh-CN";fx.data=null;fx.ensureArchived.mockReset();fx.open.mockReset();fx.host.mockReset();fx.components={"dsh-runtime":{name:"dsh-runtime",state:"ready",selected:"0.2.1-rc.3",versions:[{version:"0.2.1-rc.3",pinnedBy:3}],dsh:{version:"0.2.1-rc.3",node:{minimum:"24.9.0",version:"24.21.0",ready:true}}},"claude-runtime":{name:"claude-runtime",state:"ready",claudeCli:{selected:"bundled",bundled:{version:"2.1.7"},system:{version:"2.1.9"}}}};fx.view=adaptRuntimes({native:[{release:"r260",version:"0.160.0-r52.4",selected:true,agentCount:0},{release:"r238",missing:true,agentCount:1},{release:"r35",agentCount:0}],claude:[{release:"claude-r29",selected:true,agentCount:2}]}); });
 afterEach(async () => {await act(async()=>root.unmount());node.remove();});
 it("keeps current and pinned/missing releases visible and folds only unused old versions", async () => {
   await act(async()=>root.render(h(RuntimeGroup,{kind:"native",title:"cute-codex",list:fx.view.native})));
@@ -197,4 +197,73 @@ it("Kimi: the same Node line (range from external, observed version)", async () 
   const { AcpRuntimeCard } = await import("../src/renderer/src/components/DshRuntimeCard");
   await act(async () => root.render(h(AcpRuntimeCard, { runtime: "kimi", hostId: "remote-host" })));
   expect(node.querySelector("[data-runtime-node]")!.textContent).toBe("Node ≥ 24.9.0, < 25 · 当前 v24.10.0");
+});
+
+describe("version rows: active and archived agents apart", () => {
+  const session = (id: string, lifecycle = "active") => ({ cutexSessionId: id, displayName: id, lifecycle });
+  const lists = (over: Record<string, unknown> = {}) => ({ active: [session("amy"), session("bea")], retired: [session("old-1", "retired"), session("old-2", "retired")], ...over });
+  const pin = (...ids: string[]) => ({ agents: ids.map(id => ({ cutexSessionId: id, name: id.toUpperCase() })) });
+  const draw = async (claude: unknown[], sidebar: unknown) => {
+    fx.data = { daemon: { kind: "disconnected" }, features: new Set(), sidebar };
+    const list = adaptRuntimes({ claude } as never)!.claude;
+    await act(async () => root.render(h(RuntimeGroup, { kind: "claude", title: "Claude", list })));
+  };
+  const row = () => node.querySelector("li")!;
+  const headline = () => row().querySelector("button")!.textContent!;
+  it("a version held only by archived agents says so instead of counting them as agents on it", async () => {
+    await draw([{ release: "claude-r29", ...pin("old-1", "old-2") }], lists());
+    expect(headline()).toContain("2 个已归档");
+    expect(row().querySelector("[data-tip]")?.getAttribute("data-tip")).toContain("不代表没升级");
+    await act(async () => row().querySelector("button")!.click());
+    const part = row().querySelector<HTMLDetailsElement>("[data-archived-agents]")!;
+    expect(part.open).toBe(false);
+    expect(part.querySelector("summary")!.textContent).toContain("已归档的");
+    expect(part.querySelector("summary")!.textContent).toContain("（2）");
+    expect(part.textContent).toContain("OLD-1");
+    expect(row().querySelector("p:not([data-archived-agents] p)")).toBeNull();
+  });
+  it("a mixed version counts them apart: active names in the row, archived names only in the collapsed part", async () => {
+    await draw([{ release: "claude-r35", ...pin("amy", "old-1", "bea") }], lists());
+    expect(headline()).toContain("2 个");
+    expect(headline()).toContain("1 个已归档");
+    expect(headline()).not.toContain("3 个");
+    await act(async () => row().querySelector("button")!.click());
+    const names = row().querySelector("p")!;
+    expect(names.textContent).toContain("AMY");
+    expect(names.textContent).toContain("BEA");
+    expect(names.textContent).not.toContain("OLD-1");
+    expect(row().querySelector("[data-archived-agents]")!.textContent).toContain("OLD-1");
+  });
+  it("active-only versions read as before, with no archived part or hint", async () => {
+    await draw([{ release: "claude-r42", ...pin("amy", "bea") }], lists());
+    expect(headline()).not.toContain("已归档");
+    expect(row().querySelector("[data-tip]")).toBeNull();
+    await act(async () => row().querySelector("button")!.click());
+    expect(row().querySelector("[data-archived-agents]")).toBeNull();
+    expect(row().querySelector("p")!.textContent).toContain("AMY");
+  });
+  it("while archived agents are unread nobody is called archived, and showing the list asks for them", async () => {
+    const pending = lists({ retired: [], partial: true, archivedPending: { count: 2 } });
+    await draw([{ release: "claude-r29", ...pin("old-1", "old-2") }], pending);
+    expect(headline()).toContain("2 个");
+    expect(headline()).not.toContain("已归档");
+    expect(fx.ensureArchived).toHaveBeenCalledWith("remote-host");
+    await draw([{ release: "claude-r29", ...pin("old-1", "old-2") }], lists());
+    expect(headline()).toContain("2 个已归档");
+  });
+  it("an agent the lists don't have (hidden) and pins sent only as a count are not called archived", async () => {
+    await draw([{ release: "claude-r35", agentCount: 4, ...pin("ghost", "old-1") }], lists());
+    expect(headline()).toContain("3 个");
+    expect(headline()).toContain("1 个已归档");
+    await act(async () => row().querySelector("button")!.click());
+    expect(row().querySelector("p")!.textContent).toContain("GHOST");
+    expect(row().querySelector("p")!.textContent).toContain("还有 2 个");
+  });
+  it("in English too", async () => {
+    fx.locale = "en";
+    await draw([{ release: "claude-r29", ...pin("old-1") }], lists());
+    expect(headline()).toMatch(/Archived .*: 1$/);
+    await draw([{ release: "claude-r35", ...pin("amy", "old-1") }], lists());
+    expect(headline()).toMatch(/: 1 · archived: 1$/);
+  });
 });

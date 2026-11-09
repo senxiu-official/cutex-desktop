@@ -18,6 +18,7 @@ import { lazyPage } from "../../lib/lazyPage";
 // Loaded on first open (lib/lazyPage).
 const UsersPeoplePart = lazyPage(() => import("./UsersPage").then((m) => m.UsersPeoplePart));
 const UsersDevicesPart = lazyPage(() => import("./UsersPage").then((m) => m.UsersDevicesPart));
+const UsersAllDevicesPart = lazyPage(() => import("./UsersPage").then((m) => m.UsersAllDevicesPart));
 const UsersPeersPart = lazyPage(() => import("./UsersPage").then((m) => m.UsersPeersPart));
 
 export default defineModule({
@@ -34,7 +35,7 @@ export default defineModule({
     "settings.section": [
       {
         id: "users.people",
-        page: "users",
+        page: "access",
         order: 100,
         titleKey: "users.list",
         sections: [{ anchor: USERS_ANCHOR, titleKey: "users.list", keywords: ["users.grant", "users.alias", "users.add", "users.selfName", "users.person.title"] }],
@@ -42,11 +43,20 @@ export default defineModule({
       },
       {
         id: "users.devices",
-        page: "users",
+        page: "access",
         order: 110,
         titleKey: "users.devices",
         sections: [{ anchor: DEVICES_ANCHOR, titleKey: "users.devices", keywords: ["users.devices.hint", "users.devices.pendingChip", "users.devices.pair", "users.ownerRequiresApproval", "users.revoke"] }],
         Section: UsersDevicesPart,
+      },
+      // 全部设备: the whole list, on the host page's sub-page.
+      {
+        id: "users.allDevices",
+        page: "access",
+        order: 111,
+        titleKey: "shell.access.sub.devices",
+        sections: [{ anchor: "users-all-devices", titleKey: "shell.access.sub.devices" }],
+        Section: UsersAllDevicesPart,
       },
       {
         id: "users.peers",

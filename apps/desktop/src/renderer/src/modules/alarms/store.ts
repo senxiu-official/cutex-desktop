@@ -11,7 +11,7 @@ import { featuresOf, useApp } from "../../store";
 import { useConvViewHost } from "../../lib/conversationScope";
 import { LOCAL_HOST_ID } from "../../../../shared/hosts";
 import { services } from "../app";
-import type { AppModuleContext } from "../slots";
+import type { ModuleContext } from "../slots";
 import { agentAlarms, keysTouched, NO_ALARMS, withAlarm, type AgentAlarms } from "./model";
 
 interface Entry {
@@ -97,7 +97,7 @@ function scheduleReload(keys: readonly string[]) {
 }
 
 /** Module activation: follow `cutex/alarms/changed` on every connected host until the module stops. */
-export function startAlarmSync(ctx: AppModuleContext): void {
+export function startAlarmSync(ctx: ModuleContext): void {
   if (typeof bridge?.on !== "function") return;
   const off = bridge.on("hostEvent", ({ hostId, envelope }) => {
     const change = alarmChangeOf(envelope);

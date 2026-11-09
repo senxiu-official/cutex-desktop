@@ -1,17 +1,15 @@
-// Small list helpers shared by the delegation and job lists (DESIGN §4.18): short colored "#N"
+// Small list helpers shared by the delegation and job lists (DESIGN §4.18): short colored "#5e89dd"
 // tags instead of raw ids, and grouping of rows by project.
-import { onHostSwitch } from "./hostSwitch";
 
 const TAG_COLORS = ["#4c8dff", "#40c057", "#f59f00", "#e64980", "#7950f2", "#12b886", "#fd7e14", "#15aabf"];
-const numbers = new Map<string, number>();
-onHostSwitch(() => numbers.clear());
+const TAG_LENGTH = 6;
 
-/** Stable per app run: first id seen is #1. Color is derived from the id so it never shifts. */
+/** From the id alone, so it stays the same after a restart and on every device: the first characters cutex shortens an id to (`ask-5e89dd8c…` / `delegation-5e89dd` → #5e89dd), so a tag can be quoted to an agent. */
 export function taskTag(taskId: string): { label: string; color: string } {
-  if (!numbers.has(taskId)) numbers.set(taskId, numbers.size + 1);
+  const short = taskId.replace(/^[a-z]+-/i, "").slice(0, TAG_LENGTH) || taskId;
   let h = 0;
   for (const ch of taskId) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-  return { label: `#${numbers.get(taskId)}`, color: TAG_COLORS[h % TAG_COLORS.length]! };
+  return { label: `#${short}`, color: TAG_COLORS[h % TAG_COLORS.length]! };
 }
 
 /** Split already-sorted rows by project: sidebar project order, rows without a project last. */

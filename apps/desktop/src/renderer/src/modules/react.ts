@@ -1,5 +1,5 @@
 // React bindings of the module host (hooks only; docs/desktop-modules.md §8).
-import { useCallback, useSyncExternalStore } from "react";
+import { useCallback, useRef, useSyncExternalStore } from "react";
 import { useI18n, type MessageKey } from "../i18n";
 import { useApp } from "../store";
 import { appModules } from "./app";
@@ -33,11 +33,12 @@ export function usePlacement<S extends SlotId>(slot: S): (item: SlotItem<S>) => 
   return useCallback((item: SlotItem<S>) => host.placement(slot, item), [host, slot, overrides]);
 }
 
-/** One key of a module's prefs (`cutex-desktop.module.<id>`). `fallback` must be a primitive or a stable reference. */
-export function useModulePref<T extends Json>(id: ModuleId, key: string, fallback: T): [T, (value: T) => void] {
+/** One key of a module's prefs (`cutex-desktop.module.<id>`). The first `fallback` is kept, so an inline `[]` is fine. The setter also takes an updater of the stored value. */
+export function useModulePref<T extends Json>(id: ModuleId, key: string, fallback: T): [T, (value: T | ((previous: T) => T)) => void] {
   const prefs = appModules().prefs(id);
-  const value = useSyncExternalStore(prefs.subscribe, () => prefs.get(key, fallback));
-  const set = useCallback((next: T) => prefs.set(key, next), [prefs, key]);
+  const first = useRef(fallback).current;
+  const value = useSyncExternalStore(prefs.subscribe, () => prefs.get(key, first));
+  const set = useCallback((next: T | ((previous: T) => T)) => prefs.set(key, typeof next === "function" ? next(prefs.get(key, first)) : next), [prefs, key, first]);
   return [value, set];
 }
 

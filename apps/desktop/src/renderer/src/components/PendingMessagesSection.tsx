@@ -55,7 +55,7 @@ function MessageRow({ message, busy, label, cancel, ranSince, hostId }: { messag
   const { t } = useI18n();
   const wake = wakeTexts(t, rowLabel(message, label));
   const conv = useConvScope();
-  const agentName = useApp((s) => message.senderName ?? rowsOf(s.sidebar, convSidebarOf(conv, s)).find((r) => r.cutexSessionId === message.from)?.displayName ?? message.from ?? "?");
+  const agentName = useApp((s) => rowsOf(s.sidebar, convSidebarOf(conv, s)).find((r) => r.cutexSessionId === message.from)?.displayName ?? message.senderName ?? message.from ?? "?");
   const peer = peerSenderOf(message);
   const name = peer ? peer.label : senderLabel(t, message.from, message.sourceKind, agentName);
   const failed = message.state === "failed";

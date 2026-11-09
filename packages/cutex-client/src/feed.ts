@@ -82,6 +82,8 @@ export class EventFeed {
   private backoff: number;
   /** Ends the reconnect wait in progress early (null while not waiting). */
   private wake: (() => void) | null = null;
+  /** `reopen` ended the current attempt: no failure to report and no wait. */
+  private reopening = false;
 
   constructor(
     private readonly client: CutexClient,
@@ -118,6 +120,18 @@ export class EventFeed {
     this.wake?.();
   }
 
+  /**
+   * The way to the daemon moved while this stream may still be live on the old way: end it now and
+   * resume from the last cursor on a new connection.
+   */
+  reopen(): void {
+    if (this.stopped) return;
+    this.reopening = true;
+    this.backoff = this.options.minBackoffMs ?? 500;
+    this.controller?.abort();
+    this.wake?.();
+  }
+
   private async run(): Promise<void> {
     const minBackoff = this.options.minBackoffMs ?? 500;
     const maxBackoff = this.options.maxBackoffMs ?? 15_000;
@@ -151,9 +165,13 @@ export class EventFeed {
           return;
         }
         this.resetLive("reconnect");
-        this.handlers.status?.("retrying", error);
+        if (!this.reopening) this.handlers.status?.("retrying", error);
       }
       if (this.stopped) return;
+      if (this.reopening) {
+        this.reopening = false;
+        continue;
+      }
       const wait = this.backoff;
       this.backoff = Math.min(wait * 2, maxBackoff);
       await this.sleep(wait);

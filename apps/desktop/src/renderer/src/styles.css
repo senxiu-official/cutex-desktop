@@ -520,13 +520,20 @@
 }
 /* Folders (lib/folderLook, components/Sidebar FolderHeader; owner folders and 更早的项目): the name and icon in
    the folder colour's ink (the project icon rule, so it passes in light and dark), the trailing line in the same
-   colour at a lower strength. */
+   colour at a lower strength. A colour outside the palette brings its own ink per theme (lib/folderInk,
+   `--folder-ink-light` / `--folder-ink-dark`, set by lib/folderLook folderStyle), and its line follows that ink. */
 .folder-ink {
-  color: color-mix(in oklab, var(--folder-color) var(--project-icon-ink), var(--project-icon-ink-toward));
+  color: var(--folder-ink-light, color-mix(in oklab, var(--folder-color) var(--project-icon-ink), var(--project-icon-ink-toward)));
 }
 .folder-line {
-  background: color-mix(in oklab, var(--folder-color) 40%, transparent);
+  background: color-mix(in oklab, var(--folder-ink-light, var(--folder-color)) 40%, transparent);
 }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .folder-ink { color: var(--folder-ink-dark, color-mix(in oklab, var(--folder-color) var(--project-icon-ink), var(--project-icon-ink-toward))); }
+  :root:not([data-theme="light"]) .folder-line { background: color-mix(in oklab, var(--folder-ink-dark, var(--folder-color)) 40%, transparent); }
+}
+:root[data-theme="dark"] .folder-ink { color: var(--folder-ink-dark, color-mix(in oklab, var(--folder-color) var(--project-icon-ink), var(--project-icon-ink-toward))); }
+:root[data-theme="dark"] .folder-line { background: color-mix(in oklab, var(--folder-ink-dark, var(--folder-color)) 40%, transparent); }
 /* 线条 (项目图标样式 = line): the same ink, no tile. */
 .project-icon.project-icon-line {
   background: transparent;
@@ -745,6 +752,50 @@
 }
 .markdown [data-streamdown="inline-code"] {
   overflow-wrap: anywhere;
+}
+/* Markdown math (components/MathNode.tsx; line boxes: lib/mathLayout.ts). KaTeX's own 1.21em is sized for a
+   serif page; next to the chat sans it reads large. line-height 0: the formula's height is its struts, so
+   a formula that fits the line's strut leaves the line alone. Colour follows the prose (light, dark, palettes). */
+.markdown .katex {
+  font-size: 1.1em;
+  line-height: 0;
+  color: inherit;
+}
+/* Zero-size marks at the top and the bottom of an inline formula's line box (lib/mathLayout.ts measures it). */
+.markdown :is(.math-probe-top, .math-probe-bottom) {
+  display: inline-block;
+  width: 0;
+  height: 0;
+  vertical-align: top;
+}
+.markdown .math-probe-bottom {
+  vertical-align: bottom;
+}
+.markdown .math-display {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-block: round(nearest, 0.25em, var(--prose-pixel, 1px));
+  margin-block: round(nearest, 1rem, var(--prose-pixel, 1px));
+  text-align: center;
+}
+.markdown .math-display:first-child {
+  margin-top: 0;
+}
+.markdown .math-display:last-child {
+  margin-bottom: 0;
+}
+.markdown .math-display > .katex-display {
+  margin: 0;
+}
+/* Source shown as written: pending (still streaming), before KaTeX loads, or a formula KaTeX rejects. */
+.markdown .math-source {
+  white-space: pre-wrap;
+}
+.markdown .math-source-block {
+  display: block;
+  margin-block: round(nearest, 1rem, var(--prose-pixel, 1px));
 }
 /* streamdown gives every code block `content-visibility: auto; contain-intrinsic-size: auto 200px`
    (inline style): a block that has just mounted is laid out 200px tall for a frame, then snaps to

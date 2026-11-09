@@ -1,26 +1,24 @@
 import { isImeComposing } from "../../lib/ime";
 // Settings → 接入: 监听地址 + 配对设备 + CORS (cutex `listen-settings` / `device-pairing`,
 // docs/research/cutex-mobile-api.md §1, §2): which addresses the connected cutex's Management API
-// listens on, the browser CORS allow-list and one-time pairing codes (QR). Paired devices are managed in
-// 用户 → 设备 on a host with cutex `users` (one link row here, docs/research/identity-settings-review-
-// 20261015.md §4.3); an older host keeps its list here (named by lib/deviceNames; cutex
-// `client-token-rename`: a pencil renames one, TokenName.tsx).
+// listens on and the browser CORS allow-list. A host with cutex `users` adds and manages devices in its
+// 设备 list (modules/users/AddDevice.tsx, one 添加设备 for every route); only an older host keeps 配对设备
+// here: a one-time code (QR) and its token list (named by lib/deviceNames; cutex `client-token-rename`: a
+// pencil renames one, TokenName.tsx).
 // Everything is host-side state read / written over the daemon API; no token is ever shown here
 // except the one-time pairing code.
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { KeyRound, Lock, ShieldAlert, Smartphone } from "lucide-react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { KeyRound, Lock, Smartphone } from "lucide-react";
 import type { ClientTokenView, GlobalSettings, ListenEntry, PairingCodeView } from "../../../../shared/ipc";
 import { MaskedAddress } from "../MaskedAddress";
 import { RenameTokenButton, TokenTitle } from "./TokenName";
 import { CLIENT_TOKEN_RENAME_FEATURE } from "../../lib/deviceNames";
 import { useI18n, type MessageKey } from "../../i18n";
-import { qrPath } from "../../lib/qr";
 import {
   checkCorsOrigin,
   checkListenEntry,
   entryAddress,
   entryStatus,
-  formatCountdown,
   LISTEN_FEATURE,
   needsPairingBanner,
   needsRestart,
@@ -31,12 +29,13 @@ import {
   tokenName,
   unixSeconds,
 } from "../../lib/remoteAccess";
-import { formatWhen, useClock, useNow } from "../../lib/time";
+import { formatWhen, useClock } from "../../lib/time";
+import { OwnerCodeWarning, PairingCard, PairScope } from "./PairingParts";
 import { useApp } from "../../store";
-import { AddButton, ArmedRemove, Button, EmptyState, ErrorNote, ListRow, Loading, Notice, RefreshButton, ResetButton, Section, Select, TextInput, TextLink, SettingsGroup } from "./Form";
+import { AddButton, ArmedRemove, Button, EmptyState, ErrorNote, ListRow, Loading, Notice, RefreshButton, ResetButton, Section, TextInput, SettingsGroup } from "./Form";
 import { useTargetApi, useTargetFeatures, useTargetHostId } from "../../lib/targetHost";
-import { OWNER_USER_ID, shownUserName, USERS_FEATURE, type UserRecord, accessRefusalOf, DEVICE_SCOPE_FEATURE, OWNER_DEVICE_NOTICE_FEATURE, type DeviceScope } from "../../../../shared/users";
-import { accessRefusalText, scopeOptions, useOwnerLocalLock } from "./OwnerDevices";
+import { USERS_FEATURE, accessRefusalOf, DEVICE_SCOPE_FEATURE, OWNER_DEVICE_NOTICE_FEATURE, type DeviceScope } from "../../../../shared/users";
+import { accessRefusalText, useOwnerLocalLock } from "./OwnerDevices";
 import { useHostScope } from "../../lib/useHostScope";
 import { useHostData } from "../../lib/useHostScope";
 import { Tag } from "../../components/Tag";
@@ -364,104 +363,6 @@ export function CorsSection() {
   );
 }
 
-/** The pairing payload as a QR code: dark on white in both themes (phones need the contrast). */
-/** 设备权限 at pairing: one radio per scope with what it means (the owner's default: 完全控制). */
-function PairScope({ value, ownerDevice, onChange }: { value: DeviceScope; ownerDevice: boolean; onChange(scope: DeviceScope): void }) {
-  const { t } = useI18n();
-  return (
-    <SettingsGroup agents="access" source="host"><div className="-mx-4 border-b border-border px-4 py-2.5" role="radiogroup" aria-label={t("ownerDev.scope")}>
-      <div className="mb-1 text-sm">{t("ownerDev.scope")}</div>
-      {scopeOptions(t, ownerDevice, true).map((o) => (
-        <label key={o.value} className="flex cursor-pointer items-start gap-2 py-1 text-sm">
-          <input type="radio" name="pair-scope" checked={value === o.value} onChange={() => onChange(o.value)} className="mt-1 accent-[var(--color-accent)]" />
-          <span>
-            {o.label}
-            {o.value === "full" && ownerDevice && <span className="ml-1 text-xs text-subtle">{t("ownerDev.scope.ownerDefault")}</span>}
-            <span className="block text-xs text-subtle">{o.value === "full" && !ownerDevice ? t("ownerDev.scope.byUser.hint") : o.title}</span>
-          </span>
-        </label>
-      ))}
-    </div></SettingsGroup>
-  );
-}
-
-/** Before generating an owner code with full control: what it gives (owner 2026-10-19, three points). */
-function OwnerCodeWarning({ host }: { host: string }) {
-  const { t } = useI18n();
-  return (
-    <div className="-mx-4 border-b border-border bg-warn/10 px-4 py-3 text-xs text-warn-text" data-testid="owner-code-warning">
-      <div className="mb-1 flex items-center gap-1.5 text-sm font-medium">
-        <ShieldAlert size={14} className="shrink-0" />
-        {t("ownerDev.code.title", { host })}
-      </div>
-      <ul className="list-disc space-y-0.5 pl-5">
-        <li>{t("ownerDev.code.commands")}</li>
-        <li>{t("ownerDev.code.once")}</li>
-        <li>{t("ownerDev.code.notice", { host })}</li>
-      </ul>
-    </div>
-  );
-}
-
-function QrCode({ text, label }: { text: string; label: string }) {
-  const { size, d } = useMemo(() => qrPath(text), [text]);
-  const quiet = 4;
-  return (
-    <svg role="img" aria-label={label} viewBox={`${-quiet} ${-quiet} ${size + quiet * 2} ${size + quiet * 2}`} shapeRendering="crispEdges" className="h-48 w-48 shrink-0 rounded-lg bg-white ring-1 ring-border">
-      <path d={d} fill="#000" />
-    </svg>
-  );
-}
-
-function PairingCard({ code, onClose, onRenew, busy }: { code: PairingCodeView; onClose(): void; onRenew(): void; busy: boolean }) {
-  const { t } = useI18n();
-  const now = useNow(true);
-  const left = secondsLeft(code.expiresAt, now);
-  const expired = left === 0;
-  return (
-    <div className="-mx-4 border-b border-border px-4 py-3">
-      <div className="flex flex-wrap items-start gap-5">
-        <div className={expired ? "opacity-30" : ""}>
-          <QrCode text={code.qr} label={t("remote.pair.qr")} />
-        </div>
-        <div className="min-w-0 flex-1 space-y-2">
-          <p className="text-xs text-subtle">{t("remote.pair.scanHint")}</p>
-          <div className={`font-mono text-3xl font-semibold tracking-[0.2em] select-all ${expired ? "text-subtle line-through" : ""}`}>{code.code}</div>
-          <p className={`text-xs tabular-nums ${expired ? "text-danger" : left < 60 ? "text-warn" : "text-subtle"}`}>
-            {expired ? t("remote.pair.expired") : t("remote.pair.expiresIn", { time: formatCountdown(left) })}
-            {code.ownerDevice ? ` · ${t("ownerDev.code.onceShort")}` : ""}
-            {code.label ? ` · ${code.label}` : ""}
-          </p>
-          {code.urls.length > 0 ? (
-            <div>
-              <div className="text-xs text-subtle">{t("remote.pair.urls")}</div>
-              {code.urls.map((u) => (
-                <div key={u} className="truncate font-mono text-xs text-muted">
-                  {u}
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="text-xs text-warn">{t("remote.pair.noUrls")}</p>
-          )}
-          {!expired && (
-            <p className="flex items-center gap-1.5 text-xs text-subtle">
-              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" />
-              {t("remote.pair.waiting")}
-            </p>
-          )}
-          <div className="flex gap-2 pt-1">
-            <SettingsGroup agents="access" source="host"><Button primary={expired} disabled={busy} onClick={onRenew}>
-              {t("remote.pair.renew")}
-            </Button></SettingsGroup>
-            <Button onClick={onClose}>{t("remote.pair.close")}</Button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function TokenRow({ token, own, busy, onRevoke, rename }: { token: ClientTokenView; own: boolean; busy: boolean; onRevoke(): void; rename: { can: boolean; editing: boolean; start(): void; cancel(): void; save(name: string | null): Promise<boolean> } }) {
   const { t, locale } = useI18n();
   const now = useClock();
@@ -488,13 +389,17 @@ function TokenRow({ token, own, busy, onRevoke, rename }: { token: ClientTokenVi
       actions={
         <>
           {rename.can && !rename.editing && <RenameTokenButton disabled={busy} onClick={rename.start} />}
-          <ArmedRemove title={own ? t("remote.token.revokeOwn") : t("remote.token.revoke")} armedLabel={t("remote.token.revokeArmed")} disabled={busy} onRemove={onRevoke} />
+          <ArmedRemove label={t("users.revoke")} title={own ? t("remote.token.revokeOwn") : t("remote.token.revoke")} armedLabel={t("remote.token.revokeArmed")} disabled={busy} onRemove={onRevoke} />
         </>
       }
     /></SettingsGroup>
   );
 }
 
+/**
+ * 配对设备 of an older host (no cutex `users`): a one-time v1 code and the host's token list. A host with
+ * `users` adds devices in its 设备 list instead (modules/users/AddDevice.tsx), so there this card is empty.
+ */
 export function PairingSection() {
   const api = useTargetApi();
   const { t } = useI18n();
@@ -509,24 +414,16 @@ export function PairingSection() {
   const [busy, setBusy] = useState(false);
   const [paired, setPaired] = useState<ClientTokenView | null>(null);
   const known = useRef<Set<string>>(new Set());
-  // users: whose the paired device will be (default the owner: a code made here is the owner's approval).
   const features = useTargetFeatures();
   const withUsers = features.has(USERS_FEATURE);
   // client-token-rename (owner only: a non-owner connection has the capability stripped).
   const canRename = features.has(CLIENT_TOKEN_RENAME_FEATURE);
   const [renaming, setRenaming] = useState<string | null>(null);
-  const [users, setUsers] = useState<UserRecord[] | null>(null);
-  const [forUser, setForUser] = useState<string>(OWNER_USER_ID);
-  // device-scope: what the paired device may do (never above its user's grant).
+  // device-scope: what the paired device may do.
   const withScope = features.has(DEVICE_SCOPE_FEATURE);
   const [scope, setScope] = useState<DeviceScope>("full");
   const lock = useOwnerLocalLock(targetHost);
   const hostLabel = useHostScope().host(targetHost)?.view.label ?? targetHost;
-  useEffect(() => {
-    setUsers(null);
-    setForUser(OWNER_USER_ID);
-    if (key && withUsers) void api.users().then((r) => setUsers(r?.users ?? null), () => setUsers(null));
-  }, [key, withUsers]); // eslint-disable-line react-hooks/exhaustive-deps -- api follows the target host (key)
 
   const load = useCallback(async () => {
     try {
@@ -544,8 +441,8 @@ export function PairingSection() {
     setPaired(null);
     setError(null);
     setRenaming(null);
-    if (key) void load();
-  }, [key, load]);
+    if (key && !withUsers) void load();
+  }, [key, withUsers, load]);
 
   // While a code is live: poll the token list; a new token = the phone paired.
   useEffect(() => {
@@ -563,7 +460,7 @@ export function PairingSection() {
     return () => clearInterval(timer);
   }, [code, load]);
 
-  if (!key) return null;
+  if (!key || withUsers) return null;
 
   const generate = async () => {
     setBusy(true);
@@ -572,7 +469,7 @@ export function PairingSection() {
     try {
       const list = (await load()) ?? tokens ?? [];
       known.current = new Set(list.map((x) => x.tokenId));
-      setCode(await api.createPairingCode(label.trim() || undefined, users && forUser !== OWNER_USER_ID ? forUser : undefined, withScope ? scope : undefined));
+      setCode(await api.createPairingCode(label.trim() || undefined, undefined, withScope ? scope : undefined));
     } catch (e) {
       const text = errorText(e);
       setError(accessRefusalText(t, accessRefusalOf(e, { action: "pairingCode" }), hostLabel) ?? (text.includes("too_many_pairing_codes") ? t("remote.pair.tooMany") : text));
@@ -612,31 +509,24 @@ export function PairingSection() {
       ) : (
         <div className="-mx-4 flex flex-wrap items-center gap-2 border-b border-border px-4 py-2.5">
           <SettingsGroup agents="access" source="host"><TextInput width="w-48" label={t("remote.pair.label")} value={label} maxLength={60} placeholder={t("remote.pair.labelPlaceholder")} onChange={setLabel} /></SettingsGroup>
-          {users && users.length > 1 && <SettingsGroup agents="access" source="host"><Select<string> width="w-36" label={t("users.pairFor")} value={forUser} options={users.map((u) => ({ value: u.id, label: u.isOwner ? `${shownUserName(u)} · ${t("host.info.owner")}` : shownUserName(u) }))} onChange={setForUser} /></SettingsGroup>}
+          {paired && <span className="text-xs text-ok-text">{t("remote.pair.paired", { name: tokenName(paired, t) })}</span>}
+        </div>
+      )}
+      {!code && withScope && !lock.locked && <PairScope value={scope} ownerDevice onChange={setScope} />}
+      {!code && !lock.locked && (!withScope || scope === "full") && features.has(OWNER_DEVICE_NOTICE_FEATURE) && <OwnerCodeWarning host={hostLabel} />}
+      {!code && (
+        <div className="-mx-4 flex flex-wrap items-center justify-end gap-2 border-b border-border px-4 py-2.5">
+          {lock.hint && <span className="flex min-w-0 flex-1 items-center gap-1 text-xs text-subtle"><Lock size={12} />{lock.hint}</span>}
           <SettingsGroup agents="access" source="host"><Button primary disabled={busy || lock.locked} title={lock.hint ?? undefined} onClick={() => void generate()}>
             {busy ? t("remote.pair.generating") : t("remote.pair.generate")}
           </Button></SettingsGroup>
-          {paired && <span className="text-xs text-ok-text">{t("remote.pair.paired", { name: tokenName(paired, t) })}</span>}
-          {lock.hint && <span className="flex basis-full items-center gap-1 text-xs text-subtle"><Lock size={12} />{lock.hint}</span>}
         </div>
       )}
-      {!code && withScope && !lock.locked && <PairScope value={scope} ownerDevice={forUser === OWNER_USER_ID} onChange={setScope} />}
-      {!code && !lock.locked && forUser === OWNER_USER_ID && (!withScope || scope === "full") && features.has(OWNER_DEVICE_NOTICE_FEATURE) && <OwnerCodeWarning host={hostLabel} />}
       {error && <ErrorNote>{error}</ErrorNote>}
-      {/* With users, every device is managed in 用户 → 设备 (with its user); an older host keeps the list here. */}
-      {withUsers ? (
-        <div className="flex items-center gap-2 py-2.5 text-xs text-subtle" data-testid="pairing-devices-link">
-          <span className="min-w-0 flex-1">{t("remote.pair.devicesInUsers")}</span>
-          <TextLink onClick={() => useApp.getState().openSettings("users", { anchor: "users-devices" })}>{t("remote.pair.openDevices")}</TextLink>
-        </div>
-      ) : (
-        <>
-          <div className="pt-2 text-xs font-medium text-subtle">{t("remote.pair.devices")}</div>
-          {sorted === null && !error && <Loading rows={2} />}
-          {sorted?.length === 0 && <EmptyState>{t("remote.pair.noDevices")}</EmptyState>}
-        </>
-      )}
-      {!withUsers && sorted?.map((token) => (
+      <div className="pt-2 text-xs font-medium text-subtle">{t("remote.pair.devices")}</div>
+      {sorted === null && !error && <Loading rows={2} />}
+      {sorted?.length === 0 && <EmptyState>{t("remote.pair.noDevices")}</EmptyState>}
+      {sorted?.map((token) => (
         <TokenRow
           key={token.tokenId}
           token={token}

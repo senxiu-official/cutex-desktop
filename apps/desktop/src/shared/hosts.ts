@@ -118,6 +118,8 @@ export interface HostLocalConfig {
   /** Host color (palette default by order, RFC §8.1). */
   color: string;
   platform: HostPlatform | null;
+  /** The name you gave this machine (desktop only, cutex never sees it); unset: its host name. */
+  label?: string;
 }
 
 /** One stored SSH host (userData/hosts.json). The token lives encrypted in a separate file. */
@@ -269,6 +271,21 @@ export interface TunnelView {
   retryAt: number | null;
   /** Epoch ms when the forward came up (attempt resets after a stable period). */
   upSince: number | null;
+  /** Hosts with several routes: position of `target` in the route list. */
+  routeIndex?: number;
+  /** Hosts with several routes: every route failed on the network since the last connection. */
+  routesExhausted?: boolean;
+}
+
+/** What the desktop can tell about one SSH route (ssh -G reads the config; no network). */
+export type SshRouteKind = "lan" | "relay" | "tailscale";
+
+export interface SshRouteView {
+  /** The route as configured (xn-- form). */
+  target: string;
+  /** The address behind an alias, from `ssh -G` (xn-- form); null when it is the target itself or unknown. */
+  host: string | null;
+  kind: SshRouteKind | null;
 }
 
 export interface HostView {
@@ -279,6 +296,8 @@ export interface HostView {
   target: string | null;
   /** Ordered SSH addresses; `target` remains the first one for older clients. */
   targets?: string[];
+  /** Hosts with several routes: `targets` as resolved, in the same order (absent until `ssh -G` answered). */
+  routes?: SshRouteView[];
   remotePort: number | null;
   cutexPath: string | null;
   paired: boolean;
@@ -455,7 +474,7 @@ export function parseHostsFile(raw: unknown): HostsFile {
     const x = h as Record<string, unknown> | null;
     if (!x || typeof x.id !== "string" || !/^ssh-[a-z0-9]{4,32}$/.test(x.id) || seen.has(x.id)) continue;
     if (typeof x.target !== "string" || !parseSshTarget(x.target)) continue;
-    const targets = normalizeSshTargets(x.targets) ?? [x.target.trim()];
+    const targets = normalizeSshTargets(x.targets) ?? [normalizeSshTarget(x.target)!];
     seen.add(x.id);
     const color = !v1 && typeof x.color === "string" && HEX_COLOR.test(x.color) ? x.color : nextHostColor(used);
     used.push(color);
@@ -486,6 +505,7 @@ export function parseHostsFile(raw: unknown): HostsFile {
       autoConnect: typeof l.autoConnect === "boolean" ? l.autoConnect : true,
       color: typeof l.color === "string" && HEX_COLOR.test(l.color) ? l.color : HOST_PALETTE[0],
       platform: isHostPlatform(l.platform) ? l.platform : null,
+      ...(typeof l.label === "string" && l.label.trim() ? { label: l.label.trim().slice(0, 64) } : {}),
     };
     const groupIds = new Set<string>();
     for (const g of Array.isArray(r.groups) ? r.groups : []) {
@@ -512,6 +532,8 @@ export function isHostColor(value: unknown): value is string {
 export interface HostAppearancePatch {
   /** `#rrggbb` (palette swatch or custom hex). */
   color?: string;
+  /** This machine only (an SSH host's name is `updateSshHost`): its shown name; empty = its host name. */
+  label?: string;
 }
 
 /** Same scope (kind + id). */
@@ -569,7 +591,7 @@ const TARGET_RE = new RegExp(`^(?:(${USER})@)?(\\[[0-9A-Fa-f:.]+\\]|${HOSTNAME})
  * option injection); null when malformed.
  */
 export function parseSshTarget(input: string): SshTarget | null {
-  const raw = input.trim();
+  const raw = normalizeSshTarget(input);
   if (!raw || raw.startsWith("-") || raw.length > 300) return null;
   const m = TARGET_RE.exec(raw);
   if (!m) return null;
@@ -582,6 +604,96 @@ export function parseSshTarget(input: string): SshTarget | null {
     if (!Number.isInteger(port) || port < 1 || port > 65535) return null;
   }
   return { destination: user ? `${user}@${host}` : host, port };
+}
+
+/** IDNA ASCII form of a host name (null: not a valid name). The URL parser is the same in main and renderer. */
+function hostToAscii(host: string): string | null {
+  try {
+    return new URL(`http://${host}/`).hostname;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A typed address as stored and compared: trimmed, an internationalised host in its xn-- form.
+ * Config, ssh arguments and identity keys only ever hold this form. Null: the host is no valid name.
+ */
+export function normalizeSshTarget(input: string): string | null {
+  const raw = input.trim();
+  if (/^[\x00-\x7f]*$/.test(raw)) return raw;
+  const at = raw.lastIndexOf("@");
+  const m = /^(.*?)(:\d{1,5})?$/.exec(raw.slice(at + 1))!;
+  const host = hostToAscii(m[1]!);
+  return host ? `${raw.slice(0, at + 1)}${host}${m[2] ?? ""}` : null;
+}
+
+/** RFC 3492 decoding of one label without its `xn--` (null: not valid punycode). */
+function punycodeDecode(input: string): string | null {
+  const output: number[] = [];
+  const delimiter = input.lastIndexOf("-");
+  for (let i = 0; i < Math.max(delimiter, 0); i++) output.push(input.charCodeAt(i));
+  let n = 128;
+  let i = 0;
+  let bias = 72;
+  for (let pos = delimiter > 0 ? delimiter + 1 : 0; pos < input.length; ) {
+    const before = i;
+    let weight = 1;
+    for (let k = 36; ; k += 36) {
+      if (pos >= input.length) return null;
+      const c = input.charCodeAt(pos++);
+      const digit = c >= 48 && c <= 57 ? c - 22 : c >= 97 && c <= 122 ? c - 97 : c >= 65 && c <= 90 ? c - 65 : 36;
+      if (digit >= 36) return null;
+      i += digit * weight;
+      const t = k <= bias ? 1 : k >= bias + 26 ? 26 : k - bias;
+      if (digit < t) break;
+      weight *= 36 - t;
+    }
+    const size = output.length + 1;
+    let delta = before === 0 ? Math.floor((i - before) / 700) : (i - before) >> 1;
+    delta += Math.floor(delta / size);
+    let k = 0;
+    for (; delta > 455; k += 36) delta = Math.floor(delta / 35);
+    bias = k + Math.floor((36 * delta) / (delta + 38));
+    n += Math.floor(i / size);
+    i %= size;
+    if (n > 0x10ffff) return null;
+    output.splice(i++, 0, n);
+  }
+  return String.fromCodePoint(...output);
+}
+
+/**
+ * An address as the UI shows it: xn-- labels in Unicode (`remote-work.xn--fsqu00a.test` →
+ * `remote-work.例子.test`), the rest as it is. A label that does not encode back to itself stays
+ * as written. Display only: never store or compare this form.
+ */
+export function displaySshTarget(target: string): string {
+  return target.replace(/(?<![a-z0-9-])xn--[a-z0-9-]+/gi, (label) => {
+    const decoded = punycodeDecode(label.slice(4));
+    return decoded && hostToAscii(decoded) === label.toLowerCase() ? decoded : label;
+  });
+}
+
+/** What `ssh -G <target>` prints: the resolved host name (null: no such line). */
+export function parseSshConfigDump(stdout: string): string | null {
+  const m = /^hostname\s+(\S+)\s*$/im.exec(stdout);
+  return m ? m[1]! : null;
+}
+
+/** 100.64.0.0/10, Tailscale's address range. */
+const TAILSCALE_V4 = /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.\d{1,3}\.\d{1,3}$/;
+
+/** A readable kind for a route, from its name and resolved host; null when neither says. */
+export function sshRouteKind(target: string, host: string | null): SshRouteKind | null {
+  const parsed = parseSshTarget(target)?.destination ?? target;
+  const name = parsed.slice(parsed.lastIndexOf("@") + 1).toLowerCase();
+  const resolved = (host ?? name).toLowerCase();
+  if (TAILSCALE_V4.test(resolved) || resolved.endsWith(".ts.net") || resolved.startsWith("fd7a:115c:a1e0:")) return "tailscale";
+  const word = (words: string) => new RegExp(`(^|[-_.])(${words})($|[-_.])`).test(name);
+  if (word("relay|ovh|syd")) return "relay";
+  if (word("lan") || /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(resolved) || resolved.endsWith(".local") || resolved.endsWith(".lan")) return "lan";
+  return null;
 }
 
 export function formatSshTarget(target: SshTarget): string {
@@ -597,8 +709,8 @@ export function normalizeSshTargets(value: unknown): string[] | null {
   const targets: string[] = [];
   for (const item of value) {
     if (typeof item !== "string") return null;
-    const target = item.trim();
-    if (!parseSshTarget(target)) return null;
+    const target = normalizeSshTarget(item);
+    if (!target || !parseSshTarget(target)) return null;
     if (!targets.includes(target)) targets.push(target);
   }
   return targets;
@@ -665,7 +777,7 @@ export function defaultHostLabel(target: string): string {
   const t = parseSshTarget(target);
   if (!t) return target.trim();
   const at = t.destination.lastIndexOf("@");
-  return at >= 0 ? t.destination.slice(at + 1) : t.destination;
+  return displaySshTarget(at >= 0 ? t.destination.slice(at + 1) : t.destination);
 }
 
 // ---------- ssh command lines ----------
@@ -687,14 +799,22 @@ function common(interactive: boolean): string[] {
   ];
 }
 
+/** Hosts with several routes give up on a dead route sooner: another one is waiting. */
+export interface TunnelTiming {
+  connectTimeoutSec: number;
+  aliveIntervalSec: number;
+}
+
 /** `ssh -N -L 127.0.0.1:<local>:127.0.0.1:<remote> … -- <destination>` (no remote command). */
-export function tunnelArgs(target: SshTarget, localPort: number, remotePort: number, interactive = false): string[] {
+export function tunnelArgs(target: SshTarget, localPort: number, remotePort: number, interactive = false, timing?: TunnelTiming): string[] {
+  const options = common(interactive);
+  if (timing) options[options.indexOf("ConnectTimeout=15")] = `ConnectTimeout=${timing.connectTimeoutSec}`;
   return [
     "-N",
     "-T",
-    ...common(interactive),
+    ...options,
     "-o", "ExitOnForwardFailure=yes",
-    "-o", "ServerAliveInterval=15",
+    "-o", `ServerAliveInterval=${timing?.aliveIntervalSec ?? 15}`,
     "-o", "ServerAliveCountMax=3",
     "-L", `127.0.0.1:${localPort}:127.0.0.1:${remotePort}`,
     ...(target.port ? ["-p", String(target.port)] : []),
@@ -918,7 +1038,7 @@ export function classifySshFailure(exitCode: number | null, stderr: string, cont
     // Connection to UNKNOWN port -1: Connection refused". A refused forward *channel* (remote daemon
     // down) does not end ssh and is not this.
     if (/Connection refused/i.test(s) && !/channel \d+: open failed/i.test(s)) return "refused";
-    if (/Connection timed out|Operation timed out|timed out during banner exchange|timed out waiting for the port forward/i.test(s)) return "timeout";
+    if (/Connection (?:to .* port \S+ )?timed out|Operation timed out|timed out during banner exchange|timed out waiting for the port forward/i.test(s)) return "timeout";
     if (context === "exec" && exitCode !== 255) {
       if (/unrecognized subcommand|unexpected argument|wasn't expected|unknown (?:sub)?command|invalid subcommand|no such (?:sub)?command/i.test(s)) return "cutexTooOld";
       if (exitCode === 127 || /command not found|not recognized as an internal or external command|No such file or directory|cannot find the (?:file|path)/i.test(s)) return "cutexNotFound";
@@ -939,6 +1059,29 @@ export const TUNNEL_MAX_BACKOFF_MS = 30_000;
 /** An attempt that stayed up this long resets the backoff. */
 export const TUNNEL_STABLE_MS = 30_000;
 
+// ---- hosts with several routes ----
+/** From a failed route to the next one in the same pass (the backoff waits only between whole passes). */
+export const ROUTE_NEXT_MS = 250;
+/** The longest wait between whole passes: turning Tailscale on should work soon after. */
+export const ROUTE_MAX_BACKOFF_MS = 10_000;
+/** One route's limits in a normal pass; every third pass uses the single-route limits, so a slow route still gets through. */
+export const ROUTE_CONNECT_TIMEOUT_SEC = 8;
+export const ROUTE_READY_TIMEOUT_MS = 12_000;
+/** ServerAliveInterval: three missed answers = 15-20 s to notice a route that went silent (single route: 45-60 s). */
+export const ROUTE_ALIVE_INTERVAL_SEC = 5;
+/** On a lower route: how often the better ones are tried, first and after a long outage. */
+export const ROUTE_PROBE_INTERVAL_MS = 30_000;
+export const ROUTE_PROBE_SLOW_INTERVAL_MS = 60_000;
+export const ROUTE_PROBE_SLOW_AFTER_ROUNDS = 6;
+/** A better route must stay up and answer as this host for this long before the switch. */
+export const ROUTE_HOLD_MS = 20_000;
+/** A route that refused us (key, host key, another cutex) is asked rarely: each try is a full handshake. */
+export const ROUTE_REFUSED_RETRY_MS = 10 * 60_000;
+/** A route we switched to and lost within this window waits before the next try, longer each time. */
+export const ROUTE_FLAP_WINDOW_MS = 10 * 60_000;
+export const ROUTE_FLAP_BASE_MS = 2 * 60_000;
+export const ROUTE_FLAP_MAX_MS = 30 * 60_000;
+
 /** 1 s, 2 s, 4 s … capped at 30 s (attempt counts from 1). */
 export function backoffMs(attempt: number): number {
   return Math.min(TUNNEL_MAX_BACKOFF_MS, 1000 * 2 ** Math.max(0, attempt - 1));
@@ -949,22 +1092,33 @@ export function initialTunnel(target: string | null = null): TunnelView {
 }
 
 export type TunnelEvent =
-  | { type: "spawn"; localPort: number; target?: string }
+  | { type: "spawn"; localPort: number; target?: string; routeIndex?: number }
   | { type: "ready"; now: number }
-  | { type: "exit"; error: SshErrorView; now: number }
+  /** The connection moved to a better route that is already up. */
+  | { type: "switch"; target: string; routeIndex: number; now: number }
+  /** `nextRoute`: another route of this pass comes right after. `exhausted`: this pass failed on the network. */
+  | { type: "exit"; error: SshErrorView; now: number; nextRoute?: boolean; exhausted?: boolean; maxBackoffMs?: number }
   | { type: "stop" };
+
+function withoutExhausted(s: TunnelView): TunnelView {
+  const { routesExhausted: _, ...rest } = s;
+  return rest;
+}
 
 export function tunnelReduce(s: TunnelView, e: TunnelEvent): TunnelView {
   switch (e.type) {
     case "spawn":
-      return { ...s, status: "starting", localPort: e.localPort, ...(e.target !== undefined ? { target: e.target } : {}), retryAt: null, upSince: null };
+      return { ...s, status: "starting", localPort: e.localPort, ...(e.target !== undefined ? { target: e.target } : {}), ...(e.routeIndex !== undefined ? { routeIndex: e.routeIndex } : {}), retryAt: null, upSince: null };
     case "ready":
-      return { ...s, status: "up", error: null, retryAt: null, upSince: e.now };
+      return { ...withoutExhausted(s), status: "up", error: null, retryAt: null, upSince: e.now };
+    case "switch":
+      return { ...withoutExhausted(s), status: "up", target: e.target, routeIndex: e.routeIndex, error: null, attempt: 0, retryAt: null, upSince: e.now };
     case "exit": {
       const stable = s.upSince !== null && e.now - s.upSince >= TUNNEL_STABLE_MS;
-      const attempt = (stable ? 0 : s.attempt) + 1;
-      if (isPermanentSshError(e.error.code)) return { ...s, status: "error", error: e.error, attempt, retryAt: null, upSince: null };
-      return { ...s, status: "retrying", error: e.error, attempt, retryAt: e.now + backoffMs(attempt), upSince: null };
+      const attempt = (stable ? 0 : s.attempt) + (e.nextRoute ? 0 : 1);
+      const next = { ...s, ...(e.exhausted ? { routesExhausted: true } : {}), error: e.error, attempt, upSince: null };
+      if (isPermanentSshError(e.error.code)) return { ...next, status: "error", retryAt: null };
+      return { ...next, status: "retrying", retryAt: e.now + (e.nextRoute ? ROUTE_NEXT_MS : Math.min(backoffMs(attempt), e.maxBackoffMs ?? TUNNEL_MAX_BACKOFF_MS)) };
     }
     case "stop":
       return { ...initialTunnel(s.target ?? null), localPort: s.localPort };

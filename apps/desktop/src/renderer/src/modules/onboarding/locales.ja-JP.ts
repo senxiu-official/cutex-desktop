@@ -238,7 +238,7 @@ export const jaJP: Record<keyof typeof zhCN, string> = {
   "onboarding.guide.update.title": "更新",
   "onboarding.guide.update.text": "Cutex 自体の更新は「設定 → 更新と診断」にあります。\n各ホストの cutex は、それぞれ「設定 → ホストのバックエンドの更新」で更新します。\n更新前から動いている{{agents}}は、再起動するまで古いバージョンが表示されることがあります。",
   "onboarding.guide.remote.title": "リモートホストとペアリングしたデバイス",
-  "onboarding.guide.remote.text": "リモートホストの{{agents}}も同じように使えます。会話、委任、サービスが利用でき、ファイルはそのコンピュータに保存されます。\nペアリングしたスマートフォンなどは、与えられた権限でホストに接続します。「設定 → ユーザー → ログイン済みのデバイス」で管理や取り消しができます。",
+  "onboarding.guide.remote.text": "リモートホストの{{agents}}も同じように使えます。会話、委任、サービスが利用でき、ファイルはそのコンピュータに保存されます。\nペアリングしたスマートフォンなどは、与えられた権限でホストに接続します。「設定 → ホスト」で管理や取り消しができます。",
   "onboarding.guide.help.title": "ヘルプ",
   "onboarding.guide.help.hint": "ガイドやヒントをもう一度見るほか、ドキュメントや問題の報告を開けます。",
   "onboarding.guide.help.onboarding": "ガイド",

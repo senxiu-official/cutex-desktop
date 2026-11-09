@@ -1,4 +1,4 @@
-// Who is involved in a task / delegation row: the colored "#N" tag and an agent as [avatar] name
+// Who is involved in a task / delegation row: the colored "#5e89dd" tag and an agent as [avatar] name
 // (click = open that agent). Shared by task rows, delegation cards and the overviews.
 import { taskTag } from "../lib/tasks";
 import { useApp } from "../store";
@@ -11,7 +11,7 @@ import type { AgentHint } from "../lib/agentHint";
 import { SystemAvatar } from "./SystemAvatar";
 import { isShortId, resolveId } from "../lib/shortIds";
 
-/** Colored "#N" for a task or delegation id (lib/tasks taskTag: numbered per app run, colour from the id). */
+/** Colored short tag for a task or delegation id (lib/tasks taskTag: text and colour from the id). */
 export function TaskTag({ taskId, assignmentId, title }: { taskId: string; assignmentId?: string; title?: string }) {
   const tag = taskTag(taskId);
   return (

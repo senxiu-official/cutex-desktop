@@ -10,6 +10,7 @@ import { act, createElement as h } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+vi.mock("../src/renderer/src/modules/react", async (importOriginal) => ({ ...(await importOriginal<object>()), useSlot: () => [] }));
 vi.mock("../src/renderer/src/bridge", () => ({ api: {}, apiFor: () => ({}), bridge: { on: () => () => {} }, onEvent: () => () => {}, cleanIpcMessage: (m: string) => m }));
 vi.mock("../src/renderer/src/i18n", async (importOriginal) => ({
   ...(await importOriginal<object>()),
@@ -263,7 +264,10 @@ describe("the picker (home: desktop tile and empty tray share it)", () => {
       expect(entries.map((e) => e.label)).toEqual(["home.picker.services", "home.picker.agents", "home.picker.artifacts"]);
       // Already pinned: shown, disabled.
       expect(entries[0]!.submenu![0]!.disabled).toBe(true);
-      entries[1]!.submenu![0]!.onSelect();
+      // Agents: the shared searchable picker (every agent, grouped by project), not a capped submenu.
+      const agents = (entries[1] as unknown as { flyout: { props: { options: { value: string; label: string }[]; onPick(value: string): void } } }).flyout.props;
+      const eva = agents.options.find((o) => o.label === "Eva")!;
+      agents.onPick(eva.value);
       expect(added).toEqual([{ hostId: "local", kind: "agent", key: "s-eva", title: "Eva" }]);
 
       state(["user-home", "user-home-page-pins"]);

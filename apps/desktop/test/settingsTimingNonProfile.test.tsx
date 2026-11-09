@@ -55,9 +55,9 @@ it("owner_notify on an older host: the delivery matrix and sound are display-onl
   features.value = new Set();
   render(h(OwnerNotifySection, { settings: { ownerNotify: ownerNotify() } as unknown as GlobalSettings, onSettings: () => {} }));
   const matrix = host.querySelector("table")!.parentElement!;
-  expect(chips(matrix)).toEqual(["settings.scope.agents.none"]);
+  expect(chips(matrix)).toEqual([]);
   expect(chips(host.querySelector("table")!)).toEqual([]);
-  expect(chips(row("owner-notify.sound"))).toEqual(["settings.scope.agents.none"]);
+  expect(chips(row("owner-notify.sound"))).toEqual([]);
   expect(chips(row("owner-notify.audience"))).toEqual(["settings.scope.agents.offNowOnNext"]);
   expect(chips(row("owner-notify.perHour"))).toEqual(["settings.scope.agents.now"]);
   expect(header()).toEqual(["settings.scope.agents.mixed"]);
@@ -73,7 +73,7 @@ it("side chat: uniform next-start timing appears once at page level", () => {
 
 it("notes: owner-private metadata (none), the prompt reaches the side-chat model at the next note (now)", () => {
   render(h(SideSummarySettings));
-  expect(chips(row("side-chat.anchorSetting"))).toEqual(["settings.scope.agents.none"]);
+  expect(chips(row("side-chat.anchorSetting"))).toEqual([]);
   expect(chips(row("side-chat.summaryPrompt"))).toEqual(["settings.scope.agents.now"]);
   expect(header()).toEqual(["settings.scope.agents.mixed"]);
   noCardLabels();

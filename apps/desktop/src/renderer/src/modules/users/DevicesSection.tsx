@@ -5,28 +5,31 @@
 // (cutex `client-token-rename` pencil, components/settings/TokenName), platform · last used · masked
 // address, the user it belongs to (a select; 待分配 sends it back), 移除. A device that now uses another
 // person's identity says so (知道了 with `person-identity-ack`). A user filter (also set from a user's
-// counts), 配对设备 (Settings → 接入), and the 新设备先待分配 switch at the bottom.
+// counts), 添加设备 with the pairing requests (AddDevice.tsx), and the 新设备先待分配 switch at the bottom.
 import { isImeComposing } from "../../lib/ime";
 import { useState } from "react";
 import { Fingerprint } from "lucide-react";
 import { accessRefusalOf, DEVICE_SCOPE_FEATURE, PERSON_IDENTITY_ACK_FEATURE, shownUserName, type DeviceScope, type UsersList, type UsersResult, type UserTokenRecord } from "../../../../shared/users";
 import { groupFingerprint } from "../../../../shared/personIdentity";
 import { MaskedText } from "../../components/MaskedText";
-import { ArmedRemove, Button, Checkbox, EmptyState, ErrorNote, ListRow, Section, Select, SettingRow, SettingsGroup, TextInput, TextLink, Toggle } from "../../components/settings/Form";
+import { ArmedRemove, Button, Checkbox, EmptyState, ErrorNote, ListRow, Section, Select, SettingRow, SettingsGroup, SubPageRow, TextInput, TextLink, Toggle } from "../../components/settings/Form";
 import { accessRefusalText, DeviceScopeRow, scopeLabel, useOwnerLocalLock } from "../../components/settings/OwnerDevices";
 import { useOwnerNewDevices } from "../../lib/ownerDevices";
 import { useHostScope } from "../../lib/useHostScope";
 import { RenameTokenButton, ThisComputerBadge, TokenDetail, TokenIcon, TokenTitle } from "../../components/settings/TokenName";
 import { useI18n } from "../../i18n";
+import { useApp } from "../../store";
 import { useFingerprint } from "../../lib/personIdentity";
 import { settingsAnchorId } from "../../lib/settingsNav";
-import { useTargetApi, useTargetFeatures, useTargetHostId } from "../../lib/targetHost";
-import { createUserAndAssign, deviceRows, grantSummary, isUnassigned, newUserDefaultName, personKeyOwners, rememberKeyFor, tokenPerson, USER_NAME_MAX, withPersonKey, type DeviceFilter } from "./model";
-import { DEVICES_ANCHOR, nameIn, openPairing, PENDING, useOwnTokenId, useRename, useRevoke, userOptions, useT, type Write } from "./shared";
+import { useTargetApi, useTargetFeatures, useTargetHostId, useTargetSidebar } from "../../lib/targetHost";
+import { createUserAndAssign, deviceRows, firstDevices, grantChoices, grantSummary, isUnassigned, newUserDefaultName, personKeyOwners, rememberKeyFor, tokenPerson, USER_NAME_MAX, withPersonKey, type DeviceFilter } from "./model";
+import { DEVICES_ANCHOR, nameIn, PENDING, useOwnTokenId, useRename, useRevoke, userOptions, useT, type Write } from "./shared";
 import { changePersonKeys } from "./personKeyWrites";
 import { UserDot } from "./UserDot";
 import { Tag } from "../../components/Tag";
 import { useOwnerWindow } from "../../lib/ownerContext";
+import { DevicePairing, useAddDeviceSupport } from "./AddDevice";
+import { RelayPairingRow } from "./RelayPairing";
 
 /** A key's fingerprint (the host's, else computed here): masked by default (eye reveals, grouped by 4). */
 export function KeyPrint({ publicKey, known }: { publicKey: string; known?: string | null }) {
@@ -35,7 +38,7 @@ export function KeyPrint({ publicKey, known }: { publicKey: string; known?: stri
   return <MaskedText value={fp} shown={groupFingerprint(fp)} title={publicKey} copy testId="key-print" />;
 }
 
-export function DevicesSection({ list, write, filter, onFilter }: { list: UsersList; write: Write; filter: DeviceFilter; onFilter(f: DeviceFilter): void }) {
+export function DevicesSection({ list, write, filter, onFilter, limit }: { list: UsersList; write: Write; filter: DeviceFilter; onFilter(f: DeviceFilter): void; /** The host's page: waiting devices and this many others, then 全部 ›. */ limit?: number }) {
   const { t } = useI18n();
   const tt = useT();
   const api = useTargetApi();
@@ -49,7 +52,15 @@ export function DevicesSection({ list, write, filter, onFilter }: { list: UsersL
   const [creating, setCreating] = useState<string | null>(null);
   const [newName, setNewName] = useState("");
   const [busy, setBusy] = useState(false);
-  const rows = deviceRows(list.tokens, filter, own);
+  // 添加设备 (AddDevice.tsx): the panel opens in this card; pairing requests show on top of the list.
+  const [adding, setAdding] = useState(false);
+  const support = useAddDeviceSupport();
+  const pairLock = useOwnerLocalLock(hostId);
+  const reload = () => void write(async () => ({ ok: true as const, value: null }), setError);
+  const addButton = support && <Button primary={!adding} disabled={adding || pairLock.locked} title={pairLock.hint ?? undefined} onClick={() => setAdding(true)}>{t("users.devices.pair")}</Button>;
+  const all = deviceRows(list.tokens, filter, own);
+  const { rows, more } = limit === undefined ? { rows: all, more: false } : firstDevices(all, limit);
+  const openAll = () => useApp.getState().openSettings("access", { sub: "devices" });
   // device-scope: each device narrows its user's grant; set in the device's detail (owner 2026-10-19).
   const withScope = useTargetFeatures().has(DEVICE_SCOPE_FEATURE);
   const [detail, setDetail] = useState<string | null>(null);
@@ -97,13 +108,15 @@ export function DevicesSection({ list, write, filter, onFilter }: { list: UsersL
       actions={
         <>
           {/* A view filter of the list, not a setting. */}
-          <div role="search" className="contents"><Select<string> width="w-36" label={t("users.devices.filter")} value={filterValue} options={filterOptions} onChange={(v) => onFilter(v === "" ? { kind: "all" } : v === PENDING ? { kind: "pending" } : { kind: "user", userId: v })} /></div>
-          <Button onClick={openPairing}>{t("users.devices.pair")}</Button>
+          {limit === undefined && <div role="search" className="contents"><Select<string> width="w-36" label={t("users.devices.filter")} value={filterValue} options={filterOptions} onChange={(v) => onFilter(v === "" ? { kind: "all" } : v === PENDING ? { kind: "pending" } : { kind: "user", userId: v })} /></div>}
+          {addButton}
         </>
       }
     >
+      {!support && <p className="py-2 text-xs text-subtle" data-testid="add-device-unsupported">{t("users.pair.unsupported", { host })}</p>}
+      <DevicePairing adding={adding} onClose={() => setAdding(false)} onChanged={reload} />
       {error && <ErrorNote>{error}</ErrorNote>}
-      {rows.length === 0 && <EmptyState action={filter.kind === "all" ? <Button onClick={openPairing}>{t("users.devices.pair")}</Button> : undefined}>{t(filter.kind === "all" ? "users.noDevices" : "users.devices.noneFiltered")}</EmptyState>}
+      {rows.length === 0 && <EmptyState action={filter.kind === "all" && !adding ? addButton || undefined : undefined}>{t(filter.kind === "all" ? "users.noDevices" : "users.devices.noneFiltered")}</EmptyState>}
       {rows.length > 0 && <SettingsGroup agents="access" source="host">{rows.map((token) => {
         const unassigned = isUnassigned(token);
         const mine = token.tokenId === own;
@@ -162,13 +175,15 @@ export function DevicesSection({ list, write, filter, onFilter }: { list: UsersL
                 ) : (
                   <Select<string> value={token.userId!} options={[...users, { value: PENDING, label: t("users.pendingOption") }]} label={t("users.rebind")} width="w-36" onChange={(to) => void write(() => api.bindUserToken(token.tokenId, to === PENDING ? null : to), setError)} />
                 )}
-                <ArmedRemove title={`${t("users.revoke")} — ${removeTitle}`} armedLabel={t("users.revokeArmed")} onRemove={() => void revoke(token.tokenId, setError)} />
+                <ArmedRemove label={t("users.revoke")} title={removeTitle} armedLabel={t("users.revokeArmed")} onRemove={() => void revoke(token.tokenId, setError)} />
               </>
             }
           />
         );
       })}</SettingsGroup>}
-      <ApprovalSetting list={list} write={write} />
+      {more && <SubPageRow title={t("users.devices.all", { n: all.length })} onOpen={openAll} />}
+      <RelayPairingRow />
+      {limit !== undefined && <ApprovalSetting list={list} write={write} />}
     </Section>
   );
 }
@@ -183,14 +198,16 @@ function DeviceDetail({ list, token, own, onScope }: { list: UsersList; token: U
   const win = useOwnerWindow();
   const { t } = useI18n();
   const tt = useT();
+  const sidebar = useTargetSidebar();
   const user = list.users.find((u) => u.id === token.userId);
   if (!user || !token.scope) return null;
+  const projects = grantChoices(sidebar).projects;
   const owner = !!user.isOwner;
   return (
     <div className="mt-2 ml-7 rounded-lg border border-border/70 px-3" data-testid="device-detail">
       <SettingRow agents="access" source="host" label={t("ownerDev.projects")} info={t("ownerDev.projectsHint", { name: shownUserName(user) })}>
         <span className="flex items-center gap-2 text-xs text-muted">
-          {owner ? t("users.ownerBadge") : grantSummary(user.grant, tt)}
+          {owner ? t("users.ownerBadge") : grantSummary(user.grant, tt, projects)}
           <TextLink onClick={() => win.document.getElementById(settingsAnchorId("users-list"))?.scrollIntoView({ block: "start", behavior: "smooth" })}>{t("ownerDev.openUser", { name: shownUserName(user) })}</TextLink>
         </span>
       </SettingRow>

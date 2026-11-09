@@ -4,6 +4,8 @@ import { SseParser, type SseMessage } from "./sse";
 
 export interface StreamHandle {
   close(): void;
+  /** A reconnecting stream: end the current connection and reconnect right away (the way to the daemon moved). */
+  reopen(): void;
 }
 
 /**
@@ -29,6 +31,7 @@ export function openStream(
   let controller = new AbortController();
   let lastId: string | undefined;
   let closed = false;
+  let reopening = false;
 
   const run = async () => {
     let delay = 500;
@@ -78,19 +81,27 @@ export function openStream(
         if (!options.reconnect) return;
       } catch (error) {
         if (closed) return;
-        handlers.onError?.(error);
+        if (reopening) {
+          reopening = false;
+          delay = 0;
+        } else handlers.onError?.(error);
         if (!options.reconnect || (error instanceof CutexApiError && error.status < 500 && error.status !== 429)) return;
       } finally {
         clearTimeout(idleTimer);
       }
       await new Promise((r) => setTimeout(r, delay));
-      delay = Math.min(delay * 2, 10_000);
+      delay = Math.min(Math.max(delay, 250) * 2, 10_000);
     }
   };
   void run();
   return {
     close() {
       closed = true;
+      controller.abort();
+    },
+    reopen() {
+      if (closed || !options.reconnect) return;
+      reopening = true;
       controller.abort();
     },
   };

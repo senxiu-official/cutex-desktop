@@ -1,5 +1,5 @@
 import { bridge } from "../../bridge";
-import type { AppModuleContext } from "../slots";
+import type { ModuleContext } from "../slots";
 import { browserCache } from "./browserCache";
 import { browserTitle } from "./browserState";
 import { guestLifecycle } from "./guestLifecycle";
@@ -15,7 +15,7 @@ import { inBrowserTabWindow, openPopupTab, pressBrowserTab, revealBrowserTab } f
 import { browserThumbnails } from "./thumbnails";
 
 /** A preview intentionally has no browser bridge, hence no real webview or website requests. */
-export async function startBrowser(context: AppModuleContext): Promise<void> {
+export async function startBrowser(context: ModuleContext): Promise<void> {
   const browser = bridge.browser;
   if (!browser || context.signal.aborted) return;
   const activation = browserActivation.begin();
@@ -89,7 +89,7 @@ export async function closeBrowser(hostId: string, tabKey: string): Promise<bool
 }
 
 /** Main granted a claim by itself (local page / 一直允许 / Profile always): tell the owner, never silently. */
-function claimGrantedNotice(context: AppModuleContext, event: BrowserEvent): void {
+function claimGrantedNotice(context: ModuleContext, event: BrowserEvent): void {
   if (!event.claimGrant) return;
   const reason = translate(`browser.claim.reason.${event.claimGrant.reason}` as Parameters<typeof translate>[0]);
   // The cache holds the sanitized title / URL (no query secrets, no control characters).

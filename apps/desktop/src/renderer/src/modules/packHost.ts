@@ -3,9 +3,11 @@
 // specifier the pack builder records (`@cutex-desktop/app/<path under src/renderer/src>`). A pack never
 // brings its own React; its build turns these imports into reads from this table.
 //
-// Listing a file here makes it part of what packs can import. Adding one is safe; renaming or removing
+// Listing a file here makes it part of what first-party packs can import. Adding one is safe; renaming or removing
 // one (or an export a pack uses) is caught per pack by its host import list (checkHostImports) and the
 // pack falls back to the bundled copy. Never list dev/, registry.ts or another module's directory.
+// The public API (`@cutex-desktop/module-api`, §30) is not listed by hand: its part of the table is generated from that
+// package, and it is all a module not built from this repository may read (checkPublicHostImports).
 import { MODULE_API_VERSION, MODULE_PACK_HOST_GLOBAL, type ModulePackHost } from "@cutex-desktop/plugin-sdk";
 import * as react from "react";
 import * as reactJsxRuntime from "react/jsx-runtime";
@@ -16,7 +18,9 @@ import * as appI18n from "../i18n";
 import * as appStore from "../store";
 import * as appModulesReact from "./react";
 import * as appModulesSlots from "./slots";
+import * as libAgentLook from "../lib/agentLook";
 import * as libContextMenu from "../lib/contextMenu";
+import * as libOwnerWindow from "../lib/ownerWindow";
 import * as libHostGatingView from "../lib/hostGatingView";
 import * as libHostPick from "../lib/hostPick";
 import * as libSideServices from "../lib/sideServices";
@@ -28,6 +32,7 @@ import * as componentsPage from "../components/Page";
 import * as componentsServiceLogs from "../components/ServiceLogs";
 import * as componentsSettingsForm from "../components/settings/Form";
 import * as componentsStatusIcon from "../components/StatusIcon";
+import { MODULE_API_HOST } from "../moduleApi/hostTable.generated";
 
 type Namespace = Readonly<Record<string, unknown>>;
 
@@ -41,7 +46,9 @@ export const PACK_HOST_MODULES: Readonly<Record<string, Namespace>> = Object.fre
   "@cutex-desktop/app/store": appStore,
   "@cutex-desktop/app/modules/react": appModulesReact,
   "@cutex-desktop/app/modules/slots": appModulesSlots,
+  "@cutex-desktop/app/lib/agentLook": libAgentLook,
   "@cutex-desktop/app/lib/contextMenu": libContextMenu,
+  "@cutex-desktop/app/lib/ownerWindow": libOwnerWindow,
   "@cutex-desktop/app/lib/hostGatingView": libHostGatingView,
   "@cutex-desktop/app/lib/hostPick": libHostPick,
   "@cutex-desktop/app/lib/sideServices": libSideServices,
@@ -53,6 +60,7 @@ export const PACK_HOST_MODULES: Readonly<Record<string, Namespace>> = Object.fre
   "@cutex-desktop/app/components/ServiceLogs": componentsServiceLogs,
   "@cutex-desktop/app/components/settings/Form": componentsSettingsForm,
   "@cutex-desktop/app/components/StatusIcon": componentsStatusIcon,
+  ...MODULE_API_HOST,
 }) as Readonly<Record<string, Namespace>>;
 
 /** What of a pack's host import list this app lacks (`spec` or `spec#name`); empty = it can load. */
@@ -67,6 +75,19 @@ export function checkHostImports(imports: Readonly<Record<string, readonly strin
     for (const name of names) if (name !== "*" && !(name in ns)) missing.push(`${spec}#${name}`);
   }
   return missing;
+}
+
+/** What a public-API module may read: the shared libraries and the public entries, nothing of the app's own files. */
+export const PUBLIC_HOST_MODULES: Readonly<Record<string, Namespace>> = Object.freeze({ react, "react/jsx-runtime": reactJsxRuntime, "react-dom": reactDom, ...MODULE_API_HOST }) as Readonly<Record<string, Namespace>>;
+
+/** `checkHostImports` for a module not built from this repository. */
+export function checkPublicHostImports(imports: Readonly<Record<string, readonly string[]>>): string[] {
+  return checkHostImports(imports, PUBLIC_HOST_MODULES);
+}
+
+/** The module reads the experimental entry: Settings says it may stop working after an app update. */
+export function usesExperimentalApi(imports: Readonly<Record<string, readonly string[]>>): boolean {
+  return Object.prototype.hasOwnProperty.call(imports, "@cutex-desktop/module-api/experimental");
 }
 
 /** Installs the host object once (globalThis.__CUTEX_MODULE_HOST__); returns it. */

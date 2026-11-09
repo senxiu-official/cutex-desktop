@@ -1,0 +1,321 @@
+{
+  "format": 2,
+  "name": {
+    "en": "Reader",
+    "zh-CN": "读书团子"
+  },
+  "canvas": [
+    320,
+    256
+  ],
+  "character": [
+    0,
+    0,
+    256,
+    256
+  ],
+  "breathMs": 3600,
+  "bodies": {
+    "up": {
+      "still": "up.png",
+      "breath": [
+        "up-0.png",
+        "up-1.png",
+        "up-2.png",
+        "up-3.png"
+      ]
+    },
+    "read": {
+      "still": "read.png",
+      "breath": [
+        "read-0.png",
+        "read-1.png",
+        "read-2.png",
+        "read-3.png"
+      ]
+    },
+    "read-blink": {
+      "still": "read-blink.png"
+    },
+    "sleep": {
+      "still": "sleep.png",
+      "breath": [
+        "sleep-0.png",
+        "sleep-1.png",
+        "sleep-2.png",
+        "sleep-3.png"
+      ]
+    }
+  },
+  "props": {
+    "open": {
+      "image": "book-open.png",
+      "cover": {}
+    }
+  },
+  "pages": {
+    "lift": "page-lift.png",
+    "upright": "page-upright.png",
+    "land": "page-land.png"
+  },
+  "hands": "hands.png",
+  "sparkle": {
+    "image": "sparkle.png",
+    "size": [
+      10,
+      12
+    ],
+    "at": [
+      [
+        82,
+        176
+      ],
+      [
+        176,
+        172
+      ],
+      [
+        128,
+        168
+      ],
+      [
+        100,
+        222
+      ]
+    ]
+  },
+  "covers": {
+    "green": {
+      "kind": "book"
+    },
+    "plum": {
+      "kind": "diary",
+      "tint": [
+        1.15,
+        0.6,
+        1.25
+      ]
+    },
+    "night": {
+      "kind": "book",
+      "tint": [
+        0.55,
+        0.7,
+        1.3
+      ],
+      "image": "cover-night.png"
+    }
+  },
+  "pile": {
+    "image": "pile-book.png",
+    "at": [
+      240,
+      226
+    ],
+    "size": [
+      72,
+      24
+    ],
+    "step": 7,
+    "max": 20,
+    "cover": [
+      [
+        13,
+        2
+      ],
+      [
+        69,
+        2
+      ],
+      [
+        59,
+        12
+      ],
+      [
+        3,
+        12
+      ]
+    ],
+    "deck": [
+      {
+        "cover": "green"
+      },
+      {
+        "cover": "green"
+      },
+      {
+        "cover": "plum"
+      },
+      {
+        "cover": "green"
+      },
+      {
+        "cover": "night"
+      }
+    ]
+  },
+  "clips": {
+    "idle": [
+      {
+        "body": "up",
+        "ms": 2400
+      }
+    ],
+    "opening": [
+      {
+        "body": "up",
+        "ms": 160
+      },
+      {
+        "body": "read",
+        "ms": 180
+      },
+      {
+        "body": "read",
+        "prop": "open",
+        "ms": 90,
+        "magic": 0
+      },
+      {
+        "body": "read",
+        "prop": "open",
+        "ms": 90,
+        "magic": 0.25
+      },
+      {
+        "body": "read",
+        "prop": "open",
+        "ms": 90,
+        "magic": 0.5
+      },
+      {
+        "body": "read",
+        "prop": "open",
+        "ms": 90,
+        "magic": 0.75
+      },
+      {
+        "body": "read",
+        "prop": "open",
+        "ms": 90,
+        "magic": 1
+      },
+      {
+        "body": "read",
+        "prop": "open",
+        "ms": 300
+      }
+    ],
+    "reading": [
+      {
+        "body": "read",
+        "prop": "open",
+        "ms": 3000
+      },
+      {
+        "body": "read-blink",
+        "prop": "open",
+        "ms": 180
+      },
+      {
+        "body": "read",
+        "prop": "open",
+        "ms": 1700
+      },
+      {
+        "body": "read",
+        "prop": "open",
+        "ms": 150,
+        "page": "lift"
+      },
+      {
+        "body": "read",
+        "prop": "open",
+        "ms": 150,
+        "page": "upright"
+      },
+      {
+        "body": "read",
+        "prop": "open",
+        "ms": 150,
+        "page": "land"
+      },
+      {
+        "body": "read",
+        "prop": "open",
+        "ms": 1500
+      }
+    ],
+    "closing": [
+      {
+        "body": "read",
+        "prop": "open",
+        "ms": 200
+      },
+      {
+        "body": "read",
+        "prop": "open",
+        "ms": 90,
+        "magic": 1
+      },
+      {
+        "body": "read",
+        "prop": "open",
+        "ms": 90,
+        "magic": 0.75
+      },
+      {
+        "body": "read",
+        "prop": "open",
+        "ms": 90,
+        "magic": 0.5
+      },
+      {
+        "body": "read",
+        "prop": "open",
+        "ms": 90,
+        "magic": 0.25
+      },
+      {
+        "body": "read",
+        "prop": "open",
+        "ms": 90,
+        "magic": 0
+      },
+      {
+        "body": "read",
+        "ms": 180
+      },
+      {
+        "body": "up",
+        "ms": 400
+      }
+    ],
+    "fallAsleep": [
+      {
+        "body": "up",
+        "ms": 900
+      },
+      {
+        "body": "sleep",
+        "ms": 1200
+      }
+    ],
+    "sleeping": [
+      {
+        "body": "sleep",
+        "ms": 2000
+      }
+    ],
+    "wake": [
+      {
+        "body": "sleep",
+        "ms": 500
+      },
+      {
+        "body": "up",
+        "ms": 600
+      }
+    ]
+  }
+}

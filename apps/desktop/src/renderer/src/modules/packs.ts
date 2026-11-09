@@ -6,7 +6,7 @@ import { useSyncExternalStore } from "react";
 import { MODULE_API_VERSION, moduleApiSatisfies } from "@cutex-desktop/plugin-sdk";
 import { comparePackVersions, isPackModuleId, type AvailablePackView, type InstalledPackView, type ModulePacksBridge, type ModulePacksView } from "../../../shared/modulePacks";
 import { registerModuleMessages, unregisterModuleMessages } from "../i18n";
-import { checkHostImports, installPackHost } from "./packHost";
+import { checkHostImports, checkPublicHostImports, installPackHost } from "./packHost";
 import type { AppModule, AppModuleHost } from "./slots";
 
 /** Why an installed pack is (not) used. */
@@ -19,7 +19,7 @@ export type PackDecision =
  * module), null = bundled without pack.json (never overridden), else the bundled version.
  */
 export function packDecision(pack: InstalledPackView, bundled: string | null | undefined, opts: { missingHost?: readonly string[]; failed?: string | null; appModuleApi?: string } = {}): PackDecision {
-  if (bundled === null) return { use: false, reason: "notPackable" };
+  if (bundled === null || (pack.local && bundled !== undefined)) return { use: false, reason: "notPackable" };
   if (pack.compat !== "ok" || !moduleApiSatisfies(pack.moduleApi, opts.appModuleApi ?? MODULE_API_VERSION)) {
     return { use: false, reason: pack.compat === "needsNewerModule" ? "needsNewerModule" : "needsNewerApp" };
   }
@@ -182,7 +182,7 @@ export function createPackLoader(deps: PackLoaderDeps) {
     const installed = new Map(view.installed.map((p) => [p.id, p]));
     for (const pack of view.installed) {
       const f = failed.get(pack.id);
-      const d = packDecision(pack, bundledVersion(pack.id), { missingHost: checkHostImports(pack.host), failed: f && f.version === pack.version ? f.error : null, appModuleApi: MODULE_API_VERSION });
+      const d = packDecision(pack, bundledVersion(pack.id), { missingHost: pack.local && !view.local.internal ? checkPublicHostImports(pack.host) : checkHostImports(pack.host), failed: f && f.version === pack.version ? f.error : null, appModuleApi: MODULE_API_VERSION });
       decisions[pack.id] = { ...d, version: pack.version };
       if (!d.use) {
         if (active.has(pack.id)) await restoreBundled(pack.id);
@@ -196,6 +196,7 @@ export function createPackLoader(deps: PackLoaderDeps) {
         const message = error instanceof Error ? error.message : String(error);
         failed.set(pack.id, { version: pack.version, error: message });
         decisions[pack.id] = { use: false, reason: "failed", detail: message, version: pack.version };
+        if (pack.local) void deps.bridge.localFailed({ id: pack.id, version: pack.version, reason: message }).catch(() => {});
         deps.log?.(`module pack ${pack.id} ${pack.version} failed, using the bundled copy: ${message}`);
       }
     }
@@ -216,6 +217,7 @@ export function createPackLoader(deps: PackLoaderDeps) {
       if (state?.kind !== "failed" || failed.get(id)?.version === version) continue;
       failed.set(id, { version, error: state.error });
       deps.log?.(`module pack ${id} ${version} failed, using the bundled copy: ${state.error}`);
+      if (lastView?.installed.some((p) => p.id === id && p.local)) void deps.bridge.localFailed({ id, version, reason: state.error }).catch(() => {});
       chain = chain.then(async () => {
         await restoreBundled(id);
         if (lastView) await sync(lastView);

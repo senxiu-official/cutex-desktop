@@ -1,6 +1,6 @@
 // Host status helpers for the switcher and Settings → 主机 (pure; test/hosts.test.ts). Per-host
 // views for the whole host list (scope, colors, versions): lib/hostScope.ts.
-import { LOCAL_HOST_ID, REMOTE_FEATURES, type HostsState, type HostView, type SshErrorCode, type TunnelView } from "../../../shared/hosts";
+import { LOCAL_HOST_ID, REMOTE_FEATURES, displaySshTarget, type HostsState, type HostView, type SshErrorCode, type SshRouteKind, type TunnelView } from "../../../shared/hosts";
 import type { DaemonState } from "../../../shared/ipc";
 import type { SettingsSource } from "./settingsNav";
 
@@ -81,6 +81,47 @@ export function connIndicator(kind: HostView["kind"], tunnel: TunnelView | null,
 export function hostIndicator(hosts: HostsState | null, daemon: DaemonState): HostIndicator {
   if (!isRemote(hosts)) return connIndicator("local", null, daemon);
   return connIndicator(activeHost(hosts)?.kind ?? "ssh", hosts!.tunnel, daemon);
+}
+
+/** The route a host with several routes is on: its kind, its address as shown, its place in the list. */
+export interface CurrentRoute {
+  kind: SshRouteKind | null;
+  address: string;
+  /** From 1. */
+  position: number;
+  total: number;
+}
+
+/** Null: a single address, or nothing to say yet (the status line shows the plain address then). */
+export function currentRoute(host: HostView): CurrentRoute | null {
+  const tunnel = host.conn?.tunnel;
+  const targets = host.targets ?? [];
+  if (!tunnel || targets.length < 2 || !tunnel.target) return null;
+  const index = tunnel.routeIndex ?? targets.indexOf(tunnel.target);
+  if (index < 0 || index >= targets.length) return null;
+  const route = host.routes?.[index];
+  return { kind: route?.kind ?? null, address: displaySshTarget(route?.host ?? targets[index]!), position: index + 1, total: targets.length };
+}
+
+/** The steps of an SSH connection, in the order they happen. */
+export const HOST_STAGES = ["address", "ssh", "cutex", "credential"] as const;
+export type HostStage = (typeof HOST_STAGES)[number];
+
+const STAGE_OF: Readonly<Record<string, HostStage>> = {
+  badInput: "address", resolve: "address", refused: "address", timeout: "address", hostMismatch: "address",
+  noSsh: "ssh", auth: "ssh", hostKey: "ssh", forward: "ssh", exited: "ssh",
+  cutexNotFound: "cutex", cutexTooOld: "cutex", badOutput: "cutex", remoteDaemon: "cutex", daemon: "cutex",
+  noToken: "credential", noKeyring: "credential", tokenRejected: "credential",
+};
+
+/** The step a problem code stops at; null: not one of the connection's. */
+export function problemStage(problem: string | null | undefined): HostStage | null {
+  return (problem && STAGE_OF[problem]) || null;
+}
+
+/** Every route failed on the network: only the owner can change that (Tailscale, a conflicting VPN). */
+export function routesExhausted(tunnel: TunnelView | null | undefined): boolean {
+  return !!tunnel?.routesExhausted && tunnel.status !== "up";
 }
 
 /** Dot colour class for a status. */

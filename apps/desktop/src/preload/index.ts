@@ -2,9 +2,11 @@ import { installDebugReactHook } from "../shared/debugReactHook";
 import { DEBUG_CHANNEL, debugError, type DebugRequest } from "../shared/debug";
 import { contextBridge, ipcRenderer } from "electron";
 import { browserBridge } from "./browser";
-import { PLUGINS_CHANNEL, type PluginRequest } from "../shared/plugins";
 import { FRAMES_CHANNEL, type FrameRequest } from "../shared/frames";
 import { MODULE_PACKS_CHANNEL, type ModulePacksRequest } from "../shared/modulePacks";
+import { MODULE_DEV_CHANNEL, type ModuleDevRequest } from "../shared/moduleDev";
+import { MODULE_DATA_CHANNEL, type ModuleDataRequest } from "../shared/moduleData";
+import { DESK_PET_CHANNEL, type DeskPetRequest } from "../shared/deskPet";
 import { KNOWN_ISSUES_CHANNEL, type KnownIssuesRequest } from "../shared/knownIssues";
 import { LAUNCH_ART_CHANNEL, type LaunchArtRequest } from "../shared/launchArt";
 import { DIRECTOR_AVATARS_CHANNEL, type DirectorAvatarsRequest } from "../shared/directorAvatars";
@@ -135,6 +137,7 @@ const METHODS: InvokeMethod[] = [
   "abandonAgentCreate",
   "createHumanSession",
   "renameFormalAgent",
+  "promoteQuickChat",
   "formalNameHistory",
   "patchNewThreadDefaults",
   "services",
@@ -217,6 +220,7 @@ const METHODS: InvokeMethod[] = [
   "pickFolder",
   "revealPath",
   "revertHistory",
+  "filesRevert",
   "forkSession",
   "forkPreview",
   "deleteSession",
@@ -228,6 +232,8 @@ const METHODS: InvokeMethod[] = [
   "projectMemory",
   "projectMemoryFile",
   "projectMcp",
+  "agentMcp",
+  "setAgentMcpDisabled",
   "asks",
   "ask",
   "askAnswer",
@@ -353,6 +359,13 @@ const METHODS: InvokeMethod[] = [
   "patchProxySettings",
   "getSettings",
   "createPairingCode",
+  "pairingInvites",
+  "createPairingInvite",
+  "cancelPairingInvite",
+  "relayPairing",
+  "setRelayPairing",
+  "approvePairingRequest",
+  "denyPairingRequest",
   "clientTokens",
   "revokeClientToken",
   "renameClientToken",
@@ -525,11 +538,6 @@ const bridge: PreloadBridge = {
   browser: browserBridge({ invoke: (channel, request, binding) => invoke(channel, request, binding), binding: hostId => deliveringHosts ? null : bindings.get(hostId) ?? null, subscribe: listener => bridge.on("browserEvent", listener) }),
   api,
   apiFor,
-  plugins: {
-    list: () => invoke(PLUGINS_CHANNEL, { op: "list" } satisfies PluginRequest),
-    prepare: (input) => invoke(PLUGINS_CHANNEL, { ...input, op: "prepare" } satisfies PluginRequest),
-    release: (id) => invoke(PLUGINS_CHANNEL, { op: "release", id } satisfies PluginRequest),
-  },
   frames: {
     prepareArtifactPage: (input, deskId) => invoke(FRAMES_CHANNEL, { op: "artifactPage", hostId: input.hostId, artifactId: input.artifactId, version: input.version, ...(input.large ? { large: true } : {}), ...(deskId === undefined ? {} : { deskId }) } satisfies FrameRequest),
     prepareFilePage: (input, deskId) => invoke(FRAMES_CHANNEL, { op: "filePage", hostId: input.hostId, path: input.path, ...(input.scope ? { scope: { kind: input.scope.kind, id: input.scope.id } } : {}), ...(input.large ? { large: true } : {}), ...(deskId === undefined ? {} : { deskId }) } satisfies FrameRequest),
@@ -538,12 +546,47 @@ const bridge: PreloadBridge = {
     pageDataUsage: () => invoke(FRAMES_CHANNEL, { op: "pageDataUsage" } satisfies FrameRequest),
     pageDataClear: (hostId, artifactId) => invoke(FRAMES_CHANNEL, { op: "pageDataClear", hostId, artifactId } satisfies FrameRequest),
   },
+  moduleDev: {
+    state: () => invoke(MODULE_DEV_CHANNEL, { op: "state" } satisfies ModuleDevRequest),
+    setEnabled: (enabled) => invoke(MODULE_DEV_CHANNEL, { op: "setEnabled", enabled } satisfies ModuleDevRequest),
+    addFolder: () => invoke(MODULE_DEV_CHANNEL, { op: "addFolder" } satisfies ModuleDevRequest),
+    removeFolder: (folder) => invoke(MODULE_DEV_CHANNEL, { op: "removeFolder", folder } satisfies ModuleDevRequest),
+    report: (folder, rev, error) => invoke(MODULE_DEV_CHANNEL, { op: "report", folder, rev, error } satisfies ModuleDevRequest),
+    onState: (listener) => bridge.on("moduleDev", listener),
+  },
+  moduleData: {
+    read: (id, path) => invoke(MODULE_DATA_CHANNEL, { op: "read", id, path } satisfies ModuleDataRequest),
+    write: (id, path, data) => invoke(MODULE_DATA_CHANNEL, { op: "write", id, path, data } satisfies ModuleDataRequest),
+    remove: (id, path) => invoke(MODULE_DATA_CHANNEL, { op: "remove", id, path } satisfies ModuleDataRequest),
+    list: (id, path) => invoke(MODULE_DATA_CHANNEL, { op: "list", id, path } satisfies ModuleDataRequest),
+    usage: (id) => invoke(MODULE_DATA_CHANNEL, { op: "usage", id } satisfies ModuleDataRequest),
+    pick: (id, filters) => invoke(MODULE_DATA_CHANNEL, { op: "pick", id, filters } satisfies ModuleDataRequest),
+    save: (id, data, suggestedName, filters) => invoke(MODULE_DATA_CHANNEL, { op: "save", id, data, suggestedName, filters } satisfies ModuleDataRequest),
+    folders: () => invoke(MODULE_DATA_CHANNEL, { op: "folders" } satisfies ModuleDataRequest),
+    clear: (id) => invoke(MODULE_DATA_CHANNEL, { op: "clear", id } satisfies ModuleDataRequest),
+  },
   modulePacks: {
     state: () => invoke(MODULE_PACKS_CHANNEL, { op: "state" } satisfies ModulePacksRequest),
     check: () => invoke(MODULE_PACKS_CHANNEL, { op: "check" } satisfies ModulePacksRequest),
     install: (input) => invoke(MODULE_PACKS_CHANNEL, { op: "install", id: input.id, ...(input.version !== undefined ? { version: input.version } : {}), ...(input.allowOlder ? { allowOlder: true } : {}) } satisfies ModulePacksRequest),
     remove: (input) => invoke(MODULE_PACKS_CHANNEL, { op: "remove", id: input.id } satisfies ModulePacksRequest),
+    installLocal: () => invoke(MODULE_PACKS_CHANNEL, { op: "installLocal" } satisfies ModulePacksRequest),
+    allowLocal: (input) => invoke(MODULE_PACKS_CHANNEL, { op: "allowLocal", allow: input.allow } satisfies ModulePacksRequest),
+    localFailed: (input) => invoke(MODULE_PACKS_CHANNEL, { op: "localFailed", id: input.id, version: input.version, reason: input.reason } satisfies ModulePacksRequest),
     onState: (listener) => bridge.on("modulePacks", listener),
+  },
+  deskPet: {
+    state: () => invoke(DESK_PET_CHANNEL, { op: "state" } satisfies DeskPetRequest),
+    start: (labels) => invoke(DESK_PET_CHANNEL, { op: "start", labels } satisfies DeskPetRequest),
+    stop: () => invoke(DESK_PET_CHANNEL, { op: "stop" } satisfies DeskPetRequest),
+    set: (patch) => invoke(DESK_PET_CHANNEL, { op: "set", patch } satisfies DeskPetRequest),
+    tick: (tick) => invoke(DESK_PET_CHANNEL, { op: "tick", ...tick } satisfies DeskPetRequest),
+    reloadArt: () => invoke(DESK_PET_CHANNEL, { op: "reloadArt" } satisfies DeskPetRequest),
+    openFolder: () => invoke(DESK_PET_CHANNEL, { op: "openFolder" } satisfies DeskPetRequest),
+    preview: (id) => invoke(DESK_PET_CHANNEL, { op: "preview", id } satisfies DeskPetRequest),
+    follow: (family) => invoke(DESK_PET_CHANNEL, { op: "follow", family } satisfies DeskPetRequest),
+    onState: (listener) => bridge.on("deskPet", listener),
+    onOpenSettings: (listener) => bridge.on("deskPetOpenSettings", () => listener()),
   },
   knownIssues: {
     get: (refresh) => invoke(KNOWN_ISSUES_CHANNEL, { op: "get", refresh: refresh === true } satisfies KnownIssuesRequest),

@@ -1,7 +1,7 @@
 // Dedicated summaries share the core row's status, failure, context menu and layout toggles.
 import { BookOpen, CircleStop, FileText, Search, ServerCog, ScanLine, Users, Wrench } from "lucide-react";
 import type { RawItem } from "../../lib/timeline";
-import { standardToolRow, type StandardToolModel } from "../../lib/standardToolRows";
+import { standardToolRow, type PendingNoticeKind, type PendingNotices, type StandardToolModel } from "../../lib/standardToolRows";
 import { toolOutput } from "../../lib/workGroups";
 import { toolResult } from "../../lib/taskRows";
 import { PlainToolRow } from "../../components/PlainToolRow";
@@ -10,9 +10,22 @@ import { useConvHost } from "../../lib/conversationScope";
 import { useI18n } from "../../i18n";
 import { approvalSubject, useLiveApproval } from "../../lib/liveApproval";
 import { TimelineRowFallback } from "../TimelineRowFallback";
+import { openDelegationDetail } from "../../lib/delegationOpen";
+import { useResolvedAskId } from "../../lib/delegationsView";
 
 const statusKeys = { busy: "status.running", idle: "status.idle", offline: "status.offline", error: "status.error" } as const;
 const icons = { read: BookOpen, search: Search, tools: Wrench, agents: Users, memberRuntime: ServerCog, taskStop: CircleStop, artifactRead: FileText, actionStatus: ScanLine };
+const NOTICE_KINDS: readonly PendingNoticeKind[] = ["answer", "question", "state"];
+/** Agent tool text carries the short delegation id; the store's full id opens the detail. */
+function PendingNoticeRow({ notice }: { notice: PendingNotices["entries"][number] }) {
+  const { t } = useI18n();
+  const hostId = useConvHost();
+  const askId = useResolvedAskId(notice.delegation, hostId);
+  return <li className="flex min-w-0 gap-2">
+    {notice.kind && <span className="shrink-0 text-subtle">{t(`conversation.tools.pendingNotices.${notice.kind}`)}</span>}
+    <button type="button" className="min-w-0 truncate text-left hover:text-text hover:underline" title={notice.title} onClick={() => openDelegationDetail(hostId, askId, { title: notice.title })}>{notice.title}</button>
+  </li>;
+}
 function Details({ item, model }: { item: RawItem; model: StandardToolModel }) {
   const { t } = useI18n();
   const output = toolOutput(item) ?? JSON.stringify(toolResult(item) ?? item.result ?? item, null, 2);
@@ -27,6 +40,10 @@ function Details({ item, model }: { item: RawItem; model: StandardToolModel }) {
     {model.body !== undefined && model.body !== null && <pre className="mt-2 font-mono whitespace-pre-wrap break-words">{model.body}</pre>}
     {model.agents.length > 0 && <ul className="my-2 space-y-1" aria-label={t("conversation.tools.agents")}>
       {model.agents.map((agent, i) => <li key={`${agent.id}:${i}`} className="flex min-w-0 gap-2"><span className="min-w-0 break-all">{agent.name}</span><code className="min-w-0 break-all text-subtle">{agent.id}</code>{agent.status && <span className="ml-auto shrink-0 text-subtle">{agent.status in statusKeys ? t(statusKeys[agent.status as keyof typeof statusKeys]) : agent.status}</span>}</li>)}
+    </ul>}
+    {model.pendingNotices && model.pendingNotices.entries.length > 0 && <ul className="my-2 space-y-1" aria-label={t("conversation.tools.pendingNotices", { n: model.pendingNotices.total })}>
+      {model.pendingNotices.entries.map(notice => <PendingNoticeRow key={notice.id} notice={notice} />)}
+      {model.pendingNotices.more && <li className="text-subtle">{t("conversation.tools.pendingNotices.more", { n: model.pendingNotices.entries.length })}</li>}
     </ul>}
     {(model.kind === "agents" && model.agentCount !== null || model.kind === "artifactRead") ? <details className="mt-2">
       <summary className="cursor-pointer text-subtle">{t("conversation.tools.rawResult")}</summary>
@@ -44,7 +61,9 @@ export function StandardToolRow({ item }: { item: RawItem; sessionId: string }) 
   const live = useLiveApproval(hostId, waiting ? approvalSubject(item) : null);
   if (!model) return <TimelineRowFallback />;
   const decided = waiting && live !== null && live !== "pending";
-  const detail = model.kind === "agents" && model.agentCount !== null ? [t("conversation.tools.agentCount", { n: model.agentCount }), model.summary].filter(Boolean).join(" · ") : model.summary;
+  const notices = model.pendingNotices;
+  const noticeText = notices ? [t("conversation.tools.pendingNotices", { n: notices.total }), ...NOTICE_KINDS.filter(k => notices.counts[k] > 0).map(k => `${t(`conversation.tools.pendingNotices.${k}`)} ${notices.counts[k]}`)].join(" · ") : null;
+  const detail = model.kind === "agents" && model.agentCount !== null ? [t("conversation.tools.agentCount", { n: model.agentCount }), model.summary, noticeText].filter(Boolean).join(" · ") : model.summary;
   const key = model.kind === "memberRuntime" && model.operation ? `conversation.tools.memberRuntime.${model.operation}` as const : `conversation.tools.${model.kind}` as const;
   const state = decided ? t(`conversation.tools.actionStatus.approval.${live}`) : model.state ? t(`conversation.tools.actionStatus.${model.state}`) : null;
   const summary = [detail, state].filter(Boolean).join(" · ");

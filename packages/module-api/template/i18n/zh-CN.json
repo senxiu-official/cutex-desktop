@@ -1,0 +1,8 @@
+{
+  "my-module.title": "我的模块",
+  "my-module.description": "托盘里的一个按钮，打开一个计数页面。",
+  "my-module.open": "打开我的模块",
+  "my-module.hint": "计数保存在这台设备上。",
+  "my-module.count": "按了 {n} 次",
+  "my-module.press": "按一下"
+}

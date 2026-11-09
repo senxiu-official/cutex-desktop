@@ -35,6 +35,41 @@ describe("openStream", () => {
     } finally { handle.close(); client.dispose(); vi.useRealTimers(); }
   });
 
+  it("reopen reconnects at once with the last event id and reports no error", async () => {
+    const headers: (string | null)[] = [];
+    const fetch = (async (_url: string, init?: RequestInit) => {
+      headers.push(new Headers(init!.headers).get("Last-Event-ID"));
+      return hangingResponse([`id: ${headers.length}\nevent: output\ndata: {}\n\n`], init!.signal!);
+    }) as typeof globalThis.fetch;
+    const client = new CutexClient(endpoint, { fetch });
+    const onError = vi.fn();
+    const seen: string[] = [];
+    const handle = openStream(client, "/terminal", { onMessage: (m) => seen.push(m.id ?? ""), onError }, { reconnect: true });
+    try {
+      await vi.waitFor(() => expect(seen).toEqual(["1"]));
+      handle.reopen();
+      await vi.waitFor(() => expect(seen).toEqual(["1", "2"]), { timeout: 200 });
+      expect(headers).toEqual([null, "1"]);
+      expect(onError).not.toHaveBeenCalled();
+    } finally { handle.close(); client.dispose(); }
+  });
+
+  it("reopen leaves a stream that does not reconnect alone", async () => {
+    let opens = 0;
+    const fetch = (async (_url: string, init?: RequestInit) => {
+      opens++;
+      return hangingResponse([], init!.signal!);
+    }) as typeof globalThis.fetch;
+    const client = new CutexClient(endpoint, { fetch });
+    const handle = openStream(client, "/once", { onMessage() {} });
+    try {
+      await vi.waitFor(() => expect(opens).toBe(1));
+      handle.reopen();
+      await new Promise((r) => setTimeout(r, 20));
+      expect(opens).toBe(1);
+    } finally { handle.close(); client.dispose(); }
+  });
+
   it("reconnects a silent stream after idleTimeoutMs", async () => {
     let opens = 0;
     const fetch = (async (_url: string, init?: RequestInit) => {

@@ -21,6 +21,7 @@ vi.mock("@cutex-desktop/cutex-client", () => ({
   CutexUnreachableError: class extends Error {},
   EventFeed: class {
     reconnectNow = vi.fn();
+    reopen = vi.fn();
     start = vi.fn();
     stop = vi.fn();
     constructor(public client: unknown, public handlers: any, public options: { cutexSessionId?: string }) { fixture.feeds.push(this); }
@@ -163,6 +164,21 @@ describe("session feeds after a reconnect", () => {
     const [feed] = sessionFeeds();
     service.retarget("http://b.invalid");
     expect(feed.reconnectNow).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("moveStreams", () => {
+  it("reopens the host feed and session feeds from their cursors; the daemon state stays connected", async () => {
+    fixture.host = () => Promise.resolve({ hostId: "h" });
+    service.useEndpoint({ baseUrl: "http://a.invalid", token: "t" } as any, { remote: true });
+    await settle();
+    await service.subscribe("s1", { streamId: "x", after: null });
+    expect(service.currentState.kind).toBe("connected");
+    const feeds = fixture.feeds;
+    expect(feeds.length).toBeGreaterThanOrEqual(2);
+    service.moveStreams();
+    for (const feed of feeds) expect(feed.reopen).toHaveBeenCalledTimes(1);
+    expect(service.currentState.kind).toBe("connected");
   });
 });
 

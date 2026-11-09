@@ -1,9 +1,10 @@
+import { noteOwnerMessage } from "./lib/activityFeed";
 import { BACKGROUND_WORK_METHOD, BackgroundWorkProjection, backgroundWorkChange } from "../../shared/backgroundWork";
 import { usesInputLedger, usesOwnerCarries } from "./lib/deliveryMode";
 import { applyInputLedgerNotification, applyInputLedgerSnapshot, bootstrapSnapshot, emptyInputLedgerSession, inputGetSnapshot, inputListSnapshot, inputLedgerReconnected, inputLedgerStreamReset, queueListSnapshot, type InputLedgerSession, type InputLedgerStep, type InputLedgerFetch, type InputLedgerSnapshot } from "./lib/inputLedger/alignment";
 import type { InputRecord } from "@cutex-desktop/protocol";
 import { OWNER_IDLE_BUSY_TIMELINE_FEATURE } from "@cutex-desktop/protocol";
-import { predictedOwnerSurface, type LedgerOwnerOutbox } from "./lib/inputLedger/owner";
+import { predictedOwnerSurface, retryRefusal, type LedgerOwnerOutbox } from "./lib/inputLedger/owner";
 import { acknowledgeLedgerOutbox, loadLedgerOutbox, persistLedgerOutbox } from "./lib/inputLedger/outbox";
 import { migrateLegacyDelivery } from "./lib/inputLedger/migration";
 import { captureDebugError } from "./lib/debugState";
@@ -233,7 +234,9 @@ export type SettingsTab =
   | "updates"
   | "about"
   | "whats-new"
-  | "help";
+  | "help"
+  // A module's own page: its `settings.page` item names it (a pack's page is not listed here).
+  | (string & {});
 
 /**
  * What the app keeps of a connected host it does not show (multi-host RFC §6.2 / §10, P0: every
@@ -482,7 +485,7 @@ interface AppState {
   /** Agents whose queue is transiently stopped by interrupt-and-send (not shown as paused). */
   queueHandoff: Record<ViewKey, boolean>;
   /** `focus.profile` (tab "profiles") opens that profile's detail page; `focus.create` the 添加 form. */
-  openSettings(tab?: SettingsTab, focus?: { profile?: string; anchor?: string; create?: boolean; kimiAccount?: string }): void;
+  openSettings(tab?: SettingsTab, focus?: { profile?: string; anchor?: string; create?: boolean; kimiAccount?: string; sub?: string }): void;
   /** Shows a `main.page` item (= services.ui.openPage, modules/app.ts). */
   openPage(page: ItemId, params?: PageParams): void;
   /** Back to the conversation. */
@@ -1779,7 +1782,7 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
     // The row's line drops the removed reply (cutex keeps it in the session's activity projection): lib/revertedPreview.
     const live = host === focusHost() ? get().activity[sessionId] : undefined;
     const hideUpTo = Math.max(live?.at ?? 0, ...activityTimes(resource));
-    const replacement = previewOfKept(shown, beforeTurnId, hideUpTo, plainPreview);
+    const replacement = previewOfKept(shown, beforeTurnId, hideUpTo, plainPreview, shownSenderOn(host));
     markReverted(sessionId, { hideUpTo, replacement });
     if (host === focusHost()) set((state) => ({ activity: { ...state.activity, [sessionId]: replacement } }));
     await refreshHostSidebar(host);
@@ -2606,7 +2609,7 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
     },
 
     openSettings(tab = "general", focus) {
-      const sub = tab !== "profiles" ? {} : focus?.create ? { create: "1" } : focus?.profile ? { profile: focus.profile } : {};
+      const sub = focus?.sub ? { sub: focus.sub } : tab !== "profiles" ? {} : focus?.create ? { create: "1" } : focus?.profile ? { profile: focus.profile } : {};
       // The Settings Shelf (lib/settingsShelf) beside the conversation; the view stays. Another page than
       // the one a live edit (在主界面调整) belongs to: the owner moved on, the edit ends where it is.
       const editing = get().customize;
@@ -2736,8 +2739,12 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
       const record = ledgerSession(sessionId, host).records.get(inputId);
       if (!ledgerOn(host) || !record?.actions?.includes("retry")) return;
       const release = pinLedger(sessionId, host);
-      try { await apiOn(host).inputRetry(sessionId, inputId, record.rev); }
+      let result: unknown;
+      try { result = await apiOn(host).inputRetry(sessionId, inputId, record.rev); }
       finally { try { await getLedgerInput(sessionId, host, inputId); } finally { release(); } }
+      // The call succeeds while the resend itself was refused: the owner must hear it.
+      const refused = retryRefusal(result);
+      if (refused) get().notify(refused.onlyDismiss ? translate("inputLedger.retryNothingSentOnlyDismiss") : refused.offline ? translate("inputLedger.retryNothingSentOffline") : refused.nothingSent ? translate("inputLedger.retryNothingSent") : translate("inputLedger.retryFailed", { code: refused.code }), "error", { hostId: host, sessionId });
     },
     async dismissInput(sessionId, inputId, hostId) {
       const host = hostId ?? hostOf(sessionId);
@@ -3080,7 +3087,7 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
         turnTriggers.set(hostId, triggers);
         if (focus) {
           const current = pendingActivity?.[id] ?? get().activity[id];
-          const next = nextPreview(current, envelope);
+          const next = nextPreview(current, envelope, shownSenderOn(hostId));
           if (next) {
             if (!pendingActivity) {
               pendingActivity = {};
@@ -3613,6 +3620,7 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
       const sidebar = sidebarOn(host);
       // Archived: read-only until restored (the composer is replaced by the archived banner).
       if (isArchived(sidebar?.retired.find((s) => s.cutexSessionId === id))) return null;
+      noteOwnerMessage(host);
       if (ledgerOn(host)) {
         const key = viewKey(host, id);
         const entry: LedgerOwnerOutbox = { inputId: crypto.randomUUID(), sessionId: id, hostId: host, text, extra, strategy, predictedSurface: predictedOwnerSurface({ strategy }, ledgerSession(id, host).delivery, featuresOn(host).has(OWNER_IDLE_BUSY_TIMELINE_FEATURE)), ...(opts.joinDelegation ? { joinDelegation: opts.joinDelegation } : {}), createdAt: new Date().toISOString(), phase: "sending" };
@@ -4361,6 +4369,14 @@ export function pictureInUse(s: AppState, value: string, except: string): boolea
 export function sidebarOf(s: HostReadSource, hostId: string | null | undefined): SidebarSnapshot | null {
   if (!hostId || hostId === focusOf(s)) return s.sidebar;
   return s.byHost[hostId]?.sidebar ?? null;
+}
+
+/** The name the owner knows a sender id by on `hostId` (undefined: the sidebar does not hold it; lib/activity). */
+function shownSenderOn(hostId: string): (id: string) => string | undefined {
+  return (id) => {
+    const sidebar = sidebarOf(useApp.getState(), hostId);
+    return (sidebar?.active.find((r) => r.cutexSessionId === id) ?? sidebar?.retired.find((r) => r.cutexSessionId === id))?.displayName;
+  };
 }
 
 /** The cutex capabilities of a host (empty when not followed / not loaded). */

@@ -55,10 +55,18 @@ export function farGaps(list: HTMLElement, rows: readonly HTMLElement[]): [numbe
     }
     return box;
   };
+  // A sibling without a box (`display: none`, e.g. a turn's empty attachments list under `empty:hidden`) takes
+  // no part in the margin collapsing and its rect is all zeros (top 0 = the viewport's top): measuring to it
+  // gave a far row a margin the size of its distance to the window top, the height jumped on every far / near
+  // switch, and the scroll that followed re-armed the switch (the timeline shook every ~350 ms while idle).
+  const boxed = (sib: Element | null, step: (e: Element) => Element | null): Element | null => {
+    while (sib && getComputedStyle(sib).display === "none") sib = step(sib);
+    return sib;
+  };
   return rows.map((el) => {
     const r = el.getBoundingClientRect();
-    const prev = el.previousElementSibling;
-    const next = el.nextElementSibling;
+    const prev = boxed(el.previousElementSibling, (e) => e.previousElementSibling);
+    const next = boxed(el.nextElementSibling, (e) => e.nextElementSibling);
     const top = prev ? r.top - prev.getBoundingClientRect().bottom : r.top - inner().top;
     const bottom = next ? next.getBoundingClientRect().top - r.bottom : inner().bottom - r.bottom;
     return [Math.max(0, Math.round(top * 100) / 100), Math.max(0, Math.round(bottom * 100) / 100)];

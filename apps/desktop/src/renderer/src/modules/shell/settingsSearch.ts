@@ -30,18 +30,14 @@ export const ME_SEARCH: Search = {
  */
 export const ACCESS_SEARCH: Search = {
   sections: [
+    { anchor: "hostConnection", titleKey: "shell.access.connection", keywords: ["host.connect", "host.disconnect", "host.reconnect", "host.test", "host.edit", "host.repair", "host.color", "host.autoConnect", "host.remove"] },
+    // A member's own user and devices (MeOnHost); the owner finds 已登录设备 in the users module's cards.
+    { anchor: "users-me", titleKey: "users.me.title", keywords: ["me.access.role.pending", "me.access.device.root"] },
+    { anchor: "users-own-devices", titleKey: "users.own.title", keywords: ["users.devices", "users.own.hint", "users.revoke"], access: "member" },
+    // 高级 (a sub-page).
     { anchor: "hostInfo", titleKey: "host.info.title", keywords: ["host.info.owner", "host.info.version", "host.info.system"] },
     { anchor: "hostRights", titleKey: "host.rights.title", keywords: ["host.own.role.rights", "host.own.role.member", "host.own.toMember", "host.rights.manageUsers"] },
-    { anchor: "hostConnection", titleKey: "shell.access.connection", keywords: ["host.connect", "host.disconnect", "host.reconnect", "host.test", "host.edit", "host.repair", "host.color", "host.autoConnect", "host.remove"] },
-  ],
-};
-
-/** 用户 (on the Settings host): the owner finds its cards in the users module; a member their own user and devices. */
-export const USERS_SEARCH: Search = {
-  sections: [
-    { anchor: "users-me", titleKey: "users.me.title", keywords: ["me.access.role.pending", "me.access.device.root"] },
-    // A member's own devices (MeOnHost OwnDevicesSection); the owner finds 已登录设备 in the users module's cards.
-    { anchor: "users-own-devices", titleKey: "users.own.title", keywords: ["users.devices", "users.own.hint", "users.revoke"], access: "member" },
+    { anchor: "diagnostics", titleKey: "connection.diagnostics", keywords: ["host.daemonHostId", "connection.features"] },
   ],
 };
 

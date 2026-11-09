@@ -11,6 +11,8 @@ import type { MenuAction, MenuEntry } from "./contextMenu";
 import { isOwnerFeatures } from "../../../shared/users";
 import { featuresOf, hostApi, pinnedOn, sidebarOf, useApp } from "../store";
 import { showShelfToast } from "./shelves";
+import { parseHostKey } from "./hostKeys";
+import { INDEPENDENT_GROUP } from "./agentList";
 import { beginOperation, trackedOperationItem, updateOperationItem } from "./backgroundOperations";
 
 type T = (key: MessageKey, vars?: Record<string, string | number>) => string;
@@ -243,50 +245,37 @@ async function bringBack(host: string, ids: readonly string[]): Promise<number> 
 
 // ── The quick path (owner 2026-10-23: medium risk = confirm in place, not a dialog) ───────────────────
 
-/** The clear 会停的 set of `scope` at `secs`: stoppable only — cautions (incl. pinned) and blocked ones stay out. */
-export async function quickIdleIds(scope: StopIdleScope, secs: number): Promise<string[]> {
-  const listing = await hostApi(scope.hostId).idleRuntimes({ minIdleSecs: secs, ...(scope.projectId ? { projectId: scope.projectId } : {}) });
-  if (!listing) throw new Error("unsupported");
-  return idleRows(listing.agents, scope, pinnedOn(scope.hostId)).filter((row) => row.verdict === "stoppable").map((row) => row.cutexSessionId);
-}
-
-/** Stop `ids` (下线，可唤醒) and say so in a toast with 撤销 (the dialog's result, without the dialog). */
-export async function stopQuick(scope: StopIdleScope, secs: number, ids: readonly string[], t: T): Promise<void> {
+/**
+ * Stop each host's `ids` (下线，可唤醒; a folder may hold projects of more than one host: each host stops its own
+ * agents with the same cutex action) and say so in one toast with 撤销, which brings each back on its host.
+ */
+export async function stopQuick(batches: readonly { hostId: string; ids: readonly string[] }[], secs: number, t: T): Promise<void> {
   const notify = (text: string) => useApp.getState().notify(text, "error");
-  try {
-    const result = await trackedStopIdle(scope.hostId, ids, secs, "wakeable");
-    const stopped = result.results.filter((r) => r.result === "stopped").map((r) => r.cutexSessionId);
-    const skipped = result.results.filter((r) => r.result === "skipped").length;
-    const failed = result.results.filter((r) => r.result === "failed");
-    if (failed.length) notify(t("stopIdle.failedSome", { n: failed.length, error: failed.map((r) => r.error ?? "").join("; ") }));
-    if (!stopped.length) {
-      if (!failed.length) showShelfToast(t("stopIdle.quickNone"));
-      return;
+  const stopped: { hostId: string; ids: string[] }[] = [];
+  let skipped = 0;
+  const failed: StopIdleItemResult[] = [];
+  const errors: string[] = [];
+  for (const batch of batches) {
+    if (!batch.ids.length) continue;
+    try {
+      const result = await trackedStopIdle(batch.hostId, batch.ids, secs, "wakeable");
+      const ids = result.results.filter((r) => r.result === "stopped").map((r) => r.cutexSessionId);
+      if (ids.length) stopped.push({ hostId: batch.hostId, ids });
+      skipped += result.results.filter((r) => r.result === "skipped").length;
+      failed.push(...result.results.filter((r) => r.result === "failed"));
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : String(error));
     }
-    const text = skipped ? t("stopIdle.toastSkipped", { n: stopped.length, m: skipped }) : t("stopIdle.done", { n: stopped.length });
-    showShelfToast(text, () => void bringBack(scope.hostId, stopped).then((n) => showShelfToast(t("stopIdle.undone", { n }))));
-  } catch (error) {
-    notify(t("stopIdle.failed", { error: error instanceof Error ? error.message : String(error) }));
   }
-}
-
-/** Which words a scope uses: this project's members only, the independent agents, or every project on the host. */
-export function scopeWords(scope: Pick<StopIdleScope, "projectId" | "independent">): "Project" | "Independent" | "Host" {
-  return scope.projectId ? "Project" : scope.independent ? "Independent" : "Host";
-}
-
-/** A menu row that counts first, arms in place (「下线 3 个？再点一次」) and takes them offline on the second click. */
-function quickRow(scope: StopIdleScope, secs: number, t: T, row: Pick<MenuAction, "label" | "icon" | "title">): MenuAction {
-  let ids: string[] = [];
-  return {
-    ...row,
-    preparing: t("stopIdle.checking"),
-    prepare: async () => {
-      ids = await quickIdleIds(scope, secs);
-      return ids.length ? { armed: t(`stopIdle.armed${scopeWords(scope)}` as MessageKey, { n: ids.length }) } : { empty: t("stopIdle.quickNone") };
-    },
-    onSelect: () => stopQuick(scope, secs, ids, t),
-  };
+  if (errors.length) notify(t("stopIdle.failed", { error: errors.join("; ") }));
+  if (failed.length) notify(t("stopIdle.failedSome", { n: failed.length, error: failed.map((r) => r.error ?? "").join("; ") }));
+  const n = stopped.reduce((sum, b) => sum + b.ids.length, 0);
+  if (!n) {
+    if (!failed.length && !errors.length) showShelfToast(t("stopIdle.quickNone"));
+    return;
+  }
+  const text = skipped ? t("stopIdle.toastSkipped", { n, m: skipped }) : t("stopIdle.done", { n });
+  showShelfToast(text, () => void Promise.all(stopped.map((b) => bringBack(b.hostId, b.ids))).then((backs) => showShelfToast(t("stopIdle.undone", { n: backs.reduce((a, b) => a + b, 0) }))));
 }
 
 /** Whether `hostId` offers stop-idle and this connection may use it (the owner). */
@@ -308,25 +297,149 @@ export function customIdleSecs(amount: string, unit: "m" | "h" | "d"): number | 
   return n * (unit === "m" ? 60 : unit === "h" ? 3600 : 86400);
 }
 
-/**
- * The menu entry (empty without the capability): one 下线空闲的智能体 › submenu (owner 2026-10-25) with the quick
- * row (空闲 30 分钟以上的, counted and armed in place) and 选择… (the dialog, scoped to where it was opened).
- */
-export function stopIdleMenuEntries(scope: StopIdleScope, t: T, icon?: ReactNode): MenuEntry[] {
-  if (!stopIdleAvailable(scope.hostId)) return [];
-  const words = scopeWords(scope);
-  return [
-    {
-      label: t("stopIdle.menu"),
-      icon,
-      title: t(`stopIdle.menuHint${words}` as MessageKey),
-      onSelect: () => {},
-      submenu: [
-        quickRow(scope, DEFAULT_IDLE_SECS, t, { label: t(`stopIdle.quick${words}` as MessageKey), title: t(`stopIdle.menuHint${words}` as MessageKey) }),
-        { label: t("stopIdle.review"), title: t("stopIdle.reviewHint"), onSelect: () => void openStopIdle(scope, DEFAULT_IDLE_SECS) },
-      ],
+// ── The menu (owner 2026-11-06: scope, then idle time, each with its count) ─────────────────────────────
+
+/** The menu's idle times, longest last; 0 = every idle one. */
+export const QUICK_IDLE_SECS = [30 * 60, 60 * 60, 3 * 60 * 60, 24 * 60 * 60, 0] as const;
+
+/** Agents of one host a menu scope covers: some projects (null = an independent agent), or all (`projects` absent). */
+export interface StopIdleTarget {
+  hostId: string;
+  projects?: ReadonlySet<string | null>;
+}
+
+/** One scope of the menu: 本项目 / 独立 / a folder / a host, with what it covers on each host. */
+export interface StopIdleMenuScope {
+  kind: "Project" | "Independent" | "Folder" | "Host";
+  /** The project, folder or host name. */
+  label: string;
+  targets: StopIdleTarget[];
+  /** The dialog's scope for 选择… (single-host scopes only). */
+  dialog?: StopIdleScope;
+}
+
+const inTarget = (target: StopIdleTarget, projectId: string | null) => !target.projects || target.projects.has(projectId);
+/** The cutex filter for a target: one project asks for that project only; otherwise the host's whole listing. */
+const projectFilter = (target: StopIdleTarget): { projectId?: string } => {
+  const only = target.projects && target.projects.size === 1 ? [...target.projects][0] : undefined;
+  return typeof only === "string" ? { projectId: only } : {};
+};
+
+/** The clear 会停的 rows of a target as cutex lists them at `secs` (stoppable only: cautions, pinned, the Director, busy and waiting ones stay out). */
+async function stoppableRows(target: StopIdleTarget, secs: number): Promise<IdleRow[]> {
+  const listing = await hostApi(target.hostId).idleRuntimes({ minIdleSecs: secs, ...projectFilter(target) });
+  if (!listing) throw new Error("unsupported");
+  return idleRows(listing.agents, {}, pinnedOn(target.hostId)).filter((row) => row.verdict === "stoppable" && inTarget(target, row.projectId));
+}
+
+/** How many each idle time would take offline: `rows` (stoppable, listed at 0) idle at least that long (0: all of them). */
+export function idleCounts(rows: readonly Pick<IdleRow, "idleSecs">[], secsList: readonly number[] = QUICK_IDLE_SECS): number[] {
+  return secsList.map((secs) => rows.filter((row) => secs === 0 || (row.idleSecs !== null && row.idleSecs >= secs)).length);
+}
+
+/** The ids each host would stop at `secs` (asked again on the second look, so the armed count is cutex's own). */
+export async function scopeIdleIds(scope: Pick<StopIdleMenuScope, "targets">, secs: number): Promise<{ hostId: string; ids: string[] }[]> {
+  return Promise.all(scope.targets.map(async (target) => ({ hostId: target.hostId, ids: (await stoppableRows(target, secs)).map((row) => row.cutexSessionId) })));
+}
+
+/** The idle time's label: 「空闲 30 分钟以上」 / 「所有空闲的」. */
+function idleLabel(secs: number, t: T): string {
+  return secs === 0 ? t("stopIdle.idleAny") : t("stopIdle.idleOver", { time: t(presetKey(secs)) });
+}
+
+/** One idle time of a scope: its count on the right, what it does in ⓘ; counts again and arms in place, the second click takes them offline. */
+function idleRow(scope: StopIdleMenuScope, secs: number, count: number, t: T): MenuAction {
+  let batches: { hostId: string; ids: string[] }[] = [];
+  const time = idleLabel(secs, t);
+  return {
+    label: time,
+    hint: String(count),
+    disabled: count === 0,
+    info: t(secs === 0 ? "stopIdle.rowInfoAny" : "stopIdle.rowInfo", { scope: scope.label, time: secs === 0 ? "" : t(presetKey(secs)), n: count }),
+    preparing: t("stopIdle.checking"),
+    prepare: async () => {
+      batches = await scopeIdleIds(scope, secs);
+      const n = batches.reduce((sum, b) => sum + b.ids.length, 0);
+      return n ? { armed: t("stopIdle.armedScope", { scope: scope.label, n }) } : { empty: t("stopIdle.quickNone") };
     },
-  ];
+    onSelect: () => stopQuick(batches, secs, t),
+  };
+}
+
+/** The scope's idle-time rows, counted from one listing per host (asked with 0). */
+async function idleRowsFor(scope: StopIdleMenuScope, t: T): Promise<{ rows: MenuAction[]; total: number }> {
+  const listed = (await Promise.all(scope.targets.map((target) => stoppableRows(target, 0)))).flat();
+  const counts = idleCounts(listed);
+  return { rows: QUICK_IDLE_SECS.map((secs, i) => idleRow(scope, secs, counts[i]!, t)), total: counts[counts.length - 1]! };
+}
+
+/** The scope row's name: 「本项目 · X」, 「独立{{agent}}」, 「文件夹 · X」, 「主机 X 的所有项目」. */
+function scopeName(scope: StopIdleMenuScope, t: T): string {
+  return t(`stopIdle.scope${scope.kind}` as MessageKey, { name: scope.label });
+}
+
+/**
+ * The menu entry (empty without the capability): 下线空闲的{{agent}} › with one row per scope (本项目 or 独立, its folder,
+ * the host), each › its idle times with their counts (owner 2026-11-06: scope, then duration), then 选择… (the dialog).
+ * With one scope the idle times stand directly in the submenu. Each idle time counts, arms in place and acts on the
+ * second click (the same medium-risk confirm as before); only the clear 会停的 set goes, on each agent's own host.
+ */
+export function stopIdleMenuEntries(scopes: StopIdleMenuScope | readonly StopIdleMenuScope[], t: T, icon?: ReactNode): MenuEntry[] {
+  const usable = (Array.isArray(scopes) ? (scopes as readonly StopIdleMenuScope[]) : [scopes as StopIdleMenuScope])
+    .map((scope) => ({ ...scope, targets: scope.targets.filter((target) => stopIdleAvailable(target.hostId)) }))
+    .filter((scope) => scope.targets.length > 0);
+  if (!usable.length) return [];
+  const dialog = usable.find((scope) => scope.dialog)?.dialog;
+  const review: MenuEntry[] = dialog ? ["separator", { label: t("stopIdle.review"), title: t("stopIdle.reviewHint"), onSelect: () => void openStopIdle(dialog, DEFAULT_IDLE_SECS) }] : [];
+  const fail = (error: unknown): MenuEntry[] => [{ label: t("stopIdle.failed", { error: error instanceof Error ? error.message : String(error) }), note: true, disabled: true, onSelect: () => {} }];
+  const submenu = async (): Promise<MenuEntry[]> => {
+    if (usable.length === 1) {
+      try {
+        return [...(await idleRowsFor(usable[0]!, t)).rows, ...review];
+      } catch (error) {
+        return [...fail(error), ...review];
+      }
+    }
+    const rows = await Promise.all(
+      usable.map(async (scope): Promise<MenuAction> => {
+        try {
+          const { rows, total } = await idleRowsFor(scope, t);
+          // No ⓘ here: its tooltip would cover the idle times beside it; each idle time says what it does.
+          return { label: scopeName(scope, t), hint: String(total), onSelect: () => {}, submenu: rows };
+        } catch (error) {
+          return { label: scopeName(scope, t), onSelect: () => {}, submenu: fail(error) };
+        }
+      }),
+    );
+    return [...rows, ...review];
+  };
+  const title = usable.length === 1 ? t(`stopIdle.menuHint${usable[0]!.kind}` as MessageKey) : undefined;
+  return [{ label: t("stopIdle.menu"), icon, title, onSelect: () => {}, submenu }];
+}
+
+/** A host's scope: every project on it. */
+export function hostIdleScope(hostId: string, label: string): StopIdleMenuScope {
+  return { kind: "Host", label, targets: [{ hostId }], dialog: { hostId, label } };
+}
+
+/** A project's (or the independent agents') scope on its host. */
+export function projectIdleScope(hostId: string, projectId: string | null, label: string): StopIdleMenuScope {
+  return projectId === null
+    ? { kind: "Independent", label, targets: [{ hostId, projects: new Set([null]) }], dialog: { hostId, independent: true, label } }
+    : { kind: "Project", label, targets: [{ hostId, projects: new Set([projectId]) }], dialog: { hostId, projectId, label } };
+}
+
+/** A folder's scope: its projects, grouped by their host (`members` are host keys; `__independent__` = that host's independent agents). */
+export function folderIdleScope(name: string, members: readonly string[]): StopIdleMenuScope {
+  const byHost = new Map<string, Set<string | null>>();
+  for (const member of members) {
+    const parsed = parseHostKey(member);
+    if (!parsed) continue;
+    const [hostId, id] = parsed;
+    if (!byHost.has(hostId)) byHost.set(hostId, new Set());
+    byHost.get(hostId)!.add(id === INDEPENDENT_GROUP ? null : id);
+  }
+  return { kind: "Folder", label: name, targets: [...byHost].map(([hostId, projects]) => ({ hostId, projects })) };
 }
 
 /** The focus host's entries for the sidebar's own menu (then a separator; none without the capability). */
@@ -334,6 +447,6 @@ export function hostStopIdleEntries(t: T, icon?: ReactNode): MenuEntry[] {
   const app = useApp.getState();
   const hostId = app.hosts?.active ?? "local";
   const label = app.hosts?.hosts.find((h) => h.id === hostId)?.label ?? hostId;
-  const entries = stopIdleMenuEntries({ hostId, label }, t, icon);
+  const entries = stopIdleMenuEntries(hostIdleScope(hostId, label), t, icon);
   return entries.length ? [...entries, "separator"] : [];
 }

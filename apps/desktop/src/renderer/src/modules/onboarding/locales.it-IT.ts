@@ -238,7 +238,7 @@ export const itIT: Record<keyof typeof zhCN, string> = {
   "onboarding.guide.update.title": "Aggiornamenti",
   "onboarding.guide.update.text": "Gli aggiornamenti di Cutex sono in Impostazioni → Aggiornamenti e diagnostica.\ncutex va aggiornato separatamente su ogni host, in Impostazioni → Aggiornamenti del backend host.\nGli {{Agents}} avviati prima di un aggiornamento possono mostrare la vecchia versione finché non vengono riavviati.",
   "onboarding.guide.remote.title": "Host remoti e dispositivi associati",
-  "onboarding.guide.remote.text": "Gli {{Agents}} su un host remoto funzionano come quelli locali: conversazioni, deleghe e servizi sono disponibili, e i file restano su quella macchina.\nUn dispositivo associato, per esempio un telefono, si collega con i permessi che gli hai dato; puoi gestirli o revocarli in Impostazioni → Utenti → Dispositivi connessi.",
+  "onboarding.guide.remote.text": "Gli {{Agents}} su un host remoto funzionano come quelli locali: conversazioni, deleghe e servizi sono disponibili, e i file restano su quella macchina.\nUn dispositivo associato, per esempio un telefono, si collega con i permessi che gli hai dato; puoi gestirli o revocarli in Impostazioni → Host.",
   "onboarding.guide.help.title": "Aiuto",
   "onboarding.guide.help.hint": "Rivedi guide e suggerimenti, apri la documentazione o segnala un problema.",
   "onboarding.guide.help.onboarding": "Guide",

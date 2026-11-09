@@ -206,6 +206,8 @@ export const en: Record<keyof typeof zhCN, string> = {
   "approvals.rules.audit": "Rule audit",
   "approvals.rules.audit.hint": "cutex records rule creation, edits, revocation, automatic matches and rejected matches.",
   "approvals.rules.audit.empty": "No audit events yet",
+  "approvals.rules.audit.all": "All {n}",
+  "approvals.rules.audit.latest": "Latest {n}",
   "approvals.rules.audit.created": "Rule created",
   "approvals.rules.audit.updated": "Rule updated",
   "approvals.rules.audit.revoked": "Rule revoked",

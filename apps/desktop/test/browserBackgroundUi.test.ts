@@ -10,6 +10,7 @@ import { en } from "../src/renderer/src/modules/browser/i18n.en";
 
 vi.mock("../src/renderer/src/i18n", () => ({ useI18n: () => ({ t: (key: string, values?: Record<string, string>) => values ? `${key}:${JSON.stringify(values)}` : key }) }));
 import { BrowserBackgroundView } from "../src/renderer/src/modules/browser/BrowserBackgroundView";
+import { MAX_BROWSER_THUMBNAIL_URL_LENGTH } from "../src/shared/browser";
 
 // Renderer side of the background carrier (owner option C, 2026-10-18).
 async function flush() { for (let i = 0; i < 20; i++) await Promise.resolve(); }
@@ -50,7 +51,7 @@ describe("background tab state and thumbnails", () => {
   });
   it("accepts only main's bounded JPEG data URL", () => {
     expect(safeBrowserThumbnail(JPEG)).toBe(JPEG);
-    for (const value of ["https://example.com/a.jpg", "data:image/png;base64,AAAA", "data:image/jpeg;base64,<script>", `data:image/jpeg;base64,${"A".repeat(256 * 1024)}`, 5, null])
+    for (const value of ["https://example.com/a.jpg", "data:image/png;base64,AAAA", "data:image/jpeg;base64,<script>", `data:image/jpeg;base64,${"A".repeat(MAX_BROWSER_THUMBNAIL_URL_LENGTH)}`, 5, null])
       expect(safeBrowserThumbnail(value)).toBeUndefined();
     const store = createBrowserThumbnails(), listener = vi.fn();
     store.subscribe(listener);

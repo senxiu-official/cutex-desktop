@@ -19,8 +19,12 @@ describe("folder look choice", () => {
     expect(folderLook("s-1", { icon: "music" })).toEqual({ color: auto.color, icon: Music });
     expect(folderLook("s-1", { color: "#D6409F", icon: "briefcase" })).toEqual({ color: "#D6409F", icon: Briefcase });
   });
-  it("draws a colour outside the palette or an unknown icon as automatic (no free colour)", () => {
-    expect(folderLook("s-1", { color: "#ff0000", icon: "not-an-icon" })).toEqual(folderLook("s-1"));
+  it("a custom colour is drawn (with its own ink); an invalid colour or an unknown icon is drawn automatic", () => {
+    const red = folderLook("s-1", { color: "#ff0000", icon: "not-an-icon" });
+    expect(red.color).toBe("#FF0000");
+    expect(red.ink).toBeDefined();
+    expect(red.icon).toBe(folderLook("s-1").icon);
+    expect(folderLook("s-1", { color: "red" })).toEqual(folderLook("s-1"));
   });
   it("offers the folder icons and the project icons, never the 更早的项目 archive box", () => {
     for (const icon of FOLDER_ICONS) expect(FOLDER_ICON_CHOICES.map((c) => c.Icon)).toContain(icon);

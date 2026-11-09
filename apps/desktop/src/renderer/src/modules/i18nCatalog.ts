@@ -30,7 +30,8 @@ export interface ModuleZhHantMessages {}
 
 // zh-CN only: the modules' en strings (./<id>/i18n.en.ts → i18nCatalogEn) and other locales (./<id>/i18n.locales.ts →
 // i18nCatalogLocales) load with their lazy catalogs (i18n/index.tsx; 0.2.0 beta perf audit, 2026-10-24).
-const found = import.meta.glob<{ zhCN: Record<string, string> }>("./*/i18n.ts", { eager: true });
+// A pack-only module (pack.json `packOnly`) brings its own strings when it loads; test/modules.test.ts keeps these lists right.
+const found = import.meta.glob<{ zhCN: Record<string, string> }>(["./*/i18n.ts", "!./desk-pet/**"], { eager: true });
 
 /** Key prefix → zh-CN dictionary ("modules" = the host itself; otherwise the module directory name). */
 export const MODULE_DICTIONARIES_ZH: Record<string, Record<string, string>> = {

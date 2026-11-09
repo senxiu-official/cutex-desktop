@@ -4,28 +4,10 @@ import type { ProjectSummary, SessionResource } from "@cutex-desktop/protocol";
 import type { SidebarSnapshot } from "../../../../shared/ipc";
 import { clientTokenName } from "../../lib/deviceNames";
 export { selfKeyUnknown, withPersonKey } from "../../lib/personKeys";
+export { EMPTY_GRANT, grantChoices, grantSummary, refusalText, sortedUsers, toggleId, USER_NAME_MAX, type GrantChoice } from "../../lib/userGrants";
+import { EMPTY_GRANT, grantSummary, toggleId, USER_NAME_MAX, type GrantChoice } from "../../lib/userGrants";
 import { shownUserName, type PersonKeyInput, type UserTokenRecord, type UserGrant, type UserRecord, type UsersList, type UsersRefusal, type UsersResult } from "../../../../shared/users";
 import { byNameThenId, compareNames } from "../../lib/rosterOrder";
-
-export const EMPTY_GRANT: UserGrant = { projects: [], standaloneAgents: [], send: false };
-
-export interface GrantChoice {
-  id: string;
-  name: string;
-}
-
-/** Projects and standalone agents of the target host that a grant can name (active ones, by name). */
-export function grantChoices(sidebar: SidebarSnapshot | null): { projects: GrantChoice[]; standalone: GrantChoice[] } {
-  const projects = (sidebar?.projects?.projects ?? [])
-    .filter((p: ProjectSummary) => p.lifecycle !== "archived")
-    .map((p) => ({ id: p.project_id, name: p.presentation?.display_name || p.project_id }));
-  const rows = sidebar?.hostRows ?? {};
-  const standalone = (sidebar?.active ?? [])
-    .filter((s: SessionResource) => !rows[s.cutexSessionId]?.projectId)
-    .map((s) => ({ id: s.cutexSessionId, name: s.displayName || s.cutexSessionId }));
-  const byName = byNameThenId<GrantChoice>((c) => c.name, (c) => c.id);
-  return { projects: projects.sort(byName), standalone: standalone.sort(byName) };
-}
 
 /** Ids a grant names that the host no longer lists (kept on save: they may come back). */
 export function unknownIds(ids: readonly string[], choices: readonly GrantChoice[]): string[] {
@@ -50,10 +32,6 @@ export function rebaseGrantDraft(draft: UserGrant, base: UserGrant, saved: UserG
 export function toggleAllProjects(draft: UserGrant, on: boolean, kept: readonly string[]): { draft: UserGrant; kept: string[] } {
   if (on) return { draft: { ...draft, projects: "all" }, kept: draft.projects === "all" ? [...kept] : [...draft.projects] };
   return { draft: { ...draft, projects: draft.projects === "all" ? [...kept] : draft.projects }, kept: [...kept] };
-}
-
-export function toggleId(list: readonly string[], id: string, on: boolean): string[] {
-  return on ? (list.includes(id) ? [...list] : [...list, id]) : list.filter((x) => x !== id);
 }
 
 // ---------- 项目页 → 可见用户 (one project, every non-owner user) ----------
@@ -88,18 +66,6 @@ export function shownGrant(user: Pick<UserRecord, "id" | "grant">, listRevision:
 }
 
 type T = (key: string, vars?: Record<string, string | number>) => string;
-
-/** "全部项目 · 1 个独立智能体 · 可发消息" — what a user's grant amounts to. */
-export function grantSummary(grant: UserGrant | null, t: T): string {
-  const g = grant ?? EMPTY_GRANT;
-  const parts: string[] = [];
-  if (g.projects === "all") parts.push(t("users.summary.all"));
-  else if (g.projects.length) parts.push(t("users.summary.projects", { n: g.projects.length }));
-  if (g.standaloneAgents.length) parts.push(t("users.summary.standalone", { n: g.standaloneAgents.length }));
-  if (!parts.length) return t("users.summary.nothing");
-  parts.push(t(g.send ? "users.summary.send" : "users.summary.readOnly"));
-  return parts.join(" · ");
-}
 
 /** Tokens / peers bound to each user, and the pending tokens. */
 export function bindingsOf(list: UsersList): { tokens: Map<string, UsersList["tokens"]>; peers: Map<string, UsersList["peers"]>; pending: UsersList["tokens"] } {
@@ -139,22 +105,6 @@ export function deviceRows<T extends Pick<UserTokenRecord, "tokenId" | "pending"
     if (Number.isFinite(ua) && ua !== ub) return ub - ua;
     return a.tokenId.localeCompare(b.tokenId);
   });
-}
-
-/** Owner first, then by the name shown (their own display name, else the owner's label). */
-export function sortedUsers(users: readonly UserRecord[]): UserRecord[] {
-  return [...users].sort((a, b) => (a.isOwner !== b.isOwner ? (a.isOwner ? -1 : 1) : compareNames(shownUserName(a), shownUserName(b))));
-}
-
-/**
- * A refused users write in our words (`userName`: the user a delete was refused for; `nameOf`: a user
- * id's shown name, for person_key_in_use).
- */
-export function refusalText(error: UsersRefusal, t: T, userName?: string, nameOf?: (userId: string) => string): string {
-  if (error.code === "user_in_use" && userName !== undefined) return t("users.inUse", { name: userName, devices: error.tokens?.length ?? 0, peers: error.peers?.length ?? 0 });
-  if (error.code === "person_key_in_use") return t("users.error.person_key_in_use", { name: error.userId ? (nameOf?.(error.userId) ?? error.userId) : "?" });
-  const known = ["owner_required", "owner_immutable", "user_in_use", "user_not_found"];
-  return known.includes(error.code) ? t(`users.error.${error.code}`) : t("users.error.other", { message: error.message || error.code });
 }
 
 /**
@@ -227,9 +177,6 @@ export function withoutPersonKey(user: Pick<UserRecord, "personKeys">, publicKey
 
 // ---------- 新建用户并分配 (pending device card; docs/research/person-identity-p2-20261014.md §5) ----------
 
-/** Longest user name cutex takes (`name`, 1–64 characters). */
-export const USER_NAME_MAX = 64;
-
 /** The new user's default name: the name the device claimed with its identity, else the device name. */
 export function newUserDefaultName(list: Pick<UsersList, "users" | "tokenPersons">, token: Pick<UserTokenRecord, "tokenId" | "userId" | "person" | "deviceName" | "ownerName" | "label">, t: T): string {
   const claimed = tokenPerson(list, token).displayName;
@@ -270,4 +217,10 @@ export async function createUserAndAssign(
   // A brand-new user has no keys yet: the PUT body is just this one.
   const remembered = (await write(() => api.putUserPersonKeys(userId, [{ publicKey: input.rememberKey! }]))) !== null;
   return { userId, bound, remembered };
+}
+
+/** The host's page: every device waiting for a user, and the first `limit` others; the rest behind 全部 ›. */
+export function firstDevices(all: readonly UserTokenRecord[], limit: number): { rows: UserTokenRecord[]; more: boolean } {
+  const settled = all.filter((token) => !isUnassigned(token));
+  return { rows: [...all.filter(isUnassigned), ...settled.slice(0, limit)], more: settled.length > limit };
 }

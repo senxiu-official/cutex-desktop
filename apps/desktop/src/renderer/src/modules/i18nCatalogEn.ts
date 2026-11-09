@@ -4,7 +4,7 @@
 import { en as hostEn } from "./i18n.en";
 import type { ModuleMessages } from "./i18nCatalog";
 
-const found = import.meta.glob<{ en: Record<string, string> }>("./*/i18n.en.ts", { eager: true });
+const found = import.meta.glob<{ en: Record<string, string> }>(["./*/i18n.en.ts", "!./desk-pet/**"], { eager: true });
 
 /** Key prefix → en dictionary (as MODULE_DICTIONARIES_ZH). */
 export const MODULE_DICTIONARIES_EN: Record<string, Record<string, string>> = {

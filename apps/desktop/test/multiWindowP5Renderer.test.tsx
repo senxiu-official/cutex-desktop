@@ -41,7 +41,7 @@ vi.mock("../src/renderer/src/modules/browser/guestLifecycle", () => ({
 
 import { BrowserBody } from "../src/renderer/src/modules/browser/BrowserBody";
 import { startBrowser } from "../src/renderer/src/modules/browser/runtime";
-import type { AppModuleContext } from "../src/renderer/src/modules/slots";
+import type { ModuleContext } from "../src/renderer/src/modules/slots";
 import { inBrowserTabWindow } from "../src/renderer/src/modules/browser/popupOpen";
 import { BROWSER_TAB } from "../src/renderer/src/modules/browser/browserState";
 import { emptyLayout } from "../src/renderer/src/lib/sideLayout";
@@ -98,7 +98,7 @@ describe("browser tabs in desk windows (renderer, P5)", () => {
   it("startBrowser runs main's new-tab / pressed / reveal for a desk tab in that desk", async () => {
     useSide.of(DESK).setState({ layout: tab("desk-tab") });
     const controller = new AbortController();
-    await startBrowser({ signal: controller.signal, services: { side: { open: vi.fn(), reveal: vi.fn(), list: vi.fn(() => []) }, ui: { notice: vi.fn() } } } as unknown as AppModuleContext);
+    await startBrowser({ signal: controller.signal, services: { side: { open: vi.fn(), reveal: vi.fn(), list: vi.fn(() => []) }, ui: { notice: vi.fn() } } } as unknown as ModuleContext);
     const view = { hostId: "local", epoch: "epoch-a", guestId: "guest-1", tabKey: "desk-tab", pageGeneration: 1, url: "http://localhost:26180/", title: "", loading: false, canGoBack: false, canGoForward: false, status: "attached" };
     const emit = (event: object) => { for (const listener of fakes.listeners) listener(event); };
     fakes.ran.length = 0;

@@ -1,20 +1,20 @@
 import { create } from "zustand";
 import type { MessageKey } from "../../i18n";
-import type { AppModuleContext, CutexRef, RefOpenResult } from "../slots";
+import type { ModuleContext, CutexRef, RefOpenResult } from "../slots";
 import type { Json } from "../types";
 import { addBookmark, BookmarkError, checkedRef, EMPTY_BOOKMARKS, readBookmarks, refKey, renameBookmark as renamed, scopeBookmark, type BookmarkScope, type BookmarkDocument, type BookmarkProblem, type BookmarkRecord } from "./model";
 
 export const useBookmarks = create<{ document: BookmarkDocument; storageError: BookmarkProblem | null; actionError: string | null; failures: Record<string, string> }>(() => ({ document: EMPTY_BOOKMARKS, storageError: null, actionError: null, failures: {} }));
-let context: AppModuleContext | null = null;
+let context: ModuleContext | null = null;
 const opens = new Map<string, number>();
 const PREF_KEY = "saved";
 export function problemKey(p: BookmarkProblem): MessageKey { return ({ "invalid-ref": "bookmarks.invalidRef", "invalid-storage": "bookmarks.invalidStorage", "storage-full": "bookmarks.storageFull", "storage-failed": "bookmarks.storageFailed", "module-off": "bookmarks.moduleOff" } as const)[p]; }
-function ctx(): AppModuleContext { if (!context || context.signal.aborted) throw new BookmarkError("module-off"); return context; }
+function ctx(): ModuleContext { if (!context || context.signal.aborted) throw new BookmarkError("module-off"); return context; }
 function report(error: unknown): void {
   const message = context?.t(problemKey(error instanceof BookmarkError ? error.code : "invalid-ref")) ?? String(error);
   useBookmarks.setState({ actionError: message }); context?.services.ui.notice(message, "error");
 }
-export function activateBookmarks(current: AppModuleContext): void {
+export function activateBookmarks(current: ModuleContext): void {
   context = current;
   let loading = false;
   const load = () => {

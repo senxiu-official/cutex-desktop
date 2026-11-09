@@ -43,8 +43,10 @@ export type { GetConversationSummaryResponse } from "./GetConversationSummaryRes
 export type { GitDiffToRemoteParams } from "./GitDiffToRemoteParams";
 export type { GitDiffToRemoteResponse } from "./GitDiffToRemoteResponse";
 export type { GitSha } from "./GitSha";
+export type { GuardianAssessmentOutcome } from "./GuardianAssessmentOutcome";
 export type { ImageDetail } from "./ImageDetail";
 export type { ImageGenerationFailure } from "./ImageGenerationFailure";
+export type { ImageGenerationInputImage } from "./ImageGenerationInputImage";
 export type { ImageGenerationItem } from "./ImageGenerationItem";
 export type { InitializeCapabilities } from "./InitializeCapabilities";
 export type { InitializeParams } from "./InitializeParams";
@@ -81,6 +83,7 @@ export type { ResourceTemplate } from "./ResourceTemplate";
 export type { ResponseItem } from "./ResponseItem";
 export type { ResponseItemId } from "./ResponseItemId";
 export type { ReviewDecision } from "./ReviewDecision";
+export type { SavedImage } from "./SavedImage";
 export type { ServerNotification } from "./ServerNotification";
 export type { ServerNotificationEnvelope } from "./ServerNotificationEnvelope";
 export type { ServerRequest } from "./ServerRequest";

@@ -8,6 +8,8 @@ import { bridge } from "../../bridge";
 import { confirmDialog, openMenuFrom } from "../../lib/contextMenu";
 import { Button, ListRow, SettingsGroup } from "../../components/settings/Form";
 import { applyPackView, packRow, usePackRuntime, type PackRow } from "../packs";
+import { readsAppInternals } from "../../../../shared/modulePacks";
+import { usesExperimentalApi } from "../packHost";
 import type { ModulePacksView, PackStep } from "../../../../shared/modulePacks";
 
 const STEPS: PackStep[] = ["download", "verify", "unpack"];
@@ -73,8 +75,68 @@ export function PackIndexHeader() {
   );
 }
 
+/** Local modules (§23.14): the switch and the install both open main's own dialogs; this only asks. */
+export function LocalPacksGroup() {
+  const { t } = useI18n();
+  const view = usePackRuntime().view;
+  const api = bridge.modulePacks;
+  if (!api || !view) return null;
+  const { allowed, safeStart, held, error } = view.local;
+  const busy = !!view.operation;
+  const heldText = (h: (typeof held)[number]) =>
+    h.reason === "failed" ? t("modules.pack.local.heldFailed", { version: h.version, error: h.detail ?? "" }) : t(h.reason === "off" ? "modules.pack.local.heldOff" : "modules.pack.local.heldSafe", { version: h.version });
+  // Main asks in its own dialog, together with what to do about the module's data (§30.6).
+  const remove = (id: string) => run(() => api.remove({ id }));
+  return (
+    <SettingsGroup agents="none" source="local">
+      <ListRow
+        title={t("modules.pack.local.title")}
+        detail={t(allowed ? "modules.pack.local.onDetail" : "modules.pack.local.offDetail")}
+        below={
+          safeStart || error ? (
+            <div className="space-y-1 pb-1 text-xs">
+              {safeStart && <p className="text-warn-text">{t(safeStart.reason === "crashes" ? "modules.pack.local.safeCrashes" : "modules.pack.local.safeArgument")}</p>}
+              {error && <p className="break-words text-danger">{t("modules.pack.local.error", { message: error })}</p>}
+            </div>
+          ) : undefined
+        }
+        actions={
+          allowed ? (
+            <>
+              <Button onClick={() => void run(() => api.installLocal())} disabled={busy}>
+                {t("modules.pack.local.install")}
+              </Button>
+              <Button onClick={() => void run(() => api.allowLocal({ allow: false }))} disabled={busy}>
+                {t("modules.pack.local.turnOff")}
+              </Button>
+            </>
+          ) : (
+            <Button onClick={() => void run(() => api.allowLocal({ allow: true }))} disabled={busy}>
+              {t("modules.pack.local.allow")}
+            </Button>
+          )
+        }
+      />
+      {held.map((h) => (
+        <ListRow
+          key={h.id}
+          title={
+            <span className="flex min-w-0 items-center gap-2">
+              <span className="truncate">{h.id}</span>
+              <Tag tone={h.reason === "failed" ? "danger" : "warn"}>{t("modules.pack.local.badge")}</Tag>
+            </span>
+          }
+          detail={heldText(h)}
+          actions={<Button onClick={() => void remove(h.id)}>{t("modules.pack.remove")}</Button>}
+        />
+      ))}
+    </SettingsGroup>
+  );
+}
+
 function sourceTag(row: PackRow, t: ReturnType<typeof useI18n>["t"]): { text: string; tone: "muted" | "ok" | "warn" | "danger" | "accent" } | null {
   const d = row.decision;
+  if (row.installed?.local && (row.activeVersion || !d || d.use)) return { text: t("modules.pack.local.tag", { version: row.installed.version }), tone: "warn" };
   if (row.activeVersion) return { text: t("modules.pack.downloaded", { version: row.activeVersion }), tone: "accent" };
   if (row.installed && d && !d.use) {
     const version = row.installed.version;
@@ -101,11 +163,27 @@ function sourceTag(row: PackRow, t: ReturnType<typeof useI18n>["t"]): { text: st
 export function PackSourceTag({ row }: { row: PackRow }) {
   const { t } = useI18n();
   const tag = sourceTag(row, t);
-  return tag ? (
-    <Tag tone={tag.tone} title={tag.text}>
-      {tag.text}
-    </Tag>
-  ) : null;
+  const experimental = row.installed && usesExperimentalApi(row.installed.host);
+  const internal = row.installed?.local && readsAppInternals(row.installed.host);
+  return (
+    <>
+      {tag && (
+        <Tag tone={tag.tone} title={tag.text}>
+          {tag.text}
+        </Tag>
+      )}
+      {experimental && (
+        <Tag tone="warn" title={t("modules.pack.experimentalHint")}>
+          {t("modules.pack.experimental")}
+        </Tag>
+      )}
+      {internal && (
+        <Tag tone="warn" title={t("modules.pack.internalHint")}>
+          {t("modules.pack.internal")}
+        </Tag>
+      )}
+    </>
+  );
 }
 
 /** Download / Update / ⋯ (other versions, Remove) for one module. */
@@ -119,7 +197,8 @@ export function PackActions({ row, name }: { row: PackRow; name: string }) {
     await run(() => api.install({ id: row.id, version, ...(older && row.installed ? { allowOlder: true } : {}) }));
   };
   const remove = async () => {
-    if (!row.bundled && !(await confirmDialog(t("modules.pack.removeConfirm", { name }), true))) return;
+    // A local module: main asks in its own dialog, together with what to do about its data (§30.6).
+    if (!row.bundled && !row.installed?.local && !(await confirmDialog(t("modules.pack.removeConfirm", { name }), true))) return;
     await run(() => api.remove({ id: row.id }));
   };
   const canRemove = !!row.installed || !!row.broken;

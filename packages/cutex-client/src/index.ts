@@ -18,6 +18,8 @@ export * from "./projectEvents";
 export * from "./sse";
 export * from "./stream";
 export * from "./summary";
+export * from "./pairingInvites";
+export * from "./relayPairing";
 export * from "./sessionDeltas";
 export * from "./runtimePrune";
 export * from "./users";

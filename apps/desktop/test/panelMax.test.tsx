@@ -11,6 +11,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Every API call resolves to null (a focus change opens an agent: subscribe / unsubscribe / bootstrap).
+vi.mock("../src/renderer/src/modules/react", async (importOriginal) => ({ ...(await importOriginal<object>()), useSlot: () => [] }));
 vi.mock("../src/renderer/src/modules/app", () => ({ appModules: () => ({ snapshot: () => [] }) }));
 vi.mock("../src/renderer/src/bridge", () => {
   const api = new Proxy({}, { get: (_t, m) => (m === "then" ? undefined : () => Promise.resolve(null)) });

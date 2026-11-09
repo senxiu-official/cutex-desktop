@@ -16,6 +16,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { gunzipSync } from "node:zlib";
+import { parseReleaseInfo } from "../shared/update";
 import { download } from "./binaryUpdate";
 import { parsePublicKey, releaseKeyring, verifyData, type MinisignPublicKey } from "./minisign";
 import { ProxyAuthError, type Transport, type TransportResponse } from "./updateTransport";
@@ -32,12 +33,15 @@ import {
   PACK_PATH_RE,
   packCompat,
   packFileUrl,
+  parseIndexPack,
   parseModuleIndex,
   parsePackVersion,
+  readsAppInternals,
   SIGNED_DIR,
   type InstalledPackView,
   type ModuleIndex,
   type ModuleIndexPack,
+  type LocalPacksView,
   type ModulePacksView,
   type PackStep,
 } from "../shared/modulePacks";
@@ -169,6 +173,83 @@ interface PackState {
 interface Verified {
   pack: ModuleIndexPack;
   dir: string;
+  local?: true;
+}
+
+/** An install from a file (§23.14): the exact archive and file hashes the owner confirmed. */
+interface LocalTrust {
+  version: string;
+  sha256: string;
+  installedAt: string;
+  pack: ModuleIndexPack;
+  /** Why it was turned off after failing to activate; a new install from a file clears it. */
+  failed?: string;
+}
+
+interface LocalState {
+  v: 1;
+  /** The owner's choice; unset = the build's default. */
+  allowed?: boolean;
+  /** Starts with local modules loaded that have not yet been seen healthy. */
+  failedStarts: number;
+  trust: Record<string, LocalTrust>;
+}
+
+/** What main shows the owner before installing a file. */
+export interface LocalPackPrompt {
+  id: string;
+  title?: Record<string, string>;
+  version: string;
+  /** From the file itself: nothing vouches for it. */
+  author: string | null;
+  path: string;
+  sha256: string;
+  replaces: string | null;
+  /** It imports beyond the public API, and this dev build will load it anyway: the dialog says it may break. */
+  internal?: boolean;
+}
+
+/** Native dialogs, main only (main/localModulePrompts.ts). */
+export interface LocalPackPrompts {
+  pickFile(): Promise<string | null>;
+  confirmInstall(pack: LocalPackPrompt): Promise<boolean>;
+  confirmAllow(): Promise<boolean>;
+}
+
+export interface LocalPacksOptions {
+  defaultAllowed: boolean;
+  /** A dev build (`localPacksDefault`, not the owner's switch): modules reading beyond the public API load, tagged. */
+  internal?: boolean;
+  /** Started with LOCAL_SAFE_START_ARG. */
+  skip?: boolean;
+  reservedIds: readonly string[];
+  prompts: LocalPackPrompts;
+  /**
+   * A local module's data folder (main/moduleData.ts, §30.6) on removal: main asks the owner in its own dialog whether
+   * to keep or delete it. Absent: removal never touches the data.
+   */
+  data?: {
+    has(id: string): boolean;
+    bytes(id: string): number;
+    delete(id: string): Promise<void>;
+    confirmRemove(id: string, dataBytes: number | null): Promise<"keep" | "delete" | null>;
+  };
+}
+
+const LOCAL_FILE = "local.json";
+/** Starts in a row that never got healthy before one runs without local modules. */
+export const LOCAL_FAILED_STARTS = 3;
+const LOCAL_MANIFEST_KEYS = ["id", "version", "moduleApi", "title", "description", "author", "entry", "styles", "host"];
+
+/**
+ * Whether local modules start allowed: an unpackaged run or a self-built package. A CI release package
+ * records its `releasePage` when it is packaged, and one whose package.json cannot be read counts as public.
+ * The channel file is not used: Settings can switch it.
+ */
+export function localPacksDefault(opts: { packaged: boolean; packageJson: unknown }): boolean {
+  if (!opts.packaged) return true;
+  const info = parseReleaseInfo(opts.packageJson);
+  return !("reason" in info) && !info.releasePage;
 }
 
 interface CheckedIndex {
@@ -184,6 +265,8 @@ export interface ModulePackServiceOptions {
   source: ModulePackSource;
   transport: Transport;
   appModuleApi: string;
+  /** Absent: this service never installs or loads a local module. */
+  local?: LocalPacksOptions;
   onChange?: (view: ModulePacksView) => void;
   log?: (text: string) => void;
   now?: () => number;
@@ -203,6 +286,11 @@ export class ModulePackService {
   private checking: Promise<ModulePacksView> | null = null;
   private operation: ModulePacksView["operation"] = null;
   private lastError: ModulePacksView["lastError"] = null;
+  private localState: LocalState = { v: 1, failedStarts: 0, trust: {} };
+  private safeStart: LocalPacksView["safeStart"] = null;
+  private held: LocalPacksView["held"] = [];
+  private localError: string | null = null;
+  private localBusy = false;
 
   constructor(private readonly opts: ModulePackServiceOptions) {}
 
@@ -220,6 +308,18 @@ export class ModulePackService {
     }
     for (const name of names) if (/^\.(download|staging|trash)-/.test(name)) rmSync(join(root, name), { recursive: true, force: true });
     this.state = this.readState();
+    this.localState = this.readLocal();
+    if (this.opts.local?.skip) {
+      this.safeStart = { reason: "argument" };
+    } else if (this.localAllowed() && Object.keys(this.localState.trust).length) {
+      if (this.localState.failedStarts >= LOCAL_FAILED_STARTS) {
+        this.safeStart = { reason: "crashes" };
+        this.localState.failedStarts = 0;
+      } else {
+        this.localState.failedStarts += 1;
+      }
+      this.writeLocal();
+    }
     for (const id of names) {
       if (!isPackModuleId(id)) continue;
       const idDir = join(root, id);
@@ -232,8 +332,13 @@ export class ModulePackService {
           rmSync(dir, { recursive: true, force: true });
           continue;
         }
+        const hold = this.isLocalDir(dir, id, version) ? this.localHold(id, version) : null;
+        if (hold) {
+          this.held.push(hold);
+          continue;
+        }
         try {
-          good.push({ pack: this.verifyInstalled(dir, id, version), dir });
+          good.push({ pack: this.verifyInstalled(dir, id, version), dir, ...(this.isLocalDir(dir, id, version) ? { local: true as const } : {}) });
         } catch (error) {
           bad.push({ id, version, error: errorText(error) });
           this.opts.log?.(`module pack ${id} ${version} failed verification: ${errorText(error)}`);
@@ -253,6 +358,19 @@ export class ModulePackService {
   /** Verifies one installed version dir; returns its index entry or throws with the reason. */
   private verifyInstalled(dir: string, id: string, version: string): ModuleIndexPack {
     if (!isPlainDir(dir)) throw new Error("not a directory");
+    const local = this.isLocalDir(dir, id, version);
+    const pack = local ? this.localState.trust[id]!.pack : this.signedEntry(dir, id, version);
+    const present = listFiles(dir).filter((p) => p !== SIGNED_DIR && !p.startsWith(`${SIGNED_DIR}/`));
+    const listed = new Map(pack.files.map((f) => [f.path, f]));
+    for (const p of present) if (!listed.has(p)) throw new Error(`unexpected file ${p}`);
+    for (const f of pack.files) {
+      const data = readCapped(join(dir, ...f.path.split("/")), LIMITS.fileBytes);
+      if (data.length !== f.size || sha256(data) !== f.sha256) throw new Error(`${f.path} does not match its ${local ? "recorded" : "signed"} hash`);
+    }
+    return pack;
+  }
+
+  private signedEntry(dir: string, id: string, version: string): ModuleIndexPack {
     const signed = join(dir, SIGNED_DIR);
     const bytes = readCapped(join(signed, MODULES_INDEX_FILE), LIMITS.indexBytes);
     const signature = readCapped(join(signed, `${MODULES_INDEX_FILE}.minisig`), LIMITS.signatureBytes).toString("utf8");
@@ -260,14 +378,54 @@ export class ModulePackService {
     const index = parseModuleIndex(JSON.parse(bytes.toString("utf8")), () => true);
     const pack = index.packs.find((p) => p.id === id && p.version === version);
     if (!pack) throw new Error(`its signed index does not list ${id} ${version}`);
-    const present = listFiles(dir).filter((p) => p !== SIGNED_DIR && !p.startsWith(`${SIGNED_DIR}/`));
-    const listed = new Map(pack.files.map((f) => [f.path, f]));
-    for (const p of present) if (!listed.has(p)) throw new Error(`unexpected file ${p}`);
-    for (const f of pack.files) {
-      const data = readCapped(join(dir, ...f.path.split("/")), LIMITS.fileBytes);
-      if (data.length !== f.size || sha256(data) !== f.sha256) throw new Error(`${f.path} does not match its signed hash`);
-    }
     return pack;
+  }
+
+  /** Accepted without a signature only when no signature is there at all and the trust file records this version. */
+  private isLocalDir(dir: string, id: string, version: string): boolean {
+    return !!this.opts.local && this.localState.trust[id]?.version === version && !exists(join(dir, SIGNED_DIR));
+  }
+
+  private localAllowed(): boolean {
+    if (!this.opts.local) return false;
+    return this.localState.allowed ?? this.opts.local.defaultAllowed;
+  }
+
+  /** Why this installed local module does not load in this run, or null when it does. */
+  private localHold(id: string, version: string): LocalPacksView["held"][number] | null {
+    const failed = this.localState.trust[id]?.failed;
+    if (failed) return { id, version, reason: "failed", detail: failed };
+    if (!this.localAllowed()) return { id, version, reason: "off" };
+    return this.safeStart ? { id, version, reason: "safeStart" } : null;
+  }
+
+  private readLocal(): LocalState {
+    const out: LocalState = { v: 1, failedStarts: 0, trust: {} };
+    if (!this.opts.local) return out;
+    try {
+      const raw = JSON.parse(readFileSync(join(this.opts.root, LOCAL_FILE), "utf8")) as Partial<LocalState>;
+      if (typeof raw.allowed === "boolean") out.allowed = raw.allowed;
+      if (typeof raw.failedStarts === "number" && Number.isSafeInteger(raw.failedStarts) && raw.failedStarts > 0) out.failedStarts = raw.failedStarts;
+      for (const [id, t] of Object.entries(raw.trust ?? {})) {
+        // A bad record is dropped: its directory then has neither a signature nor a record, so it does not load.
+        try {
+          const pack = parseIndexPack(t.pack, () => true);
+          if (pack.id === id && pack.version === t.version && pack.archive.sha256 === t.sha256) out.trust[id] = { version: t.version, sha256: t.sha256, installedAt: String(t.installedAt), pack, ...(typeof t.failed === "string" ? { failed: t.failed } : {}) };
+        } catch (error) {
+          this.opts.log?.(`local module record ${id} refused: ${errorText(error)}`);
+        }
+      }
+    } catch {
+      // no file yet, or unreadable: nothing is trusted
+    }
+    return out;
+  }
+
+  private writeLocal(): void {
+    mkdirSync(this.opts.root, { recursive: true });
+    const tmp = join(this.opts.root, `.local-${process.pid}-${randomBytes(4).toString("hex")}.tmp`);
+    writeFileSync(tmp, JSON.stringify(this.localState, null, 2));
+    renameSync(tmp, join(this.opts.root, LOCAL_FILE));
   }
 
   private readState(): PackState {
@@ -294,7 +452,7 @@ export class ModulePackService {
     this.load();
     const api = this.opts.appModuleApi;
     const installed: InstalledPackView[] = [...this.verified.values()]
-      .map(({ pack }) => ({
+      .map(({ pack, local }) => ({
         id: pack.id,
         version: pack.version,
         moduleApi: pack.moduleApi,
@@ -304,6 +462,7 @@ export class ModulePackService {
         host: pack.host,
         ...(pack.title ? { title: pack.title } : {}),
         ...(pack.description ? { description: pack.description } : {}),
+        ...(local ? { local } : {}),
       }))
       .sort((a, b) => a.id.localeCompare(b.id));
     const c = this.checked;
@@ -324,6 +483,7 @@ export class ModulePackService {
       check: this.checkError,
       operation: this.operation,
       lastError: this.lastError,
+      local: { allowed: this.localAllowed(), internal: !!this.opts.local?.internal, safeStart: this.safeStart, held: [...this.held], error: this.localError },
     };
   }
 
@@ -432,40 +592,7 @@ export class ModulePackService {
       }
 
       this.step({ id, action: "install", version: pack.version, step: "unpack" });
-      const idDir = join(root, id);
-      const target = join(idDir, pack.version);
-      let movedOld = false;
-      let placed = false;
-      try {
-        mkdirSync(staging);
-        for (const [path, data] of files) {
-          const parts = path.split("/");
-          if (parts.length > 1) mkdirSync(join(staging, ...parts.slice(0, -1)), { recursive: true });
-          writeFileSync(join(staging, ...parts), data, { flag: "wx" });
-        }
-        mkdirSync(join(staging, SIGNED_DIR));
-        writeFileSync(join(staging, SIGNED_DIR, MODULES_INDEX_FILE), checked.bytes, { flag: "wx" });
-        writeFileSync(join(staging, SIGNED_DIR, `${MODULES_INDEX_FILE}.minisig`), checked.signature, { flag: "wx" });
-        mkdirSync(idDir, { recursive: true });
-        if (exists(target)) {
-          renameSync(target, trash);
-          movedOld = true;
-        }
-        renameSync(staging, target);
-        placed = true;
-        const verified = this.verifyInstalled(target, id, pack.version);
-        rmSync(trash, { recursive: true, force: true });
-        this.verified.set(id, { pack: verified, dir: target });
-        this.broken = this.broken.filter((b) => b.id !== id);
-        this.state.active[id] = pack.version;
-        this.writeState();
-        for (const v of safeList(idDir)) if (v !== pack.version) rmSync(join(idDir, v), { recursive: true, force: true });
-      } catch (error) {
-        // Put back whatever was there before (a reinstall of the same version).
-        if (placed) rmSync(target, { recursive: true, force: true });
-        if (movedOld && !exists(target)) renameSync(trash, target);
-        throw new PackError("unpack_failed", errorText(error));
-      }
+      this.place(id, pack.version, files, staging, trash, { index: checked });
       this.opts.log?.(`module pack ${id} ${pack.version} installed`);
     } catch (error) {
       this.lastError = {
@@ -486,6 +613,193 @@ export class ModulePackService {
     return this.view();
   }
 
+  /** Stages the files and swaps them in; whatever was there before comes back if the new copy fails its check. */
+  private place(id: string, version: string, files: Map<string, Buffer>, staging: string, trash: string, proof: { index: CheckedIndex } | { trust: LocalTrust }): void {
+    const idDir = join(this.opts.root, id);
+    const target = join(idDir, version);
+    const hadTrust = this.localState.trust[id];
+    let movedOld = false;
+    let placed = false;
+    try {
+      mkdirSync(staging);
+      for (const [path, data] of files) {
+        const parts = path.split("/");
+        if (parts.length > 1) mkdirSync(join(staging, ...parts.slice(0, -1)), { recursive: true });
+        writeFileSync(join(staging, ...parts), data, { flag: "wx" });
+      }
+      if ("index" in proof) {
+        mkdirSync(join(staging, SIGNED_DIR));
+        writeFileSync(join(staging, SIGNED_DIR, MODULES_INDEX_FILE), proof.index.bytes, { flag: "wx" });
+        writeFileSync(join(staging, SIGNED_DIR, `${MODULES_INDEX_FILE}.minisig`), proof.index.signature, { flag: "wx" });
+        delete this.localState.trust[id];
+      } else {
+        this.localState.trust[id] = proof.trust;
+      }
+      mkdirSync(idDir, { recursive: true });
+      if (exists(target)) {
+        renameSync(target, trash);
+        movedOld = true;
+      }
+      renameSync(staging, target);
+      placed = true;
+      const verified = this.verifyInstalled(target, id, version);
+      if (hadTrust || "trust" in proof) this.writeLocal();
+      rmSync(trash, { recursive: true, force: true });
+      this.verified.set(id, { pack: verified, dir: target, ...("trust" in proof ? { local: true as const } : {}) });
+      this.broken = this.broken.filter((b) => b.id !== id);
+      this.held = this.held.filter((h) => h.id !== id);
+      this.state.active[id] = version;
+      this.writeState();
+      for (const v of safeList(idDir)) if (v !== version) rmSync(join(idDir, v), { recursive: true, force: true });
+    } catch (error) {
+      // Put back whatever was there before (a reinstall of the same version).
+      if (placed) rmSync(target, { recursive: true, force: true });
+      if (movedOld && !exists(target)) renameSync(trash, target);
+      if (hadTrust) this.localState.trust[id] = hadTrust;
+      else delete this.localState.trust[id];
+      throw new PackError("unpack_failed", errorText(error));
+    }
+  }
+
+  // ---- local modules (§23.14) ----
+
+  /**
+   * Asks for nothing from the caller: main picks the file and asks the owner. Validation is the signed path's:
+   * the same tar reader, limits, entry parser and moduleApi check; only the proof differs (the owner's yes).
+   */
+  async installLocal(): Promise<ModulePacksView> {
+    this.load();
+    const local = this.opts.local;
+    if (!local || !this.localAllowed()) {
+      this.localError = "local modules are off";
+      this.emit();
+      return this.view();
+    }
+    if (this.localBusy || this.operation) return this.view();
+    this.localBusy = true;
+    this.localError = null;
+    this.emit();
+    const tag = `local-${process.pid}-${randomBytes(4).toString("hex")}`;
+    const staging = join(this.opts.root, `.staging-${tag}`);
+    const trash = join(this.opts.root, `.trash-${tag}`);
+    try {
+      const path = await local.prompts.pickFile();
+      if (!path) return this.view();
+      const { pack, files, sha256: digest, author } = this.readLocalArchive(path);
+      await this.refuseTakenId(pack.id, local);
+      const current = this.verified.get(pack.id) ?? null;
+      const held = this.held.find((h) => h.id === pack.id) ?? null;
+      const confirmed = await local.prompts.confirmInstall({ id: pack.id, ...(pack.title ? { title: pack.title } : {}), version: pack.version, author, path, sha256: digest, replaces: current?.pack.version ?? held?.version ?? null, ...(local.internal && readsAppInternals(pack.host) ? { internal: true } : {}) });
+      if (!confirmed) return this.view();
+      if (this.view().operation) throw new PackError("busy", "busy with another module");
+      this.operation = { id: pack.id, action: "install", version: pack.version, step: "unpack" };
+      this.emit();
+      mkdirSync(this.opts.root, { recursive: true });
+      this.place(pack.id, pack.version, files, staging, trash, { trust: { version: pack.version, sha256: digest, installedAt: new Date((this.opts.now ?? Date.now)()).toISOString(), pack } });
+      this.opts.log?.(`local module ${pack.id} ${pack.version} installed, sha256 ${digest}`);
+    } catch (error) {
+      this.localError = errorText(error);
+      this.opts.log?.(`local module install failed: ${this.localError}`);
+    } finally {
+      rmSync(staging, { recursive: true, force: true });
+      rmSync(trash, { recursive: true, force: true });
+      this.operation = null;
+      this.localBusy = false;
+      this.emit();
+    }
+    return this.view();
+  }
+
+  private readLocalArchive(path: string): { pack: ModuleIndexPack; files: Map<string, Buffer>; sha256: string; author: string | null } {
+    const archive = readCapped(path, LIMITS.archiveBytes);
+    const files = readTar(gunzipSync(archive, { maxOutputLength: LIMITS.packBytes + 512 * (LIMITS.filesPerPack + 4) }));
+    const manifestBytes = files.get("pack.json");
+    if (!manifestBytes) throw new Error("the archive has no pack.json");
+    const manifest = JSON.parse(manifestBytes.toString("utf8")) as Record<string, unknown>;
+    if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) throw new Error("pack.json must be an object");
+    for (const k of Object.keys(manifest)) if (!LOCAL_MANIFEST_KEYS.includes(k)) throw new Error(`pack.json: unknown field ${JSON.stringify(k)}`);
+    const digest = sha256(archive);
+    const { author, ...entry } = manifest;
+    const pack = parseIndexPack(
+      {
+        ...entry,
+        files: [...files].map(([p, data]) => ({ path: p, size: data.length, sha256: sha256(data) })),
+        archive: { name: `${String(manifest.id)}-${String(manifest.version)}.tar.gz`, url: "local:", size: archive.length, sha256: digest },
+      },
+      () => true,
+    );
+    const compat = packCompat(pack.moduleApi, this.opts.appModuleApi);
+    if (compat !== "ok") throw new Error(`${pack.id} ${pack.version} ${compat === "needsNewerApp" ? "needs a newer app" : "is too old for this app"}`);
+    return { pack, files, sha256: digest, author: typeof author === "string" && author ? author : null };
+  }
+
+  /** A local module never takes over a built-in or a signed module's id. */
+  private async refuseTakenId(id: string, local: LocalPacksOptions): Promise<void> {
+    if (local.reservedIds.includes(id)) throw new Error(`${id} is the id of a built-in module, so a local module cannot use it`);
+    const idDir = join(this.opts.root, id);
+    if (safeList(idDir).some((v) => exists(join(idDir, v, SIGNED_DIR)))) throw new Error(`${id} is installed as a signed module, so a local module cannot use its id`);
+    if (!this.checked) await (this.checking ?? this.check());
+    if (this.checked?.index.packs.some((p) => p.id === id)) throw new Error(`${id} is published as a signed module, so a local module cannot use its id`);
+  }
+
+  /** On: only after the owner's yes in main's own dialog. Off: no dialog, nothing is lost. */
+  async allowLocal(allow: boolean): Promise<ModulePacksView> {
+    this.load();
+    const local = this.opts.local;
+    if (!local || allow === this.localAllowed() || this.localBusy) return this.view();
+    if (allow) {
+      this.localBusy = true;
+      try {
+        if (!(await local.prompts.confirmAllow())) return this.view();
+      } finally {
+        this.localBusy = false;
+      }
+    }
+    this.localState.allowed = allow;
+    this.localState.failedStarts = 0;
+    this.writeLocal();
+    this.held = [];
+    for (const [id, t] of Object.entries(this.localState.trust)) {
+      const dir = join(this.opts.root, id, t.version);
+      if (!exists(dir)) continue;
+      const hold = this.localHold(id, t.version);
+      if (hold) {
+        this.verified.delete(id);
+        this.held.push(hold);
+        continue;
+      }
+      try {
+        this.verified.set(id, { pack: this.verifyInstalled(dir, id, t.version), dir, local: true });
+      } catch (error) {
+        this.broken = this.broken.filter((b) => b.id !== id);
+        this.broken.push({ id, version: t.version, error: errorText(error) });
+      }
+    }
+    this.emit();
+    return this.view();
+  }
+
+  /** A local module failed to activate: off until its file is installed again, and the reason stays on show. */
+  localFailed(req: { id: string; version: string; reason: string }): ModulePacksView {
+    this.load();
+    const trust = this.localState.trust[req.id];
+    if (!trust || trust.version !== req.version || trust.failed) return this.view();
+    trust.failed = req.reason;
+    this.writeLocal();
+    this.verified.delete(req.id);
+    this.held.push({ id: req.id, version: req.version, reason: "failed", detail: req.reason });
+    this.emit();
+    return this.view();
+  }
+
+  /** The app ran long enough with local modules loaded: the count of failed starts begins again. */
+  localStartHealthy(): void {
+    this.load();
+    if (!this.localState.failedStarts) return;
+    this.localState.failedStarts = 0;
+    this.writeLocal();
+  }
+
   private step(op: NonNullable<ModulePacksView["operation"]> & { step: PackStep }): void {
     this.operation = op;
     this.emit();
@@ -495,18 +809,79 @@ export class ModulePackService {
     this.load();
     if (this.operation) throw new PackError("busy", `busy with ${this.operation.id}`);
     const id = req.id;
+    // A local module: main's own dialog, which also asks about its data folder. A signed pack falls back to the bundled
+    // copy of the same module, so its data stays without asking.
+    const data = this.opts.local?.data;
+    let deleteData = false;
+    if (this.localState.trust[id] && data) {
+      if (this.localBusy) return this.view();
+      this.localBusy = true;
+      try {
+        const choice = await data.confirmRemove(id, data.has(id) ? data.bytes(id) : null);
+        if (!choice) return this.view();
+        deleteData = choice === "delete";
+      } finally {
+        this.localBusy = false;
+      }
+      // An install may have started while the dialog was open.
+      const started = this.operation as ModulePacksView["operation"];
+      if (started) throw new PackError("busy", `busy with ${started.id}`);
+    }
     try {
+      if (deleteData) await data!.delete(id);
       rmSync(join(this.opts.root, id), { recursive: true, force: true });
       this.verified.delete(id);
       this.broken = this.broken.filter((b) => b.id !== id);
+      this.held = this.held.filter((h) => h.id !== id);
       delete this.state.active[id];
       this.writeState();
+      if (this.localState.trust[id]) {
+        delete this.localState.trust[id];
+        this.writeLocal();
+      }
       if (this.lastError?.id === id) this.lastError = null;
     } catch (error) {
       this.lastError = { id, action: "remove", message: errorText(error), code: null };
     }
     this.emit();
     return this.view();
+  }
+
+  /** Ids of installed packs that load now, signed or local (module data, §30.6). */
+  installedIds(): string[] {
+    this.load();
+    return [...this.verified.keys()];
+  }
+
+  // ---- data files: read by main only, never served to a page ----
+
+  /** A verified pack's file paths under `prefix` (the desk pet's art, §29). */
+  dataPaths(id: string, prefix: string): string[] {
+    this.load();
+    return this.verified.get(id)?.pack.files.map((f) => f.path).filter((p) => p.startsWith(prefix)) ?? [];
+  }
+
+  /** A verified pack's file, hashed again on this read; a mismatch marks the pack broken. */
+  dataFile(id: string, path: string): Buffer | null {
+    this.load();
+    const entry = this.verified.get(id);
+    const file = entry?.pack.files.find((f) => f.path === path);
+    return entry && file ? this.readVerified(entry, file) : null;
+  }
+
+  private readVerified(entry: Verified, file: Verified["pack"]["files"][number]): Buffer | null {
+    let data: Buffer;
+    try {
+      data = readCapped(join(entry.dir, ...file.path.split("/")), LIMITS.fileBytes);
+    } catch {
+      return null;
+    }
+    if (data.length === file.size && sha256(data) === file.sha256) return data;
+    this.verified.delete(entry.pack.id);
+    this.broken.push({ id: entry.pack.id, version: entry.pack.version, error: `${file.path} changed after it was verified` });
+    this.opts.log?.(`module pack ${entry.pack.id} ${entry.pack.version}: ${file.path} changed after it was verified`);
+    this.emit();
+    return null;
   }
 
   // ---- protocol ----
@@ -536,19 +911,8 @@ export class ModulePackService {
     if (!entry || entry.pack.version !== version) return notFound();
     const file = entry.pack.files.find((f) => f.path === path);
     if (!file || !(path.endsWith(".js") || path.endsWith(".css"))) return notFound();
-    let data: Buffer;
-    try {
-      data = readCapped(join(entry.dir, ...path.split("/")), LIMITS.fileBytes);
-    } catch {
-      return notFound();
-    }
-    if (data.length !== file.size || sha256(data) !== file.sha256) {
-      this.verified.delete(entry.pack.id);
-      this.broken.push({ id: entry.pack.id, version: entry.pack.version, error: `${path} changed after it was verified` });
-      this.opts.log?.(`module pack ${entry.pack.id} ${entry.pack.version}: ${path} changed after it was verified`);
-      this.emit();
-      return notFound();
-    }
+    const data = this.readVerified(entry, file);
+    if (!data) return notFound();
     return new Response(new Uint8Array(data), {
       status: 200,
       headers: {

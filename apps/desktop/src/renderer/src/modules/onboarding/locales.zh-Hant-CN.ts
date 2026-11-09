@@ -239,7 +239,7 @@ export const zhHantCN: Record<keyof typeof zhCN, string> = {
   "onboarding.guide.update.title": "更新",
   "onboarding.guide.update.text": "Cutex 自己的更新在「設置 → 更新與診斷」裏。\n每臺主機上的 cutex 要分別更新，在「設置 → 主機後端更新」裏。\n更新前就在運行的{{agents}}，重啓之前可能還顯示舊版本。",
   "onboarding.guide.remote.title": "遠程主機和配對設備",
-  "onboarding.guide.remote.text": "遠程主機上的{{agents}}和這裏的用法一樣：會話、委託、服務都可以，文件在那臺機器上。\n配對的設備（比如手機）按你給的權限連到主機；在「設置 → 用戶 → 已登錄設備」裏管理或撤銷。",
+  "onboarding.guide.remote.text": "遠程主機上的{{agents}}和這裏的用法一樣：會話、委託、服務都可以，文件在那臺機器上。\n配對的設備（比如手機）按你給的權限連到主機；在「設置 → 主機」裏管理或撤銷。",
   "onboarding.guide.help.title": "幫助",
   "onboarding.guide.help.hint": "重看入門引導和提示，或打開文檔、反饋問題。",
   "onboarding.guide.help.onboarding": "引導",

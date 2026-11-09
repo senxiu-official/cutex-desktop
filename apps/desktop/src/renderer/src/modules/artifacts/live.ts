@@ -8,7 +8,7 @@ import { bridge } from "../../bridge";
 import { clearAgentToasts, pushAgentToast } from "../../lib/agentToasts";
 import { useSide } from "../../lib/sideLayoutStore";
 import { agentHost, featuresOf, useApp } from "../../store";
-import type { AppModuleContext, SideOpenOptions } from "../slots";
+import type { ModuleContext, SideOpenOptions } from "../slots";
 import { AUTO_OPEN_PREF, autoOpenEvent, autoOpenSetting, decideAutoOpen, type LivePublish } from "./autoOpen";
 import { VIEW } from "./model";
 import { activeAppDocument } from "../../lib/appWindowSet";
@@ -55,7 +55,7 @@ function trackCloses(signal: AbortSignal): Map<string, number> {
   return closed;
 }
 
-export function startAutoOpen(ctx: AppModuleContext): void {
+export function startAutoOpen(ctx: ModuleContext): void {
   if (typeof bridge?.on !== "function") return;
   const startedAt = Date.now();
   const closed = trackCloses(ctx.signal);

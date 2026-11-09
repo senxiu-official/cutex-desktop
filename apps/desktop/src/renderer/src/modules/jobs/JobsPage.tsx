@@ -43,7 +43,10 @@ import { MissingHosts, RowHost } from "../../components/HostListParts";
 import { DataTable, type Column } from "../../components/DataTable";
 import { JobStatusMark } from "../../components/JobParts";
 import { PageBody, PageToolbar } from "../../components/Page";
-import { Segmented, Select } from "../../components/settings/Form";
+import { Segmented } from "../../components/settings/Form";
+import { SearchableSelect } from "../../components/SearchablePicker";
+import { agentPickerOptions, listPickerRows, pickerProjectRank } from "../../lib/agentPickerOptions";
+import { useAgentPickerLabels } from "../../lib/useAgentPicker";
 import { ProjectLabel } from "../../components/StatusIcon";
 import { Tag } from "../../components/Tag";
 
@@ -124,6 +127,9 @@ function JobList({ preset, presetScope }: { preset?: string; presetScope?: Scope
   const others = useMemo(() => served.filter((d) => !d.focus).map((d) => d.hostId), [served]);
   const sidebars = useMemo(() => new Map(hosts.data.map((d) => [d.hostId, d.sidebar] as const)), [hosts.data]);
   const { who, projectOf } = useAgents(sidebars);
+  const pickerLabels = useAgentPickerLabels();
+  const pickerOrder = useUiPrefs().projectOrder;
+  const hostLabels = useApp((s) => s.hosts?.hosts) ?? [];
   const focusServed = served.some((d) => d.focus);
   const [scope, setScope] = useState<Scope>(presetScope ?? "active");
   useEffect(() => setScope(presetScope ?? "active"), [presetScope, preset]);
@@ -156,6 +162,20 @@ function JobList({ preset, presetScope }: { preset?: string; presetScope?: Scope
     const [hostId, id] = JSON.parse(key) as [string, string];
     return who(hostId, id, agentNames.get(key)).name;
   };
+  // The agent filter: the shared picker, per host (host name in the group when the page spans hosts).
+  const agentOptions = [
+    { value: "", label: t("delegations.allAgents"), group: "" },
+    ...[...new Set(agentKeys.map((key) => (JSON.parse(key) as [string, string])[0]))].flatMap((hostId) => {
+      const sidebar = sidebars.get(hostId);
+      const keys = agentKeys.filter((key) => (JSON.parse(key) as [string, string])[0] === hostId);
+      const rows = listPickerRows(keys.map((key) => ({ id: (JSON.parse(key) as [string, string])[1], name: nameOfKey(key) })), sidebar).map((r) => ({
+        ...r,
+        value: hostKey(hostId, r.value),
+        hostLabel: hosts.multi ? (hostLabels.find((h) => h.id === hostId)?.label ?? hostId) : undefined,
+      }));
+      return agentPickerOptions(rows, pickerLabels, { rank: pickerProjectRank(sidebar, pickerOrder ?? [], hostId) });
+    }),
+  ];
   const q = query.trim().toLowerCase();
   const filtered = all
     .filter((j) => !agent || agentOf(j) === agent)
@@ -263,7 +283,7 @@ function JobList({ preset, presetScope }: { preset?: string; presetScope?: Scope
     <>
       <PageToolbar>
         <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("jobs.search")} className="mr-auto w-48 rounded-md border border-border bg-background px-2 py-1 text-sm outline-none focus:border-accent" />
-        <Select value={agent} options={[{ value: "", label: t("delegations.allAgents") }, ...agentKeys.map((key) => ({ value: key, label: nameOfKey(key) }))]} onChange={setAgent} />
+        <SearchableSelect value={agent} label={t("delegations.allAgents")} width="w-48" options={agentOptions} placeholder={pickerLabels.search} emptyLabel={pickerLabels.empty} hiddenNote={pickerLabels.hiddenNote} onChange={setAgent} />
         <Segmented<Scope> value={scope} onChange={setScope} options={SCOPES.map((s) => ({ value: s, label: `${t(`jobs.scope.${s}` as MessageKey)} ${count(s)}` }))} />
       </PageToolbar>
       {hosts.multi && <MissingHosts hosts={hosts.missing} />}

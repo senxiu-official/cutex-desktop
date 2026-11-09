@@ -7,7 +7,7 @@
 // Pure parts (`hostGroupOf`, `groupHosts`, `connectionOf`) are unit-tested in test/hostOwnership.test.ts.
 import { useEffect, useMemo } from "react";
 import { create } from "zustand";
-import { HOST_OWNER_FEATURE, LOCAL_HOST_ID, ownerIsMe, type HostOwner, type HostView, type SshConnectAs } from "../../../shared/hosts";
+import { displaySshTarget, HOST_OWNER_FEATURE, LOCAL_HOST_ID, ownerIsMe, type HostOwner, type HostView, type SshConnectAs } from "../../../shared/hosts";
 import type { UsersResult } from "../../../shared/users";
 import { apiFor, bridge } from "../bridge";
 import { useApp } from "../store";
@@ -217,7 +217,7 @@ export function useHostOwnership(hostId: string): HostOwnership {
     owner,
     mine,
     connection,
-    ...(connection === "ssh" && look?.view.target ? { sshTarget: look.view.target } : {}),
+    ...(connection === "ssh" && look?.view.target ? { sshTarget: displaySshTarget(look.view.target) } : {}),
     ...(connection === "ssh" ? { connectAs: look?.view.connectAs ?? "owner" } : {}),
     role,
     capability,

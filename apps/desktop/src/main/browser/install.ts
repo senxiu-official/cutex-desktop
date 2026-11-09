@@ -4,7 +4,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import type { BrowserOperationResult } from "@cutex-desktop/browser-protocol";
 import { join } from "node:path";
 import { networkInterfaces } from "node:os";
-import { app, dialog, ipcMain, Menu, nativeImage, session, type AuthInfo, type ContextMenuParams, type DownloadItem, type BrowserWindow, type IpcMainInvokeEvent, type Session, type WebContents, type WebPreferences } from "electron";
+import { app, dialog, ipcMain, Menu, nativeImage, screen, session, type AuthInfo, type ContextMenuParams, type DownloadItem, type BrowserWindow, type IpcMainInvokeEvent, type Session, type WebContents, type WebPreferences } from "electron";
 import type { EventEnvelope } from "@cutex-desktop/protocol";
 import { BROWSER_CHANNEL, DEFAULT_BROWSER_CONTROL_SETTINGS, type BrowserControlSettings, type BrowserEvent, type BrowserRequest, type BrowserSitePermissionPromptView, type BrowserTabMount, type BrowserTabView } from "../../shared/browser";
 import { browserClaimOrigin, type BrowserClaimAutoReason, type BrowserClaimTab } from "../../shared/browserClaim";
@@ -710,7 +710,7 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
         if (typeof raw !== "string" || !raw) continue;
         try {
           const url = new URL(raw), bare = url.hostname.replace(/^\[|\]$/g, "").toLowerCase();
-          const ports = [Number(url.port || (url.protocol === "https:" ? 443 : 80)), ...(busPorts.get(host.id) ?? [])];
+          const ports = [Number(url.port || (url.protocol === "https:" ? 443 : 80)), ...(busPorts.get(host.id) ?? []), ...(manager?.connection(host.id)?.tunnel?.backendPorts() ?? [])];
           for (const port of ports) { if (isBrowserLoopbackHost(url.hostname)) controlPorts.add(port); else controlAuthorities.add(`${bare}:${port}`); }
         } catch { /* Not a URL (ssh:// placeholder): nothing of that host listens here. */ }
       }
@@ -1189,7 +1189,9 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
     if (record.pool !== "agent") throw new BrowserRelayError("permission_denied");
     const lease = leases.forGuest(record.guestId), settings = (lease && leases.settings(lease.leaseId)) ?? lastSettings;
     let carrier: BrowserCarrier | undefined;
-    carrier = createBrowserCarrier({ hostId: record.hostId, viewport: settings.viewport,
+    // The page renders at the scale of the screen the app window is on, so its card thumbnail is as sharp as the page.
+    const scaleFactor = window.isDestroyed() ? undefined : screen.getDisplayMatching(window.getBounds()).scaleFactor;
+    carrier = createBrowserCarrier({ hostId: record.hostId, viewport: settings.viewport, scaleFactor,
       guard: guest => { guardGuest(guest); if (guest.isDestroyed()) throw new BrowserRelayError("invalid_request"); guest.setWebRTCIPHandlingPolicy("disable_non_proxied_udp"); },
       wanted: () => moduleEnabled && !disposed && anyWindowVisible(),
       thumbnail: image => {

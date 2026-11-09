@@ -24,7 +24,10 @@ import { DataTable, type Column } from "./DataTable";
 import { DelegationHops, DelegationStatusMark, DelegationTag } from "./DelegationParts";
 import { PeerParty } from "./PeerParty";
 import { PageToolbar } from "./Page";
-import { Select } from "./settings/Form";
+import { SearchableSelect } from "./SearchablePicker";
+import { agentPickerOptions, listPickerRows, pickerProjectRank } from "../lib/agentPickerOptions";
+import { useAgentPickerLabels } from "../lib/useAgentPicker";
+import { useUiPrefs } from "../lib/prefs";
 
 const OPEN_BUCKETS: DelegationBucket[] = ["needsYou", "waiting", "active"];
 const DONE_PAGE = 50;
@@ -178,6 +181,9 @@ function Delegations({ projectId, only, limit, preset, actions }: { projectId?: 
   const closedLoading = useDelegations((s) => s.closedLoading);
   const closedLoaded = useDelegations((s) => s.closedIds !== null);
   const party = useParties();
+  const sidebar = useTargetSidebar();
+  const pickerLabels = useAgentPickerLabels();
+  const { projectOrder } = useUiPrefs();
   const compact = !!only;
   const [agent, setAgent] = useState(preset ?? "");
   useEffect(() => setAgent(preset ?? ""), [preset]);
@@ -212,7 +218,22 @@ function Delegations({ projectId, only, limit, preset, actions }: { projectId?: 
       {!compact && (
         <PageToolbar>
           <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("delegations.search")} className="mr-auto w-48 rounded-md border border-border bg-background px-2 py-1 text-sm outline-none focus:border-accent" />
-          <Select value={agent} options={[{ value: "", label: t("delegations.allAgents") }, ...[...new Set([...agentIds, ...(agent ? [agent] : [])])].map((id) => ({ value: id, label: party(id).name }))]} onChange={setAgent} />
+          <SearchableSelect
+            value={agent}
+            label={t("delegations.allAgents")}
+            width="w-48"
+            options={[
+              { value: "", label: t("delegations.allAgents"), group: "" },
+              ...agentPickerOptions(
+                listPickerRows([...new Set([...agentIds, ...(agent ? [agent] : [])])].map((id) => ({ id, name: party(id).name })), sidebar),
+                pickerLabels,
+                { rank: pickerProjectRank(sidebar, projectOrder ?? [], hostId) },
+              ),
+            ]}
+            placeholder={pickerLabels.search}
+            emptyLabel={pickerLabels.empty} hiddenNote={pickerLabels.hiddenNote}
+            onChange={setAgent}
+          />
           {actions}
         </PageToolbar>
       )}

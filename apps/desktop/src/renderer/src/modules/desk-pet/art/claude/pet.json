@@ -1,0 +1,10 @@
+{
+  "format": 1,
+  "name": {
+    "en": "Claude",
+    "zh-CN": "Claude"
+  },
+  "family": "claude",
+  "scale": 1,
+  "pixel": true
+}

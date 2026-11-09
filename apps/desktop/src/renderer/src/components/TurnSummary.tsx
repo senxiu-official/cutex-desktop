@@ -1,8 +1,8 @@
 // Turn-end summary (轮尾摘要): a thin muted line under a finished turn's last reply, before its
 // action row — "✎ 改了 3 个文件 +12 −4 · [chip] · [chip] · +N ▸". Expanded: one row per changed file
 // (查看变更 / 打开 on hover) and per picked link (打开方式 ▾). Data: lib/turnSummary (the turn's
-// fileChange items + links of its final reply); clicks: lib/turnSummaryView. No undo yet (needs a
-// cutex revert API; DESIGN §4.6).
+// fileChange items + links of its final reply); clicks: lib/turnSummaryView. Codex agents on a host with
+// `session-files-revert`: 撤销这些改动 in the expanded card only (components/TurnFilesRevert; DESIGN §4.6).
 import { openModifiers } from "../lib/openModifiers";
 import { useMemo, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { ChevronDown, ChevronRight, ExternalLink, File, FileDiff, FileImage, FilePen, FileText, Globe } from "lucide-react";
@@ -13,7 +13,10 @@ import { linkName, linkTypeOf, pickTurnLinks, startsExpanded, turnFileDiff, type
 import { linkActions, useExistingLinks, useFileActions } from "../lib/turnSummaryView";
 import { HOST_FILE_READ_FEATURE, rootFor, scopeFor } from "../lib/workspace";
 import { useApp } from "../store";
-import { convFeaturesOf, useConvScope, useConvSidebar } from "../lib/conversationScope";
+import { convFeaturesOf, useConvScope, useConvSidebar, useConvViewHost } from "../lib/conversationScope";
+import { useAgentFeatures } from "../lib/agentFeaturesView";
+import { canRevertTurnFiles } from "../lib/filesRevert";
+import { FilesRevertButton, FilesRevertPanel } from "./TurnFilesRevert";
 import { openTurnDiff } from "../lib/sideOpen";
 import { useUserLayoutToggle } from "../lib/userLayoutToggle";
 
@@ -51,6 +54,9 @@ export function TurnSummary({ sessionId, turnId, text, changes, latest }: { sess
   const sidebar = useConvSidebar();
   const conv = useConvScope();
   const hostRead = useApp((s) => convFeaturesOf(conv, s).has(HOST_FILE_READ_FEATURE));
+  const hostId = useConvViewHost(sessionId);
+  const agent = useAgentFeatures(sessionId);
+  const revertable = useApp((s) => canRevertTurnFiles(agent, convFeaturesOf(conv, s)));
   const root = useMemo(() => {
     const scope = scopeFor(sidebar, sessionId);
     return scope ? rootFor(sidebar, scope) : null;
@@ -156,7 +162,13 @@ export function TurnSummary({ sessionId, turnId, text, changes, latest }: { sess
               </div>
             );
           })}
-          {files.length > 0 && <p className="px-2 pt-1 text-caption/[inherit] text-subtle">{t("conversation.turnSummary.footnote")}</p>}
+          {files.length > 0 && (
+            <div className="flex min-w-0 items-center gap-2 px-2 pt-1">
+              <p className="min-w-0 flex-1 text-caption/[inherit] text-subtle">{t("conversation.turnSummary.footnote")}</p>
+              {revertable && <FilesRevertButton hostId={hostId} sessionId={sessionId} turnId={turnId} />}
+            </div>
+          )}
+          {files.length > 0 && revertable && <FilesRevertPanel hostId={hostId} sessionId={sessionId} turnId={turnId} />}
         </div>
       )}
     </div>

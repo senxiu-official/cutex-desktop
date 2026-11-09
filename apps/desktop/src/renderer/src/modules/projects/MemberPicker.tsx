@@ -14,7 +14,7 @@ import { rawIdTitle, useModelName } from "../../lib/modelDisplay";
 import { cachedProfileList, loadProfileList } from "../../lib/profileSnapshot";
 import { lastSeen } from "../../lib/offlineAgents";
 import { relativeTime, STATUS_DOT, useSidebarModel } from "../../lib/sidebarView";
-import { addCandidates, DEFAULT_PICKER_QUERY, directorChoices, filterCandidates, type MemberCandidate, type MemberPickerQuery } from "../../lib/projectMembers";
+import { addCandidates, DEFAULT_PICKER_QUERY, directorChoices, filterCandidates, hiddenQuickChats, type MemberCandidate, type MemberPickerQuery } from "../../lib/projectMembers";
 import { useTargetHostId, useTargetIsFocus, useTargetSidebar } from "../../lib/targetHost";
 import { useApp } from "../../store";
 import { Avatar } from "../../components/Avatar";
@@ -217,6 +217,7 @@ export function MemberPicker({
   const lastOf = (row: AgentRow) => lastSeen(row, activity[row.id]?.at);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const rows = useMemo(() => filterCandidates(all, q, lastOf), [all, q, activity]);
+  const hiddenChats = hiddenQuickChats(all, q);
   const chosen = [...selected].filter((id) => all.some((c) => c.row.id === id && c.pickable));
   const set = (patch: Partial<MemberPickerQuery>) => setQ((prev) => ({ ...prev, ...patch }));
 
@@ -326,7 +327,7 @@ export function MemberPicker({
             </select>
           )}
           <select value={q.sort} onChange={(e) => set({ sort: e.target.value as MemberPickerQuery["sort"] })} className={SELECT} aria-label={t("projects.picker.sort.recent")}>
-            {(["recent", "name"] as const).map((v) => (
+            {(["recent", "name", "project"] as const).map((v) => (
               <option key={v} value={v}>
                 {t(`projects.picker.sort.${v}`)}
               </option>
@@ -342,10 +343,15 @@ export function MemberPicker({
                 {t("projects.picker.addFirst")} →
               </button>
             </div>
-          ) : rows.length === 0 ? (
+          ) : rows.length === 0 && !hiddenChats ? (
             <p className="px-4 py-10 text-center text-sm text-subtle">{t(all.length === 0 ? "projects.picker.empty" : "projects.picker.noMatch")}</p>
           ) : (
             rows.map((c) => <PickRow key={c.row.id} c={c} mode={mode} checked={selected.has(c.row.id)} last={lastOf(c.row)} profileModels={profileModels} onToggle={() => toggle(c.row.id)} onConfirm={(pick) => void confirm(pick)} onMove={move} />)
+          )}
+          {!noMembers && hiddenChats > 0 && (
+            <p role="note" data-picker-hidden="" className="px-4 py-2 text-xs text-subtle">
+              {t("agentPicker.hiddenChats", { n: hiddenChats })}
+            </p>
           )}
         </div>
         {failedLines.length > 0 && (

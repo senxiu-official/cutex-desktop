@@ -17,6 +17,29 @@ let root: ReturnType<typeof createRoot>, el: HTMLDivElement;
 beforeEach(() => { fx.retry.mockReset(); fx.dismiss.mockReset(); fx.interrupt.mockReset(); fx.locale = "zh"; el = document.createElement("div"); document.body.append(el); root = createRoot(el); });
 afterEach(() => { act(() => root.unmount()); el.remove(); });
 const draw = (patch: Parameters<typeof record>[1], timeline = false) => act(() => root.render(h(InputStatus, { record: record("notice-1", patch), sessionId: "session-1", timeline })));
+describe("Claude Task notice of unconfirmed delivery", () => {
+  const notice = { kind: "systemNotice", state: "uncertain", reason: "outcomeUnknown", turnId: null, sender: { kind: "claudeTask", id: "task-1", name: "Claude Task", host: null, cutexSessionId: null }, actions: ["retry", "dismiss"], details: { mayArriveTwice: true, retryEffect: "redeliverNotice", taskRestartsOnRetry: false, recoveryDescription: "english only" } } as Parameters<typeof record>[1];
+  const button = (text: string) => [...el.querySelectorAll("button")].find(b => b.textContent === text);
+  it("says retry only resends the notice, in the owner's language, and both actions still run", async () => {
+    draw(notice, true);
+    expect(el.textContent).toContain(zhCN["inputLedger.record.uncertain"]);
+    expect(el.textContent).not.toContain("english only");
+    const retry = button(zhCN["inputLedger.taskNotice.retry"])!;
+    expect(retry.getAttribute("data-tip")).toBe(zhCN["inputLedger.taskNotice.hint"]);
+    await act(async () => retry.click());
+    expect(fx.retry).toHaveBeenCalledWith("session-1", "notice-1", undefined);
+    fx.locale = "en"; draw({ ...notice }, true);
+    expect(button(en["inputLedger.taskNotice.retry"])).toBeTruthy();
+    await act(async () => button(en["inputLedger.ignoreNotification"])!.click());
+    expect(fx.dismiss).toHaveBeenCalledWith("session-1", "notice-1", undefined);
+  });
+  it("an uncertain record without those fields keeps the normal Resend and Dismiss", () => {
+    draw({ ...notice, details: {} }, true);
+    expect(button(zhCN["inputLedger.retry"])?.getAttribute("data-tip")).toBeNull();
+    expect(button(zhCN["inputLedger.dismiss"])).toBeTruthy();
+    expect(button(zhCN["inputLedger.taskNotice.retry"])).toBeUndefined();
+  });
+});
 describe("owner-facing input status wording", () => {
   it.each(["agentMessage", "peerMessage", "delegationResult"] as const)("%s: plain 已接收 draws nothing on a timeline row, only a screen-reader label", kind => {
     draw({ kind, state: "accepted", surface: "timeline", actions: [] }, true);
@@ -27,6 +50,15 @@ describe("owner-facing input status wording", () => {
     expect(el.children).toHaveLength(1);
     draw({ kind, state: "inContext", surface: "timeline", actions: [] }, true);
     expect(el.querySelector('[data-testid="input-status"]')?.className).toBe("sr-only");
+  });
+  it.each(["receiptTimeout", "runtimeLost", "outcomeUnknown", "nativeConflict"] as const)("reconnect recovery: bus input left uncertain with %s and no turn has a known label and normal dismiss", async reason => {
+    draw({ kind: "agentMessage", state: "uncertain", reason, turnId: null, sender: { kind: "agent", id: "a", name: "Asker", host: null, cutexSessionId: "a" }, actions: ["retry", "dismiss"] }, true);
+    expect(el.textContent).toContain(zhCN["inputLedger.record.uncertain"]);
+    expect(el.textContent).not.toContain("⚠");
+    expect(el.querySelector("[data-tip]")?.getAttribute("data-tip")).toContain(reason);
+    const dismiss = [...el.querySelectorAll("button")].find(b => b.textContent === zhCN["inputLedger.dismiss"])!;
+    await act(async () => dismiss.click());
+    expect(fx.dismiss).toHaveBeenCalledWith("session-1", "notice-1", undefined);
   });
   it("a silent timeline 已接收 still shows what the owner can act on or should know", () => {
     draw({ kind: "agentMessage", state: "accepted", surface: "timeline", actions: ["dismiss"] }, true);

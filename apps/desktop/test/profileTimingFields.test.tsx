@@ -61,13 +61,13 @@ it("keeps catalog draft metadata but omits per-field settings badges in the mode
 });
 
 it("retains timing chip popovers inside a modal when it contains actual settings", () => {
-  act(() => root.render(h("dialog", { open: true }, h(SettingRow, { label: "Persistent setting", agents: "none", source: "host", children: "Value" }))));
+  act(() => root.render(h("dialog", { open: true }, h(SettingRow, { label: "Persistent setting", agents: "next", source: "host", children: "Value" }))));
   const dialog = host.querySelector("dialog")!;
-  const marker = dialog.querySelector<HTMLButtonElement>('[data-settings-agents="none"]')!;
+  const marker = dialog.querySelector<HTMLButtonElement>('[data-settings-agents="next"]')!;
   act(() => marker.click());
   // Portaled into the modal <dialog> (the top layer), not the body, so it shows above the dialog.
   const note = document.getElementById(marker.getAttribute("aria-controls")!)!;
-  expect(note.textContent).toContain("settings.scope.agents.none.body");
+  expect(note.textContent).toContain("settings.scope.agents.next.body");
   expect(note.parentElement).toBe(dialog);
 });
 

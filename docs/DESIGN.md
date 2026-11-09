@@ -107,11 +107,11 @@ An explicitly granted owner tab retains its logins, and the grant interface stat
 Granting a tab can permit account actions; it is not a read-only guarantee.
 
 External browser traffic uses the main-controlled browser egress proxy and the external-page
-setting. Admission is per tab and origin. Renderer sessions, plugins and artifact frames remain
+setting. Admission is per tab and origin. Renderer sessions and artifact frames remain
 network-locked. Host control ports are never browser targets. Main decides popups, downloads
 and site permissions.
 
-External code runs in opaque sandboxed frames with `allow-scripts` and without
+Untrusted artifact pages and HTML files run in opaque sandboxed frames with `allow-scripts` and without
 `allow-same-origin`, preload, Node or credentials. Artifact pages have no network access,
 including loopback. The fixed page bridge supports only per-artifact storage, submission to
 the page's agent after native confirmation, and user-gesture clipboard copy. Main validates
@@ -122,12 +122,17 @@ limit and no automatic eviction.
 
 The module registry supplies slots, lifecycle, settings and capability gates. The SDK and host
 packages contain the source-exported module contract and lifecycle only; they do not contain
-React, Electron, daemon protocol logic or another module engine. External plugin execution uses
-the opaque-frame sandbox.
+React, Electron, daemon protocol logic or another module engine. User and third-party modules
+run in the application renderer with application trust after native owner confirmation. They
+are not sandboxed and have no enforceable per-module permission checklist. Main never loads
+third-party Node code. The retired opaque-frame plugin loader is not a module installation path.
+The public `@cutex-desktop/module-api` provides stable, UI and experimental entries; fixed
+main-process services provide module data storage and native file pick/save dialogs. Agent
+HTML artifacts and HTML files retain their offline opaque frames.
 
 Contract revisions include versioned declarations and slot snapshots. Protocol types are
 generated from the native app-server schema. See [Desktop modules](desktop-modules.md),
-[Module development](module-dev-guide.md) and the [design references](design/README.md).
+[Module authoring](module-authoring.md) and the [design references](design/README.md).
 
 ## 9. Persistence, compatibility and updates
 

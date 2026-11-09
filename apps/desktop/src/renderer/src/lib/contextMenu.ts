@@ -7,6 +7,7 @@ import type { Foretell } from "./foretell";
 import { captureHostAction, onHostSwitch } from "./hostSwitch";
 import { activeAppDocument } from "./appWindowSet";
 import { isHTMLElement, ownerDocumentOf, selectionOf } from "./ownerWindow";
+import { targetMenuEntries } from "./menuTargets";
 
 export interface MenuAction {
   label: string;
@@ -101,6 +102,9 @@ type Dialog =
   /** In-app folder browser over a host's daemon (`fs-dir-browse`; remote hosts; null host = the focus host). */
   | { kind: "folder"; start: string | null; hostId: string | null; resolve(value: string | null): void }
   | { kind: "forkProfile"; sessionId: string; hostId: string; afterTurnId: string | null; resolve(value: null): void }
+  /** 设置 › MCP 服务器…: this agent's MCP switches (components/AgentMcpDialog). */
+  | { kind: "agentMcp"; sessionId: string; hostId: string; resolve(value: null): void }
+  | { kind: "promoteChat"; sessionId: string; hostId: string; resolve(value: null): void }
   /** 编辑信息: an agent's avatar + note (name / color only for the preview). */
   | { kind: "agentInfo"; name: string; color: string | null; seed: string; initial: AgentInfo; options: AgentInfoOptions; resolve(value: AgentInfo | null): void }
   /** 外观…: a sidebar folder's icon and colour (`look` null = automatic); null on cancel. */
@@ -180,7 +184,10 @@ export function openMenuAt(x: number, y: number, entries: MenuEntry[], options: 
   if (items.length) showMenu({ x, y, items, ...options });
 }
 
-/** `onContextMenu` handler factory. Items are built lazily so menus always reflect current state. */
+/**
+ * `onContextMenu` handler factory. Items are built lazily so menus always reflect current state. Items for what
+ * was right-clicked inside (lib/menuTargets, e.g. a formula's 「复制源码」) go above them.
+ */
 export function contextMenu(build: () => MenuEntry[]) {
   return (e: ReactMouseEvent) => {
     // Selected text inside the target: leave it to the native menu (Copy / Search), see main/index.ts.
@@ -188,7 +195,7 @@ export function contextMenu(build: () => MenuEntry[]) {
     if (sel && !sel.isCollapsed && sel.toString().trim() && sel.containsNode(e.target as Node, true)) return;
     e.preventDefault();
     e.stopPropagation();
-    openMenuAt(e.clientX, e.clientY, build(), { doc: ownerDocumentOf(e.currentTarget) });
+    openMenuAt(e.clientX, e.clientY, [...targetMenuEntries(e.target), ...build()], { doc: ownerDocumentOf(e.currentTarget) });
   };
 }
 
@@ -271,7 +278,8 @@ export async function runAction(action: MenuAction): Promise<void> {
   if (action.disabled) return;
   if (action.confirm && !(await confirmDialog(action.confirm, action.danger))) return;
   if (!current()) return;
-  await action.onSelect();
+  // A module's disabled row may have none (module-api MenuAction); `disabled` returned above, this keeps a slip harmless.
+  await action.onSelect?.();
 }
 
 export interface ConfirmLabels {
@@ -314,6 +322,15 @@ export function folderLookDialog(id: string, name: string, initial: FolderLookCh
 
 export function forkProfileDialog(sessionId: string, hostId: string, afterTurnId: string | null): Promise<void> {
   return new Promise((resolve) => showDialog({ kind: "forkProfile", sessionId, hostId, afterTurnId, resolve: () => resolve() }));
+}
+
+/** 转为智能体… for a quick chat (components/QuickChatPromoteDialog); resolves when it closes. */
+export function promoteChatDialog(sessionId: string, hostId: string): Promise<void> {
+  return new Promise((resolve) => showDialog({ kind: "promoteChat", sessionId, hostId, resolve: () => resolve() }));
+}
+
+export function agentMcpDialog(sessionId: string, hostId: string): Promise<void> {
+  return new Promise((resolve) => showDialog({ kind: "agentMcp", sessionId, hostId, resolve: () => resolve() }));
 }
 
 export function closeDialog(): void {

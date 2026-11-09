@@ -68,10 +68,11 @@ vi.mock("../src/renderer/src/components/settings/Form", async () => {
     ArmedRemove: ({ onRemove, title, disabled }: any) => e(Button, { onClick: onRemove, disabled }, title),
     Notice: ({ children }: any) => e("p", {}, children), ErrorNote: ({ children }: any) => e("p", { role: "alert" }, children),
     EmptyState: ({ children }: any) => e("p", {}, children), ListRow: ({ title, actions }: any) => e("div", {}, title, actions),
+    ListFilter: () => null, SubPageRow: ({ title, summary, onOpen }: any) => e("button", { type: "button", "data-settings-subpage": "", onClick: onOpen }, title, summary),
     Loading: () => null, LinkRow: () => null, TextLink: Button, NumberField: () => null, Toggle: () => null };
 });
 
-import { CollabPage } from "../src/renderer/src/components/settings/SecuritySettings";
+import { CollabExternalSubPage, CollabLinksSubPage, CollabPage } from "../src/renderer/src/components/settings/SecuritySettings";
 import { CorsSection, RemoteAccessSection } from "../src/renderer/src/components/settings/RemoteAccess";
 import { BrowserSettings } from "../src/renderer/src/modules/browser/BrowserSettings";
 import { clearPageData } from "../src/renderer/src/modules/artifacts/pageData";
@@ -142,7 +143,7 @@ describe("settings risk interactions", () => {
     expect(fixture.apis.A.patchAgentSecurity).toHaveBeenCalledTimes(1);
   });
   it("requires inline confirmation for project links and invalidates it when an input changes", async () => {
-    await render(CollabPage); const selects = element.querySelectorAll("select");
+    await render(CollabLinksSubPage); const selects = element.querySelectorAll("select");
     await choose(selects[0]!, "project:one"); await choose(selects[1]!, "project:two"); await click("security.links.add");
     expect(fixture.apis.A.patchAgentSecurity).not.toHaveBeenCalled(); expect(element.textContent).toContain("Project One");
     await choose(selects[1]!, "agent:missing"); expect(element.querySelector("[data-settings-risk-confirm]")).toBeNull();
@@ -150,8 +151,34 @@ describe("settings risk interactions", () => {
     await click("security.links.add"); await click("Confirm and save");
     expect(fixture.apis.A.patchAgentSecurity).toHaveBeenCalledWith({ links: [["project:one", "project:two"]] });
   });
+  it("links on the page are an entry: count and first pairs, no editor; the sub-page has the add row above the list", async () => {
+    const links = [["project:one", "project:two"], ["project:one", "agent:a"], ["project:two", "agent:b"], ["agent:a", "agent:b"]];
+    fixture.apis.A.set({ agentSecurity: { ...security(), links } });
+    await render(CollabPage);
+    expect(element.textContent).toContain("security.links.count");
+    expect(element.textContent).toContain("Project One ⇄ Project Two");
+    expect(element.querySelectorAll("select")).toHaveLength(0);
+    expect(element.textContent).not.toContain("security.links.add");
+    expect(element.querySelector("[data-settings-subpage]")).not.toBeNull();
+    await render(CollabLinksSubPage);
+    const add = [...element.querySelectorAll("button")].find((b) => b.textContent === "security.links.add")!;
+    const firstPair = [...element.querySelectorAll('[title="project:one"]')][0]!;
+    expect(add.compareDocumentPosition(firstPair) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(element.querySelector('section[aria-label*="security.links.countMax"]')).not.toBeNull();
+  });
+  it("external agents on the page are an entry: count and first names, no add or remove there", async () => {
+    fixture.apis.A.set({ agentSecurity: { ...security(), externalAgents: [{ project: "one", agent: "agent-b" }] } });
+    await render(CollabPage);
+    expect(element.textContent).toContain("security.external.total");
+    expect(element.textContent).not.toContain("security.external.add");
+    expect(element.textContent).not.toContain("security.external.remove");
+    await render(CollabExternalSubPage);
+    expect(element.textContent).toContain("security.external.add");
+    expect(element.textContent).toContain("security.external.remove");
+    expect(element.querySelector('section[aria-label*="security.external.totalMax"]')).not.toBeNull();
+  });
   it("selecting an external agent only arms an explicit target confirmation", async () => {
-    await render(CollabPage); await click("security.external.add");
+    await render(CollabExternalSubPage); await click("security.external.add");
     await act(async () => { fixture.menus[0].flyout.props.onPick("agent-b"); });
     expect(fixture.apis.A.patchAgentSecurity).not.toHaveBeenCalled(); expect(element.querySelector("[data-settings-risk-confirm]")?.textContent).toContain("Agent B");
     await click("Confirm and save"); expect(fixture.apis.A.patchAgentSecurity).toHaveBeenCalledWith({ externalAgents: [{ project: "one", agent: "agent-b" }] });
@@ -185,7 +212,7 @@ describe("settings risk interactions", () => {
     expect(fixture.prompt).not.toHaveBeenCalled(); expect(fixture.apis.A.patchSettings).toHaveBeenCalledWith({ managementListen: null });
   });
   it("does not commit an inline approval if inputs change during the preflight read", async () => {
-    await render(CollabPage); const selects = element.querySelectorAll("select");
+    await render(CollabLinksSubPage); const selects = element.querySelectorAll("select");
     await choose(selects[0]!, "project:one"); await choose(selects[1]!, "project:two"); await click("security.links.add");
     let complete!: (value: unknown) => void;
     fixture.apis.A.getSettings.mockImplementationOnce(() => new Promise(resolve => { complete = resolve; }));
@@ -241,7 +268,7 @@ describe("settings risk interactions", () => {
     const oldState = await fixture.apis.A.getSettings();
     fixture.apis.A.getSettings.mockImplementationOnce(() => new Promise(resolve => { completeOld = resolve; }));
     await click("security.crossProject.host"); await answer("Host A");
-    fixture.target = "B"; await render(CollabPage);
+    fixture.target = "B"; await render(CollabLinksSubPage);
     const selects = element.querySelectorAll("select");
     await choose(selects[0]!, "project:one"); await choose(selects[1]!, "project:two"); await click("security.links.add");
     const newState = await fixture.apis.B.getSettings();

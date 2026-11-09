@@ -2,7 +2,8 @@
 // wants: the current one, the open ones), re-read when the workspace watch says a folder changed
 // (lib/workspaceRefresh DirVersions; a folder read while closed is re-read when it opens again if it changed
 // meanwhile). A failed re-read keeps the listing it had (offline host: the last contents stay); each read
-// carries a sequence number so a late, older answer never replaces a newer one.
+// carries a sequence number so a late, older answer never replaces a newer one. One read per folder at a
+// time: changes during it read once more after it (its answer carries the older version).
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { DaemonApi, FsEntry, WorkspaceScope } from "../../../../../shared/ipc";
 import { sameEntries, type DirVersions } from "../../../lib/workspaceRefresh";
@@ -33,11 +34,12 @@ export function useListings(api: DaemonApi, scope: WorkspaceScope | null, dirs: 
   const [stale, setStale] = useState(false);
   const seq = useRef(new Map<string, number>());
   const inflight = useRef(new Map<string, number>());
-  // A new workspace / host: start over.
+  // A new workspace / host: start over. Sequence numbers move on, so a late answer from the old workspace
+  // never matches (a folder read again here, or not at all).
   useEffect(() => {
     setSlots(new Map());
     setStale(false);
-    seq.current = new Map();
+    for (const [path, n] of seq.current) seq.current.set(path, n + 1);
     inflight.current = new Map();
   }, [api, scope]);
   const key = wanted.join("\n");
@@ -48,7 +50,7 @@ export function useListings(api: DaemonApi, scope: WorkspaceScope | null, dirs: 
       const version = dirs.version(path);
       const slot = slots.get(path);
       if (slot && slot.version === version) continue;
-      if (inflight.current.get(path) === version) continue;
+      if (inflight.current.has(path)) continue;
       inflight.current.set(path, version);
       const n = (seq.current.get(path) ?? 0) + 1;
       seq.current.set(path, n);

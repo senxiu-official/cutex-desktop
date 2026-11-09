@@ -39,10 +39,14 @@ it("keeps SDK and lifecycle code independent of React, Electron, daemon and the 
   }
 });
 
-it("limits sandbox / opaque-frame imports to their reviewed users and keeps the experimental service host out of the app", () => {
+it("keeps plugin-sandbox and the experimental service host out of the app and limits opaque-frame to its reviewed users", () => {
   const app = resolve(packages, "../apps/desktop"), source = join(app, "src");
   const manifest = JSON.parse(readFileSync(join(app, "package.json"), "utf8"));
-  expect(manifest.dependencies["@cutex-desktop/service-plugin-host"]).toBeUndefined();
+  // plugin-sandbox is frozen in the repository (docs/desktop-modules.md §10): no app dependency, no import anywhere.
+  for (const name of ["@cutex-desktop/service-plugin-host", "@cutex-desktop/plugin-sandbox"]) {
+    expect(manifest.dependencies?.[name], name).toBeUndefined();
+    expect(manifest.devDependencies?.[name], name).toBeUndefined();
+  }
   const visit = (directory: string) => {
     for (const entry of readdirSync(directory, { withFileTypes: true })) {
       const path = join(directory, entry.name);
@@ -52,12 +56,10 @@ it("limits sandbox / opaque-frame imports to their reviewed users and keeps the 
       for (const match of code.matchAll(/(?:\b(?:from|import)\s*["']|\b(?:import|require)\s*\(\s*["'])([^"']+)["']/g)) {
         const specifier = match[1]!;
         expect(specifier.includes("service-plugin-host"), `${path}: ${specifier}`).toBe(false);
-        if (specifier.includes("plugin-sandbox")) {
-          expect(path === join(source, "main/plugins.ts") || path.startsWith(join(source, "renderer/src/modules/plugins") + sep), `${path}: ${specifier}`).toBe(true);
-        }
-        // Agent pages (§10.2): main's frame store (index.ts, plugins.ts, frames.ts) and the artifacts view only.
+        expect(specifier.includes("plugin-sandbox"), `${path}: ${specifier}`).toBe(false);
+        // Agent pages and HTML files (§10.2): main's frame store (index.ts, frames.ts), the artifacts view and the file view only.
         if (specifier.includes("opaque-frame")) {
-          expect(["main/index.ts", "main/plugins.ts", "main/frames.ts"].some((file) => path === join(source, file)) || path === join(source, "renderer/src/modules/artifacts/PageFrame.tsx") || path === join(source, "renderer/src/components/FilePageFrame.tsx"), `${path}: ${specifier}`).toBe(true);
+          expect(["main/index.ts", "main/frames.ts"].some((file) => path === join(source, file)) || path === join(source, "renderer/src/modules/artifacts/PageFrame.tsx") || path === join(source, "renderer/src/components/FilePageFrame.tsx"), `${path}: ${specifier}`).toBe(true);
         }
         // Source consumers use the reviewed scoped package entry; no cross-package path bypass.
         if (specifier.startsWith(".")) expect(resolve(dirname(path), specifier).startsWith(app + sep), `${path}: ${specifier}`).toBe(true);

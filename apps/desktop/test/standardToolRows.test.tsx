@@ -67,6 +67,15 @@ describe("dedicated tool row interactions", () => {
  it("agent lists show returned count, expandable identities and complete result pagination metadata", () => {
   mount(list({ agents: [{ id: "agent-1", name: "Kai", status: "busy" }], next_cursor: 10 })); expect(box.textContent).toContain("conversation.tools.agentCount:1"); expect(box.querySelector("ul")).toBeNull(); toggle(); expect(box.querySelector("ul")?.textContent).toBe("Kaiagent-1status.running"); expect(box.querySelector("pre")?.textContent).toContain('"next_cursor": 10');
  });
+ it("pending notices: counts on the row, titles in the details; an older host or none pending adds nothing", () => {
+  const pending = { total: 3, counts: { answer: 2, question: 0, state: 1 }, more: true, entries: [{ delivery_id: "d1", delegation: "ask-1", kind: "answer", title: "Fix the sidebar" }, { delivery_id: "d2", delegation: "ask-2", kind: "newKind", title: "" }, { title: "no delegation" }] };
+  expect(standardToolRow(list({ agents: [], pending_notices: pending }))?.pendingNotices).toEqual({ total: 3, counts: { answer: 2, question: 0, state: 1 }, more: true, entries: [{ id: "d1", delegation: "ask-1", kind: "answer", title: "Fix the sidebar" }, { id: "d2", delegation: "ask-2", kind: null, title: "ask-2" }] });
+  expect(standardToolRow(list({ agents: [] }))?.pendingNotices).toBeNull();
+  expect(standardToolRow(list({ agents: [], pending_notices: { total: 0, counts: {}, entries: [] } }))?.pendingNotices).toBeNull();
+  mount(list({ agents: [{ id: "agent-1", name: "Kai", status: "busy" }], pending_notices: pending }));
+  expect(box.textContent).toContain("conversation.tools.pendingNotices:3 · conversation.tools.pendingNotices.answer 2 · conversation.tools.pendingNotices.state 1");
+  toggle(); expect(box.textContent).toContain("Fix the sidebar"); expect(box.textContent).toContain("conversation.tools.pendingNotices.more:2");
+ });
  it("failed native calls retain visible error and stay collapsed", () => {
   mount(native("Read", { file_path: "missing" }, { status: "failed", success: false, contentItems: [{ type: "inputText", text: "file not found" }] })); expect(box.textContent).toContain("taskrow.outcome.failed"); expect(box.textContent).toContain("file not found"); expect(box.querySelector('button[aria-expanded="false"]')).not.toBeNull();
  });

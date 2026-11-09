@@ -12,7 +12,7 @@ import { missingTerminals, scopeOfKey, TERMINAL, terminalIdOf } from "./terminal
 import { scopeKey } from "../../lib/workspace";
 import { shortcutKeyUsed } from "../../lib/browserCapture";
 import { matchesCommand } from "../../lib/keybindings";
-import type { AppModuleContext, SideBinding } from "../slots";
+import type { ModuleContext, SideBinding } from "../slots";
 import type { MessageKey } from "../../i18n";
 import { isElement } from "../../lib/ownerWindow";
 import { activeAppDocument, queryAppWindows } from "../../lib/appWindowSet";
@@ -220,7 +220,7 @@ export async function adoptTerminals(hostId: string, scope: WorkspaceScope, open
 }
 
 /** Module activation: the output / exit marks and the terminal key (lib/keybindings `terminal`). Undone when the module stops. */
-export function startTerminals(ctx: AppModuleContext): void {
+export function startTerminals(ctx: ModuleContext): void {
   const notice = (reason: string) =>
     ctx.services.ui.notice(
       reason === "no-agent" ? ctx.t("terminal.noWorkspace") : ctx.t("side.unavailable", { what: ctx.t("terminal.title"), reason: ctx.t(`side.reason.${reason}` as MessageKey) }),

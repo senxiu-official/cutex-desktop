@@ -10,6 +10,7 @@ const server = (patch: Partial<McpServerStatus>): McpServerStatus => ({
   serverInfo: null,
   serverCapabilities: null,
   tools: {},
+  toolListMeta: null,
   toolsError: null,
   resources: [],
   resourceTemplates: [],

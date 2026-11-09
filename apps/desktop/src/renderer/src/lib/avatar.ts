@@ -43,6 +43,8 @@ export interface AgentInfo {
   /** 显示名 (cutex `displayNameOverride`); undefined = not edited here. */
   displayName?: string | null;
   badge?: SessionBadge | null;
+  /** cutex agent-memory-injection (a runtime default, saved with `cutex/session/defaults/update`); undefined = not shown. */
+  memoryInjection?: boolean;
 }
 
 /** `cutex/session/metadata/update` params for what changed (empty = nothing to send). */

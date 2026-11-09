@@ -1,4 +1,4 @@
-// Acceptance §4: the parent page frames only plugin documents; the plugin scheme is not a fetch target.
+// Acceptance §4: the parent page frames only opaque frame documents (agent pages, HTML files); their scheme is not a fetch target.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, it } from "vitest";
@@ -11,7 +11,7 @@ it("renderer CSP allows only cutex-plugin: frames", () => {
 });
 
 it("cutex-plugin: is registered without Fetch API support", () => {
-  const line = read("src/main/index.ts").split("\n").find((text) => text.includes("{ scheme: PLUGIN_SCHEME"))!;
+  const line = read("src/main/index.ts").split("\n").find((text) => text.includes("{ scheme: FRAME_SCHEME"))!;
   expect(line).toContain("standard: true, secure: true");
   expect(line).not.toContain("supportFetchAPI");
   expect(line).not.toContain("bypassCSP");

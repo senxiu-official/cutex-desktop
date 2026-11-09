@@ -1,9 +1,9 @@
 export const zhCN = {
   "connection.title": "连接",
-  "connection.description": "主机列表、切换主机、启动时连接和诊断（设置 → 设备）",
+  "connection.description": "主机列表、切换主机、启动时连接和诊断（设置 → 主机）",
   // ---- settings (moved from the base catalog, 2026-10-09) ----
   "connection.diagnostics": "诊断",
-  "connection.page": "主机列表",
+  "connection.page": "主机",
   "connection.endpoint": "地址",
   "connection.version": "cutex 版本",
   "connection.noCaps": "旧版 cutex（无 /v2/capabilities）",
@@ -11,11 +11,6 @@ export const zhCN = {
   // ---- 设备管理 (连接 restructure 2026-10-19) ----
   "connection.pageHint": "本机连接的所有主机，以及适用于所有主机的桌面设置。",
   "connection.openHost": "查看 {host} 的连接和访问",
-  "connection.mine": "我的主机",
-  "connection.mineHint": "{{owner}}是你本人的主机。",
-  "connection.others": "可访问的主机",
-  "connection.othersHint": "{{owner}}是其他人的主机，包括你经 SSH 拥有完全控制的主机。",
-  "connection.othersNone": "暂无",
   "connection.thisDevice": "本机",
   "connection.member": "你是成员",
   "connection.add": "添加主机",

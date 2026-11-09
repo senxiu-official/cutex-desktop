@@ -1,0 +1,121 @@
+html,
+body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+  user-select: none;
+}
+body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  cursor: grab;
+}
+body:active {
+  cursor: grabbing;
+}
+body.native-drag {
+  -webkit-app-region: drag;
+}
+#pet {
+  position: relative;
+  flex: none;
+}
+#pet img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  visibility: hidden;
+  -webkit-user-drag: none;
+  pointer-events: none;
+}
+#count {
+  flex: none;
+  height: 20px;
+  margin-top: 2px;
+  padding: 0 8px;
+  border-radius: 10px;
+  background: rgba(30, 30, 32, 0.78);
+  color: #fff;
+  font: 600 12px/20px system-ui, sans-serif;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+#count[hidden] {
+  display: none;
+}
+body {
+  box-sizing: border-box;
+}
+#fan button {
+  position: absolute;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(30, 30, 32, 0.86);
+  color: #fff;
+  font: 16px/32px system-ui, sans-serif;
+  text-align: center;
+  cursor: pointer;
+}
+#fan button:hover {
+  background: rgba(70, 70, 76, 0.96);
+}
+#bubble {
+  position: absolute;
+  transform: translateX(-50%);
+  height: 40px;
+  padding: 0 12px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.96);
+  color: #1e1e20;
+  font: 22px/40px system-ui, sans-serif;
+  pointer-events: none;
+}
+#pet.pixel img {
+  image-rendering: pixelated;
+}
+#mark {
+  position: absolute;
+  transform: translateX(-50%);
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #f59e0b;
+  color: #fff;
+  font: 800 20px/28px system-ui, sans-serif;
+  text-align: center;
+  pointer-events: none;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.9);
+}
+.icon {
+  position: absolute;
+  width: 24px;
+  height: 24px;
+  margin-left: -12px;
+  pointer-events: none;
+}
+.icon.coin {
+  box-sizing: border-box;
+  width: 20px;
+  height: 20px;
+  margin-left: -10px;
+  border-radius: 50%;
+  border: 2px solid #b7791f;
+  background: radial-gradient(circle at 35% 35%, #fde68a, #f6c343 60%, #d69e2e);
+}
+body.pixel .icon {
+  image-rendering: pixelated;
+}
+#pet canvas.scene {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}

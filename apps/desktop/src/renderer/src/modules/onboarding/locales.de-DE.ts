@@ -238,7 +238,7 @@ export const deDE: Record<keyof typeof zhCN, string> = {
   "onboarding.guide.update.title": "Aktualisierungen",
   "onboarding.guide.update.text": "Aktualisierungen von Cutex findest du unter Einstellungen → Aktualisierungen und Diagnose.\ncutex auf jedem Host wird separat unter Einstellungen → Backend-Aktualisierungen aktualisiert.\nSchon vorher gestartete {{agents}} zeigen bis zum Neustart möglicherweise noch die alte Version.",
   "onboarding.guide.remote.title": "Remote-Hosts und gekoppelte Geräte",
-  "onboarding.guide.remote.text": "{{Agents}} auf einem Remote-Host funktionieren wie die hier: Gespräche, Delegierungen und Dienste sind verfügbar; die Dateien bleiben auf jenem Computer.\nEin gekoppeltes Gerät, etwa ein Handy, nutzt die von dir erteilten Rechte. Verwalte oder widerrufe sie unter Einstellungen → Benutzer → Geräte.",
+  "onboarding.guide.remote.text": "{{Agents}} auf einem Remote-Host funktionieren wie die hier: Gespräche, Delegierungen und Dienste sind verfügbar; die Dateien bleiben auf jenem Computer.\nEin gekoppeltes Gerät, etwa ein Handy, nutzt die von dir erteilten Rechte. Verwalte oder widerrufe sie unter Einstellungen → Hosts.",
   "onboarding.guide.help.title": "Hilfe",
   "onboarding.guide.help.hint": "Anleitungen und Tipps erneut ansehen, Dokumentation öffnen oder ein Problem melden.",
   "onboarding.guide.help.onboarding": "Anleitungen",

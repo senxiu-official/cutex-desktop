@@ -12,6 +12,7 @@ import { useTrackOverlay } from "../../lib/openOverlays";
 import { sidebarOf, useApp } from "../../store";
 import { LOCAL_HOST_ID } from "../../../../shared/hosts";
 import { pickerGroups, recentGrants, type PickerAgent } from "./agentPicker";
+import { isQuickChat } from "../../lib/sidebar";
 import { useOwnerWindow } from "../../lib/ownerContext";
 
 interface Props {
@@ -49,10 +50,12 @@ export function BrowserAgentPicker({ hostId, agents, selected, onSelect, onOpen,
     const row = sidebar?.hostRows?.[agent.sessionId];
     const projectId = row?.projectId ?? null;
     const summary = projectId ? sidebar?.projects?.projects.find(project => project.project_id === projectId) : undefined;
-    return { ...agent, projectId, projectName: projectId ? (row?.projectName || summary?.presentation.display_name || projectId) : null };
+    const session = sidebar?.active.find(item => item.cutexSessionId === agent.sessionId);
+    return { ...agent, projectId, projectName: projectId ? (row?.projectName || summary?.presentation.display_name || projectId) : null, ...(!projectId && session && isQuickChat(session, row) ? { quickChat: true } : {}) };
   }), [agents, sidebar]);
   const groups = useMemo(() => pickerGroups(rows, { query, current, recent }), [rows, query, current, recent]);
   const flat = useMemo(() => groups.flatMap(group => group.agents), [groups]);
+  const hiddenChats = query.trim() ? 0 : rows.filter(row => row.quickChat && !flat.includes(row)).length;
   const chosen = agents.find(agent => agent.sessionId === selected);
 
   useEffect(() => { setCursor(0); }, [query]);
@@ -102,7 +105,7 @@ export function BrowserAgentPicker({ hostId, agents, selected, onSelect, onOpen,
     event.stopPropagation();
   }
 
-  const groupLabel = (kind: string, label: string | null) => kind === "top" ? t("browser.owner.pickerSuggested") : kind === "independent" ? t("browser.owner.pickerIndependent") : label;
+  const groupLabel = (kind: string, label: string | null) => kind === "top" ? t("browser.owner.pickerSuggested") : kind === "independent" ? t("browser.owner.pickerIndependent") : kind === "chats" ? t("agentPicker.chats") : label;
   let index = 0;
   return <>
     <button ref={trigger} type="button" data-browser-agent-select={look} aria-label={look === "grant" ? label : t("browser.owner.select")} data-tip={title ?? chosen?.name ?? t("browser.owner.select")}
@@ -129,7 +132,7 @@ export function BrowserAgentPicker({ hostId, agents, selected, onSelect, onOpen,
           {error && <div role="alert" className="px-2.5 py-2 text-xs text-danger">
             <p>{error}</p><button type="button" data-browser-agent-retry="" disabled={loading} className="mt-2 underline" onClick={onOpen}>{t("browser.refusal.retry")}</button>
           </div>}
-          {!error && !flat.length && <p role="status" className="px-2.5 py-2 text-xs text-subtle">{t(agents.length ? "browser.owner.pickerNoMatch" : loading ? "browser.owner.loadingAgents" : "browser.owner.noAgents")}</p>}
+          {!error && !flat.length && !hiddenChats && <p role="status" className="px-2.5 py-2 text-xs text-subtle">{t(agents.length ? "browser.owner.pickerNoMatch" : loading ? "browser.owner.loadingAgents" : "browser.owner.noAgents")}</p>}
           {groups.map(group => <div key={group.key} role="group" aria-label={groupLabel(group.kind, group.label) ?? undefined}>
             <div className="truncate px-2.5 pt-1.5 pb-0.5 text-caption/[inherit] text-subtle">{groupLabel(group.kind, group.label)}</div>
             {group.agents.map(agent => {
@@ -144,6 +147,7 @@ export function BrowserAgentPicker({ hostId, agents, selected, onSelect, onOpen,
               </div>;
             })}
           </div>)}
+          {!error && hiddenChats > 0 && <p role="note" data-picker-hidden="" className="px-2.5 py-1.5 text-caption/[inherit] text-subtle">{t("agentPicker.hiddenChats", { n: hiddenChats })}</p>}
         </div>
       </div>, win.document.body
     )}

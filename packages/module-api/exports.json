@@ -1,0 +1,50 @@
+{
+  "moduleApi": "1.31",
+  "shared": [
+    "react",
+    "react/jsx-runtime",
+    "react-dom"
+  ],
+  "entries": {
+    "@cutex-desktop/module-api": [
+      "MODULE_API_VERSION",
+      "defineModule",
+      "pageTitle",
+      "services",
+      "useAgents",
+      "useHosts",
+      "useI18n",
+      "useModulePref"
+    ],
+    "@cutex-desktop/module-api/ui": [
+      "Button",
+      "CodeBlockButton",
+      "EmptyState",
+      "HostPicker",
+      "IconButton",
+      "ListRow",
+      "Loading",
+      "Notice",
+      "NumberField",
+      "Page",
+      "PageToolbar",
+      "Section",
+      "Segmented",
+      "Select",
+      "SettingRow",
+      "StatusIcon",
+      "TextField",
+      "TextInput",
+      "Toggle",
+      "TrayButton",
+      "openMenu"
+    ],
+    "@cutex-desktop/module-api/experimental": [
+      "contributeExperimental",
+      "daemonFor",
+      "defineExperimentalModule",
+      "focusTurn",
+      "side"
+    ]
+  }
+}

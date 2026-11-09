@@ -35,7 +35,8 @@ import type { AgentRow, SidebarGroup } from "./sidebar";
 import { openAgentList } from "./agentListDialog";
 import { moveToSectionEntry } from "./sectionMenus";
 import { sidebarMenuTail } from "./customizeMenu";
-import { stopIdleAvailable, stopIdleMenuEntries } from "./stopIdle";
+import { folderIdleScope, hostIdleScope, projectIdleScope, stopIdleAvailable, stopIdleMenuEntries, type StopIdleMenuScope } from "./stopIdle";
+import { sectionOf } from "./sidebarSections";
 import { markSeenOn, turnMarksOn } from "./turnUnread";
 import { runLimited, START_CONCURRENCY } from "./agentList";
 import { captureHostAction } from "./hostSwitch";
@@ -50,6 +51,13 @@ type T = (key: MessageKey, vars?: Record<string, string | number>) => string;
 const ICON = 14;
 
 const copyText = (text: string) => void navigator.clipboard.writeText(text);
+
+/** 下线空闲的… scopes from a project header: this project (or the independent agents), its folder if any, the host. */
+function idleScopesFor(groupId: string, project: boolean, name: string, host: string): StopIdleMenuScope[] {
+  const folder = sectionOf(getUiPrefs().sidebarSections, hostKey(host, groupId));
+  const hostLabel = useApp.getState().hosts?.hosts.find((h) => h.id === host)?.label ?? host;
+  return [projectIdleScope(host, project ? groupId : null, name), ...(folder ? [folderIdleScope(folder.name, folder.members)] : []), hostIdleScope(host, hostLabel)];
+}
 
 /** Online agents with nothing running (not the Director): what 停止空闲 stops. */
 export function idleStoppable(group: Pick<SidebarGroup, "online">): AgentRow[] {
@@ -173,7 +181,7 @@ export function projectMenu(group: SidebarGroup, workspaceRoot: string | null, c
     marked.length > 0 && { label: t("menu.markProjectRead", { count: marked.length }), icon: <MailCheck size={ICON} />, onSelect: () => marked.forEach((r) => markSeenOn(host, r.id)) },
     // Design 031: cutex decides who is idle (stop-idle-agents); older cutex keeps the desktop's own list.
     ...(stopIdleAvailable(host)
-      ? stopIdleMenuEntries(project ? { hostId: host, projectId: group.id, label: name } : { hostId: host, independent: true, label: name }, t, <Power size={ICON} />)
+      ? stopIdleMenuEntries(idleScopesFor(group.id, project, name, host), t, <Power size={ICON} />)
       : [
           owner && idle.length > 0 && {
             label: t("menu.stopIdle", { count: idle.length }),

@@ -42,7 +42,7 @@ describe.each(["zh-CN", "en"] as const)("settings IA search %s", (locale) => {
     for (const q of ["Sample module", "示例模块", "Original name"]) expect(anchors(index(locale), q, "modules"), q).toContain("module-sample");
   });
   it("uses precisely the visible navigation's page order", () => {
-    expect(index(locale).filter((d) => d.anchor === null).map((d) => d.page)).toEqual(settingsNavGroups(pages).flatMap((g) => g.entries.map((e) => e.item.page)));
+    expect(index(locale).filter((d) => d.anchor === null).map((d) => d.page)).toEqual(settingsNavGroups(pages, true).flatMap((g) => g.entries.map((e) => e.item.page)));
   });
   it("never enables Profile detail navigation for a member connection", () => {
     const profiles = index(locale, false).filter((d) => d.page === "profiles");

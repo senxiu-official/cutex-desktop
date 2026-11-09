@@ -57,6 +57,8 @@ import type { MessageSettlementCloseRequest, MessageSettlementCloseResponse } fr
 import type { DaemonEndpoint } from "./endpoint";
 import type { OperatorActionReceipt, OperatorActionRequest, OperatorProjectWorkspace } from "./operators";
 import type { ClientTokenList, ClientTokenRenamed, HostSummary, PairingCode, PairRequest, PairResponse, SummaryReadResult } from "./summary";
+import { approveBody, denyBody, pairingInviteBody, pairingInvitePaths, readCreatedPairingInvite, readPairingInvite, readPairingInvites, type CreatedPairingInvite, type PairingInvite, type PairingInviteCreate } from "./pairingInvites";
+import { readRelayPairingStatus, RELAY_PAIRING_PATH, relayPairingBody, type RelayPairingStatus } from "./relayPairing";
 import { CutexApiError, CutexUnreachableError } from "./errors";
 import { errorOf, fetchWithRetry, type HttpRetryOptions } from "./retry";
 import { admittedResponse, finiteRead, ReadLoad, subscriptionRead } from "./readLoad";
@@ -801,6 +803,41 @@ export class CutexClient {
       body.scope = options.scope;
     }
     return this.request("POST", "/v2/pairing-codes", { body });
+  }
+
+  /** Pairing v2 owner list (owner-local: loopback with root / a HostCli token; never secrets, tokens or CSRs). */
+  async pairingInvites(): Promise<PairingInvite[]> {
+    return readPairingInvites(await this.request<unknown>("GET", pairingInvitePaths.list));
+  }
+
+  /** Pairing v2: a 5-minute invite (owner-local). The reply's `qr` is a one-time secret: never log it. */
+  async createPairingInvite(options: PairingInviteCreate = {}): Promise<CreatedPairingInvite> {
+    return readCreatedPairingInvite(await this.request<unknown>("POST", pairingInvitePaths.create, { body: pairingInviteBody(options) }));
+  }
+
+  /** 公网扫码配对 (`relay-pairing-switch-v1`, owner-local): the switch and whether the entry listens. */
+  async relayPairing(): Promise<RelayPairingStatus> {
+    return readRelayPairingStatus(await this.request<unknown>("GET", RELAY_PAIRING_PATH));
+  }
+
+  /** Turn public QR pairing on / off (idempotent; no restart). 409 bootstrap_not_configured, 503 bootstrap_bind_unavailable / bootstrap_unavailable. */
+  async setRelayPairing(enabled: boolean): Promise<RelayPairingStatus> {
+    return readRelayPairingStatus(await this.request<unknown>("POST", RELAY_PAIRING_PATH, { body: relayPairingBody(enabled) }));
+  }
+
+  /** Pairing v2: cancel an invite (an approved one cannot be: revoke the device instead). */
+  async cancelPairingInvite(inviteId: string): Promise<void> {
+    await this.request<unknown>("DELETE", pairingInvitePaths.one(inviteId));
+  }
+
+  /** Pairing v2: allow exactly this request with the code it shows (idempotent). */
+  async approvePairingRequest(inviteId: string, requestId: string, shortCode: string): Promise<PairingInvite | null> {
+    return readPairingInvite(await this.request<unknown>("POST", pairingInvitePaths.approve(inviteId), { body: approveBody(requestId, shortCode) }));
+  }
+
+  /** Pairing v2: refuse the request (terminal for this invite). */
+  async denyPairingRequest(inviteId: string, requestId: string): Promise<PairingInvite | null> {
+    return readPairingInvite(await this.request<unknown>("POST", pairingInvitePaths.deny(inviteId), { body: denyBody(requestId) }));
   }
 
   /** `GET /v2/client-tokens`: issued client / device tokens (metadata only, never the secret). */

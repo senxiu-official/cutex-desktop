@@ -13,7 +13,7 @@ uses Maid / Chief Maid / Maidling, so screens may read 「44 个 Maid」 where t
 
 ```
 ┌ 窗口顶栏 ──────────────────────────────────────────────────────────────────────────────┐
-│ Logo · 主机选择「所有设备」· 入口图标… ⋯ │ ⌘K 搜索 │ 启动器… · ＋ · Shelf 开关 │
+│ Logo · 主机选择「所有主机」· 入口图标… ⋯ │ ⌘K 搜索 │ 启动器… · ＋ · Shelf 开关 │
 ├ 侧栏 ───────────┬ 会话 ──────────────────────────────────┬ Shelf ──────────────────────┤
 │ 搜索            │ 会话顶栏：头像 名字 角色 状态 🔔 ⋯       │ Rail │ 页：项目视图          │
 │ 项目分组        │          项目 · 主机 · 路径 · 分支      │ (页签│  计数 · 主管卡        │
@@ -33,7 +33,7 @@ uses Maid / Chief Maid / Maidling, so screens may read 「44 个 Maid」 where t
 | 中文 | English | 是什么 | 主要文件 |
 |---|---|---|---|
 | 窗口顶栏 | title bar | The row at the very top of the window. | `components/TitleBar.tsx` |
-| 主机选择（所有设备 / 本机） | host switcher | Picks which hosts the window shows. | `TitleBar.tsx` `HostSwitcher` |
+| 主机选择（所有主机 / 本机） | host switcher | Picks which hosts the window shows. | `TitleBar.tsx` `HostSwitcher` |
 | 入口图标（钉住的导航） | nav entries | Pinned page icons: 新建, 快速启动, 委托, 审批… The rest are under ⋯. | `components/SidebarNav.tsx`, `lib/navPins.ts` |
 | ⌘K 搜索（快速切换） | quick switcher | Search box to jump to agents, services, 成果 and pages. | `modules/quick-switch` |
 | 窗口布局（恢复默认布局） | layout reset | 「恢复默认布局」, the last item of the ＋ menu; there is no title-bar layout button any more (removed 2026-11-05). | `lib/sideMenus.tsx` `launcherMenu`, `lib/layoutReset.ts` |
@@ -85,7 +85,7 @@ uses Maid / Chief Maid / Maidling, so screens may read 「44 个 Maid」 where t
 | 接下来（队列） | next up (queue card) | Things waiting to be handed to this agent: 排队, 留言, 委托回复, 闹钟. | `components/QueuePanel.tsx` |
 | 交互卡 | interaction card | A pending approval or question, docked above the 输入框. | `components/InteractionDock.tsx` |
 | 输入框底栏 | composer footer | ＋ tools, 权限模式 (完全访问…), 规则, Profile + 配额圈, 模型 · 推理强度, 上下文圈. | `components/ComposerToolbarRow.tsx` |
-| 提及（@ 面板） | mention panel | `@` lists agents and the host's Profiles (two groups, 5 rows each) and files; `p@` / `m@` list only Profiles / models. A pick shows as a chip: @name, or the Profile's name · model · effort. | `components/Composer.tsx`, `lib/useProfileMentions.ts`, `components/ProfileMentionChip.tsx` |
+| 提及（@ 面板） | mention panel | `@` lists agents (the current agent's project first, then recent mentions; matches names and project names; quick chats only when typed) and the host's Profiles (two groups, 5 rows each) and files; `p@` / `m@` list only Profiles / models. A pick shows as a chip: @name, or the Profile's name · model · effort. | `components/Composer.tsx`, `lib/useProfileMentions.ts`, `components/ProfileMentionChip.tsx` |
 
 ## 托盘 Tray
 
@@ -109,6 +109,20 @@ uses Maid / Chief Maid / Maidling, so screens may read 「44 个 Maid」 where t
 | 标签 / 标签行 | tab / tab row | One open component inside a 窗格, and the row that switches them. | `lib/sideLayout.ts` |
 | 只看 Shelf | Shelf only | The 会话 shrinks to a 窄条 and its Shelf fills the space. | `settings.panel.shelfOnly` |
 | 设置 Shelf | settings Shelf | Settings opened as a card beside the 会话. | `modules/shell` |
+| 开发者模式 | developer mode | Settings → 模块: load a module being written from a folder and swap in each new build. Tagged 开发. | `modules/shell/DevModules.tsx`, `main/moduleDev.ts` |
+| 本地模块 | local module | A module installed from a `.tar.gz` file (Settings → 模块 → 从文件安装…), after main's native confirm; runs with the app's own power. Tagged 本地安装. | `modules/shell/ModulePacks.tsx`, `main/modulePacks.ts` |
+| 模块数据 | module data | A module's own folder on this device (`userData/module-data/<id>/`), and the Settings → 模块 list of those folders, kept or deleted when a module is removed. | `modules/shell/ModuleData.tsx`, `main/moduleData.ts` |
+| 不透明 frame | opaque frame | The sandboxed, offline frame agent pages and HTML files show in. Not a module and not a plugin. (The frame *plugin* feature that also used it is retired.) | `@cutex-desktop/opaque-frame`, `main/frames.ts` |
+| 主机（设置页） | Hosts page | Settings → 主机: one list of hosts, groups, what connects at launch. | `components/settings/ConnectionSettings.tsx` |
+| 主机详情 | host page | One host's page, opened from a row or from the switcher's ›; its heading is the host's name. Its connection, users and devices. (Was 主机 + 用户与设备.) | `components/settings/AccessSettings.tsx` |
+| 路线 | routes | A host's SSH addresses on its card, in the order they are tried; the one in use is marked. | `ConnectionSettings.tsx` |
+| 添加设备 | add a device | The one way to add a phone or computer to a host: a button on 主机详情's 设备 list. Shows one 5-minute QR / 配对文字 that works over the host's LAN / Tailscale address and, if set up, the relay. (Replaces 配对设备 on hosts with users.) | `modules/users/AddDevice.tsx`, `main/pairingInvites.ts` |
+| 设备申请 · 核对号码 | pairing request · check number | A device that scanned the QR and waits on top of the 设备 list: name, system, whose, scope, and the 6-digit number the phone also shows. 允许 (full control: a system dialog with the number) or 拒绝. | `modules/users/AddDevice.tsx` |
+| 旧版手机 | older phone app | A fold under the QR: a one-time v1 配对码 for a phone app that cannot read the new QR yet; it skips 允许. Temporary. | `modules/users/AddDevice.tsx` |
+| 我的设备 · 邀请他人 | pairing paths | The two ways into 添加设备: your own device (owner defaults), or someone else's (who, which projects, may they talk). | `components/settings/PairingParts.tsx`, `InvitePanel.tsx` |
+| 我的设备（你） | my devices | Settings → 你: your devices across the connected hosts you own; merged by name + system only, revoke says per host what happened. | `MyDevices.tsx`, `lib/myDevices.ts` |
+| 跨机协作 · 高级 · 全部设备 | sub-pages | Sub-pages of 主机详情: linked hosts; owner, rights, listen addresses, CORS and diagnostics; every device. | `AccessSettings.tsx`, `SettingsPageItem.subPages` |
+| 互通的项目 · 可见的外部智能体 · 规则审计 · 网站权限 | sub-pages | Sub-pages of 协作 and 浏览器. The first two are an entry with a count on the page; the last two show their first rows and 全部. | `SecuritySettings.tsx`, `ApprovalRules.tsx`, `BrowserSettings.tsx` |
 
 ## 侧边组件 Side components (what goes into a Shelf)
 

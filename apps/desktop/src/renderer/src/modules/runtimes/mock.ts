@@ -39,6 +39,18 @@ export const mock: ModuleMock = {
           ...structuredClone(VIEW.native ?? []).map(r => ({ ...r, selected: false })),
         ],
       } satisfies RuntimesWire;
+      if (new URLSearchParams(location.search).has("runtimeArchived")) return {
+        hostId: "host-a",
+        native: [
+          { release: "r260", version: "0.160.0-r52.4", selected: true, agents: [{ cutexSessionId: "eva", name: "Eva" }, { cutexSessionId: "lead", name: "Lead" }] },
+          { release: "r241", version: "0.160.0-r52.3", agents: [{ cutexSessionId: "old1", name: "old-refactor" }] },
+        ],
+        claude: [
+          { release: "claude-r42", selected: true, agents: [{ cutexSessionId: "mika", name: "Mika" }] },
+          { release: "claude-r35", agents: [{ cutexSessionId: "sora", name: "Sora" }, { cutexSessionId: "old3", name: "atlas-v1" }] },
+          { release: "claude-r29", agents: [{ cutexSessionId: "old2", name: "AUTO_old-migration" }, { cutexSessionId: "old4", name: "AUTO_spike-ws" }, { cutexSessionId: "old5", name: "proto-spike" }] },
+        ],
+      } satisfies RuntimesWire;
       if (new URLSearchParams(location.search).has("runtimeGroups")) return {
         hostId: "host-a",
         native: [

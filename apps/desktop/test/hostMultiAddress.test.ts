@@ -29,6 +29,7 @@ vi.mock("../src/main/ssh", () => ({
     ssh.temporary.push(target.destination);
     return { port: target.destination === "hachimi-lan" ? 41001 : 41002, close: vi.fn() };
   }),
+  resolveSshHost: vi.fn(async () => null),
   runSsh: vi.fn(),
 }));
 
@@ -123,6 +124,67 @@ describe("HostManager multi-address identity checks", () => {
     expect(result.ok).toBe(true);
     expect(h.file.hosts[0]).toMatchObject({ target: "hachimi-direct", targets: ["hachimi-direct", "hachimi-lan"] });
     expect(ssh.tunnels.at(-1)?.options.targets.map((target: { destination: string }) => target.destination)).toEqual(["hachimi-direct", "hachimi-lan"]);
+  });
+
+  describe("a better route's check before traffic moves", () => {
+    const verifyOf = async (identity: string | null = "HOST-H") => {
+      const h = harness(identity);
+      const { tunnel } = await connect(h.manager);
+      return { h, verify: tunnel.options.verifyRoute as (port: number, target: string) => Promise<{ code: string } | null>, tunnel };
+    };
+
+    it("accepts only the confirmed identity, over the candidate's own port", async () => {
+      client.host.mockResolvedValue({ hostId: "HOST-H", platform: "linux" });
+      const { verify } = await verifyOf();
+      expect(await verify(45001, "hachimi-lan")).toBeNull();
+      expect(client.host.mock.calls.at(-1)![0]).toMatchObject({ baseUrl: "http://127.0.0.1:45001", token: "secret" });
+      client.host.mockResolvedValue({ hostId: "HOST-OTHER", platform: "linux" });
+      expect(await verify(45001, "hachimi-lan")).toMatchObject({ code: "hostMismatch" });
+    });
+
+    it("refuses when the token is rejected, the daemon does not answer, or no identity is confirmed", async () => {
+      client.host.mockResolvedValue({ hostId: "HOST-H", platform: "linux" });
+      const { verify } = await verifyOf();
+      const { CutexApiError } = await import("@cutex-desktop/cutex-client");
+      client.host.mockRejectedValue(new (CutexApiError as any)(401));
+      expect(await verify(45001, "hachimi-lan")).toMatchObject({ code: "tokenRejected" });
+      client.host.mockRejectedValue(new Error("no answer"));
+      expect(await verify(45001, "hachimi-lan")).toMatchObject({ code: "remoteDaemon" });
+
+      client.host.mockRejectedValue(new Error("never connected"));
+      const unconfirmed = await verifyOf(null);
+      client.host.mockResolvedValue({ hostId: "HOST-ANY", platform: "linux" });
+      expect(await unconfirmed.verify(45001, "hachimi-lan")).toMatchObject({ code: "remoteDaemon" });
+    });
+
+    it("moves the streams when the tunnel reports a switch; the endpoint stays", async () => {
+      client.host.mockResolvedValue({ hostId: "HOST-H", platform: "linux" });
+      const { h, tunnel } = await verifyOf();
+      (h.daemon as any).moveStreams = vi.fn();
+      tunnel.options.onRouteSwitched();
+      expect((h.daemon as any).moveStreams).toHaveBeenCalledTimes(1);
+      expect(h.daemon.useEndpoint).toHaveBeenCalledTimes(1);
+    });
+
+    it("single-address hosts do not probe", async () => {
+      const h = harness();
+      h.file.hosts[0]!.targets = ["hachimi-lan"];
+      await h.manager.connectHost(ID, true);
+      expect(ssh.tunnels.at(-1)!.options.verifyRoute).toBeUndefined();
+    });
+  });
+
+  it("stores a Unicode address in its xn-- form; a typed Unicode copy of a stored address is no change", async () => {
+    const h = harness();
+    await h.manager.connectHost(ID, true);
+    const saved = await h.manager.updateSshHost(ID, { targets: ["hachimi-lan", "remote-work.例子.test"] });
+    expect(saved.ok).toBe(true);
+    expect(h.file.hosts[0]!.targets).toEqual(["hachimi-lan", "remote-work.xn--fsqu00a.test"]);
+    const tunnels = ssh.tunnels.length;
+    await h.manager.updateSshHost(ID, { targets: ["hachimi-lan", "remote-work.xn--fsqu00a.test"] });
+    await h.manager.updateSshHost(ID, { targets: ["hachimi-lan", "remote-work.例子.test"] });
+    expect(ssh.tunnels.length).toBe(tunnels);
+    expect(ssh.tunnels.at(-1)!.options.targets[1].destination).toBe("remote-work.xn--fsqu00a.test");
   });
 
   it("offline tests reject a wrong identity and continue to the next address", async () => {

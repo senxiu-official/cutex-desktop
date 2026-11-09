@@ -8,11 +8,13 @@ import { byNameThenId } from "../../lib/rosterOrder";
 export interface PickerAgent extends BrowserAgentView {
   projectId: string | null;
   projectName: string | null;
+  /** A quick chat outside any project (lib/sidebar isQuickChat): listed only while searching, unless current / recent. */
+  quickChat?: boolean;
 }
-/** kind "top" = current conversation + recent grants; "project"; "independent" (no project). */
+/** kind "top" = current conversation + recent grants; "project"; "independent" (no project); "chats" (quick chats, while searching). */
 export interface PickerGroup {
   key: string;
-  kind: "top" | "project" | "independent";
+  kind: "top" | "project" | "independent" | "chats";
   label: string | null;
   agents: PickerAgent[];
 }
@@ -35,9 +37,12 @@ export function pickerGroups(agents: readonly PickerAgent[], options: { query?: 
   const top = new Set(topIds);
   const projects = new Map<string, PickerGroup>();
   const independent: PickerAgent[] = [];
+  const chats: PickerAgent[] = [];
+  const searching = !!(options.query ?? "").trim();
   const byName = byNameThenId<PickerAgent>((a) => a.name, (a) => a.sessionId);
   for (const agent of shown) {
     if (top.has(agent.sessionId)) continue;
+    if (!agent.projectId && agent.quickChat) { if (searching) chats.push(agent); continue; }
     if (!agent.projectId) { independent.push(agent); continue; }
     let group = projects.get(agent.projectId);
     if (!group) projects.set(agent.projectId, group = { key: `project:${agent.projectId}`, kind: "project", label: agent.projectName || agent.projectId, agents: [] });
@@ -45,6 +50,7 @@ export function pickerGroups(agents: readonly PickerAgent[], options: { query?: 
   }
   for (const group of [...projects.values()].sort(byNameThenId((g) => g.label!, (g) => g.key))) groups.push({ ...group, agents: group.agents.sort(byName) });
   if (independent.length) groups.push({ key: "independent", kind: "independent", label: null, agents: independent.sort(byName) });
+  if (chats.length) groups.push({ key: "chats", kind: "chats", label: null, agents: chats.sort(byName) });
   return groups;
 }
 

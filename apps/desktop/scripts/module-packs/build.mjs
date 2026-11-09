@@ -21,6 +21,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { writeTarGz } from "./tar.mjs";
+import { checkBundle, HOST_PREFIX, hostModule, hostUsePlugin, packBuildOptions, sha256, sortedHost } from "../../../../packages/module-api/tools/builder.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const APP_DIR = resolve(HERE, "../..");
@@ -28,14 +29,11 @@ const RENDERER_SRC = join(APP_DIR, "src/renderer/src");
 const MODULES_DIR = join(RENDERER_SRC, "modules");
 const PACK_HOST_FILE = join(MODULES_DIR, "packHost.ts");
 const SDK_DIR = resolve(APP_DIR, "../../packages/plugin-sdk/src");
-const HOST_GLOBAL = "__CUTEX_MODULE_HOST__";
-const HOST_PREFIX = "\0cutex-pack-host:";
+const PUBLIC_EXPORTS = JSON.parse(readFileSync(resolve(APP_DIR, "../../packages/module-api/exports.json"), "utf8"));
 const ENTRY_ID = "\0cutex-pack-entry";
-const NS_EXPORT = "__cutexHostNamespace";
 // Shared singletons that must come from the host, never be bundled a second time.
 const SINGLETON_RE = /[\\/]node_modules[\\/](?:\.pnpm[\\/][^\\/]+[\\/]node_modules[\\/])?(?:react|react-dom|zustand|scheduler)[\\/]/;
 
-const sha256 = (data) => createHash("sha256").update(data).digest("hex");
 const stripExt = (p) => p.replace(/\.(?:tsx?|jsx?|mjs)$/, "").replace(/[\\/]index$/, "");
 
 /**
@@ -52,7 +50,10 @@ export function readHostTable(file = PACK_HOST_FILE) {
   if (!block) throw new Error(`${file}: no PACK_HOST_MODULES table`);
   const bare = new Set();
   const files = new Map();
+  // The public API's part of the table is generated from its package (moduleApi/hostTable.generated.ts).
+  for (const spec of Object.keys(PUBLIC_EXPORTS.entries)) bare.add(spec);
   for (const line of block[1].split("\n")) {
+    if (line.trim() === "...MODULE_API_HOST,") continue;
     const m = /^\s*(?:"([^"]+)"|([A-Za-z_$][\w$]*))\s*(?::\s*([A-Za-z_$][\w$]*))?\s*,?\s*$/.exec(line);
     if (!m) {
       if (line.trim()) throw new Error(`${file}: cannot read host table line ${JSON.stringify(line.trim())}`);
@@ -107,7 +108,7 @@ function hostPlugin({ id, moduleDir, table, cssFile, packJson, extraMessages }) 
       if (table.bare.has(source)) return HOST_PREFIX + source;
       if (!importer) return null;
       if (/^(?:react|react-dom|zustand|scheduler)(?:\/|$)/.test(source)) {
-        this.error(`${importer.startsWith("\0") ? "the pack entry" : where(importer)} imports ${source}: only the host's ${[...table.bare].join(" / ")} may be used (a second copy would break hooks)`);
+        this.error(`${importer.startsWith("\0") ? "the pack entry" : where(importer)} imports ${source}: only the host's ${[...table.bare].filter((s) => !s.startsWith("@cutex-desktop/")).join(" / ")} may be used (a second copy would break hooks)`);
       }
       const r = await this.resolve(source, importer, { ...options, skipSelf: true });
       if (!r || r.external) return r;
@@ -136,63 +137,17 @@ function hostPlugin({ id, moduleDir, table, cssFile, packJson, extraMessages }) 
           const enFile = join(moduleDir, "i18n.en.ts");
           lines.push(`import { zhCN as __zhCN } from ${JSON.stringify(i18n)};`);
           lines.push(`import { en as __en } from ${JSON.stringify(existsSync(enFile) ? enFile : i18n)};`);
-          lines.push(`export const messages = { "zh-CN": __zhCN, en: __en, ...${JSON.stringify(extraMessages)} };`);
+          // A module's own other locales (i18n.locales.ts): the app's catalogs leave out a pack-only module's strings.
+          const localesFile = join(moduleDir, "i18n.locales.ts");
+          if (existsSync(localesFile)) lines.push(`import { locales as __locales } from ${JSON.stringify(localesFile)};`);
+          lines.push(`export const messages = { "zh-CN": __zhCN, en: __en, ${existsSync(localesFile) ? "...__locales, " : ""}...${JSON.stringify(extraMessages)} };`);
         } else {
           lines.push(`export const messages = ${JSON.stringify(extraMessages)};`);
         }
         if (cssFile) lines.push(`import ${JSON.stringify(cssFile)};`);
         return lines.join("\n");
       }
-      if (loadId.startsWith(HOST_PREFIX)) {
-        const spec = loadId.slice(HOST_PREFIX.length);
-        return {
-          code: [
-            `const host = globalThis[${JSON.stringify(HOST_GLOBAL)}];`,
-            `if (!host) throw new Error("this module pack runs only inside the Cutex app (no module host)");`,
-            `export const ${NS_EXPORT} = host.get(${JSON.stringify(spec)});`,
-            // Pure: read only when something imports the default (a namespace without one may be a strict proxy).
-            `export default /* @__PURE__ */ (() => ${NS_EXPORT}.default)();`,
-          ].join("\n"),
-          syntheticNamedExports: NS_EXPORT,
-          moduleSideEffects: false,
-        };
-      }
-      return null;
-    },
-  };
-}
-
-/** Records which names each module reads from the host (after TS / JSX are compiled away). */
-function hostUsePlugin(used) {
-  const record = (spec, name) => {
-    let names = used.get(spec);
-    if (!names) used.set(spec, (names = new Set()));
-    names.add(name);
-  };
-  return {
-    name: "cutex-module-pack-host-use",
-    enforce: "post",
-    async transform(code, id) {
-      if (id.startsWith("\0") || !/\.(?:[cm]?[jt]sx?)$/.test(id.split("?")[0])) return null;
-      const ast = this.parse(code);
-      const visit = async (source, names) => {
-        const r = await this.resolve(source, id);
-        if (!r || !r.id.startsWith(HOST_PREFIX)) return;
-        const spec = r.id.slice(HOST_PREFIX.length);
-        for (const n of names) record(spec, n);
-      };
-      for (const node of ast.body) {
-        if (node.type === "ImportDeclaration") {
-          if (node.importKind === "type") continue;
-          const names = node.specifiers.map((s) => (s.type === "ImportDefaultSpecifier" ? "default" : s.type === "ImportNamespaceSpecifier" ? "*" : s.imported.name ?? s.imported.value));
-          await visit(node.source.value, names.length ? names : ["*"]);
-        } else if (node.type === "ExportNamedDeclaration" && node.source) {
-          await visit(node.source.value, node.specifiers.map((s) => s.local.name ?? s.local.value));
-        } else if (node.type === "ExportAllDeclaration") {
-          await visit(node.source.value, ["*"]);
-        }
-      }
-      return null;
+      return loadId.startsWith(HOST_PREFIX) ? hostModule(loadId.slice(HOST_PREFIX.length)) : null;
     },
   };
 }
@@ -213,7 +168,7 @@ export async function buildPack(id, outDir, opts = {}) {
   const packJsonPath = join(moduleDir, "pack.json");
   if (!existsSync(packJsonPath)) throw new Error(`modules/${id}/pack.json is missing: only modules with a pack.json can be packs`);
   const packJson = JSON.parse(readFileSync(packJsonPath, "utf8"));
-  for (const k of Object.keys(packJson)) if (!["version", "moduleApi", "styles"].includes(k)) throw new Error(`modules/${id}/pack.json: unknown field ${k}`);
+  for (const k of Object.keys(packJson)) if (!["version", "moduleApi", "styles", "packOnly"].includes(k)) throw new Error(`modules/${id}/pack.json: unknown field ${k}`);
   if (!/^(0|[1-9]\d{0,5})\.(0|[1-9]\d{0,5})\.(0|[1-9]\d{0,5})$/.test(packJson.version ?? "")) throw new Error(`modules/${id}/pack.json: version must be M.m.p`);
   const vite = await import("vite");
   const sdk = await loadSdk(vite);
@@ -236,45 +191,8 @@ export async function buildPack(id, outDir, opts = {}) {
     }
     plugins.unshift(hostPlugin({ id, moduleDir, table, cssFile, packJson, extraMessages: catalogMessages(id) }));
     plugins.push(hostUsePlugin(used));
-    const result = await vite.build({
-      configFile: false,
-      root: join(APP_DIR, "src/renderer"),
-      mode: "production",
-      logLevel: opts.logLevel ?? "warn",
-      publicDir: false,
-      plugins,
-      resolve: { alias: { "@": RENDERER_SRC } },
-      esbuild: { jsx: "automatic", jsxDev: false, jsxImportSource: "react", legalComments: "none" },
-      define: { "process.env.NODE_ENV": JSON.stringify("production") },
-      build: {
-        write: false,
-        outDir: join(scratch, "out"),
-        emptyOutDir: false,
-        target: "es2022",
-        minify: "esbuild",
-        sourcemap: false,
-        modulePreload: false,
-        cssCodeSplit: false,
-        copyPublicDir: false,
-        reportCompressedSize: false,
-        assetsInlineLimit: () => true,
-        rollupOptions: {
-          input: ENTRY_ID,
-          preserveEntrySignatures: "strict",
-          // "use client" directives of bundled libraries (lucide-react) mean nothing here.
-          onwarn: (warning, warn) => (warning.code === "MODULE_LEVEL_DIRECTIVE" ? undefined : warn(warning)),
-          treeshake: { moduleSideEffects: (mid) => !/[\\/]mock\.ts$/.test(mid) },
-          output: { format: "es", entryFileNames: "index.js", assetFileNames: (a) => (a.names?.[0] ?? a.name ?? "").endsWith(".css") ? "index.css" : "[name][extname]", inlineDynamicImports: true },
-        },
-      },
-    });
-    const outputs = (Array.isArray(result) ? result : [result]).flatMap((r) => r.output);
-    const chunks = outputs.filter((o) => o.type === "chunk");
-    if (chunks.length !== 1 || chunks[0].fileName !== "index.js") throw new Error(`${id}: the build made ${chunks.map((c) => c.fileName).join(", ")}, not one index.js`);
-    const chunk = chunks[0];
-    if (chunk.imports.length || chunk.dynamicImports.length) throw new Error(`${id}: index.js still imports ${[...chunk.imports, ...chunk.dynamicImports].join(", ")}`);
-    if (/\bimport\s*\(|^\s*import\s|\bfrom\s*["']/m.test(chunk.code.replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`/g, '""'))) throw new Error(`${id}: index.js has an import statement left`);
-    const assets = outputs.filter((o) => o.type === "asset");
+    const result = await vite.build(packBuildOptions({ root: join(APP_DIR, "src/renderer"), logLevel: opts.logLevel, outDir: join(scratch, "out"), plugins, entry: ENTRY_ID, alias: { "@": RENDERER_SRC } }));
+    const { chunk, assets } = checkBundle(id, result);
     const files = [{ path: "index.js", data: Buffer.from(chunk.code, "utf8") }];
     const styles = [];
     for (const a of assets) {
@@ -283,7 +201,8 @@ export async function buildPack(id, outDir, opts = {}) {
       files.push({ path: "index.css", data: Buffer.from(a.source) });
       styles.push("index.css");
     }
-    const host = Object.fromEntries([...used.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([spec, names]) => [spec, [...names].sort()]));
+    const host = sortedHost(used);
+    files.push(...packDataFiles(moduleDir));
     const manifest = { id, version: packJson.version, moduleApi: packJson.moduleApi, entry: "index.js", styles, host };
     files.push({ path: "pack.json", data: Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`, "utf8") });
     files.sort((a, b) => (a.path < b.path ? -1 : 1));
@@ -326,6 +245,41 @@ ${readFileSync(enFile, "utf8")}` : "");
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }
+}
+
+/**
+ * The module's `art/` folder, if any, as pack files (data main reads, never served to a page; docs/desktop-modules.md §29).
+ * Every image must be listed in art/manifest.json as `source: "generated"` with its tool and prompt: anything unlisted stops the build.
+ */
+
+export function packDataFiles(moduleDir) {
+  const root = join(moduleDir, "art");
+  if (!existsSync(root)) return [];
+  const manifestPath = join(root, "manifest.json");
+  if (!existsSync(manifestPath)) throw new Error(`${root}: art/manifest.json is missing`);
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  const listed = new Map((manifest.images ?? []).map((image) => [image.path, image]));
+  const out = [];
+  const walk = (dir, rel) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = rel ? `${rel}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) walk(join(dir, entry.name), path);
+      else if (!entry.isFile()) throw new Error(`art/${path}: only plain files can go in a pack`);
+      else {
+        if (path !== "manifest.json" && entry.name !== "pet.json") {
+          const image = listed.get(path);
+          const text = (v) => typeof v === "string" && v.trim().length > 0;
+          if (image?.source !== "generated" || !text(image.tool) || !text(image.prompt)) throw new Error(`art/${path}: not listed in art/manifest.json with source "generated", its tool and its prompt`);
+          if (!path.endsWith(".png")) throw new Error(`art/${path}: only PNG images can go in a pack`);
+          if (image.sha256 !== undefined && createHash("sha256").update(readFileSync(join(dir, entry.name))).digest("hex") !== image.sha256) throw new Error(`art/${path}: not the file art/manifest.json recorded`);
+        }
+        out.push({ path: `art/${path}`, data: readFileSync(join(dir, entry.name)) });
+      }
+    }
+  };
+  walk(root, "");
+  for (const path of listed.keys()) if (!out.some((f) => f.path === `art/${path}`)) throw new Error(`art/manifest.json lists ${path}, which is not there`);
+  return out;
 }
 
 /** Ids of every module that has a pack.json. */

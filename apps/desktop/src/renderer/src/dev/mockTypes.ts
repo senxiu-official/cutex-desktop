@@ -63,6 +63,8 @@ export interface ModuleMock {
   /** Bridge api methods (DesktopApi) this module serves. Called once at install; a method may not be
    *  defined twice (test/modules.test.ts). Side effects that belong to install may run here. */
   api?(core: MockCore): Partial<DesktopApi>;
+  /** Bridge members outside the daemon api (e.g. a window service of main) this module plays in the preview. */
+  bridge?(core: MockCore): Partial<import("../../../shared/ipc").PreloadBridge>;
   /** Timers / scripted replays, started after the api is built. */
   start?(core: MockCore): void;
   /** thread/read for sessions whose history this module scripts (null = not mine). */

@@ -4,7 +4,7 @@
 import type { AskCommandMethod, AskSummary } from "../../../shared/ipc";
 import type { MessageKey } from "../i18n";
 import type { MenuEntry } from "./contextMenu";
-import { delegationActions, requesterSession } from "./delegations";
+import { delegationActions, delegationCanResume, requesterSession } from "./delegations";
 import { delegationCommand } from "./delegationStore";
 import { focusDelegation, focusTurn } from "./focusRequest";
 import { copyText } from "./menus";
@@ -38,6 +38,7 @@ export function delegationMenu(d: AskSummary, t: T, nameOf: (id: string) => stri
   // An unresolved short id (transcript-only card, cutex task 06) cannot address Management v2.
   // users-p2-access: a non-owner runs these only with send (and an older host: the owner only).
   const can = isShortId(d.askId) || !p2AccessNow(host).delegations ? { stop: false, retry: false, accept: false, abandon: false } : delegationActions(d);
+  const resume = !isShortId(d.askId) && p2AccessNow(host).delegations && delegationCanResume(d);
   const turnId = opts.views ? (d.attempt?.turnId ?? null) : null;
   const error = d.attempt?.lastError ?? null;
   return [
@@ -45,7 +46,8 @@ export function delegationMenu(d: AskSummary, t: T, nameOf: (id: string) => stri
     !!d.target && { label: t("delegation.openTarget", { name: d.targetName ?? nameOf(d.target) }), onSelect: () => void select(d.target) },
     requester && opts.here !== requester && { label: t("delegation.jumpCard"), onSelect: () => focusDelegation(requester, d.askId, host) },
     turnId && { label: t("delegation.jumpTurn"), onSelect: () => focusTurn(d.target, turnId, host) },
-    (can.stop || can.retry || can.accept || can.abandon) && "separator",
+    (resume || can.stop || can.retry || can.accept || can.abandon) && "separator",
+    resume && { label: t("delegation.resumeWait"), confirm: t("delegation.resumeWaitConfirm"), onSelect: () => runDelegationCommand(host, d, "cutex/ask/resume", t) },
     can.stop && { label: t("delegation.stop"), danger: true, confirm: t("delegation.stopConfirm"), onSelect: () => runDelegationCommand(host, d, "cutex/ask/stop", t) },
     can.retry && { label: t("delegation.retry"), onSelect: () => runDelegationCommand(host, d, "cutex/ask/retry", t) },
     can.accept && { label: t("delegation.accept"), onSelect: () => runDelegationCommand(host, d, "cutex/ask/close", t, "accepted") },

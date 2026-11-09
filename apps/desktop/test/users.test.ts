@@ -61,8 +61,11 @@ describe("Settings → 用户 model", () => {
   });
   it("summarises grants", () => {
     expect(grantSummary(null, t)).toBe("Sees nothing");
-    expect(grantSummary({ projects: "all", standaloneAgents: ["s"], send: true }, t)).toBe("All projects · 1 standalone {{agent}} · Can send");
-    expect(grantSummary({ projects: ["p", "q"], standaloneAgents: [], send: false }, t)).toBe("2 projects · Read-only");
+    expect(grantSummary({ projects: "all", standaloneAgents: ["s"], send: true }, t)).toBe("Can see all projects, 1 standalone {{agent}} · Can send · Can't manage the host");
+    expect(grantSummary({ projects: ["p", "q"], standaloneAgents: [], send: false }, t)).toBe("Can see 2 projects · Can't send · Can't manage the host");
+    const projects = [{ id: "p", name: "IFM" }, { id: "q", name: "Waveline" }];
+    expect(grantSummary({ projects: ["p", "q"], standaloneAgents: [], send: true }, t, projects)).toBe("Can see IFM, Waveline · Can send · Can't manage the host");
+    expect(grantSummary({ projects: ["p", "gone"], standaloneAgents: [], send: true }, t, projects)).toBe("Can see 2 projects · Can send · Can't manage the host");
   });
   it("compares, toggles and finds unknown ids", () => {
     expect(sameGrant({ projects: ["a", "b"], standaloneAgents: [], send: true }, { projects: ["b", "a"], standaloneAgents: [], send: true })).toBe(true);

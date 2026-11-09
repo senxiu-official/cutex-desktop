@@ -14,6 +14,8 @@ import { AGENT_PAUSE_METHOD, AGENT_RESUME_METHOD, type AgentPauseResult } from "
 import type { EventEnvelope, SessionResource } from "@cutex-desktop/protocol";
 import { readProjectOperators } from "./projectOperators";
 import { forkPreview, forkRequestParams, forkResult } from "./sessionFork";
+import { agentMcpView, type AgentMcpResult, type AgentMcpView } from "../shared/sessionMcp";
+import { FILES_REVERT_METHOD, filesRevertFailure, filesRevertPlan, type FilesRevertRequest, type FilesRevertResult } from "../shared/filesRevert";
 import { localFileAction } from "./localFiles";
 import { remoteCopyTransport } from "./remoteCopyTransport";
 import type { CopySource } from "../shared/remoteCopies";
@@ -27,6 +29,7 @@ import { directorScopeCandidates, directorReviewContent, projectDirector, direct
 import { appWindows } from "./appWindows";
 import { downloadFilename, downloadFilters } from "../shared/downloadFilename";
 import { randomUUID } from "node:crypto";
+import { promoteDoneOf, QUICK_CHAT_PROMOTE_FEATURE, QUICK_CHAT_PROMOTE_FLAG, validPromoteRequest, validPromoteTarget, type PromoteRequest, type PromoteResult } from "../shared/quickChatPromote";
 import { FORMAL_RENAME_FEATURE, FORMAL_RENAME_FLAG, holderIds, restoreNameWire, nameHistoryPath, validRenameRequest, validRenameTarget, type FormalRenameRequest, type FormalRenameResult, type NameHistoryEvent, type NameHistoryPage } from "../shared/agentRename";
 import type { HostProxyPatch } from "../shared/proxy";
 import { traceSendStage } from "../shared/sendTrace";
@@ -130,7 +133,8 @@ import { asStuckDiscarded, asStuckView, cleanMinAge, stuckDiscardRequest } from 
 import { sanitizeLaunch, type NewThreadDefaultsPatch } from "../shared/launch";
 import type { ClientState, OnlineClientView, RemoteCloseResult } from "../shared/remoteClose";
 import { CLIENT_INSTANCE } from "./clientPresence";
-import type { ClientTokenView, PairingCodeView, WindowsSandboxReadiness } from "../shared/ipc";
+import type { ClientTokenView, CreatedPairingInviteView, RelayPairingStatusView, PairingApproveResult, PairingApproveTexts, PairingCodeView, PairingInviteView, WindowsSandboxReadiness } from "../shared/ipc";
+import { approvePairing, type PairingConfirm } from "./pairingInvites";
 import { windowsSandboxReadinessOf } from "../shared/windowsSandbox";
 import { localDaemonSetup, readHostOwner, type HostOwner } from "../shared/hosts";
 import { isValidTokenId } from "../shared/hosts";
@@ -390,6 +394,18 @@ export class DaemonService implements DaemonApi {
     if (this.retryTimer) clearTimeout(this.retryTimer);
     this.retryTimer = null;
     void this.connect();
+  }
+
+  /**
+   * The SSH tunnel moved to a better route. Requests in flight stay on the old one and finish there;
+   * streams would stay too, so they reopen now from their cursors and the old route can drain.
+   */
+  moveStreams(): void {
+    this.hostFeed?.reopen();
+    for (const feed of this.sessionFeeds.values()) feed.reopen();
+    for (const follower of this.projectWatches.values()) follower.reconnectNow();
+    for (const watch of this.watches.values()) watch.reopen();
+    for (const terminal of this.terminals.values()) terminal.reopen();
   }
 
   stop(): void {
@@ -879,6 +895,13 @@ export class DaemonService implements DaemonApi {
     setTimeout(() => { if (this.client === client) this.emit("sidebarChanged", { reason: "archived_wanted" }); }, 0);
   }
 
+  /** This client's own write has returned: the next `sidebar()` shows it. `id`: its row, read directly (a new agent's too). */
+  private noteSidebarWrite(id?: string): void {
+    if (id) this.sessionDeltas?.invalidate(id);
+    this.sessionDeltas?.noteWrite();
+    this.sidebarRefresh.noteWrite();
+  }
+
   private invalidateSidebarParts(resources = true): void {
     if (resources) this.sessionDeltas?.invalidate();
     this.sidebarRefresh.invalidate();
@@ -1011,8 +1034,11 @@ export class DaemonService implements DaemonApi {
     if (client !== this.client) throw new Error("session catalog host changed");
     if (this.sessionDeltas) return this.sessionDeltas;
     const options = { background: true };
+    const batch = this.capabilitiesCache.peek()?.featureList?.includes("session-deltas-resources-v1") === true;
     const catalog = new SessionDeltaCatalog({
-      page: (lifecycle, cursor) => client.sessionPage({ lifecycle, cursor, limit: 200, maxBytes: 262144 }, options),
+      page: (lifecycle, cursor) => client.sessionPage({ lifecycle, cursor, limit: batch ? 50 : 200, maxBytes: 262144,
+        ...(batch && lifecycle === "active" ? { include: "resource,hostRow" as const } : {}),
+      }, options),
       changes: cursor => client.sessionChanges(cursor, { limit: 1000, maxBytes: 65536 }, options),
       session: async (id, lifecycle) => {
         for (const kind of [lifecycle, lifecycle === "active" ? "retired" : "active"] as const) {
@@ -1460,6 +1486,8 @@ export class DaemonService implements DaemonApi {
       caps = { ...caps, featureList: [...(caps.featureList ?? []), "owner-admission-held-v1"] };
     if (caps?.features?.[FORMAL_RENAME_FLAG] === true && !caps.featureList?.includes(FORMAL_RENAME_FEATURE))
       caps = { ...caps, featureList: [...(caps.featureList ?? []), FORMAL_RENAME_FEATURE] };
+    if (caps?.features?.[QUICK_CHAT_PROMOTE_FLAG] === true && !caps.featureList?.includes(QUICK_CHAT_PROMOTE_FEATURE))
+      caps = { ...caps, featureList: [...(caps.featureList ?? []), QUICK_CHAT_PROMOTE_FEATURE] };
     if (this.client === client && access === this.accessRevision) {
       this.liveDeltasClient = caps === null ? null : client;
       this.liveDeltasSupported = caps?.featureList?.includes(LIVE_DELTAS_FEATURE) === true;
@@ -1734,8 +1762,9 @@ export class DaemonService implements DaemonApi {
   async renameFormalAgent(id: string, request: FormalRenameRequest): Promise<FormalRenameResult> {
     if (!validRenameTarget(id) || !validRenameRequest(request)) throw new Error("bad rename request");
     const body = { requestId: request.requestId, expectedRevision: request.expectedRevision, name: request.name };
+    const client = this.requireClient();
     try {
-      const r = await this.requireClient().request<{ event: NameHistoryEvent; replayed?: boolean; session?: SessionResource | null }>("POST", `/v2/human/agents/${encodeURIComponent(id)}/rename`, { body });
+      const r = await client.request<{ event: NameHistoryEvent; replayed?: boolean; session?: SessionResource | null }>("POST", `/v2/human/agents/${encodeURIComponent(id)}/rename`, { body });
       return { ok: true, event: r.event, replayed: r.replayed === true, session: r.session ?? null };
     } catch (error) {
       if (error instanceof CutexApiError) {
@@ -1746,6 +1775,32 @@ export class DaemonService implements DaemonApi {
       }
       // No answer: it may have been renamed. Only the exact same request may be replayed.
       return { ok: false, error: { code: "transport", message: error instanceof Error ? error.message : String(error), retrySame: true } };
+    } finally {
+      if (this.client === client) this.noteSidebarWrite(id);
+    }
+  }
+
+  // ---------- 转为智能体 (quick-chat-promote-v1) ----------
+
+  async promoteQuickChat(id: string, request: PromoteRequest): Promise<PromoteResult> {
+    if (!validPromoteTarget(id) || !validPromoteRequest(request)) throw new Error("bad promote request");
+    const body = { requestId: request.requestId, expectedRevision: request.expectedRevision, name: request.name, projectId: request.projectId };
+    const client = this.requireClient();
+    try {
+      const r = await client.request<unknown>("POST", `/v2/human/sessions/${encodeURIComponent(id)}/promote`, { body });
+      const done = promoteDoneOf(r, request, id);
+      if (!done) return { ok: false, error: { code: "transport", message: "promote response does not match the request", retrySame: true } };
+      return { ok: true, result: done };
+    } catch (error) {
+      if (error instanceof CutexApiError) {
+        const message = error.message.startsWith(`${error.code}: `) ? error.message.slice(error.code.length + 2) : error.message;
+        // 503 admission_busy / persistence_unavailable changed nothing: the identical request may go again.
+        return { ok: false, error: { code: error.code, message, retrySame: error.status >= 500 } };
+      }
+      // No answer: it may have been promoted. Only the identical request may be replayed.
+      return { ok: false, error: { code: "transport", message: error instanceof Error ? error.message : String(error), retrySame: true } };
+    } finally {
+      if (this.client === client) this.noteSidebarWrite(id);
     }
   }
 
@@ -2331,6 +2386,46 @@ export class DaemonService implements DaemonApi {
     };
   }
 
+  /** Set by main/index.ts: the native confirm before allowing a full-control device, and this host's label. */
+  pairingConfirm: PairingConfirm | null = null;
+  pairingHostLabel: () => string = () => { const state = this.currentState; return state.kind === "connected" ? state.hostId : ""; };
+
+  pairingInvites(): Promise<UsersResult<PairingInviteView[]>> {
+    return this.usersCall(() => this.requireClient().pairingInvites());
+  }
+
+  createPairingInvite(options: { userId?: string; scope?: DeviceScope; label?: string }): Promise<UsersResult<CreatedPairingInviteView>> {
+    const o = options && typeof options === "object" ? options : {};
+    // The reply carries the invite secret (in `qr`): returned to the renderer only, never logged here.
+    return this.usersCall(() => this.requireClient().createPairingInvite({
+      ...(typeof o.userId === "string" ? { userId: o.userId } : {}),
+      ...(typeof o.scope === "string" ? { scope: o.scope } : {}),
+      ...(typeof o.label === "string" ? { label: o.label } : {}),
+    }));
+  }
+
+  relayPairing(): Promise<UsersResult<RelayPairingStatusView>> {
+    return this.usersCall(() => this.requireClient().relayPairing());
+  }
+
+  setRelayPairing(enabled: boolean): Promise<UsersResult<RelayPairingStatusView>> {
+    // Strictly a boolean from the renderer: anything else is a bad call, never "on".
+    if (typeof enabled !== "boolean") return Promise.resolve({ ok: false, error: { code: "relay_invalid_request", message: "enabled must be a boolean" } });
+    return this.usersCall(() => this.requireClient().setRelayPairing(enabled));
+  }
+
+  cancelPairingInvite(inviteId: string): Promise<UsersResult<null>> {
+    return this.usersCall(async () => { await this.requireClient().cancelPairingInvite(String(inviteId)); return null; });
+  }
+
+  approvePairingRequest(inviteId: string, requestId: string, texts: PairingApproveTexts): Promise<PairingApproveResult> {
+    return approvePairing(this.requireClient(), (run) => this.usersCall(run), this.pairingConfirm, this.pairingHostLabel(), inviteId, requestId, texts);
+  }
+
+  denyPairingRequest(inviteId: string, requestId: string): Promise<UsersResult<null>> {
+    return this.usersCall(async () => { await this.requireClient().denyPairingRequest(String(inviteId), String(requestId)); return null; });
+  }
+
   async clientTokens(): Promise<ClientTokenView[]> {
     const r = await this.requireClient().clientTokens();
     return (r.tokens ?? []).map((t) => ({
@@ -2626,10 +2721,20 @@ export class DaemonService implements DaemonApi {
     if (request.profile) body.profile = request.profile;
     // profile-runtime-variants: the renderer sends it only to hosts that report the capability.
     if (request.variantId !== undefined) body.variantId = variantIdOf(request.variantId);
+    // agent-memory-injection: only the non-default value is sent (older cutex refuses the field).
+    if (request.memoryInjection === false) body.memoryInjection = false;
     const launch = sanitizeLaunch(request.launch);
     if (launch) body.launch = launch;
-    const r = await this.requireClient().request<{ cutexSessionId: string; effortFallback?: unknown; profilePick?: unknown }>("POST", "/v2/human/agents", { body });
-    return { cutexSessionId: r.cutexSessionId, effortFallback: effortFallbackOf(r.effortFallback), profilePick: profilePickOf(r.profilePick) };
+    const client = this.requireClient();
+    let created: string | undefined;
+    try {
+      const r = await client.request<{ cutexSessionId: string; effortFallback?: unknown; profilePick?: unknown }>("POST", "/v2/human/agents", { body });
+      created = r.cutexSessionId;
+      return { cutexSessionId: r.cutexSessionId, effortFallback: effortFallbackOf(r.effortFallback), profilePick: profilePickOf(r.profilePick) };
+    } finally {
+      // Joining a project changes its summary too (the Director CAS reads its revision next).
+      if (this.client === client) { this.invalidateSidebarParts(false); this.noteSidebarWrite(created); }
+    }
   }
 
   async profileAutoPick(query: Parameters<DesktopApi["profileAutoPick"]>[0]) {
@@ -2641,7 +2746,9 @@ export class DaemonService implements DaemonApi {
 
   async abandonAgentCreate(actionId: string, dryRun: boolean): Promise<CreateAbandonResult> {
     if (typeof actionId !== "string" || !validActionId(actionId)) throw new Error("bad action id");
-    return this.requireClient().request<CreateAbandonResult>("POST", "/v2/agent-management/create-abandon", { body: { action_id: actionId, dry_run: !!dryRun } });
+    const client = this.requireClient();
+    try { return await client.request<CreateAbandonResult>("POST", "/v2/agent-management/create-abandon", { body: { action_id: actionId, dry_run: !!dryRun } }); }
+    finally { if (!dryRun && this.client === client) this.noteSidebarWrite(); }
   }
 
   async createHumanSession(request: Parameters<DesktopApi["createHumanSession"]>[0]) {
@@ -2652,8 +2759,15 @@ export class DaemonService implements DaemonApi {
     if (request.variantId !== undefined) body.variantId = variantIdOf(request.variantId);
     const launch = sanitizeLaunch(request.launch);
     if (launch) body.launch = launch;
-    const r = await this.requireClient().request<{ cutexSessionId: string }>("POST", "/v2/human/sessions", { body });
-    return { cutexSessionId: r.cutexSessionId };
+    const client = this.requireClient();
+    let created: string | undefined;
+    try {
+      const r = await client.request<{ cutexSessionId: string }>("POST", "/v2/human/sessions", { body });
+      created = r.cutexSessionId;
+      return { cutexSessionId: r.cutexSessionId };
+    } finally {
+      if (this.client === client) this.noteSidebarWrite(created);
+    }
   }
 
   async sessionAction(sessionId: string, method: SessionActionMethod, params: Record<string, unknown>) {
@@ -2675,14 +2789,20 @@ export class DaemonService implements DaemonApi {
       throw error;
     }
     finally {
-      if (this.client === client) this.invalidateSidebarEvent({ cutexSessionId: sessionId, cutex: { method, params } } as EventEnvelope);
+      if (this.client === client) {
+        this.invalidateSidebarEvent({ cutexSessionId: sessionId, cutex: { method, params } } as EventEnvelope);
+        this.noteSidebarWrite();
+      }
     }
   }
 
   forkPreview(sessionId: string, request?: SessionForkPreviewRequest) { return forkPreview(this.requireClient(), sessionId, request); }
 
   async forkSession(sessionId: string, request: SessionForkRequest): Promise<SessionForkResult> {
-    return forkResult(await this.sessionAction(sessionId, "cutex/session/fork", forkRequestParams(request)));
+    const client = this.requireClient();
+    const result = forkResult(await this.sessionAction(sessionId, "cutex/session/fork", forkRequestParams(request)));
+    if (this.client === client) this.noteSidebarWrite(result.cutexSessionId);
+    return result;
   }
 
   deleteSession(sessionId: string, expectedRevision?: number): Promise<MutationResult> {
@@ -2692,7 +2812,24 @@ export class DaemonService implements DaemonApi {
   async revertHistory(sessionId: string, beforeTurnId: string, expectedRevision: number, options?: { rewindFiles?: boolean }) {
     // Only sent when requested: older cutex rejects the unknown parameter.
     const params = options?.rewindFiles === true ? { beforeTurnId, expectedRevision, rewindFiles: true } : { beforeTurnId, expectedRevision };
-    return this.requireClient().cutex<unknown>(sessionId, "cutex/session/history/revert", params);
+    const client = this.requireClient();
+    try { return await client.cutex<unknown>(sessionId, "cutex/session/history/revert", params); }
+    finally { if (this.client === client) this.noteSidebarWrite(sessionId); }
+  }
+
+  /** `cutex/session/files/revert` (Codex agents, feature session-files-revert): preview, or execute a previewed plan. */
+  async filesRevert(sessionId: string, turnId: string, request: FilesRevertRequest): Promise<FilesRevertResult> {
+    if (typeof turnId !== "string" || !turnId || !request || typeof request.dryRun !== "boolean") throw new Error("Invalid files revert request");
+    if (!request.dryRun && (typeof request.expectedPlanDigest !== "string" || !request.expectedPlanDigest)) throw new Error("Invalid files revert request");
+    const params = request.dryRun ? { turnId, dryRun: true } : { turnId, dryRun: false, expectedPlanDigest: request.expectedPlanDigest };
+    try {
+      const plan = filesRevertPlan(await this.requireClient().cutex<unknown>(sessionId, FILES_REVERT_METHOD, params));
+      return plan ? { ok: true, plan } : { ok: false, code: "invalid_response", message: "cutex returned no revert plan", plan: null, journalPath: null };
+    } catch (error) {
+      if (error instanceof CutexApiError) return filesRevertFailure(error.code, error.message, error.details);
+      if (error instanceof CutexUnreachableError) return { ok: false, code: "unreachable", message: error.message, plan: null, journalPath: null };
+      throw error;
+    }
   }
 
   async backgroundTerminals(sessionId: string, threadId: string): Promise<BackgroundTerminal[]> {
@@ -2800,7 +2937,7 @@ export class DaemonService implements DaemonApi {
   async operatorAction(request: import("@cutex-desktop/cutex-client").OperatorActionRequest) {
     const client = this.requireClient();
     try { return await client.operatorAction(request); }
-    finally { if (this.client === client) this.invalidateSidebarParts(); }
+    finally { if (this.client === client) { this.invalidateSidebarParts(); this.noteSidebarWrite(); } }
   }
 
   async projectMutation(projectId: string, expected: { authorityEpoch: number; projectRevision: number }, operation: ProjectMutationOperation) {
@@ -2815,7 +2952,7 @@ export class DaemonService implements DaemonApi {
         operation,
       },
     }); }
-    finally { if (this.client === client) this.invalidateSidebarParts(); }
+    finally { if (this.client === client) { this.invalidateSidebarParts(); this.noteSidebarWrite(); } }
   }
 
   async projectPresentation(projectId: string, expected: { authorityEpoch: number; presentationRevision: number }, presentation: { display_name: string; badge_label: string; color: string }) {
@@ -2829,7 +2966,7 @@ export class DaemonService implements DaemonApi {
         presentation,
       },
     }); }
-    finally { if (this.client === client) this.invalidateSidebarParts(); }
+    finally { if (this.client === client) { this.invalidateSidebarParts(); this.noteSidebarWrite(); } }
   }
 
   async projectMemory(projectId: string): Promise<ProjectMemoryView | null> {
@@ -2852,6 +2989,48 @@ export class DaemonService implements DaemonApi {
       if (error instanceof CutexApiError && error.status === 404) return null;
       throw error;
     }
+  }
+
+  /** A scoped-MCP call's outcome: a router 404 / 405 without a scoped-MCP code is a cutex without the route. */
+  private async agentMcpCall(run: (client: CutexClient) => Promise<AgentMcpView | null>): Promise<AgentMcpResult> {
+    try {
+      const view = await run(this.requireClient());
+      return view ? { ok: true, view } : { ok: false, code: "invalid_response", message: "cutex returned no MCP view" };
+    } catch (error) {
+      if (error instanceof CutexApiError) {
+        const missing = (error.status === 404 || error.status === 405) && !["session_not_found", "scoped_mcp_store_unavailable"].includes(error.code);
+        const message = error.message.startsWith(`${error.code}: `) ? error.message.slice(error.code.length + 2) : error.message;
+        return { ok: false, code: missing ? "unsupported" : error.code, message };
+      }
+      if (error instanceof CutexUnreachableError) return { ok: false, code: "unreachable", message: error.message };
+      throw error;
+    }
+  }
+
+  private async readAgentMcp(client: CutexClient, sessionId: string): Promise<AgentMcpView | null> {
+    const path = `/v2/sessions/${encodeURIComponent(sessionId)}/mcp`;
+    const [scope, effective] = await Promise.all([client.request<unknown>("GET", path), client.request<unknown>("GET", `${path}/effective`)]);
+    return agentMcpView(sessionId, scope, effective);
+  }
+
+  /** cutex `scoped-mcp`: the MCP servers this agent launches with, and its own on / off list. */
+  agentMcp(sessionId: string): Promise<AgentMcpResult> {
+    return this.agentMcpCall((client) => this.readAgentMcp(client, sessionId));
+  }
+
+  /**
+   * Turn inherited servers off / on for this agent (the agent layer's `disabled`). The agent layer's own
+   * servers are sent back as cutex returned them (secrets stay `<redacted>`, which cutex keeps); a change
+   * since `expectedRevision` answers `revision_conflict`.
+   */
+  setAgentMcpDisabled(sessionId: string, disabled: string[], expectedRevision: number): Promise<AgentMcpResult> {
+    if (!Array.isArray(disabled) || disabled.some((n) => typeof n !== "string" || !n) || !Number.isInteger(expectedRevision)) throw new Error("Invalid MCP switch request");
+    return this.agentMcpCall(async (client) => {
+      const path = `/v2/sessions/${encodeURIComponent(sessionId)}/mcp`;
+      const scope = await client.request<{ servers?: Record<string, unknown> }>("GET", path);
+      await client.request<unknown>("PUT", path, { body: { servers: scope.servers ?? {}, disabled: [...new Set(disabled)], expectedRevision } });
+      return this.readAgentMcp(client, sessionId);
+    });
   }
 
   // ---------- delegations (cutex asks, root credential) ----------

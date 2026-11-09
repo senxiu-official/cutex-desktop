@@ -24,7 +24,7 @@ const line = (text: string) => text.replace(/\s+/g, " ").trim().slice(0, MAX);
  * The last message of the turns before `beforeTurnId` in `timeline` (what stays after the revert), as a preview at
  * `at`. Unknown (the turn is not loaded, nothing said yet): an empty output line.
  */
-export function previewOfKept(timeline: Pick<TimelineState, "turns" | "entries"> | null | undefined, beforeTurnId: string, at: number, plain: (text: string) => string = (t) => t): ActivityPreview {
+export function previewOfKept(timeline: Pick<TimelineState, "turns" | "entries"> | null | undefined, beforeTurnId: string, at: number, plain: (text: string) => string = (t) => t, shownSender?: (id: string) => string | undefined): ActivityPreview {
   const empty: ActivityPreview = { kind: "output", text: "", at };
   if (!timeline) return empty;
   const index = timeline.turns.findIndex((t) => t.id === beforeTurnId);
@@ -35,7 +35,7 @@ export function previewOfKept(timeline: Pick<TimelineState, "turns" | "entries">
       if (!entry) continue;
       if (entry.kind === "agent" && line(plain(entry.text))) return { kind: "output", text: line(plain(entry.text)), at };
       if (entry.kind === "user" && line(entry.text)) return { kind: "input", text: line(entry.text), at };
-      if (entry.kind === "received" && line(entry.message.text)) return { kind: "received", text: line(`${entry.message.senderName || entry.message.senderId}: ${entry.message.text}`), at };
+      if (entry.kind === "received" && line(entry.message.text)) return { kind: "received", text: line(`${shownSender?.(entry.message.senderId) || entry.message.senderName || entry.message.senderId}: ${entry.message.text}`), at };
     }
   }
   return empty;

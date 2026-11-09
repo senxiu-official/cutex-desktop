@@ -12,7 +12,7 @@ import { setSettingsAttention } from "../../lib/settingsAttention";
 import { useHostData } from "../../lib/useHostScope";
 import { useApp } from "../../store";
 import { services } from "../app";
-import type { AppModuleContext } from "../slots";
+import type { ModuleContext } from "../slots";
 import { runActive, upgradeAttention } from "./model";
 import { rememberReleaseNotes } from "./releaseNotes";
 
@@ -136,7 +136,7 @@ function scheduleReload(hostId: string): void {
 }
 
 /** Module activation: follow `cutex/upgrade/updated` on every connected host until the module stops. */
-export function startUpgradeSync(ctx: AppModuleContext): void {
+export function startUpgradeSync(ctx: ModuleContext): void {
   if (typeof bridge?.on !== "function") return;
   const off = bridge.on("hostEvent", ({ hostId, envelope }) => {
     const event = upgradeEventOf(envelope);

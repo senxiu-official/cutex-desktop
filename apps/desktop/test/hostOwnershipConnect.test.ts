@@ -1,7 +1,7 @@
 // Host ownership (docs/research/host-ownership-20261019.md §1.2 / §2): `/v2/host.owner` parsing, the
 // token command per connect-as mode, the "auto" decision table, hosts.json defaults, HostManager's
 // add / re-pair / switch flows (ssh mocked) and the preview's mock bridge.
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const ssh = vi.hoisted(() => ({
   commands: [] as string[],
@@ -278,18 +278,29 @@ describe("HostManager connect-as flows (ssh mocked)", () => {
 });
 
 describe("mock bridge host ownership", () => {
-  async function install(search = ""): Promise<PreloadBridge> {
-    vi.resetModules();
-    vi.useFakeTimers();
+  function stubs(search: string) {
     const win: { cutex?: PreloadBridge } = {};
     vi.stubGlobal("window", win);
     vi.stubGlobal("location", { search });
     vi.stubGlobal("document", { title: "" });
     vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => {} });
+    return win;
+  }
+  async function install(search = ""): Promise<PreloadBridge> {
+    vi.resetModules();
+    vi.useFakeTimers();
+    const win = stubs(search);
     const { installMockBridge } = await import("../src/renderer/src/dev/mockBridge");
     installMockBridge();
     return win.cutex!;
   }
+  // The first import loads the bridge's whole module graph (5 s on an idle machine, all of the first test's budget);
+  // after that an install() only re-evaluates it (~50 ms). Same as moduleMocks.test.ts.
+  beforeAll(async () => {
+    stubs("");
+    await import("../src/renderer/src/dev/mockBridge");
+    vi.unstubAllGlobals();
+  }, 60_000);
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();

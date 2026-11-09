@@ -569,3 +569,96 @@ it("a first live feed after the first read keeps that read and re-reads only row
   expect(f.session.mock.calls.map(([id]) => id)).toEqual(["a"]); expect(f.sessionPage).not.toHaveBeenCalled();
   f.session.mockClear(); await sidebar(); expect(f.session).not.toHaveBeenCalled();
 });
+
+it("a read asked after this client's own write begins after it, without the spacing, and the older read still answers", async () => {
+  const refresh = new SidebarRefresh<string>(2000); await refresh.read(async () => "first");
+  await vi.advanceTimersByTimeAsync(2000);
+  const old = deferred<string>(), stale = vi.fn();
+  const older = refresh.read(() => old.promise, stale);
+  const load = vi.fn(async () => "after write");
+  refresh.noteWrite();
+  const fresh = refresh.read(load);
+  expect(fresh).not.toBe(older); expect(load).not.toHaveBeenCalled();
+  old.resolve("before write");
+  expect(await older).toBe("before write"); expect(stale).toHaveBeenCalledOnce();
+  // Started at once though the older read began less than 2000 ms ago.
+  expect(await fresh).toBe("after write"); expect(load).toHaveBeenCalledOnce();
+});
+
+it("a failed older read does not fail the read asked after the write", async () => {
+  const refresh = new SidebarRefresh<string>(); const old = deferred<string>();
+  let fail!: (error: Error) => void;
+  const older = refresh.read(() => Promise.race([old.promise, new Promise<string>((_, reject) => { fail = reject; })]));
+  refresh.noteWrite();
+  const fresh = refresh.read(async () => "after write");
+  fail(Error("busy"));
+  await expect(older).rejects.toThrow("busy");
+  expect(await fresh).toBe("after write");
+});
+
+it("a write ends the spacing wait of a read that has not begun; that read shows it", async () => {
+  const refresh = new SidebarRefresh<number>(2000); await refresh.read(async () => 1);
+  const load = vi.fn(async () => 2);
+  const waiting = refresh.read(load);
+  await vi.advanceTimersByTimeAsync(500); expect(load).not.toHaveBeenCalled();
+  refresh.noteWrite();
+  expect(refresh.read(load)).toBe(waiting);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(load).toHaveBeenCalledOnce(); expect(await waiting).toBe(2);
+});
+
+it("events alone never make a reader wait for a newer read", async () => {
+  const refresh = new SidebarRefresh<string>(2000); const old = deferred<string>(), stale = vi.fn();
+  const running = refresh.read(() => old.promise, stale);
+  const load = vi.fn(async () => "newer");
+  for (let n = 0; n < 50; n++) { refresh.invalidate(); expect(refresh.read(load)).toBe(running); }
+  old.resolve("running");
+  expect(await running).toBe("running");
+  expect(load).not.toHaveBeenCalled(); expect(stale).toHaveBeenCalledOnce();
+});
+
+it("createAgent: a sidebar read already running cannot answer the read after it, and the project summary is fresh", async () => {
+  await open(); await sidebar();
+  const old = deferred(); f.hostSessions.mockReturnValueOnce(old.promise);
+  const running = service.sidebar();
+  await vi.advanceTimersByTimeAsync(2000);
+  f.request.mockResolvedValue({ cutexSessionId: "new" });
+  f.sessions.mockImplementation(async lifecycle => ({ sessions: lifecycle === "active" ? [{ cutexSessionId: "new" }] : [] }));
+  f.projects.mockImplementation(async () => ({ projects: [{ ...project(), project_revision: 2 }] }));
+  await service.createAgent({ name: "new", start: false } as any);
+  const fresh = service.sidebar();
+  old.resolve({ data: [], nextCursor: null });
+  await running;
+  const after = await fresh;
+  expect(after.active.map(row => row.cutexSessionId)).toEqual(["new"]);
+  expect(after.projects?.projects[0]?.project_revision).toBe(2);
+});
+
+it("createAgent on the catalog path: a read begun earlier (the poll) does not hide the new row", async () => {
+  deltaHost(); await open(false); await sidebar();
+  // The poll's catalog read is running, past the point where it could see the new agent.
+  const old = deferred(); f.sessionChanges.mockClear(); f.sessionChanges.mockReturnValueOnce(old.promise);
+  await vi.advanceTimersByTimeAsync(5000); expect(f.sessionChanges).toHaveBeenCalledOnce();
+  f.session.mockClear();
+  f.request.mockResolvedValue({ cutexSessionId: "new" });
+  await service.createAgent({ name: "new", start: false } as any);
+  const fresh = service.sidebar();
+  old.resolve({ resyncRequired: false, changes: [], nextCursor: "next", watermark: 1, more: false, oversizeFirst: false });
+  const after = await fresh;
+  expect(after.active.map(row => row.cutexSessionId)).toEqual(["a", "new"]);
+  // That one row is read directly; the others stay as they are.
+  expect(f.session.mock.calls.map(([id]) => id)).toEqual(["new"]);
+});
+
+it("createAgent during a slow first catalog read: the first read still answers, the read asked after it has the new row", async () => {
+  deltaHost(); const gate = deferred<void>();
+  f.session.mockImplementation(async (id, lifecycle) => { if (id === "a") await gate.promise; return { cutexSessionId: id, lifecycle, displayName: id, visible: true, revision: 100, runtime: { status: "offline" } }; });
+  await open(false);
+  const first = service.sidebar(); await settle();
+  f.request.mockResolvedValue({ cutexSessionId: "new" });
+  await service.createAgent({ name: "new", start: false } as any);
+  const fresh = service.sidebar();
+  gate.resolve();
+  expect((await first).active.map(row => row.cutexSessionId)).toContain("a");
+  expect((await fresh).active.map(row => row.cutexSessionId)).toEqual(["a", "new"]);
+});

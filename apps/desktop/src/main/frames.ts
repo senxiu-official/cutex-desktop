@@ -1,8 +1,8 @@
 // File pages (owner 2026-10-24): an HTML file of a workspace / the host shown as a page in the file view —
 // the same one-use offline opaque document, read by main from that host, but with no page channels at all.
 // Agent pages (docs/desktop-modules.md §10.2): an HTML artifact version as a one-use, offline, opaque
-// frame document in the shared frame store (the same store, scheme and navigation lease as plugin
-// documents, main/plugins.ts). Main reads the bytes from the host itself; the document has no network
+// frame document in the shared frame store (one store, scheme and navigation lease for agent pages and
+// file pages). Main reads the bytes from the host itself; the document has no network
 // (loopback included). It has exactly three channels (docs/design/004-artifact-page-bridge.md), decided
 // here for the artifact main itself bound to the frame id — never one the renderer or page names:
 //   A storage: that artifact's own data (pageStorage.ts limits), shared across its versions;
@@ -17,6 +17,9 @@ import type { FrameDocumentStore } from "@cutex-desktop/opaque-frame/documents";
 import { ARTIFACT_ID, type ArtifactContent, type ArtifactDetail } from "../shared/artifactStore";
 import { ARTIFACT_PAGE_MAX_BYTES, FILE_PAGE_MAX_BYTES, FILE_PAGE_PROMPT_BYTES, type ArtifactPageInput, type ArtifactPageResult, type FilePageInput, type FilePageResult } from "../shared/frames";
 import type { FsFile, WorkspaceScope } from "../shared/ipc";
+
+/** The scheme of every opaque frame document (main/index.ts registers it; the parent CSP allows only it in frame-src). */
+export const FRAME_SCHEME = "cutex-plugin";
 import { parsePageCall, type PageCall, type PageResult } from "../shared/pageBridge";
 import type { PageStorage } from "./pageStorage";
 import { pageSubmitMessage, pageSubmitPromptText, type PageSubmitPromptText } from "../shared/pagePromptText";

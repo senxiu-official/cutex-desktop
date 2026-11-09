@@ -6,3 +6,4 @@ export type BuiltPackEntry = Omit<ModuleIndexPack, "archive"> & { archive: Omit<
 export interface BuiltPack { entry: BuiltPackEntry; archivePath: string; files: { path: string; data: Buffer }[] }
 export function buildPack(id: string, outDir: string, opts?: { styles?: boolean; moduleDir?: string; logLevel?: "info" | "warn" | "error" | "silent" }): Promise<BuiltPack>;
 export function packableModules(): string[];
+export function packDataFiles(moduleDir: string): { path: string; data: Buffer }[];

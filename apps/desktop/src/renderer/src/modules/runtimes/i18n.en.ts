@@ -57,7 +57,11 @@ export const en: Record<keyof typeof zhCN, string> = {
   "runtimes.selectedHint": "New {{agents}} start on this version",
   "runtimes.missing": "files deleted",
   "runtimes.missingHint": "{{Agents}} are pinned to this version but its files are gone; repair them under Upgrade {{agents}}",
-  "runtimes.agents": "{n} {{agents}}",
+  "runtimes.agents": "{{Agents}}: {n}",
+  "runtimes.agentsSplit": "{{Agents}}: {n} · archived: {archived}",
+  "runtimes.agentsAllArchived": "Archived {{agents}}: {n}",
+  "runtimes.archivedHint": "Archived {{agents}} are not part of Upgrade {{agents}}; staying on this version does not mean they failed to upgrade",
+  "runtimes.archivedAgents": "Archived {{agents}} ({n})",
   "runtimes.noAgents": "no {{agents}}",
   "runtimes.moreAgents": "{n} more",
 };

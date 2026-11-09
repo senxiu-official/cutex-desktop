@@ -229,6 +229,46 @@ describe("EventFeed", () => {
     } finally { feed.stop(); }
   });
 
+  it("reopen moves a live stream to a new connection from its cursor, without a retry status or duplicates", async () => {
+    const statuses: string[] = [];
+    const seen: string[] = [];
+    const feed = new EventFeed(client, { event: (e) => seen.push(e.eventId), resync: () => {}, status: (s) => statuses.push(s) });
+    const first = daemon.emit();
+    feed.start();
+    await until(() => statuses.includes("live"));
+    expect(seen).toEqual([first.eventId]);
+    const streamsBefore = daemon.requests.filter((r) => r.url.includes("/v2/events/stream")).length;
+    const second = daemon.emit();
+    await until(() => seen.length === 2);
+
+    feed.reopen();
+    const third = daemon.emit();
+    await until(() => seen.length === 3 && daemon.requests.filter((r) => r.url.includes("/v2/events/stream")).length === streamsBefore + 1);
+    await until(() => statuses.at(-1) === "live");
+    expect(seen).toEqual([first.eventId, second.eventId, third.eventId]);
+    expect(statuses).not.toContain("retrying");
+    expect(daemon.requests.filter((r) => r.url.includes("/v2/events/stream")).at(-1)!.headers["last-event-id"]).toBeTruthy();
+    feed.stop();
+  });
+
+  it("reopen during a reconnect wait ends the wait; after stop it does nothing", async () => {
+    let calls = 0;
+    const fetch = vi.fn(async () => { calls++; throw new Error("down"); });
+    const source = new CutexClient(client.endpoint, { fetch: fetch as never });
+    const statuses: string[] = [];
+    const feed = new EventFeed(source, { event() {}, resync() {}, status: (s) => statuses.push(s) }, { minBackoffMs: 60_000 });
+    feed.start();
+    await until(() => statuses.includes("retrying"));
+    const before = calls;
+    feed.reopen();
+    await until(() => calls > before);
+    feed.stop();
+    const after = calls;
+    feed.reopen();
+    await flush();
+    expect(calls).toBe(after);
+  });
+
   it("replays backlog, then follows live events, without duplicates", async () => {
     daemon.emit();
     daemon.emit();

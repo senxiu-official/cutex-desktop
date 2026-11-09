@@ -9,7 +9,7 @@ import { openServiceExternal } from "../../lib/services";
 import { sideShowsHost } from "../../lib/sideServices";
 import { SERVICE_COMPONENT } from "../../lib/sideKinds";
 import { useApp } from "../../store";
-import type { AppModuleContext } from "../slots";
+import type { ModuleContext } from "../slots";
 import { SERVICE_REF_KIND } from "./refTarget";
 import { parseServiceReveal, revealIsLive, serviceLink, type ServiceReveal } from "./reveal";
 
@@ -19,7 +19,7 @@ const BROWSER_TAB = SERVICE_COMPONENT;
 /** A reveal waits in its agent's conversation this long (the owner may be elsewhere). */
 const REVEAL_CARD_MS = 30 * 60_000;
 
-export function openRevealed(ctx: AppModuleContext, r: Pick<ServiceReveal, "hostId" | "slug" | "path">): void {
+export function openRevealed(ctx: ModuleContext, r: Pick<ServiceReveal, "hostId" | "slug" | "path">): void {
   let opened = false;
   try {
     // Another host than the open agent's would open out of view on the right side: the system browser instead.
@@ -30,7 +30,7 @@ export function openRevealed(ctx: AppModuleContext, r: Pick<ServiceReveal, "host
   if (!opened) void openServiceExternal({ slug: r.slug }, r.hostId, r.path).catch((e: unknown) => ctx.services.ui.notice(ctx.t("services.reveal.failed", { error: e instanceof Error ? e.message : String(e) }), "error"));
 }
 
-export function startServiceReveals(ctx: AppModuleContext): void {
+export function startServiceReveals(ctx: ModuleContext): void {
   if (typeof bridge?.on !== "function") return;
   const startedAt = Date.now();
   const seen = new Set<string>();

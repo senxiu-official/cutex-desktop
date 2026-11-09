@@ -97,7 +97,7 @@ vi.mock("../src/main/browser/relay", () => ({ BrowserRelay: class {
   revokeLease = vi.fn(async (id: string) => { this.grants.delete(id); });
 } }));
 vi.mock("electron", () => ({
-  BrowserWindow: vi.fn(), nativeTheme: { shouldUseDarkColors: false, on: vi.fn(), off: vi.fn() }, nativeImage: { createFromBuffer: vi.fn(() => { throw Error("No image expected in wiring test"); }) },
+  BrowserWindow: vi.fn(), screen: { getDisplayMatching: vi.fn(() => ({ scaleFactor: 1.5 })) }, nativeTheme: { shouldUseDarkColors: false, on: vi.fn(), off: vi.fn() }, nativeImage: { createFromBuffer: vi.fn(() => { throw Error("No image expected in wiring test"); }) },
   ipcMain: { handle: (name: string, fn: (...args: any[]) => Promise<any>) => mocks.handlers.set(name, fn),
     removeHandler: (name: string) => mocks.handlers.delete(name) },
   app: { isPackaged: false, getPath: () => "memory-only-user-data",
@@ -172,7 +172,7 @@ function fixture(hostIds = ["local"], relayCapability = true, kinds: Record<stri
     return [id, connection] as const;
   }));
   const owner = new ContentsMock(new SessionMock()), events: BrowserEvent[] = [];
-  const window = Object.assign(new EventEmitter(), { webContents: owner, isDestroyed: () => owner.dead, isVisible: vi.fn(() => true), isMinimized: () => false,
+  const window = Object.assign(new EventEmitter(), { webContents: owner, isDestroyed: () => owner.dead, isVisible: vi.fn(() => true), isMinimized: () => false, getBounds: () => ({ x: 0, y: 0, width: 1500, height: 940 }),
     isFullScreen: () => false, setFullScreen: vi.fn() });
   const hosts = { connection: (id: string) => connections.get(id), focus: () => hostIds[0]!,
     state: () => ({ hosts: [...connections.keys()].map(id => ({ id, kind: kinds[id] ?? (id === "local" ? "local" : "dev-direct") })) }) };

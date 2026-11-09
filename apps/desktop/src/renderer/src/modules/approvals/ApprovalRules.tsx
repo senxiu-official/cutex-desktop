@@ -2,13 +2,15 @@
 // components/CutexRulesChip; this module owns the complete Settings view.
 import { useEffect, useMemo, useState } from "react";
 import { CircleHelp } from "lucide-react";
-import type { ApprovalKind, ApprovalRule, ApprovalRuleAudit, ApprovalRuleDraft, ApprovalRulesView, DaemonApi } from "../../../../shared/ipc";
+import type { ApprovalKind, ApprovalRule, ApprovalRuleAudit, ApprovalRuleAuditPage, ApprovalRuleDraft, ApprovalRulesView, DaemonApi } from "../../../../shared/ipc";
 import { Button } from "../../components/Button";
 import { TypedRuleConfirmation } from "../../components/TypedRuleConfirmation";
-import { ErrorNote, Section, SettingsGroup } from "../../components/settings/Form";
+import { ErrorNote, ListFilter, Section, SettingsGroup, SubPageRow } from "../../components/settings/Form";
 import { useI18n, type MessageKey } from "../../i18n";
 import { approvalRuleDraft, isDirectorRoleRule, ruleSaveAction } from "../../lib/approvalRuleKinds";
+import { matchesFilter } from "../../lib/listFilter";
 import { useTargetApi, useTargetSidebar } from "../../lib/targetHost";
+import { useApp } from "../../store";
 
 const message = (e: unknown) => e instanceof Error ? e.message : String(e);
 const kindLabel = (t: (key: MessageKey, params?: Record<string, string | number>) => string, kind: ApprovalKind) => t(`approvals.kind.${kind}` as MessageKey);
@@ -53,18 +55,52 @@ function RuleRow({ api, view, rule, name, refresh }: { api: DaemonApi; view: App
   </li>}</SettingsGroup>;
 }
 
-export function ApprovalRulesSettings() {
+/** Rows of 规则审计 the 协作 page shows; 全部 is its sub-page. */
+const AUDIT_ON_PAGE = 5;
+
+function AuditRow({ row }: { row: ApprovalRuleAudit }) {
   const { t, locale } = useI18n();
+  return <li className="flex gap-3 border-t border-border py-2 text-meta first:border-0"><span className="w-36 shrink-0 text-subtle">{new Date(row.at).toLocaleString(locale)}</span><span className="min-w-0 flex-1"><span className="font-medium">{t(`approvals.rules.audit.${row.action}` as MessageKey)}</span>{row.kind && <span> · {kindLabel(t, row.kind)}</span>}<span className="block text-subtle">{row.result}{row.ruleId ? ` · ${row.ruleId}` : ""}</span></span></li>;
+}
+
+/** 协作 → 规则审计: what one read returns (the newest 100), with a filter. */
+export function ApprovalRuleAuditAll() {
+  const { t } = useI18n();
+  const api = useTargetApi();
+  const [log, setLog] = useState<ApprovalRuleAuditPage | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [filter, setFilter] = useState("");
+  useEffect(() => {
+    let live = true;
+    setLog(null); setError(null);
+    api.approvalRuleAudit(0, 100).then((next) => { if (live) setLog(next); }, (e) => { if (live) setError(message(e)); });
+    return () => { live = false; };
+  }, [api]);
+  const rows = log?.audit ?? [];
+  const shown = rows.filter((row) => matchesFilter(filter, t(`approvals.rules.audit.${row.action}` as MessageKey), row.kind && kindLabel(t, row.kind), row.result, row.ruleId));
+  return <Section title={log ? t(log.nextCursor !== null ? "approvals.rules.audit.latest" : "approvals.rules.audit.all", { n: rows.length }) : undefined}>
+    {error && <ErrorNote>{error}</ErrorNote>}
+    {!log && !error && <p className="text-ui text-subtle">…</p>}
+    {log && !rows.length && <p className="text-ui text-muted">{t("approvals.rules.audit.empty")}</p>}
+    <div role="search" className="contents"><ListFilter count={rows.length} value={filter} onChange={setFilter} /></div>
+    {rows.length > 0 && !shown.length && <p className="text-ui text-muted">{t("settings.filterNone")}</p>}
+    <ul>{shown.map((row) => <AuditRow key={row.auditId} row={row} />)}</ul>
+  </Section>;
+}
+
+export function ApprovalRulesSettings() {
+  const { t } = useI18n();
   const api = useTargetApi();
   const sidebar = useTargetSidebar();
   const [view, setView] = useState<ApprovalRulesView | null>(null);
   const [audit, setAudit] = useState<ApprovalRuleAudit[]>([]);
+  const [auditMore, setAuditMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const refresh = async () => {
     try {
       setError(null);
       const [rules, log] = await Promise.all([api.approvalRules(), api.approvalRuleAudit(0, 100)]);
-      setView(rules); setAudit(log.audit);
+      setView(rules); setAudit(log.audit); setAuditMore(log.nextCursor !== null);
     } catch (e) { setError(message(e)); }
   };
   useEffect(() => { void refresh(); }, [api]);
@@ -81,7 +117,8 @@ export function ApprovalRulesSettings() {
     </Section>
     <Section title={t("approvals.rules.audit")} hint={t("approvals.rules.audit.hint")}>
       {!audit.length && <p className="text-ui text-muted">{t("approvals.rules.audit.empty")}</p>}
-      <ul>{audit.map((row) => <li key={row.auditId} className="flex gap-3 border-t border-border py-2 text-meta first:border-0"><span className="w-36 shrink-0 text-subtle">{new Date(row.at).toLocaleString(locale)}</span><span className="min-w-0 flex-1"><span className="font-medium">{t(`approvals.rules.audit.${row.action}` as MessageKey)}</span>{row.kind && <span> · {kindLabel(t, row.kind)}</span>}<span className="block text-subtle">{row.result}{row.ruleId ? ` · ${row.ruleId}` : ""}</span></span></li>)}</ul>
+      <ul>{audit.slice(0, AUDIT_ON_PAGE).map((row) => <AuditRow key={row.auditId} row={row} />)}</ul>
+      {audit.length > AUDIT_ON_PAGE && <SubPageRow title={t(auditMore ? "approvals.rules.audit.latest" : "approvals.rules.audit.all", { n: audit.length })} onOpen={() => useApp.getState().openSettings("collab", { sub: "audit" })} />}
     </Section>
   </div>;
 }

@@ -16,7 +16,6 @@ import { MoreHorizontal, Users } from "lucide-react";
 import type { ProfileItem, QuotaGauge } from "../../../../shared/ipc";
 import { useI18n, type MessageKey } from "../../i18n";
 import { ARMED_BUTTON, ARMED_FRAME } from "../../lib/armedConfirm";
-import { openMenuFrom } from "../../lib/contextMenu";
 import { useUiPrefs } from "../../lib/prefs";
 import { useModelName } from "../../lib/modelDisplay";
 import { headerExtras, contextLabel, profileKindLabel, profileProblems, profileRules } from "../../lib/profileCards";
@@ -35,6 +34,7 @@ import { useTargetHostId, useTargetQuotas, useTargetSelect, useTargetSidebar } f
 import { Tag } from "../../components/Tag";
 import { ProfileAccountBadge } from "../ProfileAccountBadge";
 import { ProfileLinkedAppearance } from "../ProfileLinkedAppearance";
+import { ProfileAgentsButton } from "./ProfileAgentsButton";
 
 /** Agent pictures shown before the count. */
 const STACK = 4;
@@ -189,13 +189,11 @@ export function ProfileCard({ item, isDefault, armed, deleting, onOpen, onMenu, 
             </>
           ) : (
             <>
-              <button
+              <ProfileAgentsButton
+                agents={agents}
                 disabled={agents.length === 0}
                 title={t("agent-config.profile.agentsUsing", { n: agents.length })}
-                onClick={(e) => {
-                  stop(e);
-                  openMenuFrom(e.currentTarget, agents.map((a) => ({ label: a.displayName, onSelect: () => void select(a.cutexSessionId) })));
-                }}
+                onPick={(id) => void select(id)}
                 className="flex items-center gap-1.5 rounded-full py-0.5 pr-2 pl-0.5 text-xs text-muted tabular-nums hover:bg-surface-2 hover:text-foreground disabled:text-subtle disabled:hover:bg-transparent"
               >
                 {agents.length === 0 ? (
@@ -210,7 +208,7 @@ export function ProfileCard({ item, isDefault, armed, deleting, onOpen, onMenu, 
                   </span>
                 )}
                 {agents.length}
-              </button>
+              </ProfileAgentsButton>
               <button title={t("agent-config.profile.more")} onClick={(e) => (stop(e), onMenu({ el: e.currentTarget }))} className="rounded-md p-1 text-muted hover:bg-surface-2 hover:text-foreground">
                 <MoreHorizontal size={16} />
               </button>

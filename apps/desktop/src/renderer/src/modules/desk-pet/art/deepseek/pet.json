@@ -1,0 +1,10 @@
+{
+  "format": 1,
+  "name": {
+    "en": "DeepSeek",
+    "zh-CN": "DeepSeek"
+  },
+  "family": "deepseek",
+  "scale": 1,
+  "pixel": true
+}

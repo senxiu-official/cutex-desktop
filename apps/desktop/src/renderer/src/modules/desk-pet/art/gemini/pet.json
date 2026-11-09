@@ -1,0 +1,10 @@
+{
+  "format": 1,
+  "name": {
+    "en": "Gemini",
+    "zh-CN": "Gemini"
+  },
+  "family": "gemini",
+  "scale": 1,
+  "pixel": true
+}

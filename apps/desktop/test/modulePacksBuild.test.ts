@@ -13,6 +13,7 @@ import { gunzipSync } from "node:zlib";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { stubServices } from "./serviceStub";
 import type { KeyValueStorage } from "../src/renderer/src/modules/types";
+import { BUILT_IN_MODULE_IDS } from "../src/shared/modulePacks";
 import type { ModulePacksBridge, ModulePacksView } from "../src/shared/modulePacks";
 import { APP_DIR, buildPack, packableModules, readHostTable, type BuiltPack } from "../scripts/module-packs/build.mjs";
 import { makeIndex } from "../scripts/module-packs/index.mjs";
@@ -46,8 +47,8 @@ describe("pack builder", () => {
     expect(specs).toEqual(Object.keys(PACK_HOST_MODULES).sort());
   });
 
-  it("the pilot is the only packable module in v1", () => {
-    expect(packableModules()).toEqual(["claude-science"]);
+  it("the packable modules are named here", () => {
+    expect(packableModules()).toEqual(["claude-science", "desk-pet"]);
   });
 
   it("builds the pilot as one ES module that reads shared code from the host only", () => {
@@ -187,7 +188,7 @@ describe("end to end: build → sign (test key) → serve → download → verif
     const bundledDef = host.modules.find((m) => m.id === "claude-science");
     expect(bundledDef).toBeDefined();
     const listeners = new Set<(v: ModulePacksView) => void>();
-    const bridge: ModulePacksBridge = { state: async () => restarted.view(), check: async () => restarted.view(), install: async () => restarted.view(), remove: async () => restarted.view(), onState: (l) => (listeners.add(l), () => listeners.delete(l)) };
+    const bridge: ModulePacksBridge = { state: async () => restarted.view(), check: async () => restarted.view(), install: async () => restarted.view(), remove: async () => restarted.view(), installLocal: async () => restarted.view(), allowLocal: async () => restarted.view(), localFailed: async () => restarted.view(), onState: (l) => (listeners.add(l), () => listeners.delete(l)) };
     const imported: string[] = [];
     const loader = createPackLoader({
       host,
@@ -215,4 +216,10 @@ describe("end to end: build → sign (test key) → serve → download → verif
       await host.dispose();
     }
   }, 120_000);
+});
+
+describe("local modules may not take a built-in id (§23.14)", () => {
+  it("main's list matches registry.ts", () => {
+    expect([...BUILT_IN_MODULE_IDS].sort()).toEqual(MODULES.map((m) => m.id).sort());
+  });
 });

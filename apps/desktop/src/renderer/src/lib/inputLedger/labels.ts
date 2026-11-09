@@ -152,10 +152,21 @@ export function inputLabel(record: InputRecord): InputLabel {
     stalled: record.stalled,
     insert: record.kind === "owner",
   });
-  // Older native-held records retain the server's waiting state/actions. This known
-  // hold reason describes an unknown delivery outcome, not temporary unavailability.
-  return label.kind === "label" && label.id === "nativeHeld" && record.details.nativeReason === "request_uncertain"
-    ? { ...label, id: "uncertain" } : label;
+  // Older native-held records retain the server's waiting state/actions. These known
+  // hold reasons describe an unknown delivery outcome, not temporary unavailability:
+  // `interrupted` (its carrying turn was interrupted) never clears by waiting.
+  if (label.kind === "label" && label.id === "nativeHeld"
+    && (record.details.nativeReason === "request_uncertain" || record.details.nativeReason === "interrupted")) return { ...label, id: "uncertain" };
+  // A resend refused by a host before the fix: nothing will send it, it is not "waiting to send".
+  if (label.kind === "label" && label.id === "ownerRetry" && record.kind === "owner" && record.stalled?.reason === "noProgress") return { ...label, id: "uncertain" };
+  return label;
+}
+
+/** Minutes of 「已等 N 分钟」. `noProgress` is about the whole wait: a host may rewrite its mark's `since`. */
+export function stalledMinutes(record: InputRecord, now: number): number {
+  if (!record.stalled) return 0;
+  const since = record.stalled.reason === "noProgress" ? record.since : record.stalled.since;
+  return Math.max(0, Math.floor((now - Date.parse(since)) / 60000));
 }
 
 /** Session header / 「工作中」 row ids (054 §3.3), read only from `delivery`. */

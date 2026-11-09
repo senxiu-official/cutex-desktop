@@ -1,4 +1,4 @@
-import type { HostClaudeRuntime, SessionLifecycle } from "@cutex-desktop/protocol";
+import type { HostClaudeRuntime, HostSessionRow, SessionLifecycle, SessionResource } from "@cutex-desktop/protocol";
 
 /** Owner-only transport. Canonical revisions are NOT SessionResource revisions. */
 export const SESSION_DELTAS_FEATURE = "session-deltas-v1";
@@ -9,9 +9,11 @@ export interface SessionPageQuery {
   cursor?: string;
   limit?: number;
   maxBytes?: number;
+  /** session-deltas-resources-v1; request only after capability negotiation. */
+  include?: "resource" | "hostRow" | "resource,hostRow";
 }
 export interface SessionCatalogPage {
-  sessions: { cutexSessionId: string; revision: number }[];
+  sessions: { cutexSessionId: string; revision: number; resource?: SessionResource | null; hostRow?: HostSessionRow | null }[];
   nextCursor: string | null;
   changeCursor: string | null;
   oversizeFirst: boolean;

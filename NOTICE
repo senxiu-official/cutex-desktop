@@ -77,4 +77,12 @@ Licensed under the Unicode License v3 (LICENSES/Unicode-3.0.txt).
   - apps/desktop/src/renderer/src/lib/fontRanges.ts holds tables generated from Scripts.txt and
     ScriptExtensions.txt of Unicode 17.0.0 (scripts/generate-font-ranges.py).
 
+-------------------------------------------------------------------------------------------------
+KaTeX fonts — https://github.com/KaTeX/KaTeX
+Copyright (c) 2009-2010, Design Science, Inc.; Copyright (c) 2014-2018 Khan Academy
+Licensed under the SIL Open Font License, Version 1.1 (LICENSES/OFL-1.1-katex-fonts.txt).
+
+  - The KaTeX_* fonts of the katex npm package (dist/fonts), bundled unmodified with the app for
+    Markdown math. KaTeX's code is MIT and is listed in THIRD_PARTY_NOTICES.md.
+
 祀小姐真可爱。

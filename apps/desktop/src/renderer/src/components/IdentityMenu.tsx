@@ -22,6 +22,7 @@ import { Avatar } from "./Avatar";
 import { UsageFlyout } from "./UsageFlyout";
 import { bindingLabel } from "../lib/keybindings";
 import { useOwnerDocument } from "../lib/ownerContext";
+import { useSlot } from "../modules/react";
 
 const MENU_OWNER = "identity";
 function IdentityAvatar({ identity, size }: { identity: Identity; size: number }) {
@@ -29,9 +30,11 @@ function IdentityAvatar({ identity, size }: { identity: Identity; size: number }
 }
 
 /** The identity menu's entries, shared by the sidebar footer button and the title-bar chip (the theme is read when it opens). */
-function identityEntries({ t, locale, setLocale, identity, connected, shell, update }: {
+function identityEntries({ t, locale, setLocale, identity, connected, shell, update, moduleRows }: {
   t: ReturnType<typeof useI18n>["t"]; locale: ReturnType<typeof useI18n>["locale"]; setLocale: ReturnType<typeof useI18n>["setLocale"];
   identity: Identity; connected: boolean; shell: ReturnType<typeof useShellInfo>; update: ReturnType<typeof useUpdateStatus>;
+  /** `identity.menu` (§29): modules' rows, read as the menu opens. */
+  moduleRows: readonly { entries(): MenuEntry[] }[];
 }): MenuEntry[] {
   const theme = loadTheme();
   const role = t(identity.words.line);
@@ -42,7 +45,7 @@ function identityEntries({ t, locale, setLocale, identity, connected, shell, upd
   const updateUsable = !!update && (update.state !== "unsupported" || update.retryable === true);
   return [
     {
-      // The header itself opens 设置 → 用户 (你的名字和头像), instead of a separate menu item.
+      // The header itself opens 设置 → 你 (你的名字和头像), instead of a separate menu item.
       label: title,
       title: t("identity.edit"),
       labelNode: (
@@ -80,6 +83,13 @@ function identityEntries({ t, locale, setLocale, identity, connected, shell, upd
       submenu: (["light", "dark", "system"] as ThemePref[]).map((v) => ({ label: t(`shell.theme.${v}` as MessageKey), icon: checked(v === theme), onSelect: () => applyTheme(v) })),
       onSelect() {},
     },
+    ...moduleRows.flatMap((row) => {
+      try {
+        return row.entries();
+      } catch {
+        return [];
+      }
+    }),
     "separator",
     shell?.quickstart && { label: t("identity.help"), icon: <BookOpen size={14} />, onSelect: () => void bridge.shell?.openQuickstart?.() },
     bridge.update && {
@@ -116,7 +126,8 @@ export function IdentityButton() {
   const suffix = identity.words.suffix ? t(identity.words.suffix) : null;
   const title = identity.role === "owner" ? identity.name : `${identity.name} · ${role}`;
 
-  const entries = () => identityEntries({ t, locale, setLocale, identity, connected, shell, update });
+  const moduleRows = useSlot("identity.menu").map((e) => e.item);
+  const entries = () => identityEntries({ t, locale, setLocale, identity, connected, shell, update, moduleRows });
 
   return (
     <button
@@ -160,6 +171,7 @@ export function IdentityChip() {
   const open = useMenuOwner() === MENU_OWNER;
   const title = identity.role === "owner" ? identity.name : `${identity.name} · ${t(identity.words.line)}`;
   const hint = update && updateButtonVisible(update);
+  const moduleRows = useSlot("identity.menu").map((e) => e.item);
   return (
     <button
       data-titlebar-identity=""
@@ -172,7 +184,7 @@ export function IdentityChip() {
           const host = useApp.getState().hosts?.active ?? "local";
           void prepareUsage(host).catch(() => {});
         }
-        openMenuFrom(e.currentTarget, identityEntries({ t, locale, setLocale, identity, connected, shell, update }), { owner: MENU_OWNER });
+        openMenuFrom(e.currentTarget, identityEntries({ t, locale, setLocale, identity, connected, shell, update, moduleRows }), { owner: MENU_OWNER });
       }}
       className={`relative ml-0.5 flex shrink-0 items-center rounded-full p-0.5 hover:bg-surface-2 ${open ? "bg-surface-2" : ""}`}
     >

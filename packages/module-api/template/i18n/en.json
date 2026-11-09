@@ -1,0 +1,8 @@
+{
+  "my-module.title": "My module",
+  "my-module.description": "A button in the tray that opens a counter.",
+  "my-module.open": "Open my module",
+  "my-module.hint": "The count stays on this device.",
+  "my-module.count": "Pressed {n} times",
+  "my-module.press": "Press"
+}

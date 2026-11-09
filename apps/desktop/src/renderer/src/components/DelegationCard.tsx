@@ -10,7 +10,7 @@ import type { AskAnswerPage } from "../../../shared/ipc";
 import { useI18n } from "../i18n";
 import { ARMED_FRAME } from "../lib/armedConfirm";
 import { contextMenu, openMenuFrom } from "../lib/contextMenu";
-import { attemptSeconds, delegateCallOf, delegationActions, delegationStatus, formatSpan, peerPartyText, requesterSession, stopPending, waitSeconds, type DelegationStatus } from "../lib/delegations";
+import { attemptSeconds, delegateCallOf, delegationActions, delegationCanResume, delegationStatus, formatSpan, peerPartyText, requesterSession, stopPending, waitSeconds, type DelegationStatus } from "../lib/delegations";
 import { delegationMenu, runDelegationCommand } from "../lib/delegationMenu";
 import { delegationApi, hasDelegationViews, loadCardDelegation, loadDelegationDetail, useDelegations } from "../lib/delegationStore";
 import { hostKey } from "../lib/hostKeys";
@@ -41,6 +41,7 @@ const NO_QUESTIONS: AskQuestion[] = [];
 const NO_COMMANDS = { stop: false, retry: false, accept: false, abandon: false } as const;
 /** The action row's buttons (the armed face keeps this shape). */
 const ACTION_SHAPE = "rounded-md px-2 py-0.5 text-xs";
+const ACTION_IDLE = "text-muted hover:bg-surface-2 hover:text-text";
 const ACTION_IDLE_DANGER = "text-muted hover:bg-surface-2 hover:text-danger";
 /** 「放弃这个委托？再左键点击一次确认」 / "Abandon this delegation? Click again to confirm" (no space after full-width marks). */
 const armedHint = (question: string, again: string) => `${question}${/[　-〿！-／：-？]$/.test(question) ? "" : " "}${again}`;
@@ -216,6 +217,11 @@ export function DelegationDetailBody({ d, brief, here, host, layout = "card" }: 
         {can.stop && (
           <ArmedButton shape={ACTION_SHAPE} idle={ACTION_IDLE_DANGER} hint={armedHint(t("delegation.stopConfirm"), t("delegation.again"))} onArmedChange={setStopArmed} resetKey={d.revision} testId="delegation-stop" onConfirm={() => void runDelegationCommand(host, d, "cutex/ask/stop", t)}>
             {t("delegation.stop")}
+          </ArmedButton>
+        )}
+        {commands && delegationCanResume(d) && (
+          <ArmedButton shape={ACTION_SHAPE} idle={ACTION_IDLE} hint={armedHint(t("delegation.resumeWaitConfirm"), t("delegation.again"))} resetKey={d.revision} testId="delegation-resume" onConfirm={() => void runDelegationCommand(host, d, "cutex/ask/resume", t)}>
+            {t("delegation.resumeWait")}
           </ArmedButton>
         )}
         {can.retry && (

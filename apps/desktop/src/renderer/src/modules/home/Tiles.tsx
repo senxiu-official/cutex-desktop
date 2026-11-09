@@ -9,7 +9,11 @@ import { pagePinKey, pagePinKindsNow, usePagePinKind, type PagePinKind, type Pag
 import type { ArtifactSummary } from "../../../../shared/artifactStore";
 import { artifactRef } from "../../../../shared/artifactStore";
 import { useI18n, type MessageKey } from "../../i18n";
-import type { MenuEntry } from "../../lib/contextMenu";
+import { closeMenu, type MenuEntry } from "../../lib/contextMenu";
+import { agentPickerOptions, pickerProjectRank, sidebarPickerRows } from "../../lib/agentPickerOptions";
+import { getUiPrefs } from "../../lib/prefs";
+import { SearchablePickerBody } from "../../components/SearchablePicker";
+import { LOCAL_HOST_ID } from "../../../../shared/hosts";
 import { hostData } from "../../lib/hostScope";
 import { useHostScope } from "../../lib/useHostScope";
 import { Avatar } from "../../components/Avatar";
@@ -305,10 +309,28 @@ export async function pickerMenu(target: PinTarget, t: ReturnType<typeof useI18n
     return { label: text, icon, hint: multi ? label(pin.hostId) : undefined, disabled: on, title: on ? t("home.unpin") : undefined, onSelect: () => target.add(pin) };
   };
   const svc: MenuEntry[] = hostIds.flatMap((hostId) => (hostData(s, hostId)?.services ?? []).map((v) => entry({ hostId, kind: "service", key: v.slug, title: (v.displayName || v.slug).slice(0, 200) }, v.displayName || v.slug, <Server size={14} />)));
-  const agents: MenuEntry[] = hostIds
-    .flatMap((hostId) => (sidebarOf(s, hostId)?.active ?? []).map((r) => ({ hostId, r })))
-    .slice(0, 40)
-    .map(({ hostId, r }) => entry({ hostId, kind: "agent", key: r.cutexSessionId, title: r.displayName.slice(0, 200) }, r.displayName, <Avatar name={r.displayName} avatar={r.avatar} seed={r.cutexSessionId} size={16} />));
+  // Agents: every agent of the connected hosts in the shared picker (search, projects as groups), not the first 40.
+  const pinKey = (hostId: string, id: string) => `${hostId}\n${id}`;
+  const selectedHost = s.selectedHost ?? s.hosts?.active ?? LOCAL_HOST_ID;
+  const projectOrder = getUiPrefs().projectOrder ?? [];
+  const agentLabels = { top: t("agentPicker.top"), independent: t("agentPicker.independent"), archived: t("agentPicker.archived"), chats: t("agentPicker.chats") };
+  const agentOptions = hostIds.flatMap((hostId) => {
+    const sidebar = sidebarOf(s, hostId);
+    const rows = sidebarPickerRows(sidebar, { hostLabel: multi ? label(hostId) : undefined, keyOf: (id) => pinKey(hostId, id) });
+    return agentPickerOptions(rows, agentLabels, { top: hostId === selectedHost ? [s.selectedId && pinKey(hostId, s.selectedId)] : [], rank: pickerProjectRank(sidebar, projectOrder, hostId) });
+  });
+  // The selected agent's host first, so its 当前 row leads the list.
+  agentOptions.sort((a, b) => Number(b.group === agentLabels.top) - Number(a.group === agentLabels.top));
+  for (const o of agentOptions) {
+    const [hostId, id] = o.value.split("\n") as [string, string];
+    if (target.isPinned({ hostId, kind: "agent", key: id, title: o.label })) o.disabled = true;
+  }
+  const pickAgent = (value: string) => {
+    const [hostId, id] = value.split("\n") as [string, string];
+    const name = agentOptions.find((o) => o.value === value)?.label ?? id;
+    closeMenu();
+    target.add({ hostId, kind: "agent", key: id, title: name.slice(0, 200) });
+  };
   // Artifacts: the newest of each host's projects (artifacts need a scope).
   const artifacts: { hostId: string; a: ArtifactSummary }[] = [];
   await Promise.all(
@@ -343,7 +365,9 @@ export async function pickerMenu(target: PinTarget, t: ReturnType<typeof useI18n
     : [];
   return [
     { label: t("home.picker.services"), icon: <Server size={14} />, submenu: svc.length ? svc : none, onSelect: () => {} },
-    { label: t("home.picker.agents"), icon: <Avatar name="A" agent={{}} size={16} />, submenu: agents.length ? agents : none, onSelect: () => {} },
+    agentOptions.length
+      ? { label: t("home.picker.agents"), icon: <Avatar name="A" agent={{}} size={16} />, flyout: <SearchablePickerBody options={agentOptions} placeholder={t("agentPicker.search")} emptyLabel={t("agentPicker.empty")} hiddenNote={(n) => t("agentPicker.hiddenChats", { n })} label={t("home.picker.agents")} onPick={pickAgent} />, onSelect: () => {} }
+      : { label: t("home.picker.agents"), icon: <Avatar name="A" agent={{}} size={16} />, submenu: none, onSelect: () => {} },
     { label: t("home.picker.artifacts"), icon: <FileBox size={14} />, submenu: arts.length ? arts : none, onSelect: () => {} },
     ...pages,
   ];

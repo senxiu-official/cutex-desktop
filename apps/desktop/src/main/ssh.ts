@@ -10,19 +10,37 @@ import { rename, writeFile } from "node:fs/promises";
 import { connect, createServer } from "node:net";
 import { join } from "node:path";
 import {
+  ROUTE_ALIVE_INTERVAL_SEC,
+  ROUTE_CONNECT_TIMEOUT_SEC,
+  ROUTE_FLAP_BASE_MS,
+  ROUTE_FLAP_MAX_MS,
+  ROUTE_FLAP_WINDOW_MS,
+  ROUTE_HOLD_MS,
+  ROUTE_MAX_BACKOFF_MS,
+  ROUTE_NEXT_MS,
+  ROUTE_PROBE_INTERVAL_MS,
+  ROUTE_PROBE_SLOW_AFTER_ROUNDS,
+  ROUTE_PROBE_SLOW_INTERVAL_MS,
+  ROUTE_READY_TIMEOUT_MS,
+  ROUTE_REFUSED_RETRY_MS,
+  TUNNEL_STABLE_MS,
   backoffMs,
   classifySshFailure,
   execArgs,
   formatSshTarget,
   initialTunnel,
+  isPermanentSshError,
+  parseSshConfigDump,
   tunnelArgs,
   tunnelReduce,
   type SshErrorView,
   type SshTarget,
   type TunnelEvent,
+  type TunnelTiming,
   type TunnelView,
 } from "../shared/hosts";
 import type { AskpassSession, AskpassSpawn } from "./sshAskpass";
+import { TunnelFront } from "./tunnelFront";
 
 export interface SshRunOptions {
   /** Prompts go to the desktop's dialog; timeouts pause while a question is open. */
@@ -120,6 +138,25 @@ export async function runSsh(target: SshTarget, command: string, timeoutMs = 30_
       ask?.done();
       resolve({ code, stdout, stderr });
     });
+  });
+}
+
+/** The host behind an address as ssh would resolve it (`ssh -G`: reads the config, opens no connection). */
+export function resolveSshHost(target: SshTarget): Promise<string | null> {
+  return new Promise((resolve) => {
+    let stdout = "";
+    let child: ChildProcess;
+    try {
+      child = spawn(resolveSshBinary(), ["-G", ...(target.port ? ["-p", String(target.port)] : []), "--", target.destination], { stdio: ["ignore", "pipe", "ignore"], windowsHide: true });
+    } catch {
+      resolve(null);
+      return;
+    }
+    child.stdout!.on("data", (d: Buffer) => {
+      if (stdout.length < 64 * 1024) stdout += d.toString("utf8");
+    });
+    child.on("error", () => resolve(null));
+    child.on("close", (code) => resolve(code === 0 ? parseSshConfigDump(stdout) : null));
   });
 }
 
@@ -272,12 +309,46 @@ export interface SshTunnelOptions {
   askpass?: AskpassSession | null;
   /** Tests only: extra ssh options. */
   extraArgs?: string[];
+  /**
+   * Several routes: does a better route's forward at `port` reach this same host? null = yes.
+   * Absent: no probing, the tunnel only moves when a route fails.
+   */
+  verifyRoute?(port: number, target: string): Promise<SshErrorView | null>;
+  /** The tunnel moved to a better route; new connections already go there. */
+  onRouteSwitched?(): void;
 }
+
+/** A better route being tried: never a prompt (BatchMode), nothing visible until it has proved itself. */
+interface RouteCandidate {
+  child: ChildProcess;
+  port: number;
+  index: number;
+  stderr: string;
+  closed: boolean;
+  code: number | null;
+}
+
+/** What the tunnel remembers per route between probes. */
+interface RouteMemory {
+  /** No probe before this epoch ms (refused us, or kept failing right after a switch). */
+  notBefore: number;
+  /** When we switched to it (null: not switched to / already judged). */
+  switchedAt: number | null;
+  flaps: number;
+}
+
+const pause = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 /**
  * `ssh -N -L 127.0.0.1:<local>:127.0.0.1:<remote>` with readiness detection (the local port starts
  * accepting) and automatic reconnect with backoff (shared/hosts `tunnelReduce`). The local port is
  * kept across reconnects so the daemon client — and its event-feed cursors — survive a drop.
+ *
+ * With several routes the shown port is a `TunnelFront` and each ssh forwards to a private port behind
+ * it. A failed route moves to the next one at once; the backoff waits only between whole passes. On a
+ * lower route the better ones are tried in the background without prompts; one that stays up and
+ * answers as this host takes the new connections. The old ssh keeps running until its last
+ * connection ends, so requests in flight finish on the route they were sent on.
  */
 export class SshTunnel {
   private view: TunnelView = initialTunnel();
@@ -287,11 +358,35 @@ export class SshTunnel {
   private stderr = "";
   private targetIndex = 0;
   private rejected: SshErrorView | null = null;
+  private readonly multi: boolean;
+  private front: TunnelFront | null = null;
+  /** The private port of the current ssh (several routes only). */
+  private backendPort: number | null = null;
+  /** Failures in the current pass over the routes; reset when a connection proved stable. */
+  private passFailures = 0;
+  private passOnNetwork = false;
+  private passes = 0;
+  private readonly routes: RouteMemory[];
+  private candidate: RouteCandidate | null = null;
+  /** Former routes still carrying connections, by private port. */
+  private readonly draining = new Map<number, ChildProcess>();
+  private probeTimer: NodeJS.Timeout | null = null;
+  /** Bumped to abandon a probe in progress. */
+  private probeRun = 0;
+  private probeRounds = 0;
 
-  constructor(private readonly options: SshTunnelOptions) {}
+  constructor(private readonly options: SshTunnelOptions) {
+    this.multi = options.targets.length > 1;
+    this.routes = options.targets.map(() => ({ notBefore: 0, switchedAt: null, flaps: 0 }));
+  }
 
   get state(): TunnelView {
     return this.view;
+  }
+
+  /** Private loopback ports of this tunnel's ssh processes: control ports like the shown one. */
+  backendPorts(): number[] {
+    return [...(this.backendPort !== null ? [this.backendPort] : []), ...(this.candidate ? [this.candidate.port] : []), ...this.draining.keys()];
   }
 
   start(): void {
@@ -307,6 +402,8 @@ export class SshTunnel {
     if (this.retryTimer) clearTimeout(this.retryTimer);
     this.retryTimer = null;
     this.targetIndex = 0;
+    this.passFailures = 0;
+    this.passOnNetwork = false;
     this.options.askpass?.reset();
     void this.attempt();
   }
@@ -321,12 +418,17 @@ export class SshTunnel {
     this.stopped = true;
     if (this.retryTimer) clearTimeout(this.retryTimer);
     this.retryTimer = null;
+    this.cancelProbe();
     const child = this.child;
     this.child = null;
-    if (child) {
-      killTree(child);
-      this.options.pids.remove(child.pid);
+    this.backendPort = null;
+    for (const old of [...(child ? [child] : []), ...this.draining.values()]) {
+      killTree(old);
+      this.options.pids.remove(old.pid);
     }
+    this.draining.clear();
+    this.front?.close();
+    this.front = null;
     this.options.askpass?.close();
     this.dispatch({ type: "stop" });
   }
@@ -336,12 +438,32 @@ export class SshTunnel {
     this.options.onChange(this.view);
   }
 
+  /** Limits for one route's attempt; single-route hosts keep the plain defaults. */
+  private timing(): TunnelTiming | undefined {
+    if (!this.multi) return undefined;
+    return { connectTimeoutSec: this.longPass() ? 15 : ROUTE_CONNECT_TIMEOUT_SEC, aliveIntervalSec: ROUTE_ALIVE_INTERVAL_SEC };
+  }
+
+  private longPass(): boolean {
+    return this.passes % 3 === 2;
+  }
+
   private async attempt(): Promise<void> {
     if (this.stopped || this.child) return;
-    const previous = this.view.localPort;
-    const port = previous !== null && (await portFree(previous)) ? previous : await freeLocalPort().catch(() => 0);
+    let shown: number;
+    let port: number;
+    if (this.multi) {
+      this.front ??= new TunnelFront((drained) => this.retire(drained));
+      shown = await this.front.listen(this.view.localPort).catch(() => 0);
+      if (this.stopped || this.child) return;
+      port = await freeLocalPort().catch(() => 0);
+    } else {
+      const previous = this.view.localPort;
+      port = previous !== null && (await portFree(previous)) ? previous : await freeLocalPort().catch(() => 0);
+      shown = port;
+    }
     if (this.stopped || this.child) return;
-    if (!port) {
+    if (!port || !shown) {
       this.fail({ code: "forward", detail: "no free local port" });
       return;
     }
@@ -358,7 +480,7 @@ export class SshTunnel {
     }
     let child: ChildProcess;
     try {
-      child = spawn(resolveSshBinary(), withExtra(tunnelArgs(target, port, this.options.remotePort, !!ask), this.options.extraArgs), {
+      child = spawn(resolveSshBinary(), withExtra(tunnelArgs(target, port, this.options.remotePort, !!ask, this.timing()), this.options.extraArgs), {
         stdio: ["ignore", "ignore", "pipe"],
         windowsHide: true,
         detached: process.platform !== "win32",
@@ -366,35 +488,26 @@ export class SshTunnel {
       });
     } catch (error) {
       ask?.done();
-      this.advanceTarget(false);
-      this.fail({ code: "noSsh", detail: String(error) }, this.targetIndex !== 0);
+      this.fail({ code: "noSsh", detail: String(error) });
       return;
     }
     this.child = child;
     this.options.pids.add(child.pid);
-    this.dispatch({ type: "spawn", localPort: port, target: formatSshTarget(target) });
-    child.stderr!.on("data", (d: Buffer) => {
-      this.stderr = (this.stderr + d.toString("utf8")).slice(-8192);
-    });
-    let spawnError: NodeJS.ErrnoException | null = null;
-    child.on("error", (error: NodeJS.ErrnoException) => (spawnError = error));
-    child.on("close", (code) => {
-      ask?.done();
-      this.options.pids.remove(child.pid);
-      if (this.child !== child) return;
-      this.child = null;
-      if (this.stopped) return;
-      const err = spawnError as NodeJS.ErrnoException | null;
-      const rejected = this.rejected;
-      const hadMoreTargets = this.targetIndex < this.options.targets.length - 1;
-      this.advanceTarget(rejected === null && this.view.status === "up");
-      this.fail(rejected ?? (err?.code === "ENOENT" ? { code: "noSsh", detail: err.message } : classifySshFailure(code, this.stderr, "tunnel")), hadMoreTargets);
-    });
+    this.dispatch({ type: "spawn", localPort: shown, target: formatSshTarget(target), ...(this.multi ? { routeIndex: this.targetIndex } : {}) });
+    this.watch(child, ask);
     // Ready = ssh accepts on the local port (it binds only after authentication).
-    const expired = deadline(this.options.readyTimeoutMs ?? 30_000, this.options.askpass);
+    const expired = deadline(this.options.readyTimeoutMs ?? (this.multi && !this.longPass() ? ROUTE_READY_TIMEOUT_MS : 30_000), this.options.askpass);
     while (this.child === child && !this.stopped) {
       if (await portListening(port, 800)) {
-        if (this.child === child && !this.stopped) this.dispatch({ type: "ready", now: Date.now() });
+        if (this.child === child && !this.stopped) {
+          if (this.multi) {
+            this.backendPort = port;
+            this.front?.use(port);
+          }
+          this.dispatch({ type: "ready", now: Date.now() });
+          this.probeRounds = 0;
+          this.scheduleProbe();
+        }
         return;
       }
       if (expired()) {
@@ -402,23 +515,200 @@ export class SshTunnel {
         killTree(child);
         return;
       }
-      await new Promise((r) => setTimeout(r, 250));
+      await pause(250);
     }
   }
 
-  private advanceTarget(connected: boolean): void {
-    this.targetIndex = connected ? 0 : (this.targetIndex + 1) % this.options.targets.length;
+  /** Follows one ssh process, whichever role it has by the time it ends (candidate, current, draining). */
+  private watch(child: ChildProcess, ask: AskpassSpawn | null): void {
+    child.stderr!.on("data", (d: Buffer) => {
+      if (this.candidate?.child === child) this.candidate.stderr = (this.candidate.stderr + d.toString("utf8")).slice(-8192);
+      else if (this.child === child) this.stderr = (this.stderr + d.toString("utf8")).slice(-8192);
+    });
+    let spawnError: NodeJS.ErrnoException | null = null;
+    child.on("error", (error: NodeJS.ErrnoException) => (spawnError = error));
+    child.on("close", (code) => {
+      ask?.done();
+      this.options.pids.remove(child.pid);
+      for (const [port, old] of this.draining) if (old === child) this.draining.delete(port);
+      if (this.candidate?.child === child) {
+        this.candidate.closed = true;
+        this.candidate.code = code;
+        return;
+      }
+      if (this.child !== child) return;
+      this.child = null;
+      this.backendPort = null;
+      this.front?.use(null);
+      this.cancelProbe();
+      if (this.stopped) return;
+      const err = spawnError as NodeJS.ErrnoException | null;
+      this.judgeLostRoute();
+      this.fail(this.rejected ?? (err?.code === "ENOENT" ? { code: "noSsh", detail: err.message } : classifySshFailure(code, this.stderr, "tunnel")));
+    });
   }
 
-  private fail(error: SshErrorView, tryNextTarget = false): void {
-    this.dispatch({ type: "exit", error, now: Date.now() });
-    if (this.view.status === "retrying" || (this.view.status === "error" && tryNextTarget)) {
-      const retryAt = this.view.retryAt ?? Date.now() + backoffMs(this.view.attempt);
-      this.retryTimer = setTimeout(() => {
-        this.retryTimer = null;
-        void this.attempt();
-      }, Math.max(0, retryAt - Date.now()));
+  /** A route we switched to and lost soon after is not tried again for a while, longer each time. */
+  private judgeLostRoute(): void {
+    const route = this.routes[this.targetIndex]!;
+    if (route.switchedAt === null) return;
+    const now = Date.now();
+    route.flaps = now - route.switchedAt < ROUTE_FLAP_WINDOW_MS ? route.flaps + 1 : 0;
+    route.switchedAt = null;
+    if (route.flaps > 0) route.notBefore = now + Math.min(ROUTE_FLAP_BASE_MS * 2 ** (route.flaps - 1), ROUTE_FLAP_MAX_MS);
+  }
+
+  /** The route failed: the next one comes right away, the backoff waits only between whole passes. */
+  private fail(error: SshErrorView): void {
+    const count = this.options.targets.length;
+    const now = Date.now();
+    if (this.view.upSince !== null && now - this.view.upSince >= TUNNEL_STABLE_MS) {
+      this.passFailures = 0;
+      this.passOnNetwork = false;
+      this.passes = 0;
     }
+    this.passFailures++;
+    this.passOnNetwork ||= !isPermanentSshError(error.code);
+    this.targetIndex = (this.targetIndex + 1) % count;
+    const passDone = this.passFailures >= count;
+    // Refused everywhere needs the user. Any network failure can heal by itself (a VPN comes back).
+    const keepTrying = !passDone || this.passOnNetwork;
+    this.dispatch({ type: "exit", error, now, nextRoute: !passDone, exhausted: passDone && this.multi && this.passOnNetwork, ...(this.multi ? { maxBackoffMs: ROUTE_MAX_BACKOFF_MS } : {}) });
+    if (passDone) {
+      this.passFailures = 0;
+      this.passOnNetwork = false;
+      this.passes++;
+    }
+    if (!keepTrying) return;
+    const retryAt = this.view.retryAt ?? now + (passDone ? Math.min(backoffMs(this.view.attempt), ROUTE_MAX_BACKOFF_MS) : ROUTE_NEXT_MS);
+    this.retryTimer = setTimeout(() => {
+      this.retryTimer = null;
+      void this.attempt();
+    }, Math.max(0, retryAt - now));
+  }
+
+  // ---------- back to a better route ----------
+
+  private scheduleProbe(): void {
+    if (this.probeTimer) clearTimeout(this.probeTimer);
+    this.probeTimer = null;
+    if (!this.options.verifyRoute || this.targetIndex === 0 || this.stopped) return;
+    const wait = this.probeRounds < ROUTE_PROBE_SLOW_AFTER_ROUNDS ? ROUTE_PROBE_INTERVAL_MS : ROUTE_PROBE_SLOW_INTERVAL_MS;
+    this.probeTimer = setTimeout(() => {
+      this.probeTimer = null;
+      void this.probeRound();
+    }, wait);
+    this.probeTimer.unref?.();
+  }
+
+  private cancelProbe(): void {
+    if (this.probeTimer) clearTimeout(this.probeTimer);
+    this.probeTimer = null;
+    this.probeRun++;
+    this.dropCandidate();
+  }
+
+  private dropCandidate(): void {
+    const candidate = this.candidate;
+    this.candidate = null;
+    if (!candidate) return;
+    if (!candidate.closed) killTree(candidate.child);
+    this.options.pids.remove(candidate.child.pid);
+  }
+
+  private async probeRound(): Promise<void> {
+    const run = ++this.probeRun;
+    const live = () => run === this.probeRun && !this.stopped && this.child !== null && this.view.status === "up";
+    for (let index = 0; index < this.targetIndex; index++) {
+      if (!live()) return;
+      if (Date.now() < this.routes[index]!.notBefore) continue;
+      if (await this.probe(index, live)) {
+        if (live()) this.switchToCandidate();
+        return;
+      }
+      if (run !== this.probeRun) return;
+      this.dropCandidate();
+    }
+    if (!live()) return;
+    this.probeRounds++;
+    this.scheduleProbe();
+  }
+
+  /** One better route: true once it stayed up and kept answering as this host. */
+  private async probe(index: number, live: () => boolean): Promise<boolean> {
+    const port = await freeLocalPort().catch(() => 0);
+    if (!port || !live()) return false;
+    const target = this.options.targets[index]!;
+    let child: ChildProcess;
+    try {
+      // interactive = false: BatchMode, ssh never asks; a route that needs an answer just fails here.
+      child = spawn(resolveSshBinary(), withExtra(tunnelArgs(target, port, this.options.remotePort, false, { connectTimeoutSec: ROUTE_CONNECT_TIMEOUT_SEC, aliveIntervalSec: ROUTE_ALIVE_INTERVAL_SEC }), this.options.extraArgs), {
+        stdio: ["ignore", "ignore", "pipe"],
+        windowsHide: true,
+        detached: process.platform !== "win32",
+      });
+    } catch {
+      return false;
+    }
+    const candidate: RouteCandidate = { child, port, index, stderr: "", closed: false, code: null };
+    this.candidate = candidate;
+    this.options.pids.add(child.pid);
+    this.watch(child, null);
+    const current = () => this.candidate === candidate && !candidate.closed && live();
+    const refused = () => {
+      this.routes[index]!.notBefore = Date.now() + ROUTE_REFUSED_RETRY_MS;
+      return false;
+    };
+    const expired = deadline(ROUTE_READY_TIMEOUT_MS, null);
+    while (!(await portListening(port, 800))) {
+      if (candidate.closed) return isPermanentSshError(classifySshFailure(candidate.code, candidate.stderr, "tunnel").code) ? refused() : false;
+      if (!current() || expired()) return false;
+      await pause(250);
+    }
+    // Another cutex or a rejected token stays that way; a daemon that did not answer may next time.
+    const verified = async () => {
+      const problem = await this.options.verifyRoute!(port, formatSshTarget(target)).catch((error: unknown): SshErrorView => ({ code: "remoteDaemon", detail: String(error) }));
+      if (problem && (problem.code === "hostMismatch" || isPermanentSshError(problem.code))) refused();
+      return !problem;
+    };
+    if (!current() || !(await verified())) return false;
+    await pause(ROUTE_HOLD_MS);
+    return current() && (await verified()) && current();
+  }
+
+  /** New connections go to the candidate now; the old ssh stays until its connections have ended. */
+  private switchToCandidate(): void {
+    const candidate = this.candidate!;
+    const old = this.child;
+    const oldPort = this.backendPort;
+    this.candidate = null;
+    this.child = candidate.child;
+    this.backendPort = candidate.port;
+    this.stderr = candidate.stderr;
+    this.targetIndex = candidate.index;
+    this.rejected = null;
+    this.passFailures = 0;
+    this.passOnNetwork = false;
+    this.passes = 0;
+    this.probeRounds = 0;
+    this.routes[candidate.index]!.switchedAt = Date.now();
+    this.front?.use(candidate.port);
+    if (old && oldPort !== null) {
+      this.draining.set(oldPort, old);
+      if (!this.front?.connections(oldPort)) this.retire(oldPort);
+    }
+    this.dispatch({ type: "switch", target: formatSshTarget(this.options.targets[candidate.index]!), routeIndex: candidate.index, now: Date.now() });
+    this.options.onRouteSwitched?.();
+    this.scheduleProbe();
+  }
+
+  /** A former route has no connections left. */
+  private retire(port: number): void {
+    const old = this.draining.get(port);
+    if (!old) return;
+    this.draining.delete(port);
+    killTree(old);
+    this.options.pids.remove(old.pid);
   }
 }
 

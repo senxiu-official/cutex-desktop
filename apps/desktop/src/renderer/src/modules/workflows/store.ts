@@ -8,7 +8,7 @@ import { WORKFLOWS_FEATURE, isWorkflowRunOpen, workflowChangeOf, type WorkflowRu
 import { bridge } from "../../bridge";
 import { featuresOf, useApp } from "../../store";
 import { services } from "../app";
-import type { AppModuleContext } from "../slots";
+import type { ModuleContext } from "../slots";
 
 interface HostRuns {
   runs: WorkflowRunSummary[];
@@ -107,7 +107,7 @@ function schedule(hostId: string, runId: string | null) {
 }
 
 /** Module activation: follow workflow / approval events of every connected host until the module stops. */
-export function startWorkflowSync(ctx: AppModuleContext): void {
+export function startWorkflowSync(ctx: ModuleContext): void {
   if (typeof bridge?.on !== "function") return;
   const off = bridge.on("hostEvent", ({ hostId, envelope }) => {
     const change = workflowChangeOf(envelope);

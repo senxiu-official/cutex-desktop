@@ -41,6 +41,11 @@ it("distinguishes same-host launches by connection time and instance ID", () => 
   expect(div.textContent).toContain("2026-10-25T02:00:00.000Z");
   expect(div.textContent).toContain("remoteClose.instancesHint");
 });
+it("a computer running once does not spell out its launch", () => {
+  fx.rows = [row("12345678-first", "2026-10-25T01:00:00Z")];
+  act(() => root.render(h(OnlineDesktopsSection, { key: "one" })));
+  expect(div.textContent).not.toContain("remoteClose.instance");
+});
 it("announces the confirmed target by name", async () => {
   fx.close.mockResolvedValue({ ok: true, value: { instanceId: "12345678-first", state: "closing" } });
   await click();

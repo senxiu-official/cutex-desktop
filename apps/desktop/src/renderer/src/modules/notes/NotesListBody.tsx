@@ -12,6 +12,8 @@ import { NoteCard } from "./NoteCard";
 import { NotesUnsupported } from "./NotesUnsupported";
 import { NoteEditor } from "./NoteEditor";
 import { newDraft, notesCache, setNoteDraft, useHostSidebar, useNoteDrafts, useNotesQuery } from "./store";
+import { SearchableSelect } from "../../components/SearchablePicker";
+import { useAgentPicker } from "../../lib/useAgentPicker";
 
 const SELECT = "max-w-full rounded-md border border-border bg-background px-2 py-1 text-xs outline-none focus:border-accent";
 
@@ -21,6 +23,7 @@ export function NotesListBody({ hostId, state, setState, visible = true }: { hos
   const sidebar = useHostSidebar(hostId);
   const sessions = [...(sidebar?.active ?? []), ...(sidebar?.retired ?? [])];
   const projects = sidebar?.projects?.projects ?? [];
+  const picker = useAgentPicker(hostId, sidebar, { context: "notes", include: "all", current: state.sessionId });
   const [search, setSearch] = useState(state.query ?? "");
   useEffect(() => setSearch(state.query ?? ""), [state.query]);
   useEffect(() => { if (search === (state.query ?? "")) return; const timer = setTimeout(() => setState({ ...state, query: search }), 250); return () => clearTimeout(timer); }, [search, state, setState]);
@@ -38,9 +41,9 @@ export function NotesListBody({ hostId, state, setState, visible = true }: { hos
         <select aria-label={t("notes.list")} className={SELECT} value={scope.kind} onChange={(e) => setState({ ...state, scope: e.target.value as ListState["scope"], sessionId: state.sessionId ?? sessions[0]?.cutexSessionId, projectId: state.projectId ?? projects[0]?.project_id })}>
           <option value="session" disabled={!sessions.length && !state.sessionId}>{t("notes.scope.session")}</option><option value="project" disabled={!projects.length && !state.projectId}>{t("notes.scope.project")}</option><option value="host">{t("notes.scope.host")}</option>
         </select>
-        {scope.kind === "session" && <select aria-label={t("notes.chooseSession")} className={SELECT} value={scope.id} onChange={(e) => setState({ ...state, sessionId: e.target.value })}>
-          {!sessions.some((s) => s.cutexSessionId === scope.id) && <option value={scope.id}>{scope.id}</option>}{sessions.map((s) => <option key={s.cutexSessionId} value={s.cutexSessionId}>{s.displayName || s.cutexSessionId}</option>)}
-        </select>}
+        {scope.kind === "session" && <SearchableSelect label={t("notes.chooseSession")} value={scope.id} options={picker.options} triggerText={scope.id}
+          placeholder={picker.labels.search} emptyLabel={picker.labels.empty} hiddenNote={picker.labels.hiddenNote} width="w-64" triggerClassName={`flex w-44 items-center justify-between gap-1 ${SELECT}`}
+          onChange={(v) => { picker.remember(v); setState({ ...state, sessionId: v }); }} />}
         {scope.kind === "project" && <select aria-label={t("notes.chooseProject")} className={SELECT} value={scope.id} onChange={(e) => setState({ ...state, projectId: e.target.value })}>
           {!projects.some((p) => p.project_id === scope.id) && <option value={scope.id}>{scope.id}</option>}{projects.map((p) => <option key={p.project_id} value={p.project_id}>{p.presentation.display_name || p.project_id}</option>)}
         </select>}

@@ -2,7 +2,7 @@
 // picked (cutex add_member / Director rules), search, filters and sort.
 import { describe, expect, it } from "vitest";
 import type { SessionResource } from "@cutex-desktop/protocol";
-import { addCandidates, DEFAULT_PICKER_QUERY, detachable, directorChoices, filterCandidates } from "../src/renderer/src/lib/projectMembers";
+import { addCandidates, DEFAULT_PICKER_QUERY, detachable, directorChoices, filterCandidates, hiddenQuickChats } from "../src/renderer/src/lib/projectMembers";
 import type { AgentRow, SidebarGroup } from "../src/renderer/src/lib/sidebar";
 
 function row(id: string, name: string, over: { status?: AgentRow["status"]; last?: number; note?: string; claude?: boolean; director?: boolean } = {}): AgentRow {
@@ -78,11 +78,33 @@ describe("filterCandidates", () => {
     expect(ids(filterCandidates(members, { ...DEFAULT_PICKER_QUERY, query: "rev" }, lastOf))).toEqual(["rev"]);
     expect(ids(filterCandidates(all, { ...DEFAULT_PICKER_QUERY, query: "zzz" }, lastOf))).toEqual([]);
   });
+
+  it("also finds agents by the project they are in", () => {
+    const renamed = groups.map((g) => (g.kind === "project" && g.id === "kks" ? { ...g, name: "Kestrel Studio" } : g));
+    expect(ids(filterCandidates(addCandidates(renamed, "demo"), { ...DEFAULT_PICKER_QUERY, query: "kestrel" }, lastOf))).toEqual(["web"]);
+  });
 });
 
 describe("detachable", () => {
   it("never includes the Director", () => {
     expect(detachable(["a", "dir", "b"], "dir")).toEqual(["a", "b"]);
     expect(detachable(["a"], null)).toEqual(["a"]);
+  });
+});
+
+describe("owner 2026-11-09: 按项目 sort, quick chats", () => {
+  const chat = row("chat", "Fix the build", { last: 99 });
+  (chat.session as { registrationClass?: string }).registrationClass = "local_only";
+  const withChat: SidebarGroup[] = groups.map((g) => (g.kind === "independent" ? { ...g, offline: [...g.offline, chat] } : g));
+  it("按项目: independent (pickable) first, then by the project they are in", () => {
+    const more: SidebarGroup[] = [...groups, { kind: "project", id: "abc", name: "abc", badge: "A", color: "red", online: [], offline: [row("x", "xeno", { last: 1 })] }];
+    expect(ids(filterCandidates(addCandidates(more, "demo"), { ...DEFAULT_PICKER_QUERY, sort: "project" }, lastOf))).toEqual(["old", "solo", "x", "web"]);
+  });
+  it("quick chats are listed only while searching, with a count for the note", () => {
+    const all = addCandidates(withChat, "demo");
+    expect(ids(filterCandidates(all, DEFAULT_PICKER_QUERY, lastOf))).not.toContain("chat");
+    expect(hiddenQuickChats(all, DEFAULT_PICKER_QUERY)).toBe(1);
+    expect(ids(filterCandidates(all, { ...DEFAULT_PICKER_QUERY, query: "build" }, lastOf))).toEqual(["chat"]);
+    expect(hiddenQuickChats(all, { ...DEFAULT_PICKER_QUERY, query: "build" })).toBe(0);
   });
 });

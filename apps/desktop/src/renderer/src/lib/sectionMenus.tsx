@@ -1,14 +1,16 @@
 // Context-menu entries for sidebar project sections (lib/sidebarSections): the project menu's
-// 「移到分区 ›」 and the section header menu. Pure prefs edits, no daemon calls.
-import { ArrowDown, ArrowUp, Check, ChevronsDownUp, ChevronsUpDown, FolderInput, FolderMinus, FolderPlus, Palette, Pencil, Trash2 } from "lucide-react";
+// 「移到分区 ›」 and the section header menu. Prefs edits, plus 下线空闲的… for the folder's projects (lib/stopIdle).
+import { ArrowDown, ArrowUp, Check, ChevronsDownUp, ChevronsUpDown, FolderInput, FolderMinus, FolderPlus, Palette, Pencil, Power, Trash2 } from "lucide-react";
 import type { MessageKey } from "../i18n";
 import { folderLookDialog, promptDialog, type MenuEntry } from "./contextMenu";
 import { sidebarMenuTail } from "./customizeMenu";
+import { folderIdleScope, stopIdleMenuEntries } from "./stopIdle";
 import { getUiPrefs, updateSections } from "./prefs";
 import { assignSection, createSection, deleteSection, moveSection, renameSection, sectionOf, setSectionCollapsed, setSectionLook, type SidebarSection } from "./sidebarSections";
 
 type T = (key: MessageKey, vars?: Record<string, string | number>) => string;
 const ICON = 14;
+const withSeparator = (entries: MenuEntry[]): MenuEntry[] => (entries.length ? [...entries, "separator"] : []);
 
 /** Asks for a name, then makes a section holding `members` (nothing on cancel / empty name). */
 export async function newSectionWith(members: readonly string[], t: T): Promise<void> {
@@ -66,6 +68,8 @@ export function sectionMenu(section: SidebarSection, visible: readonly string[],
     { label: t("menu.moveSectionUp"), icon: <ArrowUp size={ICON} />, disabled: at <= 0, onSelect: () => updateSections((list) => moveSection(list, section.id, -1, visible)) },
     { label: t("menu.moveSectionDown"), icon: <ArrowDown size={ICON} />, disabled: at < 0 || at >= visible.length - 1, onSelect: () => updateSections((list) => moveSection(list, section.id, 1, visible)) },
     "separator",
+    // 下线空闲的…: this folder's projects, on each project's host.
+    ...withSeparator(stopIdleMenuEntries(folderIdleScope(section.name, section.members), t, <Power size={ICON} />)),
     { label: t("menu.deleteSection"), info: t("menu.deleteSectionHint"), icon: <Trash2 size={ICON} />, danger: true, onSelect: () => updateSections((list) => deleteSection(list, section.id)) },
     "separator",
     ...sidebarMenuTail(t),

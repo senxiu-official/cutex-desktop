@@ -37,7 +37,7 @@ it("keeps avatar style, pictures and opening display-only in a mixed Profile pag
   for (const row of rows) expect(timingButtons(row)).toEqual([]);
   expect(rows.some(row => row.textContent?.includes("avatarStyle.title"))).toBe(true);
   expect(host.querySelector('[data-settings-header] button[data-settings-agents="mixed"]')).not.toBeNull();
-  expect(host.querySelector('section button[data-settings-agents="none"][data-timing-presentation="header"]')).not.toBeNull();
+  expect(host.querySelector('section button[data-settings-agents="none"][data-timing-presentation="header"]')).toBeNull();
 });
 it("shows asymmetric timing for browser tools and none on its module navigation link", () => {
   act(() => root.render(h(BrowserProfileTools, { profile: "p" })));
@@ -49,7 +49,7 @@ it("shows asymmetric timing for browser tools and none on its module navigation 
 
 it("summarizes uniform Profile appearance at page level without repeated row icons", () => {
   act(() => root.render(h(SettingsPage, { page: "profiles", children: appearance() })));
-  expect(host.querySelector('[data-settings-header] button[data-settings-agents="none"]')).not.toBeNull();
+  expect(host.querySelector('[data-settings-header] button[data-settings-agents="none"]')).toBeNull();
   for (const row of host.querySelectorAll("[data-setting-row]")) expect(timingButtons(row)).toEqual([]);
   expect(host.querySelector('section button[data-timing-presentation="header"]')).toBeNull();
 });

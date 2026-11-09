@@ -86,6 +86,7 @@ import { ModelPicker } from "../../components/ModelPicker";
 import { LAUNCH_FOR_MODE, LAUNCH_REVIEWER_FEATURE, PERMISSION_MODES, permissionModeOfLaunch, reviewerForCreate } from "../../lib/permissionModes";
 import { Button, FormFields, Segmented, SettingRow, Select, TextInput, Toggle } from "../../components/settings/Form";
 import { useOwnerWindow } from "../../lib/ownerContext";
+import { MEMORY_INJECTION_FEATURE } from "../../../../shared/memoryInjection";
 
 const INDEPENDENT = "";
 /** cutex can give a cwd-less, project-less `POST /v2/human/agents` a scratch workspace. Not
@@ -206,6 +207,8 @@ interface NewAgentDraft {
   profile: string;
   portraitSelected: boolean;
   start: boolean;
+  /** cutex agent-memory-injection: 使用项目记忆 (absent in older drafts = on). */
+  memoryInjection?: boolean;
   launch: LaunchForm;
   launchTouched: boolean;
   /** Claude profiles (cutex claude-launch-permission-mode): the picked starting mode; null = the default. */
@@ -281,6 +284,7 @@ function NewAgentForm({ params, target, presetHost, restored }: { params: PagePa
   const [profile, setProfile] = useState(restored?.profile ?? "");
   const [portraitSelected, setPortraitSelected] = useState(restored?.portraitSelected ?? false);
   const [start, setStart] = useState(restored?.start ?? true);
+  const [memoryOn, setMemoryOn] = useState(restored?.memoryInjection ?? true);
   // From the host's cached list first (shared with 快速启动), so a revisit paints the launcher art in
   // its first frame instead of the icon intro until the list arrives; refreshed below.
   const [profiles, setProfiles] = useState<{ defaultProfile: string | null; profiles: ProfileItem[] } | null>(() => cachedProfileList(hostId));
@@ -483,6 +487,7 @@ function NewAgentForm({ params, target, presetHost, restored }: { params: PagePa
 
   const root = selectedSummary?.workspace_root ?? null;
   const scratchOk = features.has(HUMAN_AGENT_SCRATCH_FEATURE);
+  const memoryOk = features.has(MEMORY_INJECTION_FEATURE);
   // What cutex needs for a cwd: a directory, or a project with a workspace root, or (with the
   // scratch capability) nothing for an independent agent. 「新项目…」 always needs a directory.
   const missingWorkspace = !cwd.trim() && (newProject ? true : project ? !root : !scratchOk);
@@ -555,7 +560,7 @@ function NewAgentForm({ params, target, presetHost, restored }: { params: PagePa
             const reviewer = dsh ? { launch: dshLaunchFromForm(launch, launchTouched), fallback: null } : reviewerForCreate(launchFromForm(launch, launchTouched), permissionModeOfLaunch(launch.sandbox, launch.approvalPolicy, launch.approvalsReviewer), features.has(LAUNCH_REVIEWER_FEATURE));
             // The variant the page showed, sent explicitly (auto-pick: cutex's pick takes its default variant).
             const variantId = createVariantId(chosenVariant, autoOk ? auto.send : profile);
-            const created = await api.createAgent({ name: name.trim(), projectId: target ?? undefined, cwd: cwd.trim() || undefined, profile: (autoOk ? auto.send : profile) || undefined, ...(variantId ? { variantId } : {}), start: startNow, launch: !canLaunch ? undefined : claude ? claudeLaunchFromForm(launch, launchTouched, claudeMode && claudeModes?.includes(claudeMode) ? claudeMode : null, claudeModes) : reviewer.launch });
+            const created = await api.createAgent({ name: name.trim(), projectId: target ?? undefined, cwd: cwd.trim() || undefined, profile: (autoOk ? auto.send : profile) || undefined, ...(variantId ? { variantId } : {}), ...(memoryOk && !memoryOn ? { memoryInjection: false } : {}), start: startNow, launch: !canLaunch ? undefined : claude ? claudeLaunchFromForm(launch, launchTouched, claudeMode && claudeModes?.includes(claudeMode) ? claudeMode : null, claudeModes) : reviewer.launch });
             const id = created.cutexSessionId;
             // Design 028 (c): the profile default effort the model does not offer was replaced.
             const fallback = created.effortFallback;
@@ -737,7 +742,7 @@ function NewAgentForm({ params, target, presetHost, restored }: { params: PagePa
   /** Settings → Profiles (添加 or the list) on the form's host; the draft waits in lib/newAgentReturn. */
   const toProfiles = (create: boolean) => {
     if (locked) return;
-    const form: NewAgentDraft = { name, avatar, picture, task, images, pickedSkills, project, cwd, cwdTouched, profile, portraitSelected, start, launch, launchTouched, claudeMode, projectName, projectBadge, projectColorName, projectIconChoice, asDirector };
+    const form: NewAgentDraft = { name, avatar, picture, task, images, pickedSkills, project, cwd, cwdTouched, profile, portraitSelected, start, memoryInjection: memoryOn, launch, launchTouched, claudeMode, projectName, projectBadge, projectColorName, projectIconChoice, asDirector };
     keepNewAgentDraft({ hostId, params, form });
     // Host pages open on the form's host (the settings host picker; reset when Settings closes).
     if (hostId !== scope.focus) setSettingsHost(hostId);
@@ -873,6 +878,11 @@ function NewAgentForm({ params, target, presetHost, restored }: { params: PagePa
                     <SettingRow agents="newAgents" source="host" label={t("agent-config.newAgent.start")} hint={hasTask ? t("agent-config.newAgent.taskStarts") : undefined}>
                       <input type="checkbox" checked={start || hasTask} disabled={hasTask} onChange={(e) => setStart(e.target.checked)} className="h-4 w-4 accent-[var(--accent)]" />
                     </SettingRow>
+                    {memoryOk && (
+                      <SettingRow agents="newAgents" source="host" label={t("agent-config.memoryInjection.label")} hint={t("agent-config.memoryInjection.newHint")}>
+                        <input type="checkbox" data-testid="new-agent-memory" checked={memoryOn} onChange={(e) => setMemoryOn(e.target.checked)} className="h-4 w-4 accent-[var(--accent)]" />
+                      </SettingRow>
+                    )}
                   </LaunchFieldsBox>
                 )}
                 {panel === "model" && (

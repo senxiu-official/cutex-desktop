@@ -142,6 +142,10 @@ const mockRules: MockRule[] = [
 const mockRuleAudit: MockAudit[] = [
   { auditId: "ara-preview-match", at: iso(1800), action: "matched", ruleId: "aar-preview-browser", ruleRevision: 1, actor: "auto:owner", requesterCutexSessionId: "eva", projectId: "desktop", kind: "browser_open", risk: "medium", requestSha256: "47ac…", approvalId: "apr-auto047", result: "approved", details: {} },
   { auditId: "ara-preview-pause", at: iso(4000), action: "updated", ruleId: "aar-preview-service", ruleRevision: 1, actor: "owner", result: "narrowed", details: {} },
+  // `?settingslists`: more than the 协作 page shows.
+  ...(typeof location !== "undefined" && new URLSearchParams(location.search).has("settingslists")
+    ? Array.from({ length: 22 }, (_, i) => ({ auditId: `ara-preview-scale-${i}`, at: iso(5000 + i * 900), action: i % 3 ? "matched" : "updated", ruleId: i % 2 ? "aar-preview-browser" : "aar-preview-service", ruleRevision: 1, actor: "auto:owner", result: i % 3 ? "allowed" : "narrowed", details: {} }))
+    : []),
 ];
 const ruleCatalog: MockCatalogItem[] = [
   { kind: "managed_service", risk: "high", compositeRisk: false, constraints: [] }, { kind: "service_lifetime", risk: "dynamic", compositeRisk: true, constraints: [] },

@@ -239,7 +239,7 @@ export const enAU: Record<keyof typeof zhCN, string> = {
   "onboarding.guide.update.title": "Updates",
   "onboarding.guide.update.text": "Cutex’s own updates are in Settings → Updates & diagnostics.\ncutex on each host is updated separately, in Settings → Host backend updates.\n{{Agents}} started before an update may show the old version until they restart.",
   "onboarding.guide.remote.title": "Remote hosts and paired devices",
-  "onboarding.guide.remote.text": "{{Agents}} on a remote host work like the ones here: conversations, delegations and services all work, and files stay on that machine.\nA paired device (a phone, say) connects to the host with the access you gave it; manage or revoke it in Settings → Users → Signed-in devices.",
+  "onboarding.guide.remote.text": "{{Agents}} on a remote host work like the ones here: conversations, delegations and services all work, and files stay on that machine.\nA paired device (a phone, say) connects to the host with the access you gave it; manage or revoke it in Settings → Hosts.",
   "onboarding.guide.help.title": "Help",
   "onboarding.guide.help.hint": "Replay the guides and tips, or open the docs and report a problem.",
   "onboarding.guide.help.onboarding": "Guides",

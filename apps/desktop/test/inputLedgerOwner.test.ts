@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { record, delivery } from "../src/renderer/src/lib/inputLedger/testkit";
 import { applyInputLedgerSnapshot, emptyInputLedgerSession } from "../src/renderer/src/lib/inputLedger/alignment";
 import { viewKey } from "../src/renderer/src/lib/viewKey";
+import { clearableUncertain } from "../src/renderer/src/lib/inputLedger/nextUp";
 import { missingTimelineRecords, ownerTimelineEntry, predictedOwnerSurface } from "../src/renderer/src/lib/inputLedger/owner";
 
 const mock = vi.hoisted(() => ({ calls: [] as { host: string; method: string; args: unknown[] }[], responses: new Map<string, (...args: any[]) => any>(), handlers: new Map<string, (value: any) => void>() }));
@@ -185,6 +186,22 @@ describe("D3 owner ledger integration", () => {
     await merging;
     expect(mock.calls.some(call => call.method === "queuePromote")).toBe(false);
     expect(app.getState().inputs[key]!.records.has("a")).toBe(false);
+  });
+
+  it("reconnect recovery: uncertain bus input with no turn stays listed, clearable and dismissed the normal way; a retired-deadline accepted stays accepted", async () => {
+    const asker = { kind: "agent", id: "a", name: "Asker", host: null, cutexSessionId: "a" } as const;
+    const uncertain = record("bus", { kind: "agentMessage", sender: asker, state: "uncertain", reason: "receiptTimeout", turnId: null, rev: 5, actions: ["retry", "dismiss"] });
+    const pending = record("native-pending", { kind: "agentMessage", sender: asker, state: "accepted", turnId: null, deadline: null, actions: [] });
+    const session = seed([uncertain, pending]);
+    expect(missingTimelineRecords(session.records, []).map(r => r.inputId)).toEqual(expect.arrayContaining(["bus", "native-pending"]));
+    expect(clearableUncertain(session).map(r => r.inputId)).toEqual(["bus"]);
+    app.setState({ inputs: { [key]: session } });
+    const dismissed = record("bus", { ...uncertain, rev: 6, stateRevision: 2, state: "discarded", actions: [] });
+    mock.responses.set("inputGet", () => ({ ledgerEpoch: "e", stateRevision: 2, records: [dismissed], missing: [] }));
+    await app.getState().dismissInput("cutex.s1", "bus", "local");
+    expect(mock.calls.find(call => call.method === "inputDismiss")?.args).toEqual(["cutex.s1", "bus", 5]);
+    expect(app.getState().inputs[key]!.records.get("bus")?.state).toBe("discarded");
+    expect(app.getState().inputs[key]!.records.get("native-pending")?.state).toBe("accepted");
   });
 
   it("HTTP success with a failed dismiss remains a visible failure and reconciles", async () => {

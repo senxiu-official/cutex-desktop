@@ -38,8 +38,7 @@ import { NEUTRAL_GROUP, projectBlockLook } from "../lib/projectSeparation";
 import { useProjectMuted } from "../lib/notificationLevelsStore";
 import { services } from "../modules/app";
 import { ItemBoundary } from "../modules/Outlet";
-import { isExternalModuleId } from "../modules/external";
-import { ExternalBadge } from "../modules/ExternalBadge";
+import { LocalBadge } from "../modules/LocalBadge";
 import { useSlot } from "../modules/react";
 import type { AppSlotEntry, NavArea, NavItem } from "../modules/slots";
 import { StatusAvatar } from "./AgentStatus";
@@ -48,7 +47,7 @@ import { RestoreBanner } from "./RestoreBanner";
 import { AgentRowButton, OfflineRow, PinnedRows } from "./AgentRows";
 import { toggleOpenedProject, useOpenedProject } from "../lib/openedProjects";
 import { relativeTime } from "../lib/sidebarView";
-import { folderLook, OLDER_FOLDER_LOOK, type FolderLook } from "../lib/folderLook";
+import { folderLook, folderStyle, OLDER_FOLDER_LOOK, type FolderLook } from "../lib/folderLook";
 import { UpdateButton } from "./UpdateButton";
 import { IdentityButton } from "./IdentityMenu";
 import { middleOpen } from "./SidebarNav";
@@ -605,7 +604,7 @@ function OlderProjects({ layouts, foldId, nested = false }: { layouts: GroupLayo
   const days = prefs.olderProjectsAfter === "off" ? 0 : prefs.olderProjectsAfter;
   const look = OLDER_FOLDER_LOOK;
   return (
-    <section data-roster-kind={nested ? "project" : "system"} data-folded={open ? undefined : ""} data-older-projects="" style={{ "--folder-color": look.color } as CSSProperties}>
+    <section data-roster-kind={nested ? "project" : "system"} data-folded={open ? undefined : ""} data-older-projects="" style={folderStyle(look)}>
       <div className="flex items-center rounded-md">
         <FolderHeader system={!nested} look={look} name={t("sidebar.olderProjects")} count={layouts.length} open={open} onToggle={() => toggleRestOpen(foldId)} title={t("sidebar.olderProjectsHint", { days })} totals={<FolderTotals needsYou={needs} running={running} />} />
       </div>
@@ -710,7 +709,7 @@ function ProjectSection({ section, layouts, older, visible, searching, dragged, 
   const updates = sum.attention - sum.needsYou;
   const look = folderLook(section.id, section.look);
   return (
-    <section data-roster-kind="folder" data-sidebar-section={section.id} style={{ "--folder-color": look.color } as CSSProperties}>
+    <section data-roster-kind="folder" data-sidebar-section={section.id} style={folderStyle(look)}>
       <div
         data-section-drop-over={drop.over || undefined}
         className={`flex items-center rounded-md ${drop.over ? `ring-1 ring-accent/50 ${DROP_TINT}` : ""}`}
@@ -841,7 +840,7 @@ function FooterEntry({ entry }: { entry: AppSlotEntry<"nav.primary"> }) {
       className={`relative flex shrink-0 items-center rounded p-1.5 hover:bg-surface-2 hover:text-foreground disabled:opacity-50 ${active ? "bg-surface-2 text-foreground" : ""}`}
     >
       <Icon size={14} />
-      {isExternalModuleId(entry.moduleId) && <ExternalBadge />}
+      <LocalBadge moduleId={entry.moduleId} />
       {badge?.dot && <span className="absolute top-1 right-0.5 h-1.5 w-1.5 rounded-full bg-danger" />}
     </button>
   );

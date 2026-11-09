@@ -43,6 +43,21 @@ it("nested flyouts are siblings in the document, and outside wheel closes the wh
   act(() => document.body.dispatchEvent(new WheelEvent("wheel", { bubbles: true })));
   expect(document.querySelector("[role=menu]")).toBeNull();
 });
+it("an armed row keeps its danger face while focused: its first click leaves the focus on it", () => {
+  vi.useFakeTimers();
+  try {
+    act(() => openMenuAt(700, 100, [{ label: "Delete", armed: "Confirm delete", onSelect: picked }, { label: "Other", onSelect() {} }]));
+    const rows = () => [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+    expect(rows()[0]!.className).toContain("focus:bg-surface-2");
+    act(() => rows()[0]!.click());
+    const armed = document.querySelector<HTMLElement>("[data-armed]")!;
+    expect(armed.className).toContain("bg-danger-solid");
+    // A focus:bg-* utility sorts after bg-danger-solid and wins: white text on the grey focus background.
+    expect(armed.className).not.toMatch(/focus:bg-/);
+    expect(rows()[1]!.className).toContain("focus:bg-surface-2");
+    act(() => vi.advanceTimersByTime(ARMED_TIMEOUT_MS + ARMED_EXPIRED_MS + 400));
+  } finally { vi.useRealTimers(); }
+});
 it("shows the existing timeout explanation for an armed action inside a portalled submenu", () => {
   vi.useFakeTimers();
   try {

@@ -290,3 +290,30 @@ it("keeps 1x/10x warm update and 100 unrelated wake request/byte budgets constan
   expect(ten.resync.requests).toBe(ten.bootstrap.requests + 1);
   console.info("058 C2 request/JSON-byte budgets", JSON.stringify([one, ten]));
 });
+
+it("batch projections preserve null authority, page progress, and archived-on-demand", async () => {
+  const { source } = fixture(); const gate = deferred<SessionCatalogPage>();
+  const projected = (id: string, eligible = true) => ({ cutexSessionId: id, revision: 1, resource: eligible ? resource(id) : null, hostRow: eligible ? hostRow(id) : null });
+  source.page.mockImplementation(async (lifecycle, cursor) => lifecycle === "retired" ? page(["r"]) : cursor ? gate.promise : { ...page([], "first", "p2"), sessions: [projected("a"), projected("ineligible", false)] });
+  const progress = vi.fn(); const catalog = new SessionDeltaCatalog(source, progress);
+  const pending = catalog.read();
+  await vi.waitFor(() => expect(catalog.peek()?.active.map(row => row.cutexSessionId)).toEqual(["a"]));
+  gate.resolve({ ...page([]), sessions: [{ ...projected("b"), hostRow: null }] });
+  const result = await pending;
+  expect(result.active.map(row => row.cutexSessionId)).toEqual(["a", "b"]);
+  expect(Object.keys(result.hostRows)).toEqual(["a"]); expect(result.archivedPending).toBe(1);
+  expect(source.session).not.toHaveBeenCalled(); expect(source.hostRow).not.toHaveBeenCalled(); expect(source.retired).not.toHaveBeenCalled();
+  expect(source.changes).toHaveBeenCalledWith("first"); expect(progress).toHaveBeenCalledWith(3, 3);
+  catalog.wantArchived(); expect((await catalog.read()).retired).toHaveLength(1);
+});
+
+it("reads after an own write during a batch page request and keeps its dirty hint", async () => {
+  const { source } = fixture(); const gate = deferred<SessionCatalogPage>();
+  source.page.mockImplementation(async lifecycle => lifecycle === "active" ? gate.promise : page([]));
+  const catalog = new SessionDeltaCatalog(source); const before = catalog.read();
+  catalog.invalidate("a"); catalog.noteWrite(); const after = catalog.read(); expect(after).not.toBe(before);
+  gate.resolve({ ...page([]), sessions: [{ cutexSessionId: "a", revision: 1, resource: resource("a"), hostRow: hostRow("a") }] });
+  source.session.mockResolvedValue({ ...resource("a"), displayName: "after write" });
+  await before; expect((await after).active[0]?.displayName).toBe("after write");
+  expect(source.session).toHaveBeenCalledWith("a", "active"); expect(source.changes).toHaveBeenCalledTimes(2);
+});

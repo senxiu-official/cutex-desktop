@@ -1,7 +1,7 @@
 {
   "name": "@cutex-desktop/app",
   "productName": "Cutex",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "license": "Apache-2.0",
   "homepage": "https://github.com/senxiu-official/cutex-desktop",
   "repository": "github:senxiu-official/cutex-desktop",
@@ -24,6 +24,7 @@
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
     "dompurify": "^3.4.17",
+    "katex": "^0.19.1",
     "lucide-react": "1.17.0",
     "mammoth": "^1.13.0",
     "pdfjs-dist": "^6.4.299",
@@ -37,11 +38,11 @@
     "@cutex-desktop/plugin-sdk": "workspace:*",
     "@cutex-desktop/plugin-host": "workspace:*",
     "@cutex-desktop/opaque-frame": "workspace:*",
-    "@cutex-desktop/plugin-sandbox": "workspace:*",
     "@cutex-desktop/browser-protocol": "workspace:*",
     "@cutex-desktop/browser-cdp": "workspace:*"
   },
   "devDependencies": {
+    "@cutex-desktop/module-api": "workspace:*",
     "@tailwindcss/vite": "^4.3.3",
     "@types/jsdom": "^30.0.0",
     "@types/react": "^19.3.0",

@@ -7,7 +7,7 @@ import { create } from "zustand";
 import { ARTIFACT_PUBLISHED_EVENT, ARTIFACT_RESOLVE_MAX, ARTIFACT_UPDATED_EVENT, type ArtifactContent, type ArtifactDetail, type ArtifactDiff, type ArtifactResolveItem } from "../../../../shared/artifactStore";
 import { bridge } from "../../bridge";
 import { services } from "../app";
-import type { AppModuleContext } from "../slots";
+import type { ModuleContext } from "../slots";
 
 interface CacheState {
   /** `${hostId}|${ref}` */
@@ -180,7 +180,7 @@ export function invalidateArtifact(hostId: string, artifactId: string | null): v
 }
 
 /** Module activation: follow `cutex/artifact/*` on every connected host until the module stops. */
-export function startArtifactSync(ctx: AppModuleContext): void {
+export function startArtifactSync(ctx: ModuleContext): void {
   if (typeof bridge?.on !== "function") return;
   const off = bridge.on("hostEvent", ({ hostId, envelope }) => {
     const method = envelope.cutex?.method;

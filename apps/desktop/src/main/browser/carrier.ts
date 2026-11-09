@@ -1,6 +1,7 @@
 import { BrowserWindow, type NativeImage, type WebContents, type WebPreferences } from "electron";
 import { markBackgroundWindow } from "../appWindows";
 import { browserPartition } from "./attachPolicy";
+import { MAX_BROWSER_THUMBNAIL_BYTES } from "../../shared/browser";
 
 /**
  * Background carrier for agent-opened tabs (2026-10-18, owner option C): an offscreen-rendered,
@@ -16,14 +17,21 @@ import { browserPartition } from "./attachPolicy";
  * webContentsId through the registry).
  */
 export const BROWSER_CARRIER_FRAME_RATE = 15;
-/** Owner-facing live thumbnail: at most one frame per interval, this wide, JPEG. */
+/** Owner-facing live thumbnail: at most one frame per interval, the page's own frame (rendered at the
+ * owner's display scale) as JPEG at this quality, so it reads as sharp as the page. */
 export const BROWSER_THUMBNAIL_INTERVAL_MS = 1000;
-export const BROWSER_THUMBNAIL_WIDTH = 480;
-export const MAX_BROWSER_THUMBNAIL_LENGTH = 256 * 1024;
+export const BROWSER_THUMBNAIL_QUALITY = 88;
+/** Only a frame over MAX_BROWSER_THUMBNAIL_BYTES at a lower quality too is scaled down, to this width. */
+export const BROWSER_THUMBNAIL_FALLBACK_WIDTH = 1280;
+/** The display scale the page renders at: the owner's (1..3); anything else renders at 1. */
+export function browserCarrierScale(scaleFactor: number | undefined): number {
+  return typeof scaleFactor === "number" && Number.isFinite(scaleFactor) && scaleFactor > 1 && scaleFactor <= 3 ? scaleFactor : 1;
+}
 
 /** The exact preference bag (webview attach hardening + offscreen); never merged with caller input. */
-export function browserCarrierPreferences(hostId: string): WebPreferences {
-  return { partition: browserPartition(hostId, "agent"), offscreen: true, backgroundThrottling: false,
+export function browserCarrierPreferences(hostId: string, scaleFactor?: number): WebPreferences {
+  const scale = browserCarrierScale(scaleFactor);
+  return { partition: browserPartition(hostId, "agent"), offscreen: scale === 1 ? true : { deviceScaleFactor: scale }, backgroundThrottling: false,
     contextIsolation: true, sandbox: true, webSecurity: true,
     nodeIntegration: false, nodeIntegrationInWorker: false, nodeIntegrationInSubFrames: false,
     webviewTag: false, plugins: false, allowRunningInsecureContent: false,
@@ -37,6 +45,8 @@ export interface BrowserCarrier {
 export interface BrowserCarrierOptions {
   hostId: string;
   viewport: { width: number; height: number };
+  /** The owner's display scale (the app window's screen): the page and its thumbnail render at it. */
+  scaleFactor?: number;
   /** Runs synchronously right after creation, before any URL is loaded: the popup guard etc. */
   guard(guest: WebContents): void;
   /** Throttled owner thumbnail (data:image/jpeg); asked only while wanted() is true. */
@@ -47,7 +57,7 @@ export interface BrowserCarrierOptions {
 export function createBrowserCarrier(options: BrowserCarrierOptions): BrowserCarrier {
   const window = new BrowserWindow({ show: false, width: options.viewport.width, height: options.viewport.height, useContentSize: true,
     frame: false, skipTaskbar: true, fullscreenable: false, paintWhenInitiallyHidden: true, title: "",
-    webPreferences: browserCarrierPreferences(options.hostId) });
+    webPreferences: browserCarrierPreferences(options.hostId, options.scaleFactor) });
   markBackgroundWindow(window);
   const guest = window.webContents;
   const now = options.now ?? Date.now;
@@ -74,9 +84,11 @@ export function createBrowserCarrier(options: BrowserCarrierOptions): BrowserCar
     try {
       const size = image.getSize();
       if (size.width < 1 || size.height < 1) return;
-      const scaled = size.width > BROWSER_THUMBNAIL_WIDTH ? image.resize({ width: BROWSER_THUMBNAIL_WIDTH, quality: "good" }) : image;
-      const url = `data:image/jpeg;base64,${scaled.toJPEG(60).toString("base64")}`;
-      if (url.length <= MAX_BROWSER_THUMBNAIL_LENGTH) options.thumbnail(url);
+      let bytes = image.toJPEG(BROWSER_THUMBNAIL_QUALITY);
+      if (bytes.length > MAX_BROWSER_THUMBNAIL_BYTES) bytes = image.toJPEG(70);
+      if (bytes.length > MAX_BROWSER_THUMBNAIL_BYTES && size.width > BROWSER_THUMBNAIL_FALLBACK_WIDTH)
+        bytes = image.resize({ width: BROWSER_THUMBNAIL_FALLBACK_WIDTH, quality: "best" }).toJPEG(70);
+      if (bytes.length <= MAX_BROWSER_THUMBNAIL_BYTES) options.thumbnail(`data:image/jpeg;base64,${bytes.toString("base64")}`);
     } catch { /* A thumbnail is a convenience; never a reason to touch the page. */ }
   };
   guest.on("paint", (_event: unknown, _dirty: unknown, image: NativeImage) => {

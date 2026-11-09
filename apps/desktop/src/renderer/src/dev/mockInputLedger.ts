@@ -220,5 +220,5 @@ export function createMockInputLedger(scene: LedgerScene = "turn", emit: Emit = 
     if (!r) throw new Error("input_not_found");
     return put(id, inputId, { state, reason: state === "uncertain" ? "outcomeUnknown" : null, surface: state === "uncertain" ? r.surface : "timeline", order: state === "uncertain" ? r.order : null, since: iso(), deadline: state === "accepted" ? new Date(clock() + 60000).toISOString() : null, actions: state === "uncertain" ? ["retry", "dismiss"] : [], evidence: state === "inContext" ? "contextPersisted" : null, turnId: state === "inContext" ? get(id).delivery.turn?.turnId ?? r.turnId ?? "synthetic-preview-turn" : r.turnId });
   }
-  return { notice: INPUT_LEDGER_FIXTURE_NOTICE, scene, api, snapshot, queueSnapshot, promote, remove, submit, advance, setDelivery, replay, provenance: (id: string) => { get(id); return structuredClone(provenance.get(id)); } };
+  return { notice: INPUT_LEDGER_FIXTURE_NOTICE, scene, api, snapshot, queueSnapshot, promote, remove, submit, advance, put, setDelivery, replay, provenance: (id: string) => { get(id); return structuredClone(provenance.get(id)); } };
 }

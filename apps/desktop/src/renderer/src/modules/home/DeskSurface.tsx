@@ -20,7 +20,7 @@ import { services } from "../app";
 import { useSlot } from "../react";
 import { ItemBoundary } from "../Outlet";
 import type { AppSlotEntry } from "../slots";
-import { unitSizesOf, unitsOfSteps, WIDGET_STEP, type DesktopWidgetItem, type WidgetActions, type WidgetInstanceRef, type WidgetSettings, type WidgetSource, type WidgetSteps, type WidgetUnits } from "../widgetTypes";
+import { defaultStepsOf, unitSizesOf, unitsOfSteps, WIDGET_STEP, type DesktopWidgetItem, type WidgetActions, type WidgetInstanceRef, type WidgetSettings, type WidgetSource, type WidgetSteps, type WidgetUnits } from "../widgetTypes";
 import type { HomeDoc, HomePin, HomeTileSize } from "../../../../shared/home";
 import { currentDesk, mirrorBlocks, settingsOf, withUnitBand, withDesk, withItem, withoutItem, withSettings, type DeskDoc } from "./desk";
 import { bandOf, type BandKey, type Box } from "./deskLayout";
@@ -92,11 +92,11 @@ export function deskInstances(kinds: readonly Kind[], desk: DeskDoc, mods: Reado
   for (const it of desk.items) {
     const kind = byId.get(it.kind);
     if (!kind || kind.item.instances === "module") continue;
-    out.push({ id: it.id, kind, settings: settingsOf(kind.item, it.settings, locale), source: kind.item.source ?? { kind: "module" }, title: it.id, steps: kind.item.size.default, units: unitSizesOf(kind.item.size).default, owner: true });
+    out.push({ id: it.id, kind, settings: settingsOf(kind.item, it.settings, locale), source: kind.item.source ?? { kind: "module" }, title: it.id, steps: defaultStepsOf(kind.item.size), units: unitSizesOf(kind.item.size).default, owner: true });
   }
   for (const kind of kinds) {
     if (kind.item.instances !== "module" || (desk.off ?? []).includes(kind.item.id)) continue;
-    for (const ref of mods[kind.item.id] ?? []) out.push({ id: ref.id, kind, settings: settingsOf(kind.item, undefined, locale), source: ref.source ?? kind.item.source ?? { kind: "module" }, title: ref.title ?? ref.id, steps: ref.size ?? kind.item.size.default, units: ref.units ?? (ref.cells ? [ref.cells[0] * 2, ref.cells[1] * 2] : ref.size ? unitsOfSteps(ref.size) : unitSizesOf(kind.item.size).default), owner: false });
+    for (const ref of mods[kind.item.id] ?? []) out.push({ id: ref.id, kind, settings: settingsOf(kind.item, undefined, locale), source: ref.source ?? kind.item.source ?? { kind: "module" }, title: ref.title ?? ref.id, steps: ref.size ?? defaultStepsOf(kind.item.size), units: ref.units ?? (ref.cells ? [ref.cells[0] * 2, ref.cells[1] * 2] : ref.size ? unitsOfSteps(ref.size) : unitSizesOf(kind.item.size).default), owner: false });
   }
   return out;
 }
@@ -469,7 +469,7 @@ export function DeskSurface({ children }: { children?: ReactNode }) {
     return t("home.desk.from.module", { name: t(inst.kind.item.titleKey) });
   };
   const widgetMenu = (inst: Instance): MenuEntry[] => {
-    const presets = inst.kind.item.size.presets;
+    const presets = unitSizesOf(inst.kind.item.size).presets;
     return [
       { label: sourceLine(inst), note: true, disabled: true, onSelect: () => {} },
       inst.kind.item.settings?.length && {
@@ -667,7 +667,7 @@ export function useSelectedWidget(): { inst: Instance | null; save(next: WidgetS
   const desk = currentDesk(home.entry?.doc ?? null, kindItems);
   const item = sel ? desk.items.find((i) => i.id === sel) : undefined;
   const kind = item ? kinds.find((k) => k.item.id === item.kind) : undefined;
-  const inst = item && kind ? { id: item.id, kind, settings: settingsOf(kind.item, item.settings, locale), source: kind.item.source ?? { kind: "module" as const }, title: item.id, steps: kind.item.size.default, units: unitSizesOf(kind.item.size).default, owner: true } : null;
+  const inst = item && kind ? { id: item.id, kind, settings: settingsOf(kind.item, item.settings, locale), source: kind.item.source ?? { kind: "module" as const }, title: item.id, steps: defaultStepsOf(kind.item.size), units: unitSizesOf(kind.item.size).default, owner: true } : null;
   return {
     inst,
     save: (next) => {

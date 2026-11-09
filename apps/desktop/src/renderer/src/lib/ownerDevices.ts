@@ -19,9 +19,10 @@ import {
   type UsersResult,
 } from "../../../shared/users";
 import { apiFor, bridge } from "../bridge";
-import { useHostAccess } from "./hostAccess";
+import { useApp } from "../store";
+import { useHostAccess, useNonOwnerHosts } from "./hostAccess";
 import { onHostReset } from "./hostSwitch";
-import { useHostData, useHostLook } from "./useHostScope";
+import { useHostData, useHostLook, useHostsData } from "./useHostScope";
 
 export type { OwnerDeviceAdded, OwnerLocalAllowed, OwnerNewDevice };
 
@@ -193,6 +194,27 @@ export function useOwnerNewDevices(hostId: string): OwnerNewDevicesView {
       clearLatest: () => clearLatestOwnerDevice(hostId),
     };
   }, [entry, available, full, hostId, epoch, data]);
+}
+
+/**
+ * Connected hosts with an unacknowledged owner device other than this connection's own: a device with
+ * full control is announced whichever host it joined, not only on the focus host. Each host is read
+ * once per connection; `cutex/access/ownerDeviceAdded` keeps it live after that.
+ */
+export function useHostsWithNewOwnerDevices(): string[] {
+  const hosts = useApp((s) => s.hosts?.hosts);
+  const ids = useMemo(() => hosts?.map((h) => h.id) ?? [], [hosts]);
+  const data = useHostsData(ids);
+  const access = useNonOwnerHosts();
+  const entries = useEntries();
+  const readable = data.filter((d) => d.daemon.kind === "connected" && d.features.has(OWNER_DEVICE_NOTICE_FEATURE) && (access[d.hostId]?.isOwner ?? true) && !access[d.hostId]?.pending).map((d) => d.hostId);
+  const epochOf = (id: string) => hosts?.find((h) => h.id === id)?.conn?.epoch ?? null;
+  const key = readable.map((id) => `${id}\n${epochOf(id)}`).join("\n");
+  useEffect(() => {
+    for (const id of readable) void loadOwnerNewDevices(id, epochOf(id));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `key` stands for the hosts and their epochs
+  }, [key]);
+  return readable.filter((id) => entries[id]?.devices.some((d) => !d.current));
 }
 
 /**

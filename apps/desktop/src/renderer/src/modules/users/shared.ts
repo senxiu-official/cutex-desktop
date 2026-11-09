@@ -74,7 +74,3 @@ export function useOwnTokenId(): string | null {
   return pairedToken ?? null; // Older SSH hosts: keep their explicitly paired token.
 }
 
-/** Settings → 接入 → 配对设备. */
-export function openPairing() {
-  useApp.getState().openSettings("users", { anchor: "remote-access.pairing" });
-}

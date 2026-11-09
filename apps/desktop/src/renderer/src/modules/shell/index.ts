@@ -2,14 +2,13 @@
 // 键盘快捷键, 关于); step 3: Settings itself as the `shell.settings` page (Aside = its nav) and the
 // sidebar footer ⚙ 设置. v1.2: the "bar" status surface; 状态 keeps the generic placement table (the
 // capsule's own geometry is a section of the `status-capsule` module on the same page).
-import { Activity, Blocks, Cpu, Info, Keyboard, Monitor, PanelBottom, PanelLeft, PanelRight, Palette, Settings as SettingsIcon, ShieldCheck, SlidersHorizontal, SquareStack, UserRound, Users } from "lucide-react";
+import { Activity, Blocks, Cpu, Info, Keyboard, Monitor, PanelBottom, PanelLeft, PanelRight, Palette, Settings as SettingsIcon, ShieldCheck, SlidersHorizontal, SquareStack, UserRound } from "lucide-react";
 import { Settings, SettingsNav } from "../../components/Settings";
 import { openSideColumn } from "../../lib/sideActions";
-import { useOwnerDevicesNavBadge } from "../../components/settings/OwnerDevices";
 import { useOutdatedAgentCount } from "../../lib/runtimePackagesView";
 import { defineModule } from "../slots";
 import { getUiPrefs, setUiPref } from "../../lib/prefs";
-import { ABOUT_SEARCH, APPEARANCE_SEARCH, GENERAL_SEARCH, SHORTCUTS_SEARCH, SIDEBAR_SEARCH, SIDES_SEARCH, COMPOSER_SEARCH, STATUS_SEARCH, ME_SEARCH, ACCESS_SEARCH, USERS_SEARCH } from "./settingsSearch";
+import { ABOUT_SEARCH, APPEARANCE_SEARCH, GENERAL_SEARCH, SHORTCUTS_SEARCH, SIDEBAR_SEARCH, SIDES_SEARCH, COMPOSER_SEARCH, STATUS_SEARCH, ME_SEARCH, ACCESS_SEARCH } from "./settingsSearch";
 import { toggleSettingsFromNav, useSettingsBadge, useSettingsShelfOpen, useSettingsTitle } from "./settingsNav";
 import { lazyPage } from "../../lib/lazyPage";
 
@@ -29,7 +28,9 @@ const TrayPage = lazyPage(() => import("../../components/settings/PanelPages").t
 const DesktopPage = lazyPage(() => import("../../components/settings/PanelPages").then((m) => m.DesktopPage));
 const MePage = lazyPage(() => import("../../components/settings/MeSettings").then((m) => m.MePage));
 const AccessPage = lazyPage(() => import("../../components/settings/AccessSettings").then((m) => m.AccessPage));
-const UsersHostPage = lazyPage(() => import("../../components/settings/AccessSettings").then((m) => m.UsersHostPage));
+const PeersSubPage = lazyPage(() => import("../../components/settings/AccessSettings").then((m) => m.PeersSubPage));
+const AdvancedSubPage = lazyPage(() => import("../../components/settings/AccessSettings").then((m) => m.AdvancedSubPage));
+const DevicesSubPage = lazyPage(() => import("../../components/settings/AccessSettings").then((m) => m.DevicesSubPage));
 const RuntimePage = lazyPage(() => import("./RuntimePage").then((m) => m.RuntimePage));
 const ModulesPage = lazyPage(() => import("./ModulesPage").then((m) => m.ModulesPage));
 const ShortcutsPage = lazyPage(() => import("../../components/settings/AppSettings").then((m) => m.ShortcutsPage));
@@ -85,11 +86,30 @@ export default defineModule({
       // 连接 → 你 (local, every connection): 「你」 (name, picture, person identity) and the hosts you can
       // access with your role / permissions there (components/settings/MeSettings.tsx).
       { id: "shell.me", page: "me", group: "connection", order: 50, icon: UserRound, titleKey: "me.title", hintKey: "settings.pageHint.me", source: "local", Page: MePage, ...ME_SEARCH },
-      // 连接 → 主机 (混合设置 on the Settings host): 主机信息, 你的权限, 本地桌面应用连接, 主机互联 (+ listen /
-      // CORS); 连接 → 用户 (on the Settings host): users, login devices, pending devices, pairing code
-      // (components/settings/AccessSettings.tsx). 接入 / 互联 fold into 主机 (lib/settingsNav settingsTab).
-      { id: "shell.access", page: "access", group: "connection", order: 200, icon: ShieldCheck, titleKey: "shell.access.title", source: null, hostPart: true, hintKey: "settings.pageHint.access", Page: AccessPage, ...ACCESS_SEARCH },
-      { id: "shell.users", page: "users", group: "connection", order: 210, icon: Users, titleKey: "shell.users.title", source: "host", hostPart: true, hintKey: "settings.pageHint.users", useBadge: useOwnerDevicesNavBadge, Page: UsersHostPage, ...USERS_SEARCH },
+      // One host's page (混合设置 on the Settings host; owner 2026-11-07): opened from 主机 (page "hosts"), no nav
+      // row of its own. Its connection, devices and users; 跨机协作 and 高级 are sub-pages. 接入 / 互联 / 用户 fold
+      // into it (lib/settingsNav settingsTab). Anchors of the cards that moved stay valid (subPages).
+      {
+        id: "shell.access",
+        page: "access",
+        group: "connection",
+        order: 200,
+        icon: ShieldCheck,
+        titleKey: "shell.access.title",
+        source: null,
+        hostPart: true,
+        navParent: "hosts",
+        hostTitle: true,
+        backLink: { page: "hosts", labelKey: "shell.access.back" },
+        hintKey: "settings.pageHint.access",
+        subPages: {
+          peers: { titleKey: "shell.access.sub.peers", hintKey: "shell.access.sub.peersHint", Page: PeersSubPage, anchors: ["peers.access", "peers-settings", "peers-pair", "peers-list", "users.peers", "users-peers"] },
+          advanced: { titleKey: "shell.access.sub.advanced", hintKey: "shell.access.sub.advancedHint", Page: AdvancedSubPage, anchors: ["hostInfo", "hostRights", "diagnostics", "remote-access.listen", "remote-access.cors"] },
+          devices: { titleKey: "shell.access.sub.devices", Page: DevicesSubPage, anchors: ["users-all-devices"] },
+        },
+        Page: AccessPage,
+        ...ACCESS_SEARCH,
+      },
       // Agent: its sections 升级 agent (runtime-packages), 已安装的运行时 (runtimes); versions are on 后端更新 (header link).
       { id: "shell.runtime", page: "runtime", group: "agents", order: 500, icon: Cpu, titleKey: "shell.runtime", hintKey: "settings.pageHint.runtime", source: "host", useBadge: useRuntimeBadge, Page: RuntimePage, headerLink: { page: "backend", labelKey: "shell.runtime.backendLink" } },
       // 系统

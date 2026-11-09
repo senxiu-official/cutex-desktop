@@ -238,7 +238,7 @@ export const esES: Record<keyof typeof zhCN, string> = {
   "onboarding.guide.update.title": "Actualizaciones",
   "onboarding.guide.update.text": "Las actualizaciones de Cutex están en Ajustes → Actualizaciones y diagnóstico.\ncutex se actualiza por separado en cada host, en Ajustes → Actualizaciones del backend del host.\nLos {{Agents}} iniciados antes de actualizar pueden mostrar la versión anterior hasta que se reinicien.",
   "onboarding.guide.remote.title": "Hosts remotos y dispositivos emparejados",
-  "onboarding.guide.remote.text": "Los {{Agents}} de un host remoto funcionan como los de aquí: conversaciones, delegaciones y servicios están disponibles, y los archivos permanecen en ese equipo.\nUn dispositivo emparejado, como un móvil, se conecta al host con los permisos que le has dado; gestiónalos o revócalos en Ajustes → Usuarios → Dispositivos conectados.",
+  "onboarding.guide.remote.text": "Los {{Agents}} de un host remoto funcionan como los de aquí: conversaciones, delegaciones y servicios están disponibles, y los archivos permanecen en ese equipo.\nUn dispositivo emparejado, como un móvil, se conecta al host con los permisos que le has dado; gestiónalos o revócalos en Ajustes → Hosts.",
   "onboarding.guide.help.title": "Ayuda",
   "onboarding.guide.help.hint": "Vuelve a ver los tutoriales y sugerencias, consulta la documentación o informa de un problema.",
   "onboarding.guide.help.onboarding": "Tutoriales",

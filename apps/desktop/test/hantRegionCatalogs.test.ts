@@ -9,6 +9,12 @@ import { zhHantTW } from "../src/renderer/src/i18n/zh-Hant-TW";
 import { zhHantHK } from "../src/renderer/src/i18n/zh-Hant-HK";
 import { zhHantMO } from "../src/renderer/src/i18n/zh-Hant-MO";
 
+// A pack-only module's strings are not in the app's zh-CN, but the regional catalogs keep them: its pack takes them from there.
+const packOnlyFiles = import.meta.glob<{ packOnly?: boolean }>("../src/renderer/src/modules/*/pack.json", { eager: true, import: "default" });
+const packOnlyDictionaries = import.meta.glob<{ zhCN: Record<string, string> }>("../src/renderer/src/modules/*/i18n.ts", { eager: true });
+const source: Record<string, string> = { ...zhCN };
+for (const [path, json] of Object.entries(packOnlyFiles)) if (json.packOnly) Object.assign(source, packOnlyDictionaries[path.replace("pack.json", "i18n.ts")]!.zhCN);
+
 const generatorPath = resolve("../../scripts/generate-hant-regions.mjs");
 const generator = await import(/* @vite-ignore */ pathToFileURL(generatorPath).href);
 const { reviewed } = await import(/* @vite-ignore */ pathToFileURL(resolve("../../scripts/hant-region-review.mjs")).href);
@@ -19,20 +25,20 @@ const hk = (value: string) => generator.regionalValue("fixture", value, hkConver
 
 describe("Traditional Chinese regional catalogs", () => {
   it("TW contains the complete merged source; HK and MO contain differences only", () => {
-    expect(Object.keys(zhHantTW).sort()).toEqual(Object.keys(zhCN).sort());
+    expect(Object.keys(zhHantTW).sort()).toEqual(Object.keys(source).sort());
     expect(Object.keys(zhHantHK).length).toBeGreaterThan(0);
     expect(Object.keys(zhHantHK).length).toBeLessThan(Object.keys(zhHantTW).length);
     for (const [key, value] of Object.entries(zhHantHK)) {
-      expect(key in zhCN).toBe(true);
+      expect(key in source).toBe(true);
       expect(value, key).not.toBe(zhHantTW[key as keyof typeof zhCN]);
     }
     for (const [key, value] of Object.entries(zhHantMO)) {
-      expect(key in zhCN).toBe(true);
+      expect(key in source).toBe(true);
       expect(value, key).not.toBe(zhHantHK[key as keyof typeof zhCN] ?? zhHantTW[key as keyof typeof zhCN]);
     }
   });
   it("regenerates the same data from every module spread, with no stale reviewed keys", () => {
-    const generated = generator.regionalCatalogs(zhCN);
+    const generated = generator.regionalCatalogs(source);
     expect(generated.TW).toEqual(zhHantTW);
     expect(generated.HK).toEqual(zhHantHK);
     expect(generated.MO).toEqual(zhHantMO);

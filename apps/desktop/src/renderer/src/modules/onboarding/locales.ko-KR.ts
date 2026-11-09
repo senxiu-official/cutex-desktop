@@ -238,7 +238,7 @@ export const koKR: Record<keyof typeof zhCN, string> = {
   "onboarding.guide.update.title": "업데이트",
   "onboarding.guide.update.text": "Cutex 자체 업데이트는 「설정 → 업데이트와 진단」에 있어요.\n각 호스트의 cutex는 「설정 → 호스트 백엔드 업데이트」에서 따로 업데이트해요.\n업데이트 전부터 실행 중인 {{agents}}은(는) 다시 시작하기 전까지 이전 버전으로 표시될 수 있어요.",
   "onboarding.guide.remote.title": "원격 호스트와 페어링한 장치",
-  "onboarding.guide.remote.text": "원격 호스트의 {{agents}}도 똑같이 쓸 수 있어요. 대화, 위임, 서비스가 모두 작동하고 파일은 그 컴퓨터에 있어요.\n휴대폰 같은 페어링 장치는 부여한 권한으로 호스트에 연결해요. 「설정 → 사용자 → 로그인한 장치」에서 관리하거나 연결을 취소할 수 있어요.",
+  "onboarding.guide.remote.text": "원격 호스트의 {{agents}}도 똑같이 쓸 수 있어요. 대화, 위임, 서비스가 모두 작동하고 파일은 그 컴퓨터에 있어요.\n휴대폰 같은 페어링 장치는 부여한 권한으로 호스트에 연결해요. 「설정 → 호스트」에서 관리하거나 연결을 취소할 수 있어요.",
   "onboarding.guide.help.title": "도움말",
   "onboarding.guide.help.hint": "시작 가이드와 도움말을 다시 보거나 문서를 열고 문제를 알려 주세요.",
   "onboarding.guide.help.onboarding": "가이드",

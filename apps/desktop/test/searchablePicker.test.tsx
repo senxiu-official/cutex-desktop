@@ -195,3 +195,15 @@ describe("SearchableSelect", () => {
     expect(document.querySelector("[data-menu-search]")).toBeNull(); expect(picked).not.toHaveBeenCalled();
   });
 });
+
+describe("hiddenUntilSearch rows (quick chats in agent pickers)", () => {
+  const withChat: SearchablePickerOption[] = [...options, { value: "chat", label: "Fix the build", group: "快速会话", hiddenUntilSearch: true }];
+  it("are left out of the empty-query list with a count note, and found by search", () => {
+    act(() => root.render(h(SearchablePickerBody, { options: withChat, onPick: picked, placeholder: "搜索", emptyLabel: "没有结果", hiddenNote: (n: number) => `另有 ${n} 个快速会话` })));
+    expect(rows().map((r) => r.textContent)).not.toContain("Fix the build");
+    expect(document.querySelector("[data-picker-hidden]")?.textContent).toBe("另有 1 个快速会话");
+    type("build");
+    expect(rows().map((r) => r.textContent)).toEqual(["Fix the build"]);
+    expect(document.querySelector("[data-picker-hidden]")).toBeNull();
+  });
+});

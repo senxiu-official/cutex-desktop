@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { BrowserEvent, BrowserTabMount, BrowserTabView } from "../src/shared/browser";
 import { DEFAULT_BROWSER_CONTROL_SETTINGS, normalizeBrowserControlSettings } from "../src/shared/browser";
 import type { HostsState } from "../src/shared/hosts";
-import type { AppModuleContext, SideBodyProps } from "../src/renderer/src/modules/slots";
+import type { ModuleContext, SideBodyProps } from "../src/renderer/src/modules/slots";
 import type { Json } from "../src/renderer/src/modules/types";
 import { BROWSER_TAB, browserError, browserErrorKey, browserExternalUrl, browserNavigationUrl, browserRef, browserTitle, initBrowser, MAX_BROWSER_INPUT, parseBrowserParams, restoreBrowser, safeBrowserFavicon, safeBrowserUrl, type BrowserState } from "../src/renderer/src/modules/browser/browserState";
 import { browserCache, browserCacheKey, createBrowserCache } from "../src/renderer/src/modules/browser/browserCache";
@@ -385,7 +385,7 @@ describe("I2b explicit browser controls", () => {
 
   it("reveal targets only the existing exact host-bound instance in the current scope", async () => {
     const controller = new AbortController(), open = vi.fn(), reveal = vi.fn(), list = vi.fn(() => [props().instance]);
-    await startBrowser({ signal: controller.signal, services: { side: { open, reveal, list } } } as unknown as AppModuleContext);
+    await startBrowser({ signal: controller.signal, services: { side: { open, reveal, list } } } as unknown as ModuleContext);
     const event: BrowserEvent = { ...view(), epoch: "epoch", kind: "reveal" };
     const emit = (next: BrowserEvent) => { for (const listener of fakes.listeners) listener(next); };
     emit(event);
@@ -587,7 +587,7 @@ describe("I2a module integration", () => {
   it("hostsState clears old-epoch metadata even when the closed browserEvent was dropped", async () => {
     const controller = new AbortController();
     const open = vi.fn();
-    await startBrowser({ signal: controller.signal, services: { side: { open } } } as unknown as AppModuleContext);
+    await startBrowser({ signal: controller.signal, services: { side: { open } } } as unknown as ModuleContext);
     browserCache.update(view({ loading: true }));
     browserCache.update(view({ hostId: "local", title: "Other host" }));
     setHosts(hosts([["local", "focus-epoch"], ["ssh-other", "replacement"]]));
@@ -609,7 +609,7 @@ describe("I2a module integration", () => {
   it("popup diagnostics never disturb the owner's cache, busy state or side layout", async () => {
     const controller = new AbortController();
     const open = vi.fn();
-    await startBrowser({ signal: controller.signal, services: { side: { open } } } as unknown as AppModuleContext);
+    await startBrowser({ signal: controller.signal, services: { side: { open } } } as unknown as ModuleContext);
     browserCache.update(view());
     const previous = browserCache.get("ssh-other", "instance-1");
     for (const listener of fakes.listeners) listener({ ...view({ title: "Do not display", loading: true, error: "Do not show" }), epoch: "epoch", kind: "diagnostic", popupDiscardReason: "no_owner_gesture", newTabUrl: "http://localhost/rejected" });
@@ -651,7 +651,7 @@ describe("I2a module integration", () => {
     let finish!: () => void;
     fakes.browser.setEnabled.mockImplementationOnce(() => new Promise<void>((resolve) => { finish = resolve; }));
     const controller = new AbortController();
-    const context = { signal: controller.signal, services: { side: { open: vi.fn() } } } as unknown as AppModuleContext;
+    const context = { signal: controller.signal, services: { side: { open: vi.fn() } } } as unknown as ModuleContext;
     const activation = startBrowser(context);
     expect(browserActivation.get()).toBe(false);
     expect(fakes.browser.subscribe).toHaveBeenCalledTimes(0);
@@ -726,7 +726,7 @@ describe("I2a module integration", () => {
   it("events open gesture-approved child tabs in the event host, with no host focus lookup", async () => {
     const controller = new AbortController();
     const open = vi.fn();
-    const context = { signal: controller.signal, services: { side: { open } } } as unknown as AppModuleContext;
+    const context = { signal: controller.signal, services: { side: { open } } } as unknown as ModuleContext;
     await startBrowser(context);
     expect(fakes.browser.setEnabled).toHaveBeenCalledWith(true);
     expect(browserActivation.get()).toBe(true);
@@ -750,7 +750,7 @@ describe("I2a module integration", () => {
   it("ignores stale new-tab events and cannot subscribe after module disposal", async () => {
     const controller = new AbortController();
     const open = vi.fn();
-    const context = { signal: controller.signal, services: { side: { open } } } as unknown as AppModuleContext;
+    const context = { signal: controller.signal, services: { side: { open } } } as unknown as ModuleContext;
     await startBrowser(context);
     browserCache.update(view({ pageGeneration: 5 }));
     for (const listener of fakes.listeners) listener({ ...view(), epoch: "epoch", kind: "new-tab", newTabUrl: "http://localhost/" });

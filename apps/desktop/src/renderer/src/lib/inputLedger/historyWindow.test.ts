@@ -28,6 +28,19 @@ describe("ledger fallbacks respect the native history page window", () => {
     // Exhausting history restores only a genuinely absent native item, not the joined middle row.
     expect(missingTimelineRecords(records, [native], undefined, { ...middleWindow, hasOlder: false })).toEqual([older]);
   });
+  it("defers a passive note persisted at the end of an older turn, in the same second the oldest loaded turn started", () => {
+    // Real shape (media-ui-claude, 2026-11-08): the Claude runtime persists a passive note into context at the end of
+    // the turn that read it; the next turn starts within the same second, and turn startedAt is whole seconds.
+    const note = record("cutex-ask-msg-3e324c0e", {
+      kind: "agentMessage", state: "inContext", turnId: "99a9bf9d", timelineItemId: "798b89dd",
+      createdAt: "2026-11-08T12:00:02.830Z", since: "2026-11-08T12:03:05.277Z",
+    });
+    const window: TimelineHistoryWindow = { hasOlder: true, turns: [{ id: "af1928a5", startedAt: 1794139385 }, { id: "later", startedAt: 1794139500 }] };
+    expect(missingTimelineRecords(new Map([[note.inputId, note]]), [], undefined, window)).toEqual([]);
+    // A record that entered context a second after that turn started is not older history.
+    const fresh = { ...note, turnId: "not-yet-arrived", since: "2026-11-08T12:03:06.000Z" };
+    expect(missingTimelineRecords(new Map([[fresh.inputId, fresh]]), [], undefined, window)).toEqual([fresh]);
+  });
   it("keeps a missing item from a loaded turn", () => {
     expect(missing({ turnId: "recent" })).toHaveLength(1);
   });

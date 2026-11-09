@@ -492,7 +492,7 @@ describe("exhaustive settings effect declarations", () => {
     expect(sources(ROOT).flatMap(declarationIssues)).toEqual([]);
   }, 30_000); // Parses every settings source file; slow under full-suite load on Windows.
   it("allows exactly the named registered Profile placement exception with a reason", () => {
-    expect(Object.keys(SETTINGS_EFFECT_EXEMPTIONS)).toEqual(["profiles"]);
+    expect(Object.keys(SETTINGS_EFFECT_EXEMPTIONS)).toEqual(["profiles", "access"]);
     for (const [page, exemption] of Object.entries(SETTINGS_EFFECT_EXEMPTIONS)) {
       expect(pages.has(page), page).toBe(true);
       expect(exemption.reason.trim().length, page).toBeGreaterThan(20);

@@ -5,16 +5,22 @@ import { createModuleServiceScope } from "@cutex-desktop/plugin-host";
 import { translate, type MessageKey } from "../i18n";
 import { activeHost } from "../lib/hosts";
 import { scopeHosts, type HostView } from "../../../shared/hosts";
-import { apiFor } from "../bridge";
+import { apiFor, bridge } from "../bridge";
 import { closePeek } from "../lib/peekStore";
 import { checkRefContributions, parseRef } from "../lib/refs";
 import { refsHere, refsOpen, timelineFocusTurn } from "../lib/refServices";
 import { closeSideInstances, sideList, sideOpenHeld, sideReleaseHold, sideReveal } from "../lib/sideServices";
 import { panesOpen, sideOpenAlias } from "../lib/paneServices";
+import { showShelfToast } from "../lib/shelves";
 import { checkStatusContributions } from "../lib/statusSurfaces";
 import { useApp } from "../store";
 import { pinFlippedDefaults } from "./defaultFlips";
 import { createModuleHost } from "./host";
+import { subscribeActivity, subscribeUsage } from "../lib/activityFeed";
+import { subscribeOwnerWaiting } from "../lib/ownerWaiting";
+import { agentSummaries, agentSummary, openAgent, subscribeAgentSummaries } from "../lib/agentSummaries";
+import { confirmDialog } from "../lib/contextMenu";
+import { moduleDataFor, moduleFilesFor } from "../lib/moduleData";
 import { SLOT_SPECS, type AppModule, type AppModuleHost, type ModuleServices, type SlotMap } from "./slots";
 import type { HostInput, HostsInput, KeyValueStorage } from "./types";
 
@@ -51,9 +57,13 @@ function customizePage(region: string) {
  * (called lazily: those files reach back here for the module host).
  */
 export const services: ModuleServices = {
+  activity: { subscribe: (listener) => subscribeActivity(listener), subscribeUsage: (listener) => subscribeUsage(listener), subscribeOwnerWaiting: (listener) => subscribeOwnerWaiting(listener) },
+  agents: { list: agentSummaries, get: agentSummary, subscribe: subscribeAgentSummaries, open: openAgent },
   daemonFor: (hostId) => apiFor(hostId),
   ui: {
     notice: (text, tone) => useApp.getState().notify(text, tone),
+    toast: (text) => showShelfToast(text),
+    confirm: (message, danger) => confirmDialog(message, danger),
     openSettings: (page, focus) => useApp.getState().openSettings(page, focus),
     openPage: (page, params) => useApp.getState().openPage(page, params),
     closePage: () => useApp.getState().closePage(),
@@ -75,6 +85,9 @@ export const services: ModuleServices = {
   timeline: {
     focusTurn: (hostId, sessionId, turnId, opts) => timelineFocusTurn(hostId, sessionId, turnId, opts),
   },
+  // v1.31: only ctx.services knows which module asks; here there is none, so main refuses every call.
+  data: moduleDataFor("", () => bridge.moduleData),
+  files: moduleFilesFor("", () => bridge.moduleData),
   refs: {
     open: (ref, opts) => refsOpen(ref, opts),
     here: () => refsHere(),
@@ -118,8 +131,16 @@ export function startAppModules(modules: readonly AppModule[]): AppModuleHost {
       const guard = createModuleServiceScope(scope);
       return {
         daemonFor: guard.read(services.daemonFor),
+        activity: {
+          subscribe: (listener) => guard.subscribe(services.activity.subscribe, listener),
+          subscribeUsage: (listener) => guard.subscribe(services.activity.subscribeUsage, listener),
+          subscribeOwnerWaiting: (listener) => guard.subscribe(services.activity.subscribeOwnerWaiting, listener),
+        },
+        agents: { list: guard.read(services.agents.list), get: guard.read(services.agents.get), subscribe: (listener) => guard.subscribe(services.agents.subscribe, listener), open: guard.write(services.agents.open) },
         ui: {
           notice: guard.write(services.ui.notice),
+          toast: guard.write(services.ui.toast),
+          confirm: guard.request(services.ui.confirm),
           openSettings: guard.write(services.ui.openSettings),
           openPage: guard.write(services.ui.openPage),
           closePage: guard.write(services.ui.closePage),
@@ -138,6 +159,15 @@ export function startAppModules(modules: readonly AppModule[]): AppModuleHost {
           releaseHold: services.side.releaseHold,
         },
         timeline: { focusTurn: guard.request(services.timeline.focusTurn) },
+        // v1.31 (§30.6): bound to this module's id here, so a module reaches only its own folder through ctx.
+        data: (() => {
+          const d = moduleDataFor(scope.id, () => bridge.moduleData);
+          return { read: guard.request(d.read), readText: guard.request(d.readText), write: guard.request(d.write), remove: guard.request(d.remove), list: guard.request(d.list), usage: guard.request(d.usage) };
+        })(),
+        files: (() => {
+          const f = moduleFilesFor(scope.id, () => bridge.moduleData);
+          return { pick: guard.request(f.pick), save: guard.request(f.save) };
+        })(),
         refs: { open: guard.request(services.refs.open), here: guard.read(services.refs.here), parse: services.refs.parse },
       };
     },

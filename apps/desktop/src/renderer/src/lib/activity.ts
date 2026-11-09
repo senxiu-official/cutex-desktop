@@ -116,9 +116,9 @@ function toolText(item: RawItem): string | null {
 
 /**
  * Returns the new preview for `envelope.cutexSessionId`, or undefined if this event does not
- * change it.
+ * change it. `shownSender`: the name the owner knows a sender id by, when the caller's sidebar holds it.
  */
-export function nextPreview(current: ActivityPreview | undefined, envelope: EventEnvelope): ActivityPreview | undefined {
+export function nextPreview(current: ActivityPreview | undefined, envelope: EventEnvelope, shownSender?: (id: string) => string | undefined): ActivityPreview | undefined {
   const message = envelope.native?.message;
   if (!message || envelope.native?.kind !== "notification") return undefined;
   const params = (message.params ?? {}) as Record<string, unknown>;
@@ -153,7 +153,7 @@ export function nextPreview(current: ActivityPreview | undefined, envelope: Even
         return { kind: "output", text, at, itemId: item.id };
       }
       const received = parseExternalInput(item);
-      if (received) return { kind: "received", text: oneLine(`${senderLabel(translate, received.senderId, received.sourceKind, received.senderName)}: ${received.text}`), at };
+      if (received) return { kind: "received", text: oneLine(`${senderLabel(translate, received.senderId, received.sourceKind, shownSender?.(received.senderId) || received.senderName)}: ${received.text}`), at };
       return undefined;
     }
     case "error": {
