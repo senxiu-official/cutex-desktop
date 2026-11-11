@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createScenePlayer, SCENE_LANDING_MS, SCENE_LINGER_MS, SCENE_SLEEP_AFTER_MS, SCENE_TRANSFER_MS, type ScenePlayer } from "../src/renderer/src/deskPet/scene";
 import { parseDeskPetScene, type DeskPetBooks } from "../src/shared/deskPetScene";
 
-const scene = parseDeskPetScene({
+const RAW = {
   format: 2,
   name: "T",
   canvas: [320, 256],
@@ -25,9 +25,16 @@ const scene = parseDeskPetScene({
     wake: [{ body: "up", ms: 300 }],
     attention: [{ body: "up", ms: 500 }],
   },
+};
+const scene = parseDeskPetScene(RAW)!;
+// The same art with clips for changing books while reading.
+const switching = parseDeskPetScene({
+  ...RAW,
+  clips: { ...RAW.clips, switchOut: [{ body: "read", prop: "open", ms: 100 }, { body: "read", prop: "open", ms: 100, magic: 0 }], switchIn: [{ body: "read", prop: "open", ms: 100, magic: 0 }, { body: "read", prop: "open", ms: 100 }] },
 })!;
 const files = ["up.png", "up-0.png", "up-1.png", "read.png", "sleep.png", "open.png", "turn.png", "hands.png", "pile.png"];
-const art = { scene, images: Object.fromEntries(files.map((f) => [f, `data:${f}`])) };
+const images = Object.fromEntries(files.map((f) => [f, `data:${f}`]));
+const art = { scene, images };
 
 let now = 0;
 let drawn: string[] = [];
@@ -69,8 +76,8 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-async function make(books: DeskPetBooks, work = false): Promise<ScenePlayer> {
-  const player = (await createScenePlayer(document.body, "k", art, { work, books, attention: false, breathing: true }, () => now))!;
+async function make(books: DeskPetBooks, work = false, withSwitch = false): Promise<ScenePlayer> {
+  const player = (await createScenePlayer(document.body, "k", withSwitch ? { scene: switching, images } : art, { work, books, attention: false, breathing: true }, () => now))!;
   player.resize(200, 160, false);
   return player;
 }
@@ -104,6 +111,59 @@ describe("scene player", () => {
     expect(p.snapshot().mode).toBe("closing");
     advance(220);
     expect(p.snapshot()).toMatchObject({ mode: "opening", book: "b2" });
+    p.destroy();
+  });
+
+  it("with switchOut / switchIn the next book comes without looking up: no closing or opening between books", async () => {
+    const p = await make({ active: book("b1"), pile: [book("b2")] }, true, true);
+    const modes: string[] = [];
+    const watch = (ms: number) => {
+      for (let i = 0; i < ms; i += 10) {
+        advance(10);
+        const m = p.snapshot().mode;
+        if (modes.at(-1) !== m) modes.push(m);
+      }
+    };
+    watch(250);
+    p.set({ books: { active: book("b2"), pile: [] } });
+    watch(2500);
+    expect(modes).toEqual(["opening", "reading", "switchOut", "switchIn", "reading"]);
+    expect(p.snapshot().book).toBe("b2");
+    // Work stops for good: only then does she close the book and look up.
+    p.set({ work: false, books: { active: null, pile: [] } });
+    watch(SCENE_LINGER_MS + 3000);
+    expect(modes.slice(-2)).toEqual(["closing", "idle"]);
+    p.destroy();
+  });
+
+  it("with switch clips a book still landing is not taken either: reading goes on, it lands, then it is switched in", async () => {
+    const p = await make({ active: book("b1"), pile: [book("b2")] }, true, true);
+    advance(SCENE_TRANSFER_MS + SCENE_LANDING_MS);
+    p.set({ books: { active: book("b4"), pile: [book("b2")] } });
+    advance(10);
+    expect([p.snapshot(), falling()]).toEqual([{ mode: "reading", book: "b1" }, 1]);
+    const modes: string[] = [];
+    for (let i = 0; i < 300; i++) {
+      advance(10);
+      if (modes.at(-1) !== p.snapshot().mode) modes.push(p.snapshot().mode);
+    }
+    expect(modes).toEqual(["reading", "switchOut", "switchIn", "reading"]);
+    expect(p.snapshot().book).toBe("b4");
+    p.destroy();
+  });
+
+  it("the pool runs out while the old book goes: she closes and rests, no new book", async () => {
+    const p = await make({ active: book("b1"), pile: [book("b2")] }, true, true);
+    advance(250);
+    p.set({ books: { active: book("b2"), pile: [] } });
+    for (let i = 0; i < 300 && p.snapshot().mode !== "switchOut"; i++) advance(10);
+    expect(p.snapshot()).toEqual({ mode: "switchOut", book: "b1" });
+    p.set({ work: false, books: { active: null, pile: [] } });
+    // The old book finishes going (a transition is never cut), then she closes.
+    for (let i = 0; i < 30 && p.snapshot().mode === "switchOut"; i++) advance(10);
+    expect(p.snapshot().mode).toBe("closing");
+    advance(300);
+    expect(p.snapshot()).toEqual({ mode: "idle", book: null });
     p.destroy();
   });
 

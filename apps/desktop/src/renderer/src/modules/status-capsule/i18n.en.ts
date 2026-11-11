@@ -12,7 +12,7 @@ export const en: Record<keyof typeof zhCN, string> = {
   "status-capsule.more": "Capsule position, size and content",
   "status-capsule.items": "Shown in the capsule",
   "status-capsule.shortcut": "{key} expands / collapses",
-  "status-capsule.section": "Capsule (legacy, frozen)",
+  "status-capsule.section": "Status capsule (legacy)",
   "status-capsule.always": "Always show the capsule",
   "status-capsule.always.hint": "Also when nothing is running",
   "status-capsule.corner": "Position",

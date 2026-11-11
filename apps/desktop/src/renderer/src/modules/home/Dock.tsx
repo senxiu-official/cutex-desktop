@@ -90,6 +90,7 @@ function useScreenTick(): void {
 }
 
 import { AgentBadge } from "../../components/AgentBadge";
+import { isWorkerOn } from "../../lib/serviceWorker";
 import { avatarCarriesMark } from "../../lib/projectMark";
 
 interface ButtonProps {
@@ -558,7 +559,9 @@ function AppItem({ pin, name, icon, badge, onUsed }: AppProps) {
   // 投影 is an agent's: an app goes into the current Shelf (并排: the other workspace's, or a new page). A service
   // the Shelf cannot show now (another host's agent is open) has no Shelf preview: it opens in the system browser.
   const outOfView = useApp(() => serviceOutOfView(pin));
-  const effect = ref && !outOfView ? (beside: boolean) => refEffect({ ...ref, title: name }, beside || mode === "beside" ? "beside" : "replace", { onFail: notice }) : null;
+  // A background service has no page to project: a click shows it on the 服务 page (lib/serviceWorker).
+  const worker = useApp(() => pin.kind === "service" && isWorkerOn(pin.hostId, pin.key));
+  const effect = ref && !outOfView && !worker ? (beside: boolean) => refEffect({ ...ref, title: name }, beside || mode === "beside" ? "beside" : "replace", { onFail: notice }) : null;
   return (
     <TrayButton
       name={name}

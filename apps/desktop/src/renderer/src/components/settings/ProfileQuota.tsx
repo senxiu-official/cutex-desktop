@@ -9,7 +9,7 @@ import { useI18n, type MessageKey } from "../../i18n";
 import { FIELD_W } from "../../lib/fieldWidths";
 import { defaultQuotaLabel, gaugeErrors, isQuotaReaderPreset, latestObservedAt, observedClock, PROFILE_GENERIC_SWITCHES_FEATURE, QUOTA_CLAUDE_FEATURE, QUOTA_DISPLAY_LABEL_FEATURE, QUOTA_NATIVE_FEATURE, quotaLabelFieldProblem, quotaLabelText, quotaPresetChoices, quotaPresetLabel, quotaReadersOff, readerFollowsBaseUrl, usesQuotaReaders, withLabelText, withPrimaryEnabled } from "../../lib/quota";
 import { GaugeChip } from "../GaugeBar";
-import { Button, Loading, NumberField, RefreshButton, SettingRow, Section, Segmented, Select, TextInput, Toggle } from "./Form";
+import { Button, Loading, NumberField, RefreshButton, SettingRow, Section, Segmented, Select, TextInput, Toggle, RowGroup } from "./Form";
 import { useTargetFeatures, useTargetHostId, useTargetLoadQuota, useTargetQuotas } from "../../lib/targetHost";
 import { RESET_CREDITS_FEATURE } from "../../../../shared/resetCredits";
 import { ResetCreditsDetail, ResetCreditsUnsupportedRow } from "../ResetCredits";
@@ -204,8 +204,7 @@ export function QuotaConfigSection({ profile, name = profile, draft, setDraft }:
         );
   return (
     <Section   title={t("agent-config.quota.title")} hint={t("settings.profileParity.apiQuotaHint" as MessageKey, { name })} actions={<RefreshButton label={t("composer.quota.refresh")} onClick={() => void loadQuota(profile, true)} />}>
-      <h4 className="mt-2 text-xs font-medium text-muted">{t("settings.profileParity.quotaReadings" as MessageKey)}</h4>
-      <p className="mt-1 text-xs text-subtle">{t("settings.profileParity.quotaRefreshHint" as MessageKey)}</p>
+      <RowGroup title={t("settings.profileParity.quotaReadings" as MessageKey)} hint={t("settings.profileParity.quotaRefreshHint" as MessageKey)}>
       {/* No reader on: cutex reads nothing, so say so and offer the switch (saved by the save bar). */}
       {draft && quotaReadersOff(draft) ? (
         <SettingRow agents="none" source="host" readOnly label={t("agent-config.quota.current")}>
@@ -214,12 +213,11 @@ export function QuotaConfigSection({ profile, name = profile, draft, setDraft }:
       ) : (
         <GaugesRow profile={profile} label={t("agent-config.quota.current")} empty={t("agent-config.quota.currentEmpty")} errors />
       )}
+      </RowGroup>
       {!draft ? (
         <Loading rows={1} />
       ) : (
-        <>
-          <h4 className="mt-4 text-xs font-medium text-muted">{t("settings.profileParity.quotaReaderSetup" as MessageKey)}</h4>
-          <p className="mt-1 text-xs text-subtle">{t("settings.profileParity.quotaReaderSetupHint" as MessageKey)}</p>
+        <RowGroup title={t("settings.profileParity.quotaReaderSetup" as MessageKey)} hint={t("settings.profileParity.quotaReaderSetupHint" as MessageKey)}>
           <SettingRow agents="none" source="host" label={t("agent-config.quota.preset")} hint={presetHint}>
             {quotaReadersOff(draft) && <Button onClick={() => setDraft(withPrimaryEnabled(draft))}>{t("agent-config.quota.enableNow")}</Button>}
             {readers ? (
@@ -265,7 +263,7 @@ export function QuotaConfigSection({ profile, name = profile, draft, setDraft }:
               </Button>
             </div>
           )}
-        </>
+        </RowGroup>
       )}
       {resets && <ResetCreditsUnsupportedRow hostId={hostId} profile={profile} />}
     </Section>

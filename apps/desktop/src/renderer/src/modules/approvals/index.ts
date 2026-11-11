@@ -14,6 +14,7 @@ import { APPROVAL_AUTO_RULES_FEATURE } from "../../lib/approvals";
 
 const ApprovalRulesSettings = lazyPage(() => import("./ApprovalRules").then((m) => m.ApprovalRulesSettings));
 const ApprovalRuleAuditAll = lazyPage(() => import("./ApprovalRules").then((m) => m.ApprovalRuleAuditAll));
+const ApprovalRulesAll = lazyPage(() => import("./ApprovalRules").then((m) => m.ApprovalRulesAll));
 
 export default defineModule({
   id: "approvals",
@@ -45,6 +46,15 @@ export default defineModule({
       titleKey: "approvals.rules.audit",
       keywords: ["approvals.rules.audit.hint"],
       Section: ApprovalRuleAuditAll,
+    }, {
+      // Every rule (both groups) with a filter: the 协作 page shows the first five per group.
+      id: "approvals.rules.all",
+      page: "collab",
+      order: 252,
+      requires: { capabilities: [APPROVAL_AUTO_RULES_FEATURE] },
+      titleKey: "approvals.rules.allTitle",
+      keywords: ["approvals.rules.settings.hint"],
+      Section: ApprovalRulesAll,
     }],
   },
 });

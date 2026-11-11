@@ -76,6 +76,11 @@ function prepareFonts(a: Appearance): void {
   void fontController.update(a);
 }
 
+/** Loads the fonts again with the same choices (a 中文字体包 family was imported or removed). */
+export function reloadFonts(): void {
+  void fontController?.reload(current);
+}
+
 export function getAppearance(): Appearance {
   return current;
 }
@@ -110,9 +115,10 @@ export function setAppearance(patch: Partial<Appearance>, persist = true): void 
 }
 
 /**
- * Pane widths while a resize handle is dragged: only the width's CSS variable on <html> moves (and the
- * few readers of `useLiveWidth`); the stored appearance — every variable, fonts, the Electron zoom IPC,
- * every `useAppearance` reader — changes once, on release (`commitLiveWidths`).
+ * Pane widths while a resize handle is dragged: only the width's CSS variable moves, on the elements that
+ * read it (marked `data-live-width="<field>"`; on <html> an inherited custom property restyles the whole
+ * document per step), and the few readers of `useLiveWidth`. The stored appearance — every variable,
+ * fonts, the Electron zoom IPC, every `useAppearance` reader — changes once, on release (`commitLiveWidths`).
  */
 export type LiveWidthKey = "sidebarWidth" | "sidePaneWidth";
 const LIVE_VARS: Record<LiveWidthKey, string> = { sidebarWidth: "--sidebar-w", sidePaneWidth: "--sidepane-w" };
@@ -121,9 +127,11 @@ let live: Partial<Record<LiveWidthKey, number>> = {};
 export function previewWidth(field: LiveWidthKey, px: number): void {
   if (live[field] === px) return;
   live = { ...live, [field]: px };
-  document.documentElement.style.setProperty(LIVE_VARS[field], `${px}px`);
+  for (const el of liveReaders(field)) el.style.setProperty(LIVE_VARS[field], `${px}px`);
   for (const l of listeners) l();
 }
+
+const liveReaders = (field: LiveWidthKey) => document.querySelectorAll<HTMLElement>(`[data-live-width~="${field}"]`);
 
 /** The drag ended: store what was shown live (nothing previewed: nothing happens). */
 export function commitLiveWidths(): void {
@@ -131,6 +139,8 @@ export function commitLiveWidths(): void {
   if (!Object.keys(patch).length) return;
   live = {};
   setAppearance(patch, true);
+  // <html> has the stored widths now: the readers inherit them again.
+  for (const field of Object.keys(patch) as LiveWidthKey[]) for (const el of liveReaders(field)) el.style.removeProperty(LIVE_VARS[field]);
 }
 
 export function getLiveWidth(field: LiveWidthKey): number {

@@ -9,7 +9,7 @@ import { ownerWindowOf } from "./ownerWindow";
 export type ThumbnailBytes = Pick<FsFile, "encoding" | "content" | "mime" | "size" | "truncated">
   | { encoding: "bytes"; bytes: Uint8Array | ArrayBuffer; mime: string; size: number; truncated: boolean };
 /** `maxBytes`: the largest fs/file body shown (default THUMBNAIL_MAX_BYTES; a sent image may be as big as its send cap). */
-export interface ThumbnailOptions { hostId?: string; isCurrent?(): boolean; maxBytes?: number }
+export interface ThumbnailOptions { hostId?: string; isCurrent?(): boolean; maxBytes?: number; revalidate?: boolean }
 /**
  * A read that answered: the image is not there or not valid. Only this failure is cached (FAIL_TTL_MS);
  * any other (transport, the read queue full) is not, so the next mount reads again instead of keeping
@@ -64,7 +64,7 @@ export function invalidateThumbnailHost(hostId: string): void {
 export function resetThumbnailCache(): void { generation++; for (const key of [...cache.keys()]) drop(key); inflight.clear(); }
 function loadEntry(key: string, read: () => Promise<ThumbnailBytes>, options: ThumbnailOptions): Promise<Entry | null> {
   if (options.isCurrent && !options.isCurrent()) return Promise.resolve(null);
-  const hit = fresh(key); if (hit) return Promise.resolve(hit);
+  const hit = fresh(key); if (hit && !options.revalidate) return Promise.resolve(hit);
   const pending = inflight.get(key); if (pending) return pending;
   const epoch = options.hostId ? hostEpochs.get(options.hostId) ?? 0 : 0, round = generation;
   const current = () => round === generation && (!options.hostId || epoch === (hostEpochs.get(options.hostId) ?? 0)) && (options.isCurrent?.() ?? true);
@@ -108,7 +108,7 @@ export function useThumbnail(key: string | null, read: (() => Promise<ThumbnailB
     const reader = readRef.current; if (!key || !reader || !visible) return;
     let live = true; const lease: Lease = {};
     const set = leases.get(key) ?? new Set<Lease>(); set.add(lease); leases.set(key, set);
-    const hit = fresh(key); if (hit) { lease.entry = hit; hit.refs++; }
+    const hit = optionsRef.current.revalidate ? null : fresh(key); if (hit) { lease.entry = hit; hit.refs++; }
     setShown({ key, state: { status: "loading" } });
     void loadEntry(key, reader, optionsRef.current).then((entry) => {
       if (!live) return;

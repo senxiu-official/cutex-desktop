@@ -45,7 +45,7 @@ function Thumb({ hostId, a }: { hostId: string; a: ArtifactSummary }) {
     loadContent(hostId, a.artifactId, a.latestVersion, 2 * 1024 * 1024).then((c) => {
       if (!c) throw new Error("gone");
       return { mime: imageMimeFor(c.mediaType, typePath(a.name, a.latest.sourcePath)), encoding: c.encoding, content: c.content, size: c.totalBytes, truncated: c.truncated };
-    }),
+    }), { revalidate: a.latest.storage === "external" },
   );
   const Icon = KIND_ICON[a.kind];
   return (

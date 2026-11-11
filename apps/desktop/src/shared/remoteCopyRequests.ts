@@ -15,5 +15,8 @@ export type CopyRequest =
   | { kind: "start"; source: CopySource; binding: HostBinding; expected: Pick<TransferMeta, "revision" | "size">; replaceId?: string }
   | { kind: "cancel" | "remove" | "open" | "reveal"; id: string }
   | { kind: "keep"; id: string; value: boolean }
-  | { kind: "settings"; retentionDays: number | null };
+  | { kind: "settings"; retentionDays: number | null }
+  /** The download folder ({ path, isDefault }); open it; pick another in main's dialog / go back to the default (both return the folder). */
+  | { kind: "folder" | "openFolder" | "chooseFolder" | "defaultFolder" };
+export interface DownloadFolder { path: string; isDefault: boolean }
 export interface PreparedCopy { source: CopySource; meta: TransferMeta }

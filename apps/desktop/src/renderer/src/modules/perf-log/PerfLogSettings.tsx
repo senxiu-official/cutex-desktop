@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useI18n } from "../../i18n";
 import type { ReactNode } from "react";
-import { Section, Segmented, SettingRow, SettingsGroup, Toggle } from "../../components/settings/Form";
+import { Section, Select, SettingRow, SettingsGroup, Toggle } from "../../components/settings/Form";
 import { clearEntries, perfLogEnabled, readEntries, setPerfLogEnabled, usePerfLogRev, type PerfEntry } from "./recorder";
 
 type Range = "15m" | "1h" | "today" | "all" | "custom";
@@ -133,7 +133,7 @@ export function PerfLogSection() {
       </SettingRow>
       <SettingRow agents="none" source="local" label={t("perf-log.range")} hint={range === "custom" ? t("perf-log.around.hint") : undefined}>
         <div className="flex flex-wrap items-center justify-end gap-2">
-          <Segmented
+          <Select
             value={range}
             label={t("perf-log.range")}
             options={(["15m", "1h", "today", "all", "custom"] as const).map((r) => ({ value: r, label: t(`perf-log.range.${r}`) }))}

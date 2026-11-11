@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { CopySource, CopyState } from "../../../shared/remoteCopies";
-import type { CopyRequest, PreparedCopy } from "../../../shared/remoteCopyRequests";
+import type { CopyRequest, DownloadFolder, PreparedCopy } from "../../../shared/remoteCopyRequests";
+import type { ArtifactScope, ArtifactVersion } from "../../../shared/artifactStore";
 import type { WorkspaceScope } from "../../../shared/ipc";
 import type { HostBinding } from "../../../shared/hosts";
 import { bridge } from "../bridge";
@@ -10,7 +11,8 @@ import { openSide } from "./sideOpen";
 
 export const COPIES = "remote-copies.list";
 export const COPY_FEATURE = "fs-file-transfer-v1";
-export const useCopies = create<{ state: CopyState | null; pending: (PreparedCopy & { binding: HostBinding; replaceId?: string }) | null; busy: boolean; starting: boolean; error: string | null }>(() => ({ state: null, pending: null, busy: false, starting: false, error: null }));
+export const ARTIFACTS_FEATURE = "artifacts";
+export const useCopies = create<{ state: CopyState | null; folder: DownloadFolder | null; pending: (PreparedCopy & { binding: HostBinding; replaceId?: string }) | null; busy: boolean; starting: boolean; error: string | null }>(() => ({ state: null, folder: null, pending: null, busy: false, starting: false, error: null }));
 export async function copyCall<T = CopyState>(request: CopyRequest): Promise<T> {
   if (!bridge.shell?.remoteCopies) throw new Error("copy manager unavailable");
   return bridge.shell.remoteCopies<T>(request);
@@ -19,6 +21,16 @@ export function canDownload(hostId: string): boolean {
   const app = useApp.getState();
   if (!app.features || !app.byHost) return false;
   return app.hosts?.hosts.some(h => h.id === hostId && h.kind !== "local") === true && featuresOf(app, hostId).has(COPY_FEATURE);
+}
+/** A pinned artifact version can be saved from any host with the artifact store, this computer's included. */
+export function canSaveArtifact(hostId: string): boolean {
+  const app = useApp.getState();
+  if (!app.features || !app.byHost) return false;
+  return app.hosts?.hosts.some(h => h.id === hostId) === true && featuresOf(app, hostId).has(ARTIFACTS_FEATURE);
+}
+/** 保存到这台电脑: the version's exact bytes into the download folder (progress and errors on the 下载 page). */
+export function saveArtifact(hostId: string, version: Pick<ArtifactVersion, "artifactId" | "version">, scope?: ArtifactScope) {
+  return requestCopy(hostId, `${version.artifactId}@${version.version}`, scope ? { kind: scope.kind, id: scope.id } : undefined, { id: version.artifactId, version: version.version });
 }
 export function binding(hostId: string) {
   const host = useApp.getState().hosts?.hosts.find(h => h.id === hostId);
@@ -38,7 +50,7 @@ export async function requestCopy(hostId: string, path: string, scope?: Workspac
   openSide(COPIES, {}, { binding: { kind: "host", hostId } });
   useCopies.setState({ pending: null, error: null, busy: true });
   try {
-    if (!canDownload(hostId)) throw new Error(translate("remote-copies.missingFeature"));
+    if (!(artifact ? canSaveArtifact(hostId) : canDownload(hostId))) throw new Error(translate(artifact ? "remote-copies.missingArtifacts" : "remote-copies.missingFeature"));
     const host = useApp.getState().hosts?.hosts.find(h => h.id === hostId);
     const source: CopySource = savedSource ?? { hostId, hostLabel: host?.label ?? hostId, hostIdentity: "", path, ...(scope ? { scope } : {}), ...(artifact ? { artifact } : {}) };
     const expectedBinding = binding(hostId);
@@ -61,4 +73,16 @@ export async function startPrepared() {
   } catch (error) { useCopies.setState({ error: String(error) }); }
   finally { useCopies.setState({ starting: false }); }
 }
+async function folderCall(kind: "folder" | "openFolder" | "chooseFolder" | "defaultFolder") {
+  try {
+    const folder = await copyCall<DownloadFolder | undefined>({ kind });
+    if (folder) useCopies.setState({ folder, ...(kind === "folder" ? {} : { error: null }) });
+    if (kind !== "folder" && kind !== "openFolder") await refreshCopies();
+  } catch (error) { useCopies.setState({ error: String(error) }); }
+}
+export const refreshDownloadFolder = () => folderCall("folder");
+export const openDownloadFolder = () => folderCall("openFolder");
+/** Main's own folder dialog; the downloads move there (nothing may be downloading). */
+export const chooseDownloadFolder = () => folderCall("chooseFolder");
+export const defaultDownloadFolder = () => folderCall("defaultFolder");
 export function dismissCopy() { ++intent; useCopies.setState({ pending: null, busy: false }); }

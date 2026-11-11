@@ -12,10 +12,12 @@ import { confirmDialog, promptDialog, type MenuEntry } from "./contextMenu";
 import type { ReactNode } from "react";
 import { hostData } from "./hostScope";
 import { copyText } from "./menus";
+import { serviceAddressOf, serviceCopyEntries } from "./serviceAddress";
 import { sideShowsHost } from "./sideServices";
 import { SERVICE_COMPONENT } from "./sideKinds";
 import { refActionEntries } from "./refActions";
 import { claimProjectChoices, scopePatch, serviceMayManage, serviceScope } from "./projectServices";
+import { isSupervised, isWorker, isWorkerOn, showWorker } from "./serviceWorker";
 
 type T = (key: MessageKey, vars?: Record<string, string | number>) => string;
 
@@ -28,7 +30,9 @@ const daemonOf = (hostId: string | undefined) => (!hostId || hostId === focusId(
  * tab starts an on-demand service and reaches a remote host's service too), else when that tab
  * cannot open (browser module off) or `external`, in the system browser.
  */
-export async function openService(s: Pick<ServiceView, "slug">, hostId = focusId(), path = "/", opts: { external?: boolean } = {}): Promise<void> {
+export async function openService(s: Pick<ServiceView, "slug"> & { runtime?: ServiceView["runtime"] }, hostId = focusId(), path = "/", opts: { external?: boolean } = {}): Promise<void> {
+  // A background service has no page: it is shown on the 服务 page (lib/serviceWorker).
+  if (isWorker(s as Pick<ServiceView, "runtime">) || isWorkerOn(hostId, s.slug)) return showWorker(s.slug);
   if (!opts.external && openInApp(s.slug, hostId, path)) return;
   await openServiceExternal(s, hostId, path);
 }
@@ -51,6 +55,7 @@ export function openInApp(slug: string, hostId: string, path: string): boolean {
  * forwarding service ports over the SSH tunnel is phase 2).
  */
 export async function openServiceExternal(s: Pick<ServiceView, "slug">, hostId = focusId(), path = "/"): Promise<void> {
+  if (isWorkerOn(hostId, s.slug)) return showWorker(s.slug);
   const r = await daemonOf(hostId).openService(s.slug);
   const base = hostId !== LOCAL_HOST_ID ? r.url || r.localUrl : r.localUrl || r.url;
   await api.openExternal(path === "/" ? base : new URL(path.replace(/^\/+/, ""), base.endsWith("/") ? base : `${base}/`).href);
@@ -59,9 +64,13 @@ export async function openServiceExternal(s: Pick<ServiceView, "slug">, hostId =
 export function serviceMenu(s: ServiceView, t: T, onError: (e: string) => void, toggleLogs?: () => void, hostId?: string, toggleOrganize?: () => void, organization: MenuEntry[] = [], ownerFlyout?: ReactNode): MenuEntry[] {
   const api = daemonOf(hostId);
   const run = (fn: () => Promise<unknown>) => void fn().catch((e: unknown) => onError(e instanceof Error ? e.message : String(e)));
-  // Only `managed` services run under cutex; `external` and `static` (files cutex serves) have nothing to start or stop — cutex answers 409 not_supervised.
-  const supervised = s.runtime === "managed";
-  const running = s.health === "reachable" || s.health === "starting";
+  // Only `managed` services and `worker`s run under cutex; `external` and `static` (files cutex serves) have nothing to start or stop — cutex answers 409 not_supervised.
+  const supervised = isSupervised(s);
+  // A background program (no port, no page): no 打开 / copy rows; its controls come first.
+  const worker = isWorker(s);
+  // A worker waiting to restart (`unreachable`: no probe, it crashed and cutex retries with backoff — forever when
+  // persistent) is still wanted running: it offers 停止后台 / 重启, not 启动后台.
+  const running = s.health === "reachable" || s.health === "starting" || (worker && s.health === "unreachable" && !s.stopped);
   const supportsTtl = hostData(useApp.getState(), hostId ?? focusId())?.features.has(SERVICES_EPHEMERAL_TTL_FEATURE) ?? false;
   const supportsOrganize = hostData(useApp.getState(), hostId ?? focusId())?.features.has(SERVICES_ORGANIZE_FEATURE) ?? false;
   const host = hostData(useApp.getState(), hostId ?? focusId());
@@ -71,24 +80,30 @@ export function serviceMenu(s: ServiceView, t: T, onError: (e: string) => void, 
   const scopeRows = manage && !s.archived && (host?.features.has(SERVICES_PROJECT_SCOPE_FEATURE) ?? false) ? serviceScopeEntries(s, t, host?.sidebar, (patch) => run(() => api.patchService(s.slug, patch))) : [];
   const currentTtl = s.effectiveIdleTtlMinutes ?? Number.POSITIVE_INFINITY;
   const ttlChoices = [30, 120, 480, 1440].filter((minutes) => minutes > currentTtl && minutes <= (s.maxIdleTtlMinutes ?? 1440));
+  const controls: MenuEntry[] = supervised && !s.archived ? [
+    manage && running && { label: t(worker ? "services.worker.stop" : "services.stop"), info: worker ? t("services.worker.stop.hint") : undefined, onSelect: () => run(() => api.serviceAction(s.slug, "stop")) },
+    manage && !running && { label: t(supportsIdle && s.health === "stoppedIdle" ? "services.wake" : worker ? "services.worker.start" : "services.start"), onSelect: () => run(() => api.serviceAction(s.slug, "start")) },
+    manage && running && { label: t("services.restart"), onSelect: () => run(() => api.serviceAction(s.slug, "restart")) },
+    !!toggleLogs && { label: t("services.logs"), onSelect: toggleLogs },
+  ] : [];
   return [
-    !s.archived && { label: t("services.open"), onSelect: () => run(() => openService(s, hostId)) },
-    !s.archived && { label: t("services.openExternal"), onSelect: () => run(() => openService(s, hostId, "/", { external: true })) },
-    !s.archived && { label: t("services.copyUrl"), onSelect: () => copyText(s.url) },
+    ...(worker ? controls : []),
+    worker && controls.some(Boolean) && "separator",
+    !worker && !s.archived && { label: t("services.open"), onSelect: () => run(() => openService(s, hostId)) },
+    !worker && !s.archived && { label: t("services.openExternal"), onSelect: () => run(() => openService(s, hostId, "/", { external: true })) },
+    // The loopback address, not cutex's `url` (the daemon machine's name); another host's is labelled as its own (lib/serviceAddress).
+    ...(!s.archived ? serviceCopyEntries(serviceAddressOf(s, hostId ?? focusId(), useApp.getState().hosts?.hosts.find((h) => h.id === (hostId ?? focusId()))), t, copyText) : []),
     // The owner picker is the flyout (components/ServiceOwnerFlyout): the service's own host, searchable,
     // bounded, project members first — not a flat menu of the host's every session (owner bug 2026-10-28).
     manage && ownerFlyout !== undefined && { label: t("services.changeOwner"), flyout: ownerFlyout, onSelect: () => {} },
     ...scopeRows,
-    supervised && manage && !s.archived && "separator",
-    supervised && manage && !s.archived && running && { label: t("services.stop"), onSelect: () => run(() => api.serviceAction(s.slug, "stop")) },
-    supervised && manage && !s.archived && !running && { label: t(supportsIdle && s.health === "stoppedIdle" ? "services.wake" : "services.start"), onSelect: () => run(() => api.serviceAction(s.slug, "start")) },
-    supervised && manage && !s.archived && running && { label: t("services.restart"), onSelect: () => run(() => api.serviceAction(s.slug, "restart")) },
-    supervised && !s.archived && toggleLogs && { label: t("services.logs"), onSelect: toggleLogs },
+    !worker && supervised && manage && !s.archived && "separator",
+    ...(worker ? [] : controls),
     supportsIdle && supervised && manage && !s.archived && s.lifetime === "persistent" && {
       label: t("services.idleStop"), onSelect: () => {},
       submenu: (["1h", "24h", "7d", "forever"] as const).map(preset => ({
         label: `${(s.idleStopPreset ?? "forever") === preset ? "✓ " : ""}${t(`services.idleStop.${preset}`)}`,
-        info: t("services.idleStop.hint"),
+        info: t(worker ? "services.worker.idleStop.hint" : "services.idleStop.hint"),
         onSelect: () => run(() => api.patchService(s.slug, { idleStopPreset: preset })),
       })),
     },

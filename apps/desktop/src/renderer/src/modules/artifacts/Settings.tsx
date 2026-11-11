@@ -1,6 +1,6 @@
 // 设置 → 对话 → 成果: what happens when the agent in view publishes (autoOpen.ts), and what agent pages saved
 // on this computer (pageData.tsx).
-import { Section, Select, SettingRow, TextLink } from "../../components/settings/Form";
+import { Notice, Section, Select, SettingRow, TextLink } from "../../components/settings/Form";
 import { useI18n } from "../../i18n";
 import { services } from "../app";
 import { useModulePref, useSlot } from "../react";
@@ -13,7 +13,7 @@ export function ArtifactSettings() {
   const storageAvailable = useSlot("settings.page").some((e) => e.item.page === "storage" && e.mode === "show");
   return (
     <>
-    <Section title={t("artifacts.settings")}>
+    <Section title={t("artifacts.settings")} actions={storageAvailable ? <TextLink onClick={() => useApp.getState().openSettings("storage")}>{t("settings.ia.storageLink")}</TextLink> : undefined}>
       <SettingRow agents="none" source="local" label={t("artifacts.autoOpen")} info={t("artifacts.autoOpenHint")}>
         <Select<AutoOpenSetting>
           value={autoOpenSetting(raw)}
@@ -27,8 +27,7 @@ export function ArtifactSettings() {
           }}
         />
       </SettingRow>
-      <p className="py-2 text-xs text-subtle">{t("settings.ia.pageDataLink")}</p>
-      {storageAvailable && <TextLink onClick={() => useApp.getState().openSettings("storage")}>{t("settings.ia.storageLink")}</TextLink>}
+      <Notice tone="info">{t("settings.ia.pageDataLink")}</Notice>
     </Section>
     </>
   );

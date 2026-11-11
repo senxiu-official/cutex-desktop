@@ -1,6 +1,6 @@
 export const zhCN = {
   "notifications.title": "通知",
-  "notifications.description": "设置 → 通知：这台设备收不收、每个等级怎么提醒、什么事算哪个等级",
+  "notifications.description": "设置事件的通知等级、提醒方式和本设备的提醒开关",
   "notifications.page": "通知",
   "notifications.agentSaid.reply": "{{Agent}}要你回复",
   "notifications.agentSaid.urgent": "{{Agent}}说「紧急」",
@@ -33,9 +33,9 @@ export const zhCN = {
   "notifications.level.inform": "告知",
   "notifications.level.record": "记录",
   "notifications.levelHint.urgent": "必须马上知道",
-  "notifications.levelHint.needsYou": "你不动，事情就停在那里",
+  "notifications.levelHint.needsYou": "等待你处理后才能继续",
   "notifications.levelHint.inform": "你发起的事有了结果，不必处理",
-  "notifications.levelHint.record": "其它一切，只在时间线",
+  "notifications.levelHint.record": "其他事件，仅记录在时间线中",
   "notifications.fixed": "固定，不能改",
   "notifications.deviceOff": "本设备已关",
   "notifications.phoneUnpaired": "未配对",
@@ -96,10 +96,10 @@ export const zhCN = {
   "notifications.eventGroup.mine": "你发起的任务",
   "notifications.eventGroup.ask.hint": "需要你批准、答复或审阅；处理之前相关工作会暂停",
   "notifications.eventGroup.ask": "待你处理",
-  "notifications.events.changedOnly": "只看改过的",
-  "notifications.events.changed": "改过",
+  "notifications.events.changedOnly": "只看已修改的",
+  "notifications.events.changed": "已修改",
   "notifications.events.reset": "恢复预设的等级",
-  "notifications.events.none": "没有改过的事件",
+  "notifications.events.none": "没有已修改的事件",
   "notifications.eventPreset.legacy": "旧版",
   "notifications.eventPreset.default": "推荐",
   "notifications.module.ownerNotify": "{{Agent}}消息",
@@ -112,7 +112,7 @@ export const zhCN = {
   "notifications.module.jobs": "作业",
   // 3 本设备
   "notifications.device.title": "提醒开关",
-  "notifications.device.hint": "主机决定什么时候提醒；这里可以按方式关掉。",
+  "notifications.device.hint": "按提醒方式设置本设备是否接收通知；事件规则由主机决定。",
   "notifications.device.permission": "系统通知权限",
   "notifications.device.ok": "已允许",
   "notifications.device.needsPermission": "需要允许",
@@ -128,9 +128,9 @@ export const zhCN = {
   "notifications.mute.hint": "关掉的项目只留在「需要你」里，不弹通知、不推手机",
   // 两部分（UI-02）：主机 / 本设备
   "notifications.part.host": "主机的通知规则",
-  "notifications.part.hostHint": "存在所选主机的 cutex 后端里，连这台主机的每台设备都一样。",
+  "notifications.part.hostHint": "保存在所选主机，连接此主机的所有设备共用。",
   "notifications.part.device": "这台设备",
-  "notifications.part.deviceHint": "只作用于这台设备。",
+  "notifications.part.deviceHint": "仅在本设备生效。",
 } as const;
 
 declare module "../i18nCatalog" {

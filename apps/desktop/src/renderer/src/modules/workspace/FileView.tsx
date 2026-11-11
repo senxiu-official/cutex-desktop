@@ -13,8 +13,14 @@ import { Markdown } from "../../components/Markdown";
 import { SideImage } from "../../components/SideImage";
 import { useI18n } from "../../i18n";
 import { docKindOf, formatSize, loadFsDoc } from "../../lib/docPreview";
-import { isNotAFileError } from "../../lib/pathKind";
-import { isThumbnailPath, THUMBNAIL_MAX_BYTES, thumbnailSrc } from "../../lib/fileKinds";
+import { isNotAFileError, isPathMissingError } from "../../lib/pathKind";
+import { isThumbnailPath, thumbnailSrc } from "../../lib/fileKinds";
+import { canRevealLocal, performFilePathAction } from "../../lib/fileActions";
+
+/** The most cutex's fs/file returns in one read (MAX_FILE_BYTES_LIMIT); it has no offset to read past it. */
+const FILE_IMAGE_MAX_BYTES = 10 * 1024 * 1024;
+/** The read's error when the path does not exist (shown as workspace.fileMissing). */
+const FILE_MISSING = "cutex-desktop:file-missing";
 import { languageFor } from "../../lib/workspace";
 import { workspaceError } from "../../lib/workspaceView";
 import { fence } from "./shared";
@@ -94,8 +100,8 @@ export function FileView({ api, hostId, scope, path, host, visible = true, line 
     setError(null);
     loaded.current?.(null);
     if ((!host && !scope) || doc || page) return;
-    // Images up to the message-thumbnail limit (the default 2 MiB would cut a larger one off).
-    const maxBytes = isThumbnailPath(path) ? THUMBNAIL_MAX_BYTES : undefined;
+    // Images up to the most cutex's fs/file sends at once (the default 2 MiB would cut a larger one off).
+    const maxBytes = isThumbnailPath(path) ? FILE_IMAGE_MAX_BYTES : undefined;
     const read = host ? api.hostFile(path, maxBytes) : api.fsFile(scope!, path, maxBytes);
     let live = true;
     read.then(
@@ -107,7 +113,8 @@ export function FileView({ api, hostId, scope, path, host, visible = true, line 
       (e: unknown) => {
         if (!live) return;
         if (isNotAFileError(e) && folder.current) return folder.current();
-        setError(workspaceError(e));
+        // A file that is not there (deleted, moved): said in plain words, not the host's error code.
+        setError(isPathMissingError(e) ? FILE_MISSING : workspaceError(e));
       },
     );
     return () => {
@@ -116,7 +123,11 @@ export function FileView({ api, hostId, scope, path, host, visible = true, line 
   }, [api, scope, path, host, doc, page, refresh.revision]);
   const isMarkdown = /\.(md|markdown|mdx)$/i.test(path);
   // SVG comes back as text: shown as an image (<img> from a data: URL), with 源码 as for Markdown.
-  const image = file ? thumbnailSrc(file) : null;
+  const image = file ? thumbnailSrc(file, "", FILE_IMAGE_MAX_BYTES) : null;
+  // An image over that: say so, and open it with the system app when it is on this computer.
+  const bigImage = !!file && file.encoding === "base64" && file.truncated && isThumbnailPath(path);
+  const localPath = host ? path : root ? `${root.replace(/[\\/]+$/, "")}/${path}` : null;
+  const openLocal = bigImage && !!hostId && !!localPath && canRevealLocal({ hostId, path: localPath });
   const isSvg = !!file && file.encoding === "utf8" && !!image;
   const asCode = !!file && file.encoding === "utf8" && (!(isMarkdown || isSvg) || source);
   useLineFocus(body, line, asCode ? file : null);
@@ -137,12 +148,18 @@ export function FileView({ api, hostId, scope, path, host, visible = true, line 
     );
   return (
     <div ref={body} className="min-h-0 flex-1 overflow-auto px-3 py-2 text-sm">
-      {error && <p className="text-xs text-danger">{error}</p>}
+      {error && <p className="text-xs text-danger" data-file-error={error === FILE_MISSING ? "missing" : undefined}>{error === FILE_MISSING ? t("workspace.fileMissing") : error}</p>}
       {!file && !error && <p className="text-xs text-subtle">…</p>}
       {file && image && (!isSvg || !source) && <SideImage key={image} alt={file.path} src={image} hostId={hostId} imgClassName="block max-w-full" />}
       {file && file.encoding === "base64" && !file.mime.startsWith("image/") && <p className="text-xs text-subtle">{t("workspace.binary", { mime: file.mime, size: file.size })}</p>}
       {file && file.encoding === "utf8" && !(isSvg && !source) && (isMarkdown && !source ? <Markdown text={file.content} document /> : <Markdown text={fence(languageFor(file.path), file.content)} uncappedCode />)}
-      {file?.truncated && <p className="mt-2 text-xs text-warn">{t("workspace.truncated")}</p>}
+      {bigImage && (
+        <div className="flex flex-wrap items-center gap-2 text-xs text-subtle" data-file-image-big>
+          <span>{t("workspace.imageOverRead", { size: formatSize(file!.size), max: formatSize(FILE_IMAGE_MAX_BYTES) })}</span>
+          {openLocal && <button type="button" onClick={() => void performFilePathAction(hostId!, localPath!, "open")} className="rounded-md border border-border px-2 py-1 text-foreground hover:bg-hover">{t("workspace.openSystem")}</button>}
+        </div>
+      )}
+      {file?.truncated && !bigImage && <p className="mt-2 text-xs text-warn">{t("workspace.truncated")}</p>}
     </div>
   );
 }

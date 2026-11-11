@@ -27,6 +27,9 @@ function sourceValue(s: CopySource): CopySource {
     ...(s.scope ? { scope: { kind: s.scope.kind, id: s.scope.id } } : {}),
     ...(s.artifact ? { artifact: { id: s.artifact.id, version: s.artifact.version } } : {}) }
 }
+// What the owner saved to this computer on purpose (保存到这台电脑: an artifact) is never deleted automatically
+// (owner 2026-11-10: no timed deletion of user data): always kept, no expiry. Remote file copies follow the retention setting.
+const savedOnPurpose = (s: CopySource): boolean => !!s.artifact
 function filename(name: string): string {
   return downloadFilename(name)
 }
@@ -110,6 +113,7 @@ export class RemoteCopyManager {
         try {
           if (!UUID.test(raw.id) || typeof raw.name !== 'string' || filename(raw.name) !== raw.name || !Number.isSafeInteger(raw.size) || raw.size < 0 || !Number.isSafeInteger(raw.received) || raw.received < 0 || raw.received > raw.size || !['downloading', 'complete', 'failed', 'canceled', 'expired', 'missing'].includes(raw.status) || !Number.isFinite(Date.parse(raw.createdAt)) || ![raw.downloadedAt, raw.expiresAt].every(v => v === null || (typeof v === 'string' && Number.isFinite(Date.parse(v)))) || typeof raw.kept !== 'boolean' || !(raw.sha256 === null || /^[a-f0-9]{64}$/.test(raw.sha256))) continue
           const row: RemoteCopy = { id: raw.id, source: sourceValue(raw.source), name: raw.name, size: raw.size, received: raw.received, status: raw.status === 'downloading' ? 'canceled' : raw.status, createdAt: raw.createdAt, downloadedAt: raw.downloadedAt, expiresAt: raw.expiresAt, kept: raw.kept, sha256: raw.sha256 }
+          if (savedOnPurpose(row.source)) { row.kept = true; row.expiresAt = null }
           this.rows.set(row.id, row)
         } catch { /* A malformed row never supplies filesystem paths. */ }
       }
@@ -150,7 +154,7 @@ export class RemoteCopyManager {
       }
       const id = randomUUID()
       const controller = new AbortController()
-      this.rows.set(id, { id, source, name: 'download', size: consent.size, received: 0, status: 'downloading', createdAt: new Date(this.now()).toISOString(), downloadedAt: null, expiresAt: null, kept: replaceId ? this.row(replaceId).kept : false, sha256: null })
+      this.rows.set(id, { id, source, name: 'download', size: consent.size, received: 0, status: 'downloading', createdAt: new Date(this.now()).toISOString(), downloadedAt: null, expiresAt: null, kept: savedOnPurpose(source) || (replaceId ? this.row(replaceId).kept : false), sha256: null })
       this.active.set(id, { host: source.hostId, controller, done: Promise.resolve() })
       try { await this.persist() } catch (e) { this.active.delete(id); this.rows.delete(id); throw e }
       return id
@@ -227,8 +231,9 @@ export class RemoteCopyManager {
         published = true
         row.status = 'complete'; row.sha256 = digest
         if (replaceId && this.rows.has(replaceId)) row.kept = this.row(replaceId).kept
+        if (savedOnPurpose(row.source)) row.kept = true
         row.downloadedAt = new Date(this.now()).toISOString()
-        row.expiresAt = this.prefs.retentionDays === null ? null : new Date(this.now() + this.prefs.retentionDays * DAY).toISOString()
+        row.expiresAt = savedOnPurpose(row.source) || this.prefs.retentionDays === null ? null : new Date(this.now() + this.prefs.retentionDays * DAY).toISOString()
         await this.persist()
         if (replaceId && this.rows.has(replaceId) && !this.active.has(replaceId)) {
           try { await this.deleteFiles(this.row(replaceId)); this.rows.delete(replaceId); await this.persist() } catch { /* New copy remains usable if old cleanup is refused. */ }
@@ -252,7 +257,13 @@ export class RemoteCopyManager {
     await active?.done
   }
   async keep(id: string, kept: boolean): Promise<void> {
-    return this.serial(async () => { if (typeof kept !== 'boolean') throw Error('Invalid keep'); this.row(id).kept = kept; await this.persist() })
+    return this.serial(async () => {
+      if (typeof kept !== 'boolean') throw Error('Invalid keep')
+      const row = this.row(id)
+      if (!kept && savedOnPurpose(row.source)) throw Error('Saved artifacts are always kept')
+      row.kept = kept
+      await this.persist()
+    })
   }
   private async deleteFiles(row: RemoteCopy): Promise<void> {
     try {
@@ -283,7 +294,7 @@ export class RemoteCopyManager {
       try {
         const dir = await this.entry(row.id)
         await this.regular(path.join(dir, row.name === 'download.part' ? '_download.part' : row.name))
-        if (!row.kept && row.expiresAt && Date.parse(row.expiresAt) <= this.now()) {
+        if (!row.kept && !savedOnPurpose(row.source) && row.expiresAt && Date.parse(row.expiresAt) <= this.now()) {
           await this.deleteFiles(row)
           row.status = 'expired'; row.received = 0
         }

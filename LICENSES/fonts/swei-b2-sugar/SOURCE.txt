@@ -1,0 +1,3 @@
+https://github.com/max32002/swei-b2-sugar
+Revision: b4e8b267a130dc2146993f484b20a8a24408ce86
+License: https://raw.githubusercontent.com/max32002/swei-b2-sugar/b4e8b267a130dc2146993f484b20a8a24408ce86/SIL_Open_Font_License_1.1.txt

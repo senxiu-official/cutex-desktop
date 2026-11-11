@@ -1,6 +1,6 @@
 export const zhCN = {
   "updater.title": "桌面应用更新",
-  "updater.description": "设置 → 更新与诊断：检查更新和错误日志",
+  "updater.description": "检查桌面应用更新，查看错误日志",
   // ---- settings (moved from the base catalog, 2026-10-09) ----
   "updater.general.updates": "桌面更新与诊断",
   "updater.pageHint": "这台电脑上的 Cutex 桌面应用：版本、更新和错误日志。主机上的 cutex 在「主机后端更新」。",

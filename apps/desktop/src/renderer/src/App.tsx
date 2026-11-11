@@ -39,7 +39,9 @@ import { useDesktopShell } from "./lib/shell";
 import { useTermsSync } from "./lib/termsSync";
 import { startSideStore } from "./lib/sideLayoutStore";
 import { startDragTrace } from "./lib/dragTrace";
-import { startPaneSync } from "./lib/paneStore";
+import { startPaneSync, usePanes } from "./lib/paneStore";
+import { conversationPanes, paneBinding } from "./lib/paneLayout";
+import { firstRunCardShown } from "./lib/firstRun";
 import { startPaneActions } from "./lib/paneActions";
 import { useSideShortcuts } from "./lib/useSideShortcuts";
 import { useStaleFocusGuard } from "./lib/staleFocus";
@@ -65,9 +67,14 @@ function DaemonBanner() {
   const switchHost = useApp((s) => s.switchHost);
   const openSettings = useApp((s) => s.openSettings);
   const indicator = hostIndicator(hosts, daemon);
+  // A conversation on screen: it doesn't show the first-run card (below), so this line is the only notice there.
+  const conversationShown = usePanes((s) => conversationPanes(s.layout).some((id) => !!paneBinding(s.layout, id)?.sessionId));
   // No host at all: the main area guides to adding one (components/FirstRun); nothing to reconnect.
   if (indicator.status === "online" || hasNoHost(hosts)) return null;
   if (!isRemote(hosts)) {
+    // cutex not installed / not running and no conversation on screen: the main area's card (components/FirstRun) says it
+    // with the steps; no second line here.
+    if (firstRunCardShown(daemon, conversationShown)) return null;
     const text =
       daemon.kind === "connecting"
         ? t("daemon.connecting")

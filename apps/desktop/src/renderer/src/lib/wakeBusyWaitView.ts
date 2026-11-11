@@ -39,10 +39,10 @@ export function useWakeBusyWait(enabled: boolean): { supported: boolean; wait: W
  * does to a busy recipient on this host (wake-busy-wait), the old after-turn hint without the capability.
  * `undefined` when the row is no wake (nothing is loaded for it, KindTag keeps its own default).
  */
-export function useWakeHint(isWake: boolean, runtime: AgentRuntime): string | undefined {
+export function useWakeHint(isWake: boolean, runtime: AgentRuntime, features: Readonly<Record<string, unknown>> | null = null): string | undefined {
   const { t } = useI18n();
   const { supported, wait } = useWakeBusyWait(isWake);
   if (!isWake) return undefined;
-  const hint = wakeHintOf(pendingWakeLabel(supported, runtime, wait));
+  const hint = wakeHintOf(pendingWakeLabel(supported, runtime, wait, features));
   return hint.n === undefined ? t(hint.key) : t(hint.key, { n: hint.n });
 }

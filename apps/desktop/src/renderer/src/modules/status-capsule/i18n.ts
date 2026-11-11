@@ -8,7 +8,7 @@ export const zhCN = {
   "status-capsule.more": "胶囊位置、大小与内容",
   "status-capsule.items": "在胶囊里显示",
   "status-capsule.shortcut": "{key} 展开 / 收起",
-  "status-capsule.section": "胶囊（旧版，已冻结）",
+  "status-capsule.section": "状态胶囊（旧版）",
   "status-capsule.always": "始终显示胶囊",
   "status-capsule.always.hint": "没有内容时也显示",
   "status-capsule.corner": "位置",

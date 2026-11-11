@@ -9,11 +9,13 @@
 // the delegation menu.
 // Timing words (the full sentence is the tooltip / aria-label):
 //   下一步 = read at the next step (the owner's inserts too: their kind icon is ↳, muted)
-//   ring + N 秒后插入 = a wake waiting for the turn end, depleting until it inserts at the next step
+//   ring + N 秒后插入 = a wake waiting for the turn end, depleting until it inserts at the next step (legacy);
+//   ledger rows: ring + 「1:45 后可插入」, then 「等待插入时机」 (WakeCountdown, the server's nextStepAt)
 //   本回合结束后 = after this turn (alarms)
 //   「随第 N 轮」 = after a ride-along-started turn the owner's turn N goes first; this joins it
 //                  (a button: 让它先走 = cutex/userInput/queue/yield, then 「先于第 N 轮」)
 //   已暂停 (warn) = held (an owner stop / 暂停委托, lib/stopHold): the row is dimmed, no ring runs; ❚❚ is the group rail's
+import { useRef } from "react";
 import type { AgentRuntime } from "../lib/agentFeatures";
 import { MessageSettlementControl } from "./MessageSettlementControl";
 import { Activity, AlarmClock, ArrowDownLeft, CornerDownLeft, Globe, Mail, MessageCircleQuestion, MessageSquareText, Paperclip } from "lucide-react";
@@ -35,8 +37,16 @@ import { QUEUE_ROW, ROW_META, ROW_ACTIONS, rowText } from "../lib/queueRow";
 import type { InputRecord } from "@cutex-desktop/protocol";
 import { InputHoldControl } from "./InputHoldControl";
 import { InputStatus } from "./InputStatus";
-import { formatWhen, useClock, useNow } from "../lib/time";
-import { sidebarOf, useApp } from "../store";
+import { formatAt, formatWhen, useClock, useNow } from "../lib/time";
+import { blockOfNotice, grantNoticeRowOf } from "../lib/safetyGrantNotice";
+import { useHostOwnerNotes } from "../lib/ownerNotifyStore";
+import { safetyBlockState } from "../lib/ownerNotify";
+import { agentState, sidebarOf, useApp, viewOf } from "../store";
+import { readsEarly, wakeScheduleOf, wakeSourceOf, minSec } from "../lib/wakeCountdown";
+import { useVisibleNow } from "../lib/visibleNow";
+import { agentFeaturesOf } from "../lib/agentFeatures";
+import { runtimeOf } from "../lib/agentList";
+import { viewRow } from "../lib/viewHost";
 import { rowsOf } from "../lib/viewHost";
 import { SenderAvatar } from "./SystemAvatar";
 import { convFeaturesOf, useConvHost, useConvScope } from "../lib/conversationScope";
@@ -88,9 +98,79 @@ export function LedgerAdmissionRow({ record, sessionId, hostId, body, children, 
     {statusNotice && openAsk ? <button type="button" onClick={openAsk} className="min-w-0 flex-1 truncate text-left text-ui hover:text-accent hover:underline" title={text}>{rowText(text)}</button>
       : <span className="min-w-0 flex-1 truncate text-ui" title={statusNotice ? text : body ?? record.preview}>{rowText(text)}</span>}
     <InputHoldControl record={record} sessionId={sessionId} hostId={hostId} />
-    <InputStatus record={record} sessionId={sessionId} hostId={hostId} />
+    <GrantNoticeStatus record={record} sessionId={sessionId} hostId={rowHost}>
+      {record.state === "waiting" && record.kind !== "owner" ? (
+        <WakeCountdown record={record} sessionId={sessionId} hostId={rowHost}>
+          <InputStatus record={record} sessionId={sessionId} hostId={hostId} />
+        </WakeCountdown>
+      ) : <InputStatus record={record} sessionId={sessionId} hostId={hostId} />}
+    </GrantNoticeStatus>
     {children && <span className={`${ROW_ACTIONS} h-5 max-h-5`}>{children}</span>}
   </div>;
+}
+
+/**
+ * The 「主人已批准一次」 notice of a safety-block grant (cutex safety-grant-delivery; the block names this record as
+ * its `noticeInputId`): 「已批准一次，等待当前工具返回后送达 · 最晚 HH:MM 前有效」 until the agent reads it, then
+ * 「已送达 · 有效至 HH:MM」 (lib/safetyGrantNotice). Otherwise, and on an older cutex, the row's own status (`children`).
+ */
+export function GrantNoticeStatus({ record, sessionId, hostId, children }: { record: Pick<InputRecord, "inputId" | "kind" | "state" | "evidence">; sessionId: string; hostId: string; children?: React.ReactNode }) {
+  const { t } = useI18n();
+  const notes = useHostOwnerNotes(hostId);
+  const block = record.kind === "alarm" ? blockOfNotice(notes, sessionId, record.inputId) : null;
+  const now = Date.now();
+  const status = block ? grantNoticeRowOf({ ...block, state: safetyBlockState(block, now) }, record) : null;
+  if (!block || !status) return <>{children}</>;
+  const at = (iso: string | null) => (iso && Number.isFinite(Date.parse(iso)) ? formatAt(Date.parse(iso) / 1000, now) : "");
+  const time = at(status.until);
+  const minutes = Math.max(1, Math.round(block.grantSeconds / 60));
+  return status.kind === "waiting" ? (
+    <TimingMeta label={t("safetyBlock.notice.waitingHint", { minutes, time })} text={time ? `${t("safetyBlock.notice.waiting")} · ${t("safetyBlock.notice.cap", { time })}` : t("safetyBlock.notice.waiting")} testId="grant-notice-waiting" />
+  ) : (
+    <TimingMeta label={t("safetyBlock.notice.readHint", { time })} text={t("safetyBlock.notice.read", { time })} tone="text-ok-text" testId="grant-notice-read" />
+  );
+}
+
+/**
+ * A wake (or delegation results) waiting on a busy agent: the server's deadline (the record's `wakeSchedule`, else
+ * `nextStepAt` of its admission ride-along matched by id; lib/wakeCountdown wakeSourceOf) as a depleting ring and 「1:45 后可插入」, then 「等待插入时机」 until the agent's next read
+ * point or the turn end (lib/wakeCountdown). Held by an owner stop / 暂停委托: 已暂停 with the reason, no ring.
+ * Nothing without a server deadline, once cutex waits only for the native receipt (it was read), while the agent
+ * is idle, or on a runtime that reads only after the turn. Ticks once a second, only while the row is on screen
+ * (lib/visibleNow). Membership and state stay the ledger's; the ride-along gives only the deadline. While it
+ * shows, it takes the place of the row's status word (`children`, InputStatus: 本回合结束后 would contradict it).
+ */
+export function WakeCountdown({ record, sessionId, hostId, children }: { record: Pick<InputRecord, "inputId" | "createdAt" | "wakeSchedule">; sessionId: string; hostId: string; children?: React.ReactNode }) {
+  const { t } = useI18n();
+  const ride = useApp((s) => viewOf(s, hostId, sessionId)?.admission?.nextStep?.find((i) => i.id === record.inputId) ?? null);
+  const ridealongsHeld = useApp((s) => viewOf(s, hostId, sessionId)?.admission?.ridealongsHeld);
+  const busy = useApp((s) => {
+    const state = agentState(s.inputs, hostId, sessionId)?.delivery?.state;
+    return state === "turn" || state === "finishing";
+  });
+  const runtimeEarly = useApp((s) => {
+    const row = viewRow(s, hostId, sessionId);
+    return !!row && readsEarly(runtimeOf(row), agentFeaturesOf(row).map);
+  });
+  const source = wakeSourceOf(record, ride, runtimeEarly, ridealongsHeld);
+  const ref = useRef<HTMLSpanElement>(null);
+  const held = source?.held;
+  const counting = busy && !!source && source.early && !held && !source.read && !!source.item.nextStepAt && source.item.timing !== "nextStep";
+  const now = useVisibleNow(ref, counting);
+  // A hold this desktop doesn't know yet: 已暂停 without a reason.
+  if (held) return held === "ownerStop" || held === "ownerPause" ? <HeldSymbol held={held as AdmissionHeld} /> : <TimingMeta label={t("queue.turn.heldItem")} text={t("queue.meta.held")} tone="text-warn-text" testId="timing-held" />;
+  const schedule = busy && source && !source.read ? wakeScheduleOf(source.item, now, source.early) : null;
+  if (!schedule) return <>{children}</>;
+  const readPointHint = t("agentMsg.wake.readPointHint");
+  return (
+    <span ref={ref} className="flex shrink-0" data-testid="wake-countdown" data-wake-schedule={schedule.kind}>
+      {schedule.kind === "countdown" ? (
+        <TimingMeta label={t("agentMsg.wake.countdownHint", { time: minSec(schedule.secs) })} text={t("agentMsg.wake.countdown", { time: minSec(schedule.secs) })} symbol={<CountdownRing left={schedule.left} />} />
+      ) : (
+        <TimingMeta label={readPointHint} text={t("agentMsg.wake.readPoint")} />
+      )}
+    </span>
+  );
 }
 
 /** A row's kind: a small muted icon, its word as the label (no text pill). */

@@ -17,3 +17,9 @@ export function firstRunView(daemon: DaemonState, remote: boolean, agentCount: n
   if (daemon.kind === "connected" && agentCount === 0) return "empty";
   return null;
 }
+
+/** The top banner's line for the local host is left out while the main area's first-run card says the same
+ *  (cutex not installed / not running, no conversation on screen: that card has the steps). */
+export function firstRunCardShown(daemon: DaemonState, conversationShown: boolean): boolean {
+  return daemon.kind === "unreachable" && !!daemon.setup && !conversationShown;
+}

@@ -10,14 +10,17 @@ import { sharedResizeObserver } from "./resizeHub";
  */
 export function useChipFit(pref: StatusChips, deps: readonly unknown[]) {
   const lineRef = useRef<HTMLDivElement>(null);
-  const [fit, setFit] = useState<ChipFit | null>(null);
+  // Only the decision is state: a resize (a sidebar edge drag) renders the row when it flips, not per pixel.
+  const [autoCompact, setAutoCompact] = useState(false);
+  const shown = useRef(autoCompact);
+  shown.current = autoCompact;
   useLayoutEffect(() => {
     const line = lineRef.current;
     if (pref !== "auto" || !line) return;
-    const measure = () => setFit((prev) => {
-      const next = measureLine(line);
-      return prev && next && Math.abs(prev.lineWidth - next.lineWidth) < 0.5 && prev.nameWidth === next.nameWidth && prev.otherWidth === next.otherWidth && prev.chipWidth === next.chipWidth ? prev : next;
-    });
+    const measure = () => {
+      const next = chipIsCompact("auto", measureLine(line));
+      if (next !== shown.current) setAutoCompact((shown.current = next));
+    };
     measure();
     const ro = sharedResizeObserver(measure);
     ro.observe(line);
@@ -26,7 +29,7 @@ export function useChipFit(pref: StatusChips, deps: readonly unknown[]) {
     if (copy) ro.observe(copy);
     return () => ro.disconnect();
   }, [pref, ...deps]); // eslint-disable-line react-hooks/exhaustive-deps
-  return { lineRef, compact: chipIsCompact(pref, fit) };
+  return { lineRef, compact: pref === "auto" ? autoCompact : chipIsCompact(pref, null) };
 }
 
 function measureLine(line: HTMLElement): ChipFit | null {

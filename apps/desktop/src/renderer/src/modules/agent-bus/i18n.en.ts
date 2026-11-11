@@ -25,7 +25,7 @@ export const en: Record<keyof typeof zhCN, string> = {
   "agent-bus.settlement.missing": "The server could not find this item. The list was refreshed.",
   "agent-bus.settlement.unavailable": "Service unavailable. Read state again.",
   "agent-bus.title": "{{Agent}} bus",
-  "agent-bus.description": "Message delivery between {{agents}}, the bus and its stuck messages",
+  "agent-bus.description": "Manage messaging between {{agents}} and review undelivered messages",
   // ---- settings (moved from the base catalog, 2026-10-09) ----
   "agent-bus.restartHint": "Takes effect after restarting the cutex service",
   "agent-bus.tokenSet": "Set",

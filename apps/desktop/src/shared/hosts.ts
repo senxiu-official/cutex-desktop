@@ -124,6 +124,8 @@ export interface HostLocalConfig {
 
 /** One stored SSH host (userData/hosts.json). The token lives encrypted in a separate file. */
 export interface SshHostConfig {
+  /** Imported credentials use SSH for forwarding only, never remote CLI commands. */
+  pairingMode?: "ssh" | "tokenImport";
   id: string;
   label: string;
   /** First connection address; kept for older desktop versions reading this file. */
@@ -240,6 +242,7 @@ export type SshErrorCode =
   | "refused"
   | "timeout"
   | "forward" // local port forward failed (port taken)
+  | "forwardDenied" // SSH account forbids the remote forwarding channel
   | "cutexNotFound" // remote command not found
   | "cutexTooOld" // remote cutex lacks `management client-token`
   | "badOutput" // remote printed something we cannot parse
@@ -289,6 +292,7 @@ export interface SshRouteView {
 }
 
 export interface HostView {
+  pairingMode?: "ssh" | "tokenImport";
   id: string;
   /** "dev-direct" = DEV ONLY loopback host from CUTEX_DESKTOP_DEV_HOSTS (main/devHosts.ts); never in packaged builds. */
   kind: "local" | "ssh" | "dev-direct";
@@ -385,6 +389,25 @@ export interface AddSshHostRequest {
   connectAs?: SshConnectAsRequest;
 }
 
+/** Secret is input-only: never echoed in results, hosts.json, errors or events. */
+export interface ImportSshHostTokenRequest {
+  token: string;
+  /** Present to rotate an imported host's credential; preserves its pinned daemon identity. */
+  hostId?: string;
+  /** Required for a new host, ignored for rotation. */
+  target?: string;
+  remotePort?: number;
+  label?: string;
+  /** Optional identity supplied separately by the owner; always pinned after first verification. */
+  expectedHostId?: string;
+}
+
+export interface ImportedSshAccess {
+  hostId: string;
+  user: import("./users").HostUserAccess;
+  featureList: string[];
+}
+
 export interface SshHostPatch {
   label?: string;
   targets?: string[];
@@ -400,7 +423,7 @@ export interface SshHostPatch {
  * `connectAs` (`decideConnectAs`).
  */
 export type HostResult =
-  | { ok: true; hostId: string; cutexPath?: string; pending?: boolean; connectAs?: SshConnectAs; userId?: string | null; autoReason?: ReturnType<typeof decideConnectAs>["reason"] }
+  | { ok: true; hostId: string; cutexPath?: string; pending?: boolean; connectAs?: SshConnectAs; userId?: string | null; autoReason?: ReturnType<typeof decideConnectAs>["reason"]; access?: ImportedSshAccess }
   | { ok: false; error: SshErrorView };
 
 export interface HostTestResult {
@@ -494,6 +517,7 @@ export function parseHostsFile(raw: unknown): HostsFile {
       platform: !v1 && isHostPlatform(x.platform) ? x.platform : null,
       // Entries from before host ownership: today's behaviour (an owner token).
       connectAs: x.connectAs === "member" ? "member" : "owner",
+      ...(x.pairingMode === "tokenImport" ? { pairingMode: "tokenImport" as const } : {}),
     });
   }
   const known = (id: unknown): id is string => typeof id === "string" && (id === LOCAL_HOST_ID || seen.has(id));
@@ -1033,6 +1057,7 @@ export function classifySshFailure(exitCode: number | null, stderr: string, cont
     if (/Host key verification failed|REMOTE HOST IDENTIFICATION HAS CHANGED|No (?:\S+ )?host key is known|host key for .* has changed/i.test(s)) return "hostKey";
     if (/Permission denied \(|no supported authentication methods|Too many authentication failures|Authentication failed|passphrase/i.test(s)) return "auth";
     if (/Could not resolve hostname|Name or service not known|nodename nor servname|No such host is known/i.test(s)) return "resolve";
+    if (/administratively prohibited|port forwarding (?:is )?(?:disabled|not permitted)|forwarding disabled/i.test(s)) return "forwardDenied";
     if (/port forwarding failed|cannot listen to port|Address already in use|Could not request local forwarding|bind.*: (?:Permission denied|Address already in use)/i.test(s)) return "forward";
     // POSIX: "connect to host h port 22: Connection refused"; Windows OpenSSH: "banner exchange:
     // Connection to UNKNOWN port -1: Connection refused". A refused forward *channel* (remote daemon
@@ -1050,7 +1075,7 @@ export function classifySshFailure(exitCode: number | null, stderr: string, cont
 
 /** Errors that will not fix themselves: no automatic tunnel retry (the user retries). */
 export function isPermanentSshError(code: SshErrorCode): boolean {
-  return code === "auth" || code === "hostKey" || code === "noSsh" || code === "noToken" || code === "noKeyring" || code === "tokenRejected" || code === "badInput";
+  return code === "auth" || code === "hostKey" || code === "forwardDenied" || code === "noSsh" || code === "noToken" || code === "noKeyring" || code === "tokenRejected" || code === "badInput";
 }
 
 // ---------- tunnel state ----------

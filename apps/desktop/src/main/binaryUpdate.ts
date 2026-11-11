@@ -11,7 +11,7 @@
 // temp dir): <base>/.update-download while downloading, <base>/releases/.unpack-* while unpacking.
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { createReadStream, createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync } from "node:fs";
+import { createReadStream, createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { Blake2b512 } from "./blake2b";
@@ -213,10 +213,22 @@ async function hashFile(path: string): Promise<{ blake: Buffer; sha256: string }
 /**
  * GET `url` into `dest`, following redirects (each hop checked with downloadUrlAllowed). `size`: the
  * size the release API announced — more bytes abort, fewer fail. `max`: hard cap.
+ * Optional: `signal` cancels; `onProgress` gets the bytes in `dest` so far; `resume` continues a partial `dest`
+ * with a Range request (a server that answers 200 instead sends it all again, written from the start). The caller
+ * checks the finished file's hash either way.
  */
-export async function download(transport: Transport, url: string, dest: string, opts: { max: number; size: number; extraOrigins?: readonly string[] }): Promise<void> {
+export async function download(transport: Transport, url: string, dest: string, opts: { max: number; size: number; extraOrigins?: readonly string[]; signal?: AbortSignal; onProgress?: (received: number) => void; resume?: boolean }): Promise<void> {
   if (opts.size > opts.max) throw new Error(`${url} is larger than ${opts.max} bytes`);
-  const overall = AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS);
+  const overall = opts.signal ? AbortSignal.any([AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS), opts.signal]) : AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS);
+  let start = 0;
+  if (opts.resume) {
+    try {
+      start = statSync(dest).size;
+    } catch {
+      start = 0;
+    }
+    if (start >= opts.size) start = 0;
+  }
   let href = url;
   for (let hop = 0; ; hop++) {
     if (!downloadUrlAllowed(href, opts.extraOrigins)) throw new Error(`refusing to download from ${safeUrl(href)}`);
@@ -226,7 +238,7 @@ export async function download(transport: Transport, url: string, dest: string, 
     try {
       let res: TransportResponse;
       try {
-        res = await transport(href, { signal, headers: { "User-Agent": USER_AGENT, Accept: "application/octet-stream" } });
+        res = await transport(href, { signal, headers: { "User-Agent": USER_AGENT, Accept: "application/octet-stream", ...(start > 0 ? { Range: `bytes=${start}-` } : {}) } });
       } catch (error) {
         throw new Error(error instanceof ProxyAuthError ? error.message : `download of ${safeUrl(url)} failed: ${errorText(error)}`);
       }
@@ -242,23 +254,28 @@ export async function download(transport: Transport, url: string, dest: string, 
         res.cancel();
         throw new Error(`download of ${safeUrl(url)} answered ${res.status}`);
       }
+      // A Range answer continues the partial file; any other 2xx is the whole file again.
+      const partial = start > 0 && res.status === 206 && (res.header("content-range") ?? "") === `bytes ${start}-${opts.size - 1}/${opts.size}`;
+      if (!partial) start = 0;
       const declared = Number(res.header("content-length") ?? NaN);
-      if (Number.isFinite(declared) && !res.header("content-encoding") && declared !== opts.size) {
+      if (Number.isFinite(declared) && !res.header("content-encoding") && declared !== opts.size - start) {
         res.cancel();
         throw new Error(`download of ${safeUrl(url)}: ${declared} bytes, the release lists ${opts.size}`);
       }
-      let received = 0;
+      let received = start;
+      opts.onProgress?.(received);
       const counter = async function* (body: AsyncIterable<Uint8Array>) {
         for await (const chunk of body) {
           received += chunk.length;
           if (received > opts.size || received > opts.max) throw new Error(`download of ${safeUrl(url)} is larger than the release lists`);
           clearTimeout(timer);
           timer = setTimeout(() => stall.abort(new Error("download stalled")), STALL_TIMEOUT_MS);
+          opts.onProgress?.(received);
           yield chunk;
         }
       };
       try {
-        await pipeline(res.body, counter, createWriteStream(dest));
+        await pipeline(res.body, counter, createWriteStream(dest, { flags: partial ? "a" : "w" }));
       } catch (error) {
         res.cancel();
         throw new Error(`download of ${safeUrl(url)} failed: ${errorText(error)}`);

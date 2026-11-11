@@ -18,7 +18,7 @@ function ServicePicker(props: SideBodyProps<BrowserState>) {
   const list = useHostServices(props.hostId);
   const [query, setQuery] = useState("");
   const q = query.trim().toLocaleLowerCase();
-  const services = (list ?? []).filter(s => !s.archived && !s.hidden && (!q || `${s.displayName} ${s.slug}`.toLocaleLowerCase().includes(q)));
+  const services = (list ?? []).filter(s => !s.archived && !s.hidden && s.runtime !== "worker" && (!q || `${s.displayName} ${s.slug}`.toLocaleLowerCase().includes(q)));
   return <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto p-5" data-service-picker>
     <div className="flex items-center gap-2"><AppWindow size={20} /><h3 className="text-sm font-medium">{t("browser.service.choose")}</h3></div>
     <p className="text-xs text-muted">{t("browser.service.hint")}</p>

@@ -5,14 +5,13 @@ import { useState, type ReactNode } from "react";
 import type { CutexRefusal } from "../../../../shared/ipc";
 import { USAGE_SOURCE_KIND_DEFAULTS, USAGE_SOURCES_FEATURE, type UsageSource, type UsageSourceBilling, type UsageSourceKind, type UsageSourceResult, type UsageSourcesView } from "../../../../shared/usageSources";
 import { useI18n } from "../../i18n";
-import { AddButton, ArmedRemove, Button, ErrorNote, Loading, Notice, RefreshButton, Select, TextInput, Toggle , SettingsGroup , SettingsEffectCard } from "../../components/settings/Form";
+import { AddButton, ArmedRemove, Button, ErrorNote, Loading, Notice, RefreshButton, Select, TextInput, Toggle, SettingsGroup, Section, EmptyState } from "../../components/settings/Form";
 import { ProviderIcon } from "../../components/ProviderIcon";
 import { modelProvider } from "../../lib/provider";
 import { useTargetApi } from "../../lib/targetHost";
 import { availableKinds, scanClock, suggestedPath } from "./sourceHelpers";
 import { Tag } from "../../components/Tag";
 
-const CARD = "rounded-xl border border-border bg-surface";
 
 function KindIcon({ kind, size = 18 }: { kind: string; size?: number }) {
   // ZCode is Zhipu's: the GLM logo.
@@ -182,35 +181,27 @@ export function UsageSources({ view, error, unsupported, onChanged, host, hostHi
   // A known feature list without extra sources = an older cutex: keep the card in place so the feature is findable.
   if (view === null)
     return !unsupported ? null : (
-      <SettingsEffectCard><section className="mb-6">
-        <div className="mb-1 flex h-7 items-center gap-2">
-          <h3 className="text-sm font-semibold">{t("usage.sources.title")}</h3>
-          {host && <span className="ml-auto">{host}</span>}
-        </div>
+      <Section title={t("usage.sources.title")} actions={host}>
         <Notice tone="info">{t("modules.needsUpgrade", { feature: USAGE_SOURCES_FEATURE })}</Notice>
-      </section></SettingsEffectCard>
+      </Section>
     );
   return (
-    <SettingsEffectCard><section className="mb-6">
-      <div className="mb-1 flex h-7 items-center gap-2">
-        <h3 className="text-sm font-semibold">{t("usage.sources.title")}</h3>
-        <span className="ml-auto flex items-center gap-2">
-          {host}
-          {!adding && (
-            <SettingsGroup agents="none" source="host"><AddButton disabled={!view} onClick={() => setAdding(true)}>
-              {t("usage.sources.addDir")}
-            </AddButton></SettingsGroup>
-          )}
-        </span>
-      </div>
-      <p className="mb-2 text-xs text-subtle">
-        {t("usage.sources.hint", { min: Math.round((view?.scanIntervalSecs ?? 300) / 60) })}
-        {hostHint && ` ${hostHint}`}
-      </p>
+    <Section
+      title={t("usage.sources.title")}
+      hint={<>{t("usage.sources.hint", { min: Math.round((view?.scanIntervalSecs ?? 300) / 60) })}{hostHint && ` ${hostHint}`}</>}
+      actions={<>
+        {host}
+        {!adding && (
+          <SettingsGroup agents="none" source="host"><AddButton disabled={!view} onClick={() => setAdding(true)}>
+            {t("usage.sources.addDir")}
+          </AddButton></SettingsGroup>
+        )}
+      </>}
+    >
       {error && <ErrorNote>{error}</ErrorNote>}
-      <div className={`${CARD} px-4`}>
+      <div>
         {view === undefined && <Loading rows={2} />}
-        {view && view.sources.length === 0 && !adding && <div className="py-3 text-xs text-subtle">{t("usage.sources.empty")}</div>}
+        {view && view.sources.length === 0 && !adding && <EmptyState>{t("usage.sources.empty")}</EmptyState>}
         {view?.sources.map((s) => <SourceRow key={s.id} source={s} onChanged={onChanged} />)}
         {adding && view && (
           <AddForm
@@ -223,6 +214,6 @@ export function UsageSources({ view, error, unsupported, onChanged, host, hostHi
           />
         )}
       </div>
-    </section></SettingsEffectCard>
+    </Section>
   );
 }

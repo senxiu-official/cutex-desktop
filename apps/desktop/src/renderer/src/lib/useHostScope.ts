@@ -8,12 +8,13 @@ import { api } from "../bridge";
 import { useApp } from "../store";
 import { hostData, resolveHostScope, scopedHostData, type HostData, type HostLook, type HostScope } from "./hostScope";
 import { getUiPrefs, useUiPrefs } from "./prefs";
+import { hostDaemonsOf } from "./hostDaemons";
 
 /** The current scope, its hosts and their looks (re-renders on host list / scope / connection changes). */
 export function useHostScope(): HostScope {
   const hosts = useApp((s) => s.hosts);
   const daemon = useApp((s) => s.daemon);
-  const byHost = useApp((s) => s.byHost);
+  const byHost = useApp((s) => hostDaemonsOf(s.byHost));
   const marks = useUiPrefs().hostMarksSingle;
   return useMemo(() => resolveHostScope({ hosts, daemon, byHost }, marks), [hosts, daemon, byHost, marks]);
 }

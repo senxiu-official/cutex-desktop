@@ -433,3 +433,45 @@ describe("Settings → 外观 (P4)", () => {
     expect(usePortrait.of(MAIN_WINDOW).getState().prefs).toEqual({ split: DEFAULT_PORTRAIT.split, swapped: false, sidebarShown: false });
   });
 });
+
+describe("the portrait divider and band handle are drag sessions (perf/shelf-divider-drag)", () => {
+  it("each drag opens one width-drag session (lib/columnGlide) for its own length and stores once, on release", async () => {
+    // The session is what lets the instance layer follow by style, keeps the timeline's far rows skipped and holds the
+    // turns' attachments' width meanwhile — without it every step rendered the layer and redrew the whole history.
+    useSide.setState({ layout: withLeftRight() });
+    render();
+    await settle();
+    resizeWindow(1080, 1920, 1064);
+    const sessions: boolean[] = [];
+    const off = glide.onResizeDrag((active) => void sessions.push(active));
+    const writes = vi.fn();
+    const unsub = usePortrait.of(MAIN_WINDOW).subscribe(writes);
+    try {
+      pointer(divider(), "pointerdown", 600);
+      expect(glide.resizeDragActive()).toBe(true);
+      for (const y of [620, 660, 700]) pointer(divider(), "pointermove", y);
+      expect(writes).not.toHaveBeenCalled();
+      pointer(divider(), "pointerup", 700);
+      expect(glide.resizeDragActive()).toBe(false);
+      expect(writes).toHaveBeenCalledTimes(1);
+      writes.mockClear();
+      mouse(handle(), "pointerdown", { clientX: 500 });
+      expect(glide.resizeDragActive()).toBe(true);
+      for (const x of [520, 560, 600]) mouse(handle(), "pointermove", { clientX: x });
+      expect(writes).not.toHaveBeenCalled();
+      mouse(handle(), "pointerup", { clientX: 600 });
+      expect(glide.resizeDragActive()).toBe(false);
+      expect(writes).toHaveBeenCalledTimes(1);
+      writes.mockClear();
+      // A press and release without a move: the session ends, nothing is stored.
+      pointer(divider(), "pointerdown", 600);
+      pointer(divider(), "pointerup", 600);
+      expect(glide.resizeDragActive()).toBe(false);
+      expect(writes).not.toHaveBeenCalled();
+      expect(sessions).toEqual([true, false, true, false, true, false]);
+    } finally {
+      off();
+      unsub();
+    }
+  });
+});

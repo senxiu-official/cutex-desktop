@@ -61,6 +61,6 @@ describe("host file preview", { timeout: 20_000 }, () => {
     for (const file of ["preload/index.ts", "main/index.ts"]) {
       expect(readFileSync(join(root, file), "utf8")).toMatch(/"hostFile",/);
     }
-    expect(readFileSync(join(root, "main/daemon.ts"), "utf8")).toMatch(/request<FsFile>\("GET", "\/v2\/fs\/file", \{ query: \{ path, maxBytes \} \}\)/);
+    expect(readFileSync(join(root, "main/daemon.ts"), "utf8")).toContain('this.cachedImageFile("/v2/fs/file", path, maxBytes)');
   });
 });

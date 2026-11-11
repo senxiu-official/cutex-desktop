@@ -8,6 +8,7 @@ import { useBrowserTab } from "./tabs";
 import { BrowserToolRow, BrowserTurnAttachment } from "./BrowserTimelineViews";
 import { browserShotStandalone, isBrowserTool } from "./browserTimeline";
 import { lazyPage } from "../../lib/lazyPage";
+import { MediaTrayButton } from "./MediaTrayButton";
 
 // Loaded on first open (lib/lazyPage).
 const BrowserSettings = lazyPage(() => import("./BrowserSettings").then((m) => m.BrowserSettings));
@@ -29,6 +30,8 @@ export default defineModule({
       subPages: { sites: { titleKey: "browser.sitePermissions.title", hintKey: "browser.sitePermissions.hint", Page: BrowserSitesSubPage, anchors: ["site-permissions-all"] } },
       keywords: ["browser.settingsHint", "browser.hiddenTarget", "browser.hiddenTargetHint", "browser.viewportWidth", "browser.viewportHeight", "browser.viewportHint", "browser.idleDetach", "browser.idleDetachHint", "browser.host.approval", "browser.hold.limit", "browser.externalPages.label", "browser.desktopLoopback.label", "browser.claim.allows", "browser.claim.audit"],
       sections: [{ anchor: "site-permissions", titleKey: "browser.sitePermissions.title", keywords: ["browser.sitePermissions.hint", "browser.sitePermissions.forgetAll", "browser.sitePermissions.forget"] }, { anchor: "site-origins", titleKey: "browser.origins.reset", keywords: ["browser.origins.resetHint"] }] }],
+    // 正在播放: tabs that play sound (they stay alive in the background, owner 2026-11-10).
+    "tray.entry": [{ id: "browser.media", order: 200, Button: MediaTrayButton }],
     "side.component": [{
       id: BROWSER_TAB,
       titleKey: "browser.title",

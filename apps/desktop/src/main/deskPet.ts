@@ -14,6 +14,7 @@
 import { readFileSync, renameSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { app, BrowserWindow, ipcMain, Menu, nativeImage, screen, session, type MenuItemConstructorOptions, type WebContents } from "electron";
+import { keepAboveOnKwin, releaseKwin } from "./kwinKeepAbove";
 import {
   artDisplaySize,
   DESK_PET_BASE_DIP,
@@ -78,6 +79,8 @@ const MAX_WINDOW_SIDE = 640;
 const MAX_LOADED = 8;
 /** The app window's renderer reloaded or died: it did not say stop. Its module has this long to say start again. */
 const RENDERER_GONE_GRACE_MS = 20_000;
+/** The pet window's title: never shown, but on KDE Wayland the keep-above script finds the window by it (./kwinKeepAbove). */
+const WINDOW_TITLE = "Cutex desk pet";
 const PREVIEW_SIDE = 192;
 
 /** Linux Wayland: the compositor places windows (same test as main/deskShell.ts). */
@@ -156,6 +159,9 @@ export class DeskPetService {
   /** The scene the window was last sent in full (its images go once per window). */
   private sentScene: string | null = null;
   private shapeWorks = !wayland;
+  /** Kept above other windows. Wayland: null until KWin was asked (once per app run, when the window first shows). */
+  private onTop: boolean | null = wayland ? null : true;
+  private askedKwin = false;
   private dragOffset: { x: number; y: number } | null = null;
   private watchingFocus = false;
   private watchingDisplays = false;
@@ -328,6 +334,7 @@ export class DeskPetService {
       scenes: true,
       placement: wayland ? "limited" : "full",
       shape: this.shapeWorks,
+      onTop: this.onTop,
     };
   }
 
@@ -658,7 +665,7 @@ export class DeskPetService {
       focusable: false,
       alwaysOnTop: true,
       show: false,
-      title: "Cutex",
+      title: WINDOW_TITLE,
       webPreferences: {
         preload: join(__dirname, "../preload/deskPet.cjs"),
         session: this.lockedSession(),
@@ -672,6 +679,7 @@ export class DeskPetService {
     });
     this.win = win;
     win.setMenu(null);
+    win.on("page-title-updated", (event) => event.preventDefault());
     // Not the default level: with a full-screen app in front, it leaves the window not topmost at all, under that app.
     win.setAlwaysOnTop(true, "screen-saver");
     win.setVisibleOnAllWorkspaces(true);
@@ -682,6 +690,7 @@ export class DeskPetService {
       if (this.win !== win) return;
       this.applyInput();
       win.showInactive();
+      if (wayland) this.keepAboveOnWayland();
     });
     win.on("closed", () => {
       if (this.win === win) this.win = null;
@@ -689,6 +698,20 @@ export class DeskPetService {
     const dev = process.env.ELECTRON_RENDERER_URL;
     if (dev && !app.isPackaged) void win.loadURL(`${dev.replace(/\/$/, "")}/desk-pet.html`);
     else void win.loadFile(join(__dirname, "../renderer/desk-pet.html"));
+  }
+
+  /**
+   * Wayland ignores setAlwaysOnTop (and all-workspaces, skip-taskbar): the compositor keeps the pet in the normal layer,
+   * under any window the owner clicks. KDE Plasma's KWin takes a script that keeps it above; elsewhere it stays as is.
+   */
+  private keepAboveOnWayland(): void {
+    if (this.askedKwin) return;
+    this.askedKwin = true;
+    void keepAboveOnKwin({ pid: process.pid, caption: WINDOW_TITLE, file: join(this.deps.dir, "kwin-keep-above.js") }).then((ok) => {
+      this.onTop = ok;
+      if (ok) app.once("will-quit", () => releaseKwin(process.pid));
+      this.deps.sendView(this.view());
+    });
   }
 
   // ---- drag: main reads the cursor itself; the page only says a drag goes on ----

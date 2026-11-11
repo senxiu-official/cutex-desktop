@@ -431,6 +431,8 @@ export interface SideTabInfo {
   unread?: boolean; // accent dot when there is no attention
   /** A small image for the tab (a web page's favicon): a `data:image/…` URL only — anything else is not shown (no fetch). */
   favicon?: string;
+  /** The tab plays sound (a web page, owner 2026-11-10): a speaker on the tab; a click calls toggleMute. */
+  audio?: { muted: boolean; toggleMute(): void };
 }
 export interface SideInstanceInfo<S> {
   id: string;

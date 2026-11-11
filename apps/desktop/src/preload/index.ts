@@ -9,6 +9,7 @@ import { MODULE_DATA_CHANNEL, type ModuleDataRequest } from "../shared/moduleDat
 import { DESK_PET_CHANNEL, type DeskPetRequest } from "../shared/deskPet";
 import { KNOWN_ISSUES_CHANNEL, type KnownIssuesRequest } from "../shared/knownIssues";
 import { LAUNCH_ART_CHANNEL, type LaunchArtRequest } from "../shared/launchArt";
+import { FONT_PACK_CHANNEL, type FontPackRequest } from "../shared/fontCatalog";
 import { DIRECTOR_AVATARS_CHANNEL, type DirectorAvatarsRequest } from "../shared/directorAvatars";
 import { PORTRAIT_PACKS_CHANNEL, type PortraitPacksRequest } from "../shared/portraitPacks";
 import {
@@ -46,6 +47,7 @@ const METHODS: InvokeMethod[] = [
   "hosts",
   "sshConfigHosts",
   "addSshHost",
+  "importSshHostToken",
   "pairSshHost",
   "setSshConnectAs",
   "updateSshHost",
@@ -249,6 +251,8 @@ const METHODS: InvokeMethod[] = [
   "artifactStoreDelete",
   "alarms",
   "cancelAlarm",
+  "ownerPins",
+  "ownerPinUpdate",
   "workflowRuns",
   "workflowRun",
   "workflowRunAction",
@@ -341,6 +345,20 @@ const METHODS: InvokeMethod[] = [
   "projectBackground",
   "watchProjectEvents",
   "unwatchProjectEvents",
+  "panConnection",
+  "panConfigure",
+  "panDisconnect",
+  "panAuthStart",
+  "panAuthPoll",
+  "panAuthCode",
+  "panFiles",
+  "panSearch",
+  "panMeta",
+  "panDownloads",
+  "panStartDownload",
+  "panDownloadAction",
+  "watchPan",
+  "unwatchPan",
   "putUserInstructions",
   "userInstructions",
   "agentHarness",
@@ -526,6 +544,11 @@ ipcRenderer.on(EVENT_CHANNEL, (_event, name: string, payload: unknown) => {
 });
 
 const bridge: PreloadBridge = {
+  imageCache: {
+    state: () => invoke("cutex-desktop:image-cache", { op: "state" }),
+    configure: (settings) => invoke("cutex-desktop:image-cache", { op: "configure", settings }),
+    clear: () => invoke("cutex-desktop:image-cache", { op: "clear" }),
+  },
   debug: {
     initiallyEnabled: debugEnabled,
     state: () => invoke(DEBUG_CHANNEL, { op: "state" } satisfies DebugRequest),
@@ -595,6 +618,15 @@ const bridge: PreloadBridge = {
     state: () => invoke(LAUNCH_ART_CHANNEL, { op: "state" } satisfies LaunchArtRequest),
     import: () => invoke(LAUNCH_ART_CHANNEL, { op: "import" } satisfies LaunchArtRequest),
     clear: () => invoke(LAUNCH_ART_CHANNEL, { op: "clear" } satisfies LaunchArtRequest),
+  },
+  fontPack: {
+    state: () => invoke(FONT_PACK_CHANNEL, { op: "state" } satisfies FontPackRequest),
+    import: () => invoke(FONT_PACK_CHANNEL, { op: "import" } satisfies FontPackRequest),
+    remove: (id) => invoke(FONT_PACK_CHANNEL, { op: "remove", id } satisfies FontPackRequest),
+    openFolder: () => invoke(FONT_PACK_CHANNEL, { op: "openFolder" } satisfies FontPackRequest),
+    download: () => invoke(FONT_PACK_CHANNEL, { op: "download" } satisfies FontPackRequest),
+    cancelDownload: () => invoke(FONT_PACK_CHANNEL, { op: "cancelDownload" } satisfies FontPackRequest),
+    onState: (listener) => bridge.on("fontPack", listener),
   },
   directorAvatars: {
     list: () => invoke(DIRECTOR_AVATARS_CHANNEL, { op: "list" } satisfies DirectorAvatarsRequest),

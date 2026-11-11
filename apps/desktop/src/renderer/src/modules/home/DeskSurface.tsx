@@ -24,7 +24,8 @@ import { defaultStepsOf, unitSizesOf, unitsOfSteps, WIDGET_STEP, type DesktopWid
 import type { HomeDoc, HomePin, HomeTileSize } from "../../../../shared/home";
 import { currentDesk, mirrorBlocks, settingsOf, withUnitBand, withDesk, withItem, withoutItem, withSettings, type DeskDoc } from "./desk";
 import { bandOf, type BandKey, type Box } from "./deskLayout";
-import { anchoredCells, clampSize, colsFor, defaultCells, deriveCells, firstFree, migratePxBand, PITCH, place, spanPx, spansOf, toPx, unitsOfCellBand, type CellMoved, type Cells } from "./deskCells";
+import { anchoredCells, clampSize, colsFor, defaultCells, deriveCells, firstFree, migratePxBand, PITCH, place, reflowCells, spanPx, spansOf, toPx, unitsOfCellBand, visibleCols, type CellMoved, type Cells } from "./deskCells";
+import { useDeskCover } from "./deskCover";
 import { setDeskDropTarget, useDeskDropHint, withIconOnDesk, type DeskSpot } from "./deskDrop";
 import { useColorScheme, useReducedMotion, useTicker } from "./deskEnv";
 import { useHomeSource } from "./hooks";
@@ -195,6 +196,19 @@ export function DeskSurface({ children }: { children?: ReactNode }) {
   }, []);
   useEffect(() => setTileHost(() => home.hostId), [home.hostId]);
   const layout = useMemo(() => (width > 0 ? deskLayoutFor(desk, instances, width) : null), [desk, instances, width]);
+  // A Shelf over part of the desktop (owner 2026-11-10): the widgets are drawn in the columns left free — a view of the
+  // saved layout (deskCells reflowCells), never written back, so the desktop is exactly as it was once the room comes
+  // back. Arranging draws (and stores) the whole width as before.
+  const cover = useDeskCover(area, !arranging);
+  const view = useMemo(() => {
+    if (!layout || arranging || (cover.left === 0 && cover.right === 0)) return null;
+    const free = visibleCols(width, layout.cols, cover);
+    if (free.count >= layout.cols) return null;
+    const flowed = reflowCells(layout.cells, free.from, free.count);
+    // Some can't fit: the first row says how many (seen without scrolling), the widgets one row lower.
+    const down = flowed.hidden.length > 0 ? 1 : 0;
+    return { at: mapAt(flowed.at, (r) => toPx({ ...r, y: r.y + down })), hidden: flowed.hidden.length, from: free.from };
+  }, [layout, arranging, cover, width]);
   const [preview, setPreview] = useState<Preview | null>(null);
   const drag = useRef<Drag | null>(null);
   const undoStack = useRef<string[]>([]);
@@ -520,8 +534,10 @@ export function DeskSurface({ children }: { children?: ReactNode }) {
     [t],
   );
 
-  const at = preview ? mapAt(preview.at, toPx) : (layout?.at ?? {});
-  const height = Math.max(240, ...Object.values(at).map((r) => r.y + r.h)) + (arranging ? 160 : 8);
+  const at = preview ? mapAt(preview.at, toPx) : (view?.at ?? layout?.at ?? {});
+  const bottom = Math.max(0, ...Object.values(at).map((r) => r.y + r.h));
+  const hiddenNote = view && view.hidden > 0 ? { left: view.from * PITCH, top: 0, height: PITCH - 16, lineHeight: `${PITCH - 16}px` } : null;
+  const height = Math.max(240, bottom) + (arranging ? 160 : 8);
   const draggedRaw = preview?.raw;
   const gridW = layout ? spanPx(layout.cols) : 0;
   const popId = useDeskUi((s) => s.settings);
@@ -577,6 +593,12 @@ export function DeskSurface({ children }: { children?: ReactNode }) {
           </div>
         );
       })}
+      {/* Widgets the free columns can't hold (a Shelf covers the rest): how many, in the first row. */}
+      {hiddenNote && (
+        <p className="home-bare pointer-events-none absolute text-xs whitespace-nowrap" style={hiddenNote} data-desk-hidden={view!.hidden}>
+          {t("home.desk.hiddenByShelf", { n: view!.hidden })}
+        </p>
+      )}
       {arranging && sel && at[sel] && byId.get(sel) && !preview && (
         <>
           {(byId.get(sel)!.kind.item.shape ?? "card") !== "card" && <div className="desk-boxmark" style={{ left: at[sel]!.x, top: at[sel]!.y, width: at[sel]!.w, height: at[sel]!.h }} />}

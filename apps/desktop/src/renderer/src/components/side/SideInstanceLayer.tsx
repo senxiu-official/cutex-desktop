@@ -32,6 +32,7 @@ import { useSideDnd } from "../../lib/sideDnd";
 import { morphing } from "../../lib/dropMorph";
 import { useShelfMotion } from "../../lib/shelfMotion";
 import { observeSync, syncPass } from "../../lib/syncResize";
+import { onResizeDrag, resizeDragActive } from "../../lib/columnGlide";
 import type { SideInstanceInfo } from "../../modules/slots";
 import type { ItemId, Json } from "../../modules/types";
 import { ItemBoundary } from "../../modules/Outlet";
@@ -49,6 +50,46 @@ function animationMoves(e: AnimationEvent): boolean {
   if (!el || typeof el.getAnimations !== "function") return true;
   const anim = el.getAnimations().find((a) => (a as CSSAnimation).animationName === e.animationName);
   return anim ? animationMovesBoxes(anim) : true;
+}
+
+/** The style of an instance's box and of its body inside it (Instance below draws the same). */
+function boxStyles(box: SlotBox): { outer: SlotRect; body: SlotRect } {
+  const { clip, rect } = box;
+  return { outer: clip, body: { left: rect.left - clip.left, top: rect.top - clip.top, width: rect.width, height: rect.height } };
+}
+
+function writeRect(el: HTMLElement, r: SlotRect): void {
+  el.style.left = `${r.left}px`;
+  el.style.top = `${r.top}px`;
+  el.style.width = `${r.width}px`;
+  el.style.height = `${r.height}px`;
+}
+
+/**
+ * During a width drag (lib/columnGlide resizeDrag): the boxes that moved are written to the DOM, as Instance would draw
+ * them — no render of the layer per step (perf/shelf-divider-drag: the work row's commit, then this layer's, on every
+ * step). Only when the same instances show as before and each box is found; false: render as usual.
+ */
+function writeBoxes(doc: Document, old: ReadonlyMap<string, SlotBox>, next: ReadonlyMap<string, SlotBox>): boolean {
+  if (old.size !== next.size) return false;
+  const writes: [HTMLElement, HTMLElement, SlotBox][] = [];
+  for (const [id, box] of next) {
+    const prev = old.get(id);
+    if (!prev) return false;
+    if (sameBox(prev, box)) continue;
+    // The one box of this instance in view (one held for another scope has no slot: aria-hidden).
+    const els = doc.querySelectorAll<HTMLElement>(`[data-side-instance="${CSS.escape(id)}"]:not([aria-hidden])`);
+    const body = els.length === 1 ? els[0]!.querySelector<HTMLElement>(":scope > [data-side-instance-body]") : null;
+    if (!body) return false;
+    writes.push([els[0]!, body, box]);
+  }
+  for (const [el, body, box] of writes) {
+    const { outer, body: inner } = boxStyles(box);
+    writeRect(el, outer);
+    writeRect(body, inner);
+    el.toggleAttribute("data-side-clipped", !sameRect(box.clip, box.rect));
+  }
+  return true;
 }
 
 /**
@@ -193,6 +234,8 @@ export function SideInstanceLayer() {
   shownRects.current = rects;
   // The resize pass (lib/syncResize) this layer last measured in: the work row's commit already moved it.
   const measuredPass = useRef(-1);
+  // Boxes written during a drag (writeBoxes): the state takes them on release, in the release's own commit.
+  const written = useRef(false);
   measure.current = () => {
     // The live drop preview moves the panes and these boxes together (transform only): nothing to measure meanwhile.
     if (morphing()) return;
@@ -217,8 +260,22 @@ export function SideInstanceLayer() {
     // state update at all (no render of the layer).
     if (!changed && next.size === old.size) return;
     shownRects.current = next;
+    if (resizeDragActive() && writeBoxes(win.document, old, next)) {
+      written.current = true;
+      return;
+    }
+    written.current = false;
     setRects(next);
   };
+  useEffect(
+    () =>
+      onResizeDrag((active) => {
+        if (active || !written.current) return;
+        written.current = false;
+        setRects(shownRects.current);
+      }),
+    [],
+  );
   // The work row laid out again (lib/sideSlots slotsRelayout, from its layout effect): measure in the same frame.
   useEffect(() => onSlotsRelayout(() => measure.current()), []);
   // A press inside a pane's frame counts as a press in its pane (design 017).

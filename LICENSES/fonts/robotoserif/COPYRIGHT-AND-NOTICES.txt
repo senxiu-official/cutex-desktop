@@ -1,0 +1,7 @@
+copyright: Copyright 2020 The Roboto Serif Project Authors (https://github.com/googlefonts/RobotoSerif)
+
+trademark: Roboto is a registered trademark of Google, Inc.
+
+designer: Greg Gazdowicz
+
+manufacturer: Commercial Type

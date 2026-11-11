@@ -88,6 +88,7 @@ beforeEach(() => {
   pinned.length = 0;
   layer = emptyEntry;
   setTrayPins(keeper());
+  useApp.setState({ hosts: null, daemon: { kind: "connected" } as never });
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
@@ -163,6 +164,19 @@ describe("托盘常驻 on, nothing pinned: the band is there", () => {
     render(panes);
     act(() => void window.dispatchEvent(new KeyboardEvent("keydown", { key: "j", code: "KeyJ", ctrlKey: true, bubbles: true })));
     expect(document.activeElement?.hasAttribute("data-tray-pin")).toBe(true);
+  });
+
+  it("the host not online (cutex not installed / not running / connecting): no ＋ 固定 and no how-to-pin line", () => {
+    for (const daemon of [{ kind: "unreachable", setup: "notInstalled" }, { kind: "unreachable", setup: "notRunning" }, { kind: "connecting" }]) {
+      useApp.setState({ daemon: daemon as never });
+      render(panes);
+      expect(q("[data-tray-band]"), JSON.stringify(daemon)).not.toBeNull();
+      expect(q("[data-tray-pin]")).toBeNull();
+      expect(q("[data-tray-hint]")).toBeNull();
+    }
+    useApp.setState({ daemon: { kind: "connected" } as never });
+    render(panes);
+    expect(q("[data-tray-hint]")).not.toBeNull();
   });
 
   it("no keeper registered yet: the hint shows, no ＋ (nothing to open)", () => {

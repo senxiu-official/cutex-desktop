@@ -23,6 +23,8 @@ export const zhCN = {
   "modules.needsCapability": "需要 cutex 能力：{list}",
   "modules.pageOff": "这一页所属的模块已关闭或在这台主机上不可用。",
   "modules.openModules": "打开 模块",
+  "modules.section.sources": "安装与来源",
+  "modules.section.all": "全部模块",
   "modules.component.job-service.name": "作业服务",
   "modules.component.job-service.what": "{{agent}}在主机上跑长时间的后台作业（编译、测试、训练）要用它；断线也不会中断。",
   "modules.component.claude-runtime.name": "Claude 运行时",

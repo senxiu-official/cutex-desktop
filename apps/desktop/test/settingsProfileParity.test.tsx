@@ -100,7 +100,7 @@ it("separates API quota readings from draft setup and refreshes without saving d
   const draft: QuotaConfigView = { profile: { id: "p", name: "API account" }, resolvedPrimary: null, presetError: null, preset: "custom", primary: { enabled: false, url: "https://provider.test/quota", auth: "none", label: "quota", refresh_seconds: 60, mode: "balance", value_pointer: "/balance", limit_pointer: "", reset_pointer: "", reset_format: "rfc3339", window_label: null }, extras: [] };
   act(() => root.render(h(QuotaConfigSection, { profile: "p", name: "API account", draft, setDraft })));
   expect(host.textContent).toContain("Profile “API account” on the selected host");
-  expect([...host.querySelectorAll("h4")].map((x) => x.textContent)).toEqual(["Readings", "Sources and refresh rules"]);
+  expect([...host.querySelectorAll("[data-settings-row-group] > div:first-child")].map((x) => x.textContent)).toEqual(["Readings", "Sources and refresh rules"]);
   expect(host.textContent).toContain("do not set spending limits");
   const refresh = host.querySelector<HTMLButtonElement>('button[aria-label="composer.quota.refresh"]')!;
   act(() => refresh.click());

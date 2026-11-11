@@ -3,8 +3,9 @@ import type { zhCN } from "./i18n";
 
 export const en: Record<keyof typeof zhCN, string> = {
   "kimi-accounts.title": "Kimi accounts",
-  "kimi-accounts.description": "Kimi membership logins: each account has its own login on the host, used by Kimi-account Profiles",
+  "kimi-accounts.description": "Manage Kimi subscription logins; each account keeps a separate login on the host for Kimi profiles",
   "kimi-accounts.section": "Kimi accounts",
+  "kimi-accounts.all": "All {n} accounts",
   "kimi-accounts.sectionHint": "Sign in to Kimi Code with a Kimi membership account. The login runs on the host: cutex gives a web address and a code, you confirm in a browser; the desktop never touches a token. One account can serve several Profiles.",
   "kimi-accounts.add": "Add Kimi account",
   "kimi-accounts.empty": "No Kimi account yet. Add one and sign in with your Kimi membership account.",

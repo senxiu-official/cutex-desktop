@@ -15,7 +15,7 @@ import { useHostsWithNewOwnerDevices, useOwnerLocalActions, useOwnerNewDevices }
 import { setSettingsHost } from "../../lib/settingsHost";
 import { formatWhen, useClock } from "../../lib/time";
 import { useHostScope } from "../../lib/useHostScope";
-import { ArmedRemove, Button, ErrorNote, Segmented, SettingRow, SettingsGroup } from "./Form";
+import { ArmedRemove, Button, ErrorNote, Segmented, SettingRow, SettingsGroup, Banner } from "./Form";
 
 type T = ReturnType<typeof useI18n>["t"];
 
@@ -90,13 +90,19 @@ export function OwnerDevicesBanner({ hostId }: { hostId: string }) {
     if (!out.ok) setError(accessRefusalText(t, accessRefusalOf(out), host) ?? t("ownerDev.failed", { message: out.error.message || out.error.code }));
   };
   return (
-    <div className="mb-6 space-y-1.5" data-testid="owner-devices-banner">
+    <div className="mb-6 flex flex-col gap-2" data-testid="owner-devices-banner">
       {here.map((d) => {
         const at = Date.parse(d.at);
         return (
-          <div key={d.tokenId} className="flex items-center gap-3 rounded-xl border border-warn/40 bg-warn/10 px-4 py-2.5 text-sm">
-            <ShieldAlert size={16} className="shrink-0 text-warn-text" />
-            <span className="min-w-0 flex-1">
+          <Banner key={d.tokenId} icon={<ShieldAlert size={16} />} actions={(v.canAck || v.canRevoke) && <>
+            {v.canAck && (
+              <SettingsGroup agents="none" source="host"><Button title={t("ownerDev.ack")} onClick={() => void run(v.ack(d.tokenId))}>{t("ownerDev.mine")}</Button></SettingsGroup>
+            )}
+            {v.canRevoke && (
+              <SettingsGroup agents="access" source="host"><ArmedRemove label={t("ownerDev.notMine")} title={t("users.revokeHint")} armedLabel={t("users.revokeArmed")} onRemove={() => void run(v.revoke(d.tokenId))} /></SettingsGroup>
+            )}
+          </>}>
+            <span>
               {t("ownerDev.banner")}
               <span className="font-medium">{clientTokenName(d, (k, vars) => t(k as MessageKey, vars))}</span>
               <span className="text-muted">
@@ -105,22 +111,14 @@ export function OwnerDevicesBanner({ hostId }: { hostId: string }) {
                 {Number.isFinite(at) && ` · ${formatWhen(at / 1000, now, locale)}`}
               </span>
             </span>
-            {v.canAck && (
-              <SettingsGroup agents="none" source="host"><Button title={t("ownerDev.ack")} onClick={() => void run(v.ack(d.tokenId))}>{t("ownerDev.mine")}</Button></SettingsGroup>
-            )}
-            {v.canRevoke && (
-              <SettingsGroup agents="access" source="host"><ArmedRemove label={t("ownerDev.notMine")} title={t("users.revokeHint")} armedLabel={t("users.revokeArmed")} onRemove={() => void run(v.revoke(d.tokenId))} /></SettingsGroup>
-            )}
-          </div>
+          </Banner>
         );
       })}
       {elsewhere.map((id) => (
-        <div key={id} className="flex items-center gap-3 rounded-xl border border-warn/40 bg-warn/10 px-4 py-2.5 text-sm">
-          <ShieldAlert size={16} className="shrink-0 text-warn-text" />
-          <span className="min-w-0 flex-1">{t("ownerDev.elsewhere", { host: scope.host(id)?.view.label ?? id })}</span>
-          {/* A link, not a button: an offline host's page disables every button in it, and this leaves that page. */}
-          <SettingsGroup navigation agents="none" source="local"><a href="#" className="shrink-0 rounded-md px-2 py-1 text-xs text-accent hover:bg-surface" onClick={(e) => { e.preventDefault(); setSettingsHost(id); }}>{t("ownerDev.elsewhereOpen")}</a></SettingsGroup>
-        </div>
+        // A link, not a button: an offline host's page disables every button in it, and this leaves that page.
+        <Banner key={id} icon={<ShieldAlert size={16} />} actions={<SettingsGroup navigation agents="none" source="local"><a href="#" className="shrink-0 rounded-md px-2 py-1 text-xs text-accent hover:bg-surface" onClick={(e) => { e.preventDefault(); setSettingsHost(id); }}>{t("ownerDev.elsewhereOpen")}</a></SettingsGroup>}>
+          {t("ownerDev.elsewhere", { host: scope.host(id)?.view.label ?? id })}
+        </Banner>
       ))}
       {error && <ErrorNote>{error}</ErrorNote>}
     </div>

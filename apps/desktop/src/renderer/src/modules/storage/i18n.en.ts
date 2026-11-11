@@ -3,6 +3,17 @@
 import type { zhCN } from "./i18n";
 
 export const en: Record<keyof typeof zhCN, string> = {
+  "storage.imageCache.title": "Image cache",
+  "storage.imageCache.hint": "Kept on this computer, shared by image previews from every host.",
+  "storage.imageCache.used": "{size} used · {count} images",
+  "storage.imageCache.days": "Keep for",
+  "storage.imageCache.daysUnit": "days",
+  "storage.imageCache.daysHint": "Counted from the last view; removed when it runs out",
+  "storage.imageCache.cap": "Size limit",
+  "storage.imageCache.capHint": "Over the limit, the longest-unseen images go first",
+  "storage.imageCache.clearConfirm": "Click again to clear; images are read again when next viewed",
+  "storage.imageCache.clear": "Clear cache",
+
   "storage.cleanup.partialNotice": "Only part of the scope was inspected. The counts and space estimates below are partial. Narrow the cleanup scope, or preview again later to inspect the remaining items.",
   "storage.cleanup.partialEmpty": "No eligible items among those inspected in this preview.",
   "storage.cleanup.partialVacuumEstimate": "Estimated for eligible databases inspected in this preview: {bytes}. Actual space freed for your selection is shown afterwards.",
@@ -37,7 +48,7 @@ export const en: Record<keyof typeof zhCN, string> = {
   "storage.cleanup.title": "Manual cleanup",
   "storage.cleanup.hint": "Preview every action before confirming. Data is never deleted on a schedule.",
   "storage.cleanup.desktopOnly": "Cleanup needs the host {{owner}}’s desktop credential. This connection can only view records.",
-  "storage.cleanup.target": "Target host: {host}",
+  "storage.cleanup.target": "Cleanup applies to data on host {host}.",
   "storage.cleanup.action": "Action",
   "storage.cleanup.orphan-homes": "Orphan copies (older than 7 days)",
   "storage.cleanup.retired-homes": "Regenerable files in retired copies",

@@ -35,7 +35,7 @@ import { LedgerPendingMessagesSection } from "./PendingMessagesSection";
 import { DeliveryStatus } from "./DeliveryStatus";
 import { showStandaloneDelivery } from "../lib/inputLedger/deliveryPresentation";
 import { mentionPlainText } from "../lib/mentionWire";
-import { Fragment, useEffect, useMemo, useId, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useId, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { ArrowDownToLine, ChevronDown, ChevronRight, ChevronUp, CornerDownRight, Info, Pencil, Trash2, UserRound, X } from "lucide-react";
 import { useShortPaneFold } from "../lib/shortPane";
 import type { QueueItem } from "@cutex-desktop/protocol";
@@ -274,22 +274,48 @@ function LegacyQueuePanel({
   // The rows below the header shrink with the pane (min-h-0, the Composer / Conversation chain is a flex column) and
   // scroll once they no longer fit: a row is never cut or covered by the input box. Only then a scroll box, so the
   // rail strip may still stand outside the frame (lib/railStrip: a clipping ancestor moves it inside).
-  const body = useRef<HTMLDivElement>(null);
+  // Measured only when its size or its rows change: one observer per mounted list (the callback ref), the rows synced
+  // after each commit without reading layout. A render alone (a streamed reply re-rendering the tray) reads nothing.
+  const body = useRef<HTMLDivElement | null>(null);
   const [bodyScrolls, setBodyScrolls] = useState(false);
-  useLayoutEffect(() => {
-    const el = body.current;
+  // The pane's short-pane store (stable per pane; null outside a conversation pane).
+  const shortPane = useShortPaneFold();
+  const shortPaneStore = shortPane.store;
+  const bodyWatch = useRef<{ el: HTMLDivElement; ro: ResizeObserver | null; rows: Set<Element>; measured: boolean; measure(): void } | null>(null);
+  const bodyRef = useCallback((el: HTMLDivElement | null) => {
+    body.current = el;
+    bodyWatch.current?.ro?.disconnect();
+    bodyWatch.current = null;
     if (!el) return;
     const measure = () => {
       setBodyScrolls(el.scrollHeight > el.clientHeight + 1);
       // Folded, the list is out of flow: its size changing is no layout change the pane's observer would see.
-      if (tray.current?.hasAttribute("data-short-fold")) shortPane.store?.recheck();
+      if (tray.current?.hasAttribute("data-short-fold")) shortPaneStore?.recheck();
     };
-    measure();
     const ro = resizeObserverFor(el, measure);
-    if (!ro) return;
-    ro.observe(el);
-    for (const child of el.children) ro.observe(child);
-    return () => ro.disconnect();
+    ro?.observe(el);
+    bodyWatch.current = { el, ro, rows: new Set(), measured: false, measure };
+  }, [shortPaneStore]);
+  useLayoutEffect(() => {
+    const watch = bodyWatch.current;
+    if (!watch) return;
+    let changed = false;
+    for (const child of watch.el.children) {
+      if (watch.rows.has(child)) continue;
+      watch.rows.add(child);
+      watch.ro?.observe(child);
+      changed = true;
+    }
+    for (const child of watch.rows) {
+      if (child.parentNode === watch.el) continue;
+      watch.rows.delete(child);
+      watch.ro?.unobserve(child);
+      changed = true;
+    }
+    // Rows came or went (or the list just mounted): measure before paint, as the observer's answer may come a frame late.
+    if (!changed && watch.measured) return;
+    watch.measured = true;
+    watch.measure();
   });
   // The header line's slots for TurnQueue (the insert target overlay while dragging, 「全部合并插入」 at its right).
   const [targetSlot, setTargetSlot] = useState<HTMLElement | null>(null);
@@ -307,7 +333,6 @@ function LegacyQueuePanel({
   const userCollapsed = collapsedFor && collapsedFor.id === agent ? collapsedFor.v : !!queueViewOf(agent).collapsed;
   // Short pane: `pin` = the owner expanded the card by hand. "armed" until the pane measured it once: still short →
   // "held" (stays expanded in place, the auto-fold waits) until the pane has room again; not short → nothing to hold.
-  const shortPane = useShortPaneFold();
   const [pin, setPin] = useState<"armed" | "held" | null>(null);
   const setCollapsed = (v: boolean) => {
     userToggle(() => {
@@ -585,7 +610,7 @@ function LegacyQueuePanel({
       {/* Folded by the short pane: the list is an overlay above the header line (absolute — opening it moves nothing),
           kept mounted while closed (hidden: no focus, no screen reader) so a drag or a scroll position survives. */}
       {!collapsed && (<div
-        ref={body}
+        ref={bodyRef}
         id={overlayId}
         {...(autoFold ? { role: "dialog", "aria-label": t("queue.header.title"), "aria-hidden": !overlayOpen || undefined, tabIndex: -1 } : {})}
         className={`flex min-h-0 flex-col ${autoFold ? `absolute right-[-1px] bottom-full left-[-1px] z-20 max-h-[var(--short-pane-overlay-max,240px)] overflow-y-auto overscroll-contain rounded-t-inner border border-b-0 border-border bg-surface px-1 pt-1 shadow-lg outline-none ${overlayOpen ? "" : "pointer-events-none invisible"}` : ""} ${bodyScrolls ? `overflow-y-auto overscroll-contain ${autoFold ? "" : "pb-3.5 [mask-image:linear-gradient(to_bottom,black_calc(100%-14px),transparent)]"}` : ""} ${SECTION_RULES}`}

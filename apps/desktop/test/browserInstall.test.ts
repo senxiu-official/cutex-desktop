@@ -5,7 +5,7 @@ import type { BrowserWindow, IpcMainInvokeEvent } from "electron";
 import type { HostManager } from "../src/main/hosts";
 import type { BrowserEvent, BrowserRequest, BrowserTabMount, BrowserTabView } from "../src/shared/browser";
 import { BROWSER_CHANNEL, DEFAULT_BROWSER_CONTROL_SETTINGS } from "../src/shared/browser";
-import { browserAppZoom, browserDisplayUrl, installBrowser, navigationFailure, syncBrowserHosts } from "../src/main/browser/install";
+import { BROWSER_PAUSE_MEDIA_SCRIPT, browserAppZoom, browserDisplayUrl, installBrowser, navigationFailure, syncBrowserHosts } from "../src/main/browser/install";
 import { BrowserLeases } from "../src/main/browser/leases";
 import { InAppProvider } from "../src/main/browser/provider";
 
@@ -123,6 +123,10 @@ class ContentsMock extends EventEmitter {
   executeJavaScriptInIsolatedWorld = vi.fn(async () => ({ width: 640, height: 360 }));
   setWebRTCIPHandlingPolicy = vi.fn();
   setZoomFactor = vi.fn();
+  audioMuted = false;
+  isAudioMuted = () => this.audioMuted;
+  setBackgroundThrottling = vi.fn();
+  setAudioMuted = vi.fn((muted: boolean) => { this.audioMuted = muted; });
   copyImageAt = vi.fn();
   downloadURL = vi.fn();
   undo = vi.fn(); redo = vi.fn(); cut = vi.fn(); copy = vi.fn(); paste = vi.fn(); selectAll = vi.fn();
@@ -1270,6 +1274,30 @@ describe("installed controlled tabs, downloads and site permissions (0.1.3)", ()
     expect(notices().at(-1)).toEqual(["permission-hidden", { state: "hidden", origin: "http://localhost:26180", permissions: ["notifications"] }]);
     expect(shown().at(-1)).toBe("hidden");
     expect(await f.ipc({ op: "sitePermissions" })).toEqual([]);
+  });
+  it("media: Chromium's play / pause / audible events publish in the view; the owner mutes and pauses through main; a new document resets it", async () => {
+    const f = fixture(); await f.ipc({ op: "setEnabled", enabled: true });
+    const { guest } = await f.mount("side-one", "http://localhost:26180/");
+    expect(f.events.at(-1)?.media).toBeUndefined();
+    guest.emit("media-started-playing");
+    expect(f.events.at(-1)).toMatchObject({ kind: "changed", tabKey: "side-one", media: { playing: true, audible: false, muted: false } });
+    guest.emit("audio-state-changed", { audible: true });
+    expect(f.events.at(-1)?.media).toEqual({ playing: true, audible: true, muted: false });
+    await f.ipc({ op: "setMuted", tabKey: "side-one", muted: true });
+    expect(guest.setAudioMuted).toHaveBeenLastCalledWith(true);
+    expect(f.events.at(-1)?.media).toEqual({ playing: true, audible: true, muted: true });
+    await f.ipc({ op: "pauseMedia", tabKey: "side-one" });
+    expect(guest.executeJavaScriptInIsolatedWorld).toHaveBeenLastCalledWith(1006, [{ code: BROWSER_PAUSE_MEDIA_SCRIPT }], false);
+    guest.emit("media-paused"); guest.emit("audio-state-changed", { audible: false });
+    expect(f.events.at(-1)?.media).toEqual({ playing: false, audible: false, muted: true });
+    await f.ipc({ op: "setMuted", tabKey: "side-one", muted: false });
+    expect(f.events.at(-1)?.media).toBeUndefined();
+    guest.emit("media-started-playing");
+    guest.emit("did-navigate", {}, "http://localhost:26180/next");
+    expect(f.events.at(-1)?.media).toBeUndefined();
+    await expect(f.ipc({ op: "setMuted", tabKey: "missing", muted: true })).rejects.toThrow("target_closed");
+    await expect(f.ipc({ op: "setMuted", tabKey: "side-one", muted: "yes" })).rejects.toThrow("invalid_browser_request");
+    await expect(f.ipc({ op: "pauseMedia", tabKey: "side-one", code: "alert(1)" })).rejects.toThrow("invalid_browser_request");
   });
   it("guest zoom: Ctrl+= and the wheel step per site, publish in the view, persist across tabs and follow the app zoom", async () => {
     const f = fixture(); await f.ipc({ op: "setEnabled", enabled: true });

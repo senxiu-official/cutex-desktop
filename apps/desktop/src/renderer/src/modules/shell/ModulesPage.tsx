@@ -59,11 +59,15 @@ export function ModulesPage() {
   const added = new Set<string>([...(packs.view?.installed ?? []).filter((p) => p.local).map((p) => p.id), ...(devView?.modules ?? []).flatMap((m) => (m.id ? [m.id] : []))]);
   const packRowOf = (id: string) => (packs.view ? packRow(id, packs, packs.bundled ? id in packs.bundled : true, packs.bundled?.[id] ?? null) : null);
   return (
-    <Section>
+    // Two cards: where modules come from (index, local packs, developer mode, data), then the modules themselves.
+    <>
+    <Section id={settingsAnchorId("module-sources")} title={t("modules.section.sources")}>
       <PackIndexHeader />
       <LocalPacksGroup />
       <DevModulesGroup />
       <ModuleDataGroup />
+    </Section>
+    <Section id={settingsAnchorId("module-list")} title={t("modules.section.all")}>
       {[...host.modules].sort((a, b) => Number(added.has(b.id)) - Number(added.has(a.id))).map((def) => {
         const status = statuses.get(def.id);
         const state = status?.state ?? { kind: "disabled" as const };
@@ -115,5 +119,6 @@ export function ModulesPage() {
       })}
       <PackOnlyRows known={new Set(host.modules.map((m) => m.id))} />
     </Section>
+    </>
   );
 }

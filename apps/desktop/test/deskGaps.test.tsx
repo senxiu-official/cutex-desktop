@@ -152,6 +152,17 @@ describe("编辑主页 does nothing and the desktop stops responding (regression
     expect(clicked).toBe(1);
   });
 
+  // Regression 2026-11-10 (owner: 「编辑主页没用」): the tray's room band (托盘常驻 at the bottom) is as wide as the
+  // stage while the centred card is narrower; the empty band (z 45) lay over 编辑主页 and the widgets' bottom row.
+  it("the tray's room band takes the pointer only on its card, not on the empty band around it", () => {
+    withCss("components/tray.css");
+    host.innerHTML = `<div class="tray-room" data-tray-band="room" data-tray-centre=""><div class="pane-tray-dock"><button data-dock-item="">x</button></div></div>`;
+    const pe = (sel: string) => getComputedStyle(q(sel)!).pointerEvents;
+    expect(pe(".tray-room")).toBe("none");
+    expect(pe(".pane-tray-dock")).toBe("auto");
+    expect(pe("[data-dock-item]")).toBe("auto");
+  });
+
   it("with a pane in front the work row is the pointer's again (the conversation is usable)", () => {
     withCss("components/tray.css");
     renderWindow({ ...nothing, sessionId: "eva" });

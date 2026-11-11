@@ -4,7 +4,7 @@ import type { zhCN } from "./i18n";
 
 export const en: Record<keyof typeof zhCN, string> = {
   "updater.title": "Desktop updates",
-  "updater.description": "Settings → Updates & diagnostics: update checks and the error log",
+  "updater.description": "Check desktop app updates and view error logs",
   // ---- settings (moved from the base catalog, 2026-10-09) ----
   "updater.general.updates": "Desktop updates & diagnostics",
   "updater.pageHint": "The Cutex desktop app on this computer: its version, updates and error log. The cutex on a host is under Host backend updates.",

@@ -61,6 +61,24 @@ describe("format 2 scene", () => {
     for (const raw of bad) expect(parseDeskPetScene(raw), JSON.stringify(raw).slice(0, 120)).toBeNull();
   });
 
+  it("changing books while reading (switchOut, switchIn): both or neither, reading bodies only, the book always in hand, no page turns", () => {
+    const base = (scene().clips as Record<string, unknown[]>);
+    const out = [{ body: "read", prop: "open", ms: 100 }, { body: "read", prop: "open", ms: 60, magic: 0 }];
+    const into = [{ body: "read", prop: "open", ms: 60, magic: 0 }, { body: "read", prop: "open", ms: 180 }];
+    const ok = parseDeskPetScene(scene({ clips: { ...base, switchOut: out, switchIn: into } }))!;
+    expect(ok.clips.switchOut).toHaveLength(2);
+    expect(ok.clips.switchIn![1]).toEqual({ body: "read", prop: "open", ms: 180, magic: null, page: null });
+    const bad = [
+      { switchOut: out },
+      { switchIn: into },
+      { switchOut: [{ body: "up", prop: "open", ms: 100 }], switchIn: into },
+      { switchOut: out, switchIn: [{ body: "read", ms: 100 }] },
+      { switchOut: out, switchIn: [{ body: "read", prop: "open", ms: 100, page: "turn" }] },
+      { switchOut: [], switchIn: into },
+    ];
+    for (const extra of bad) expect(parseDeskPetScene(scene({ clips: { ...base, ...extra } })), JSON.stringify(extra)).toBeNull();
+  });
+
   it("file names are plain lowercase PNG names beside pet.json: no folders, no way out", () => {
     for (const name of ["../up.png", "a/up.png", "a\\up.png", "UP.png", "up.PNG", "up", ".up.png", "up.png.exe", "C:up.png", "%2e%2e.png"]) {
       expect(parseDeskPetScene(scene({ hands: name })), name).toBeNull();

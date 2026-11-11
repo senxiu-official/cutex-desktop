@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Button } from "./settings/Form";
 import type { RuntimePruneKind, RuntimePrunePlan, RuntimePruneVersion } from "../../../shared/runtimes";
 import { useI18n } from "../i18n";
 import { captureHostAction } from "../lib/hostSwitch";
@@ -24,8 +25,9 @@ export function RuntimeCleanup({ hostId, kind }: { hostId: string; kind: Runtime
   const rows = outcome?.result.results.filter(r => outcome.plan.versions.some(v => v.id === r.id && v.kind === kind)) ?? [];
   return <div className="flex flex-col gap-2 border-t border-border/60 pt-2 text-xs" data-runtime-cleanup={kind} aria-busy={pending || loading}>
     <div className="flex flex-wrap items-center gap-2">
-      <button className="rounded px-2 py-1 text-accent enabled:hover:bg-hover disabled:opacity-50" disabled={pending || loading || !candidates.length} onClick={() => ask(candidates)}>{pending ? t("runtimes.prune.pending") : t("runtimes.prune.action", { n: candidates.length })}</button>
-      <button className="text-muted enabled:hover:text-foreground disabled:opacity-50" disabled={pending || loading} onClick={() => void refreshRuntimePrune(hostId)}>{t("runtimes.prune.refresh")}</button>
+      {/* Actions are buttons like everywhere else in Settings (they were bare blue / grey words). */}
+      <Button disabled={pending || loading || !candidates.length} onClick={() => ask(candidates)}>{pending ? t("runtimes.prune.pending") : t("runtimes.prune.action", { n: candidates.length })}</Button>
+      <Button disabled={pending || loading} onClick={() => void refreshRuntimePrune(hostId)}>{t("runtimes.prune.refresh")}</Button>
       {inspectionBlocked && <span role="status" data-prune-inspection-blocked="" className="text-subtle">{t("runtimes.prune.inspection_failed")}</span>}
       {loading && <span role="status">{t("runtimes.prune.loading")}</span>}
     </div>

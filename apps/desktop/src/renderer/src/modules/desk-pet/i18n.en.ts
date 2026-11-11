@@ -21,6 +21,7 @@ export const en: Record<keyof typeof zhCN, string> = {
   "desk-pet.idleBlink": "Blink at rest",
   "desk-pet.size": "Size",
   "desk-pet.character": "Character",
+  "desk-pet.notOnTop": "This desktop does not let apps keep a window on top: the pet goes behind any window you click. KDE Plasma can; GNOME and others cannot for now.",
   "desk-pet.limitedPlacement": "This Linux session uses Wayland: the system decides where windows go, so the position is not kept across restarts, and transparent parts may catch clicks.",
   "desk-pet.noShape": "The system refused the window shape: transparent parts catch clicks too.",
   "desk-pet.showCount": "Show today's tokens under the pet",

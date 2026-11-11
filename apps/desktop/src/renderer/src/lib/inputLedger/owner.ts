@@ -1,4 +1,5 @@
 import type { InputRecord, OwnerJoinDelegation, SessionDelivery, SubmitStrategy } from "@cutex-desktop/protocol";
+import { isInputSettled } from "@cutex-desktop/protocol";
 import type { ExtraInput } from "../../../../shared/ipc";
 import { messageImages, messageSkills } from "../../../../shared/input";
 import type { TimelineEntry, TurnView } from "../timeline";
@@ -115,6 +116,63 @@ export function missingTimelineRecords(records: ReadonlyMap<string, InputRecord>
       && record.state === "inContext" && record.timelineItemId && record.turnId
       && !hasTurn(record.turnId) && Date.parse(record.since) < (oldestStart! + 1) * 1000))
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.inputId.localeCompare(b.inputId));
+}
+
+type PlacedTurn = Pick<TurnView, "id" | "status" | "startedAt">;
+
+/** Where the records without a native item go (owner 2026-11-10: 「这个规则就不该存在吧」 — no default bottom row). */
+export interface MissingPlacement {
+  /** Inline, before rendered segment i (send order). */
+  before: Map<number, InputRecord[]>;
+  /** Inline, after the last segment (their turn or send time comes after every rendered row). */
+  end: InputRecord[];
+  /** The only bottom rows: records still on their way — not settled and their turn not finished. */
+  trailing: InputRecord[];
+}
+
+const finished = (turn: PlacedTurn | undefined) => !!turn && turn.status !== "inProgress";
+
+/**
+ * Places `missing` (missingTimelineRecords) against the rendered segments (`segmentTurnIds[i]` = segment i's turn).
+ * Trailing: received / held / waiting / sending / accepted, while their turn (if any) has not finished. Every other
+ * record is inline: before the first segment of its own turn or a later one (a turn that ended with no items has no
+ * segments of its own), else — no loaded turn — before the first segment of a turn that started after it was sent.
+ * `hidden`: inline records whose place is in history not shown now (never applied to trailing ones).
+ */
+export function placeMissingRecords(missing: readonly InputRecord[], segmentTurnIds: readonly (string | null | undefined)[], turns: readonly PlacedTurn[], hidden?: (record: InputRecord) => boolean): MissingPlacement {
+  const order = new Map(turns.map((turn, index) => [turn.id, index]));
+  const byId = new Map(turns.map(turn => [turn.id, turn]));
+  const placed: MissingPlacement = { before: new Map(), end: [], trailing: [] };
+  const segOrder = segmentTurnIds.map(id => (id ? order.get(id) : undefined));
+  for (const record of missing) {
+    const own = record.turnId ? byId.get(record.turnId) : undefined;
+    if (!isInputSettled(record.state) && !finished(own)) { placed.trailing.push(record); continue; }
+    // Inline in history that is not on screen (behind 显示更早 / the older page): it shows when that history does.
+    if (hidden?.(record)) continue;
+    let at = -1;
+    if (own) {
+      const index = order.get(own.id)!;
+      at = segOrder.findIndex(o => o !== undefined && o >= index);
+    } else {
+      const sent = Date.parse(record.createdAt);
+      at = segOrder.findIndex(o => o !== undefined && (turns[o]!.startedAt ?? Infinity) * 1000 > sent);
+    }
+    if (at < 0) placed.end.push(record);
+    else placed.before.set(at, [...(placed.before.get(at) ?? []), record]);
+  }
+  const bySent = (a: InputRecord, b: InputRecord) => a.createdAt.localeCompare(b.createdAt) || a.inputId.localeCompare(b.inputId);
+  for (const list of placed.before.values()) list.sort(bySent);
+  placed.end.sort(bySent);
+  return placed;
+}
+
+/** The muted line under an in-context record whose turn ended without its item, with its real send time (unix s). */
+export function strandedNote(record: InputRecord, turns: readonly PlacedTurn[]): { key: "inputLedger.stranded.interrupted" | "inputLedger.stranded.failed" | "inputLedger.stranded.missing"; sentAt: number } | null {
+  if (record.state !== "inContext" || !record.turnId) return null;
+  const turn = turns.find(t => t.id === record.turnId);
+  if (!finished(turn)) return null;
+  const key = turn!.status === "interrupted" ? "inputLedger.stranded.interrupted" : turn!.status === "failed" ? "inputLedger.stranded.failed" : "inputLedger.stranded.missing";
+  return { key, sentAt: Math.floor(Date.parse(record.createdAt) / 1000) };
 }
 
 export function ownerOutboxTimelineEntry(entry: LedgerOwnerOutbox): Extract<TimelineEntry, { kind: "user" }> {

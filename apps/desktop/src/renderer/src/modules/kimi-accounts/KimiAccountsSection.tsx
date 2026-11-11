@@ -7,7 +7,9 @@ import { useCallback, useEffect, useState } from "react";
 import { Pencil, UserRound } from "lucide-react";
 import { kimiAccountLabel, type KimiAccount, type KimiRegion } from "../../../../shared/kimiAccounts";
 import type { CutexRefusal } from "../../../../shared/ipc";
-import { AddButton, ArmedRemove, Button, ErrorNote, IconButton, Loading, RefreshButton, Section, Segmented, SettingRow, SettingsGroup, TextInput, type SettingsRowDecoration } from "../../components/settings/Form";
+import { AddButton, ArmedRemove, Button, ErrorNote, IconButton, ListFilter, Loading, RefreshButton, Section, Segmented, SettingRow, SettingsGroup, SubPageRow, TextInput, type SettingsRowDecoration } from "../../components/settings/Form";
+import { matchesFilter } from "../../lib/listFilter";
+import { settingsAnchorId } from "../../lib/settingsNav";
 import { ComponentNotice } from "../../components/ComponentCard";
 import { KIMI_RUNTIME_COMPONENT } from "../../lib/componentCard";
 import { useI18n, type MessageKey } from "../../i18n";
@@ -42,12 +44,21 @@ function useRefusalText() {
   };
 }
 
+/** Accounts the Profile page lists; all of them are on its sub-page. */
+const ACCOUNTS_ON_PAGE = 3;
+
 export function KimiAccountsSection() {
   const hostId = useTargetHostId();
   return <AccountsSection key={hostId} hostId={hostId} />;
 }
 
-function AccountsSection({ hostId }: { hostId: string }) {
+/** Profile → Kimi 账户: every account, with a filter. */
+export function KimiAccountsAll() {
+  const hostId = useTargetHostId();
+  return <AccountsSection key={hostId} hostId={hostId} all />;
+}
+
+function AccountsSection({ hostId, all = false }: { hostId: string; all?: boolean }) {
   const { t } = useI18n();
   const accounts = useKimiAccountList();
   const [adding, setAdding] = useState(false);
@@ -64,11 +75,15 @@ function AccountsSection({ hostId }: { hostId: string }) {
   }, [list, login]);
   const put = useCallback((a: KimiAccount) => setList((l) => (l ? (l.some((x) => x.id === a.id) ? l.map((x) => (x.id === a.id ? a : x)) : [...l, a]) : [a])), []);
   const drop = useCallback((id: string) => setList((l) => (l ? l.filter((x) => x.id !== id) : l)), []);
+  const [filter, setFilter] = useState("");
   const sorted = list ? sortKimiAccounts(list) : null;
+  // The page: the first ones, and the one whose login is open; the sub-page: all, filtered.
+  const shown = all ? sorted?.filter((a) => matchesFilter(filter, a.label, ...a.profiles.map((p) => p.name))) : sorted?.filter((a, i) => i < ACCOUNTS_ON_PAGE || a.id === login);
   return (
     <Section
-      title={t("kimi-accounts.section")}
-      hint={t("kimi-accounts.sectionHint")}
+      id={all ? settingsAnchorId("kimi-accounts.all") : undefined}
+      title={all ? t("kimi-accounts.all", { n: list?.length ?? 0 }) : t("kimi-accounts.section")}
+      hint={all ? undefined : t("kimi-accounts.sectionHint")}
       actions={
         <>
           <RefreshButton onClick={() => void accounts.load()} />
@@ -82,11 +97,13 @@ function AccountsSection({ hostId }: { hostId: string }) {
         {adding && <AddForm onCancel={() => setAdding(false)} onCreated={(a) => (put(a), setAdding(false), setLogin(a.id))} />}
         {!list && !accounts.loadError && <Loading rows={2} />}
         {list && list.length === 0 && !adding && <p className="py-2 text-xs text-subtle">{t("kimi-accounts.empty")}</p>}
-        {sorted?.map((a) => (
+        {all && <div role="search" className="contents"><ListFilter count={list?.length ?? 0} value={filter} onChange={setFilter} /></div>}
+        {shown?.map((a) => (
           <SettingsGroup key={a.id} agents="next" source="host">{(decoration) => (
             <AccountRow decoration={decoration} account={a} loginOpen={login === a.id} onLogin={(open) => setLogin(open ? a.id : null)} onChanged={put} onRemoved={() => (drop(a.id), login === a.id && setLogin(null))} onStale={() => void accounts.load()} />
           )}</SettingsGroup>
         ))}
+        {!all && sorted && sorted.length > ACCOUNTS_ON_PAGE && <SubPageRow title={t("kimi-accounts.all", { n: sorted.length })} onOpen={() => useApp.getState().openSettings("profiles", { sub: "kimi" })} />}
         {accounts.loadError && <ErrorNote>{accounts.loadError}</ErrorNote>}
       </div>
     </Section>

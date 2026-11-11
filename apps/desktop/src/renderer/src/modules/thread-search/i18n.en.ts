@@ -4,7 +4,7 @@ import type { zhCN } from "./i18n";
 
 export const en: Record<keyof typeof zhCN, string> = {
   "thread-search.title": "Search",
-  "thread-search.description": "Search your and the {{agent}}'s messages in the open conversation and jump to a hit",
+  "thread-search.description": "Search your messages and replies in the current {{agent}} conversation; click a result to jump to it",
   "thread-search.placeholder": "Search this conversation",
   "thread-search.hint": "Searches your messages and the {{agent}}'s replies (not tool output or reasoning); {key} opens it",
   "thread-search.searching": "Searching…",

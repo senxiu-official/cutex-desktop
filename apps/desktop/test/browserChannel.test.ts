@@ -141,7 +141,7 @@ describe("browser preload bindings", () => {
     const bridge = browserBridge({ invoke, binding: () => ({ hostId: "remote", epoch: "epoch", focus: true }), subscribe: () => () => {} });
     const browser = bridge.forHost("remote");
     expect(browser).not.toHaveProperty("grant");
-    expect(Object.keys(browser).sort()).toEqual(["agents", "back", "claimAllowRevoke", "claimAllows", "claimAudit", "claimOpen", "claimPolicy", "clearIdempotency", "close", "desktopLoopback", "desktopLoopbackChallenge", "dismissLoginWarning", "forward", "grantAgent", "holdReady", "list", "navigate", "open", "openOwnerCopy", "openRefused", "ownerInput", "pauseLease", "profileTools", "releaseLease", "reload", "reserveOwnerTab", "resumeLease", "setZoom", "settings", "stop", "toBackground", "toolItem", "turnShot", "turnShots"]);
+    expect(Object.keys(browser).sort()).toEqual(["agents", "back", "claimAllowRevoke", "claimAllows", "claimAudit", "claimOpen", "claimPolicy", "clearIdempotency", "close", "desktopLoopback", "desktopLoopbackChallenge", "dismissLoginWarning", "forward", "grantAgent", "holdReady", "list", "navigate", "open", "openOwnerCopy", "openRefused", "ownerInput", "pauseLease", "pauseMedia", "profileTools", "releaseLease", "reload", "reserveOwnerTab", "resumeLease", "setMuted", "setZoom", "settings", "stop", "toBackground", "toolItem", "turnShot", "turnShots"]);
     expect(invoke).not.toHaveBeenCalled();
   });
   it("binds login dismissal and owner-copy requests to the source host without accepting a target URL", async () => {

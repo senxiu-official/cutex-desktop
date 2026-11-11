@@ -84,6 +84,8 @@ export interface DeskPetView {
   placement: "full" | "limited";
   /** False: transparent pixels catch clicks too (the system refused the window shape). */
   shape: boolean;
+  /** False: the system does not keep it above other windows (Linux Wayland other than KDE Plasma); null: not known yet. */
+  onTop?: boolean | null;
 }
 
 /** Native menu rows; the module supplies them in the UI language. */

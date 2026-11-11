@@ -1,4 +1,5 @@
 import type { BrowserCursorView, BrowserCursorPreferences } from "./browserCursor";
+import type { BrowserCarrierFrameRate, BrowserCarrierPreferences } from "./browserCarrier";
 import type { HostTag, HostTaggedEvent, HOST_TAGGED_EVENTS } from "./ipc";
 import type { BrowserClaimAutoReason, BrowserClaimMode } from "./browserClaim";
 
@@ -114,7 +115,11 @@ export interface BrowserTabView {
   carrier?: "background";
   /** A carrier hand-over is running: agent actions wait (busy) until the page reopened. */
   handover?: true;
+  /** Main-observed media of the page (Chromium's own media / audio events, never the page's word); absent = silent,
+   * nothing playing and not muted. Owner 2026-11-10: a tab that plays stays alive in the background. */
+  media?: BrowserMediaView;
 }
+export interface BrowserMediaView { playing: boolean; audible: boolean; muted: boolean }
 export interface BrowserSitePermissionPromptView { state: "waiting" | "hidden" | "timeout"; origin: string; permissions: BrowserSitePermission[] }
 export interface BrowserTabMount {
   guestId: string;
@@ -150,6 +155,7 @@ export type BrowserRequest =
   | { op: "resetOrigins" }
   | { op: "externalPages"; enabled?: boolean }
   | { op: "cursorColor"; color?: string | null }
+  | { op: "carrierFrameRate"; frameRate?: BrowserCarrierFrameRate }
   | { op: "desktopLoopback"; enabled?: boolean }
   | { op: "desktopLoopbackChallenge"; tabKey: string; url: string }
   | { op: "sitePermissions"; forget?: BrowserSitePermissionForget }
@@ -177,6 +183,8 @@ export type BrowserRequest =
   | { op: "navigate"; tabKey: string; url: string; desktopLoopback?: string }
   | { op: "ownerInput"; tabKey: string; kind: BrowserOwnerInputKind }
   | { op: "setZoom"; tabKey: string; action: BrowserZoomAction }
+  | { op: "setMuted"; tabKey: string; muted: boolean }
+  | { op: "pauseMedia"; tabKey: string }
   | { op: "back" | "forward" | "reload" | "stop" | "toBackground"; tabKey: string }
   | { op: "close"; tabKey: string; unmount?: boolean };
 export interface HostBrowserBridge {
@@ -221,6 +229,10 @@ export interface HostBrowserBridge {
   ownerInput(tabKey: string, kind: BrowserOwnerInputKind): Promise<void>;
   /** Owner UI zoom step of this tab (the chip's reset); the page's own shortcuts are handled in main. */
   setZoom(tabKey: string, action: BrowserZoomAction): Promise<void>;
+  /** The owner's speaker: mutes / unmutes this tab's page in main (WebContents audio). */
+  setMuted(tabKey: string, muted: boolean): Promise<void>;
+  /** The owner's 停止 in 正在播放: main pauses the page's audio / video elements (a fixed main-owned script). */
+  pauseMedia(tabKey: string): Promise<void>;
   back(tabKey: string): Promise<void>;
   forward(tabKey: string): Promise<void>;
   reload(tabKey: string): Promise<void>;
@@ -238,6 +250,8 @@ export interface BrowserBridge {
   /** Owner switch 「允许浏览外部网页」: read (no argument) or set. Host-independent. */
   externalPages(enabled?: boolean): Promise<BrowserExternalPagesView>;
   cursorColor(color?: string | null): Promise<BrowserCursorPreferences>;
+  /** 「后台网页帧率」: read (no argument) or set. Host-independent; main applies it to open carriers. */
+  carrierFrameRate(frameRate?: BrowserCarrierFrameRate): Promise<BrowserCarrierPreferences>;
   /** Remembered per-origin site permissions; forget one origin (all its permissions) or all. */
   sitePermissions(forget?: BrowserSitePermissionForget): Promise<BrowserSitePermissionView[]>;
   forHost(hostId: string): HostBrowserBridge;

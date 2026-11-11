@@ -4,7 +4,7 @@ import type { zhCN } from "./i18n";
 
 export const en: Record<keyof typeof zhCN, string> = {
   "home.title": "Desktop",
-  "home.description": "The desktop behind your panes when none is in front: profile card, clock, needs-you, usage and pinned tiles; plus a profile page. Home settings are stored on the host, so every device of yours shows the same.",
+  "home.description": "Show your identity card, clocks, Needs you, usage and pinned tiles on the desktop, and manage your personal page; sync home content to other devices through the host",
   "home.nav": "Desktop",
   "home.navRestoreHint": "Click to bring back the layout from before the desktop",
   "home.desk.from.module": "From: {name} (built in)",
@@ -23,6 +23,7 @@ export const en: Record<keyof typeof zhCN, string> = {
   "home.desk.add": "Add widget",
   "home.desk.addNone": "All are on the desktop",
   "home.desk.reset": "Restore default layout",
+  "home.desk.hiddenByShelf": "{n} hidden behind the Shelf; they come back when it closes",
   "home.desk.restoreOld": "Restore the layout from before the big grid",
   "home.desk.fold": "Fold away",
   "home.greet.morning": "Good morning",
@@ -45,7 +46,7 @@ export const en: Record<keyof typeof zhCN, string> = {
   "home.desk.listRemove": "Remove this row",
   "home.desk.zoneSearch": "Search time zones (e.g. Shanghai)",
   "home.settings.title": "Home content",
-  "home.settings.hint": "The cover, the one-line bio, the blocks shown and the two entries are edited on the desktop with “Edit home”; stored on the home host, the same on every device of yours",
+  "home.settings.hint": "Use Edit home on the desktop to change your cover, bio, blocks and shortcuts",
   "home.settings.open": "Edit home…",
   "home.profile": "Profile",
   "home.openProfile": "Open profile",

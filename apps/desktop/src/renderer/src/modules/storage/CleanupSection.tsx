@@ -1,7 +1,8 @@
 import { memo, useMemo, useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { StorageCleanupAction, StorageCleanupPreview, StorageCleanupRun } from "../../../../shared/storageCleanup";
-import { Button, ErrorNote, Section, SettingsGroup } from "../../components/settings/Form";
+import { Button, EmptyState, ErrorNote, Section, Select, SettingRow, SettingsGroup } from "../../components/settings/Form";
+import { FIELD_W } from "../../lib/fieldWidths";
 import { useI18n, type MessageKey } from "../../i18n";
 import { ARMED_FORM_BUTTON, useArmed } from "../../lib/armedConfirm";
 import { useTrackOverlay } from "../../lib/openOverlays";
@@ -64,15 +65,20 @@ export function CleanupSection() {
   const error = (value: string) => value.startsWith("storage.cleanup.") ? t(value as MessageKey) : value;
   if (!cleanup.supported) return null;
   const medium = () => { if (!cleanup.allowed || expired) return; if (!armed) setArmed(true); else { setArmed(false); void controller.execute(); } };
-  return <div className="space-y-4" data-storage-cleanup="">
-    <Section title={label("title")} hint={label("hint")}>
+  // The form is ordinary rows (清理内容 / 日志保留天数, each a select) with 预览清理 at the end of the last one.
+  const previewButton = <Button disabled={locked || cleanup.loading} onClick={() => { void controller.preview({ action, ...(action === "old-logs" ? { olderThanDays: days } : {}) }); }}>{label(cleanup.loading ? "previewing" : "preview")}</Button>;
+  return <div data-storage-cleanup="">
+    <Section title={label("title")} hint={<><span className="block">{label("hint")}</span><span className="block">{t("storage.cleanup.target", { host })}</span></>}>
       <SettingsGroup agents="none" source="host">
-      <p className="mb-3 text-meta text-muted">{t("storage.cleanup.target", { host })}</p>
-      {!cleanup.allowed ? <p className="text-ui text-muted">{label("desktopOnly")}</p> : cleanup.pending ? null : <>
-        <div className="flex flex-wrap items-end gap-3"><label className="min-w-0 flex-1 text-meta">{label("action")}<select aria-label={label("action")} value={action} disabled={locked || cleanup.loading} onChange={(event) => { setAction(event.target.value as StorageCleanupAction); controller.clearPreview(); }} className="mt-1 block w-full rounded-ctl border border-border bg-background px-2 py-1.5 text-ui">{ACTIONS.map((id) => <option key={id} value={id}>{label(id)}</option>)}</select></label>
-          {action === "old-logs" && <label className="text-meta">{label("days")}<select aria-label={label("days")} value={days} disabled={locked || cleanup.loading} onChange={(event) => { setDays(Number(event.target.value)); controller.clearPreview(); }} className="mt-1 block rounded-ctl border border-border bg-background px-2 py-1.5 text-ui">{[7, 30, 90].map((n) => <option key={n} value={n}>{t("storage.cleanup.dayOption", { n })}</option>)}</select></label>}
-          <Button disabled={locked || cleanup.loading} onClick={() => { void controller.preview({ action, ...(action === "old-logs" ? { olderThanDays: days } : {}) }); }}>{label(cleanup.loading ? "previewing" : "preview")}</Button></div>
-        {["retired-homes", "vacuum", "old-logs"].includes(action) && <p className="mt-3 text-ui text-muted">{label(action === "retired-homes" ? "retiredHint" : action === "vacuum" ? "vacuumHint" : "logsHint")}</p>}
+      {!cleanup.allowed ? <EmptyState>{label("desktopOnly")}</EmptyState> : cleanup.pending ? null : <>
+        <SettingRow agents="none" source="host" label={label("action")} hint={["retired-homes", "vacuum", "old-logs"].includes(action) ? label(action === "retired-homes" ? "retiredHint" : action === "vacuum" ? "vacuumHint" : "logsHint") : undefined}>
+          <Select<StorageCleanupAction> label={label("action")} width={FIELD_W.model} value={action} disabled={locked || cleanup.loading} options={ACTIONS.map((id) => ({ value: id, label: label(id) }))} onChange={(next) => { setAction(next); controller.clearPreview(); }} />
+          {action !== "old-logs" && previewButton}
+        </SettingRow>
+        {action === "old-logs" && <SettingRow agents="none" source="host" label={label("days")}>
+          <Select label={label("days")} value={String(days)} disabled={locked || cleanup.loading} options={[7, 30, 90].map((n) => ({ value: String(n), label: t("storage.cleanup.dayOption", { n }) }))} onChange={(next) => { setDays(Number(next)); controller.clearPreview(); }} />
+          {previewButton}
+        </SettingRow>}
       </>}
       {cleanup.executing && <p role="status" className="mt-3 text-ui text-muted">{label("busy")}</p>}
       {cleanup.error && <div className="mt-3"><ErrorNote>{error(cleanup.error)}</ErrorNote></div>}
@@ -93,7 +99,7 @@ export function CleanupSection() {
     {cleanup.run && <Section title={label("result")}><RunResult run={cleanup.run} /></Section>}
     <Section title={label("history")} actions={<Button disabled={!cleanup.connected || cleanup.historyLoading} onClick={() => { void controller.loadHistory(); }}>{label("refreshHistory")}</Button>}>
       {cleanup.historyError && <ErrorNote>{cleanup.historyError}</ErrorNote>}
-      {!cleanup.historyLoading && !cleanup.history.length && <p className="text-ui text-muted">{label("noHistory")}</p>}
+      {!cleanup.historyLoading && !cleanup.history.length && <EmptyState>{label("noHistory")}</EmptyState>}
       <ul>{cleanup.history.map((run) => <li key={run.runId} className="flex flex-wrap items-center gap-2 border-t border-border py-2 text-meta first:border-0"><span className="min-w-0 flex-1">{run.action ? label(run.action) : label("unknownAction")} · {label(run.state)}<span className="block text-subtle">{run.createdAt || run.startedAt ? new Date(run.createdAt ?? run.startedAt!).toLocaleString(locale) : run.runId}</span>{run.error && <span className="mt-1 block break-words text-warn-text">{run.error}</span>}</span><span>{formatBytes(run.freedBytes, locale)}</span><Button disabled={!cleanup.connected} onClick={() => { void controller.loadRun(run.runId); }}>{label("details")}</Button></li>)}</ul>
     </Section>
     {confirming && preview && cleanup.allowed && <SettingsGroup agents="none" source="host"><DeleteConfirmation key={signature} preview={preview} count={selected.length} bytes={bytes} host={host} busy={cleanup.executing} expired={expired} close={() => setConfirming(false)} submit={(text) => { setConfirming(false); void controller.execute(text); }} /></SettingsGroup>}

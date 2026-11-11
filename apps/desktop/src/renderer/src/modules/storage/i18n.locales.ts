@@ -3,6 +3,16 @@
 import type { zhCN } from "./i18n";
 
 export const zhHantCN: Record<keyof typeof zhCN, string> = {
+  "storage.imageCache.title": "圖片快取",
+  "storage.imageCache.hint": "存在這台電腦，所有主機的圖片預覽共用。",
+  "storage.imageCache.used": "已用 {size} · {count} 張",
+  "storage.imageCache.days": "保留天數",
+  "storage.imageCache.daysUnit": "天",
+  "storage.imageCache.daysHint": "從上次檢視算起，到期刪除",
+  "storage.imageCache.cap": "容量上限",
+  "storage.imageCache.capHint": "超出時先刪除最久沒看的圖片",
+  "storage.imageCache.clearConfirm": "再左鍵點擊一次清空；圖片下次檢視時重新讀取",
+  "storage.imageCache.clear": "清空快取",
   "storage.cleanup.partialNotice": "本次僅檢查了部分項目，以下數量和空間估算不是全部結果。請縮小清理範圍，或稍後重新預覽以檢查其餘項目。",
   "storage.cleanup.partialEmpty": "本次已檢查的項目中，沒有符合條件的項目。",
   "storage.cleanup.partialVacuumEstimate": "本次已檢查的可用資料庫預計釋放 {bytes}；選中項的實際釋放量完成後顯示。",
@@ -37,7 +47,7 @@ export const zhHantCN: Record<keyof typeof zhCN, string> = {
   "storage.cleanup.title": "手動清理",
   "storage.cleanup.hint": "每次先預覽，再由你確認；不會定時刪除數據。",
   "storage.cleanup.desktopOnly": "清理只對持有主機所有者憑據的桌面開放；當前連接只能查看記錄。",
-  "storage.cleanup.target": "目標主機：{host}",
+  "storage.cleanup.target": "清理對象爲主機 {host} 上的數據。",
   "storage.cleanup.action": "清理內容",
   "storage.cleanup.orphan-homes": "孤兒副本（超過 7 天）",
   "storage.cleanup.retired-homes": "已歸檔副本的可再生文件",

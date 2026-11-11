@@ -47,6 +47,7 @@ import {
   sshTargetStrings,
   tokenRevokeCommand,
   type AddSshHostRequest,
+  type ImportSshHostTokenRequest,
   type HostAppearancePatch,
   type HostConnView,
   type HostGroupDraft,
@@ -77,6 +78,7 @@ import type { SshPromptAnswer, SshPromptView } from "../shared/sshPrompt";
 import type { ClaimTarget, PersonIdentityService } from "./personIdentity";
 import type { IdentityFileResult, IdentityImportTexts, IdentityKeyCopyResult, PersonIdentityView } from "../shared/personIdentity";
 import { loadDevHosts, readDevToken, type DevHostConfig } from "./devHosts";
+import { ImportedTokenFailure, probeImportedToken } from "./sshTokenImport";
 import { logError } from "./errorLog";
 import { checkTransferRequest, transferProfile } from "./profileTransfer";
 import type { ProfileTransferRequest, ProfileTransferResult } from "../shared/profileTransfer";
@@ -424,6 +426,62 @@ export class HostManager implements HostApi {
     return { ok: true, hostId: id, ...issuedResult(issued) };
   }
 
+  /** Importing never runs the remote CLI; the credential is input-only. */
+  async importSshHostToken(request: ImportSshHostTokenRequest): Promise<HostResult> {
+    const existing = request?.hostId ? this.find(request.hostId) : undefined;
+    if (request?.hostId && (!existing || existing.pairingMode !== "tokenImport"))
+      return { ok: false, error: { code: "badInput", detail: "Choose an imported-token host to replace its token." } };
+    const rawTarget = existing?.target ?? request?.target;
+    const targetText = typeof rawTarget === "string" ? normalizeSshTarget(rawTarget) : null;
+    const target = targetText ? parseSshTarget(targetText) : null;
+    const remotePort = existing?.remotePort ?? request?.remotePort ?? DEFAULT_REMOTE_PORT;
+    const token = typeof request?.token === "string" ? request.token.trim() : "";
+    if (!target || !targetText || !isValidPort(remotePort) || !token || token.length > 8192 || /\s/.test(token))
+      return { ok: false, error: { code: "badInput", detail: "Enter an SSH address, a valid Management port and the token supplied by the host owner." } };
+    const expected = existing?.daemonHostId ?? request.expectedHostId;
+    if (expected != null && (typeof expected !== "string" || !expected.trim() || expected.length > 200 || /\s/.test(expected)))
+      return { ok: false, error: { code: "badInput", detail: "The expected host identity is invalid." } };
+    if (!safeStorage.isEncryptionAvailable()) return { ok: false, error: { code: "noKeyring", detail: "Encrypted token storage is unavailable." } };
+    const prompts = this.promptSession(targetText);
+    let tunnel: Awaited<ReturnType<typeof openTemporaryTunnel>> | undefined;
+    try {
+      tunnel = await openTemporaryTunnel(target, remotePort, this.pids, 15_000, { askpass: prompts });
+      const access = await probeImportedToken(tunnel.port, token, expected);
+      if (existing && this.find(existing.id) !== existing)
+        return { ok: false, error: { code: "badInput", detail: "This host changed while connecting. Import the token again." } };
+      const id = existing?.id ?? `ssh-${randomBytes(4).toString("hex")}`;
+      this.tokens.set(id, token);
+      const connectAs = access.user.isOwner ? "owner" : "member";
+      if (existing) {
+        this.patchHost(id, { tokenId: access.user.token?.id ?? null, connectAs });
+        if (this.conns.has(id) || this.wanted(id)) this.reopen(id);
+      } else {
+        const label = typeof request.label === "string" ? request.label.trim().slice(0, 64) : "";
+        this.file = { ...this.file, hosts: [...this.file.hosts, {
+          id, label: label || defaultHostLabel(targetText), target: targetText, targets: [targetText],
+          remotePort, cutexPath: DEFAULT_CUTEX_PATH, daemonHostId: access.hostId,
+          pairingMode: "tokenImport", tokenId: access.user.token?.id ?? null, connectAs,
+          createdAt: new Date().toISOString(), lastConnectedAt: null, autoConnect: true,
+          color: nextHostColor(this.file.hosts.map((h) => h.color)), platform: null,
+        }] };
+        this.save();
+        const reachable = this.reachableScope(this.scope);
+        if (reachable !== this.scope) this.setScopeOnly(reachable);
+        this.open(id);
+      }
+      this.publish();
+      return { ok: true, hostId: id, connectAs, access };
+    } catch (error) {
+      if (tunnel?.failure?.()?.code === "forwardDenied") return { ok: false, error: { code: "forwardDenied", detail: "This SSH account does not permit port forwarding. Ask the SSH host administrator to allow this Management tunnel." } };
+      if (error instanceof ImportedTokenFailure) return { ok: false, error: error.view };
+      if (error instanceof SshFailure) return { ok: false, error: { code: error.view.code, detail: "SSH could not open the tunnel. Check this account's login and port-forwarding permissions." } };
+      return { ok: false, error: { code: "remoteDaemon", detail: "Could not connect through SSH or save the imported token." } };
+    } finally {
+      tunnel?.close();
+      prompts.close();
+    }
+  }
+
   /** Re-pair: a fresh token of the kind the host already uses (`connectAs`, default owner). */
   async pairSshHost(hostId: string): Promise<HostResult> {
     return this.reissue(hostId, this.find(hostId)?.connectAs ?? "owner");
@@ -438,6 +496,7 @@ export class HostManager implements HostApi {
   private async reissue(hostId: string, mode: SshConnectAs): Promise<HostResult> {
     const host = this.find(hostId);
     if (!host) return { ok: false, error: { code: "badInput", detail: "host" } };
+    if (host.pairingMode === "tokenImport") return { ok: false, error: { code: "badInput", detail: "Import a replacement token for this host. SSH is used only for the tunnel." } };
     if (!safeStorage.isEncryptionAvailable()) return { ok: false, error: { code: "noKeyring", detail: "" } };
     let failure: HostResult = { ok: false, error: { code: "badInput", detail: "targets" } };
     for (const targetText of sshTargetStrings(host)) {
@@ -509,7 +568,7 @@ export class HostManager implements HostApi {
     this.save();
     for (const id of this.scopeIds()) if (!this.conns.has(id)) this.open(id);
     this.publish();
-    return { revoked: await this.revoke(host, token).catch(() => false) };
+    return { revoked: host.pairingMode === "tokenImport" ? false : await this.revoke(host, token).catch(() => false) };
   }
 
   async switchHost(hostId: string): Promise<void> {
@@ -741,7 +800,7 @@ export class HostManager implements HostApi {
     const l = this.file.local;
     const local: HostView = { id: LOCAL_HOST_ID, kind: "local", label: l.label || hostname(), target: null, remotePort: null, cutexPath: null, paired: true, lastConnectedAt: null, autoConnect: l.autoConnect, color: l.color, platform: l.platform, conn: view(LOCAL_HOST_ID) };
     const ssh = this.file.hosts.map(
-      (h): HostView => ({ id: h.id, kind: "ssh", label: h.label, target: h.target, targets: sshTargetStrings(h), ...(this.routeViews?.has(h.id) ? { routes: this.routeViews.get(h.id)! } : {}), remotePort: h.remotePort, cutexPath: h.cutexPath, paired: this.tokens.has(h.id), lastConnectedAt: h.lastConnectedAt, tokenId: h.tokenId, autoConnect: h.autoConnect, color: h.color, platform: h.platform, connectAs: h.connectAs ?? "owner", conn: view(h.id) }),
+      (h): HostView => ({ id: h.id, kind: "ssh", pairingMode: h.pairingMode ?? "ssh", label: h.label, target: h.target, targets: sshTargetStrings(h), ...(this.routeViews?.has(h.id) ? { routes: this.routeViews.get(h.id)! } : {}), remotePort: h.remotePort, cutexPath: h.cutexPath, paired: this.tokens.has(h.id), lastConnectedAt: h.lastConnectedAt, tokenId: h.tokenId, autoConnect: h.autoConnect, color: h.color, platform: h.platform, connectAs: h.connectAs ?? "owner", conn: view(h.id) }),
     );
     const dev = this.devHosts().map(
       (h): HostView => ({ id: h.id, kind: "dev-direct", label: h.name, target: h.baseUrl, remotePort: null, cutexPath: null, paired: true, lastConnectedAt: null, autoConnect: h.autoConnect, color: h.color, platform: h.platform, conn: view(h.id) }),
@@ -971,9 +1030,12 @@ export class HostManager implements HostApi {
     const timer = setTimeout(() => controller.abort(), 10_000);
     let remote: { hostId: string };
     try {
-      remote = await new CutexClient(this.endpoint(port, token, { target }), { fetch: daemonFetch }).host({ signal: controller.signal });
+      remote = host.pairingMode === "tokenImport"
+        ? await probeImportedToken(port, token, conn.daemonHostId ?? host.daemonHostId)
+        : await new CutexClient(this.endpoint(port, token, { target }), { fetch: daemonFetch }).host({ signal: controller.signal });
     } catch (error) {
-      if (error instanceof CutexApiError && (error.status === 401 || error.status === 403)) activate();
+      if (host.pairingMode === "tokenImport") reject(tunnel.forwardFailure?.() ?? (error instanceof ImportedTokenFailure ? error.view : { code: "remoteDaemon", detail: "The SSH tunnel could not reach cutex." }));
+      else if (error instanceof CutexApiError && (error.status === 401 || error.status === 403)) activate();
       else reject({ code: "remoteDaemon", detail: `${target}: ${error instanceof Error ? error.message : String(error)}` });
       return;
     } finally {

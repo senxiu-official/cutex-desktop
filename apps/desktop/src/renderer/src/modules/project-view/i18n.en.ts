@@ -6,7 +6,7 @@ import type { zhCN } from "./i18n";
 export const en: Record<keyof typeof zhCN, string> = {
   ...directorEn,
   "project-view.title": "Project view",
-  "project-view.description": "A pane showing what every {{agent}} of a project is doing, who delegated to whom, background work and recent activity. Opens in a {{shelf}}; also from ⌘K and the project menu",
+  "project-view.description": "View a project’s {{agent}} work, delegations, jobs and recent activity; open it from the {{shelf}}, quick switcher or project menu",
   "project-view.tabTitle": "Project · {name}",
   "project-view.pick": "Choose a project",
   "project-view.follow": "Follow the current conversation",

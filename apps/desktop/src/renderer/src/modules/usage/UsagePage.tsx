@@ -14,7 +14,7 @@ import { AlertTriangle, ArrowRight, ArrowRightLeft, Info, X } from "lucide-react
 import type { UsagePrices, UsageReport, UsageSourceFilter } from "../../../../shared/ipc";
 import { USAGE_SOURCES_FEATURE, type UsageSourcesView } from "../../../../shared/usageSources";
 import { useI18n, type MessageKey } from "../../i18n";
-import { AddButton, ArmedRemove, Button, ErrorNote, IconButton, Loading, PlannedCard, RefreshButton, Segmented, Select , SettingsGroup , SettingsEffectCard } from "../../components/settings/Form";
+import { AddButton, ArmedRemove, Button, ErrorNote, IconButton, Loading, PlannedCard, RefreshButton, Segmented, Section, Select, SettingsGroup } from "../../components/settings/Form";
 import { knownProfileNames, useKnownProfiles } from "../../lib/settingsView";
 import { applyProfileOrder, profileOrderOf, useProfileOrder } from "../../lib/profileOrder";
 import { useUiPrefs } from "../../lib/prefs";
@@ -56,7 +56,6 @@ const SPLITS: Split[] = ["total", "profile", "model", "agent", "project"];
 const ALL_SPLITS: Split[] = [...SPLITS, "host"];
 /** Polling while an extra usage source scans. */
 const SCAN_POLL_MS = 3000;
-const CARD = "rounded-xl border border-border bg-surface";
 const CELL_INPUT = "w-full min-w-0 rounded-md border border-border bg-background px-2 py-1 text-sm tabular-nums outline-none focus:border-accent";
 
 // ---------------------------------------------------------------- quotas
@@ -125,15 +124,11 @@ function Quotas({ providers, settled }: { providers: ProfileProviders; settled: 
   const withGauges = cards.filter((card) => card.gauges.length > 0);
   const without = cards.filter((card) => card.gauges.length === 0);
   return (
-    <SettingsEffectCard><section className="mb-8">
-      <div className="mb-2 flex h-7 items-center gap-2">
-        <h3 className="text-sm font-semibold">{t("usage.quotas")}</h3>
-        {observed && <span className="text-xs text-subtle">{t("usage.updatedAt", { time: observedClock(observed) })}</span>}
-        <span className="ml-auto">
-          <RefreshButton label={t("usage.refresh")} onClick={() => profiles.forEach((p) => void loadQuota(p, true))} />
-        </span>
-      </div>
-      <div className={`${CARD} divide-y divide-border px-4`}>
+    <Section title={t("usage.quotas")} actions={<>
+      {observed && <span className="text-xs text-subtle">{t("usage.updatedAt", { time: observedClock(observed) })}</span>}
+      <RefreshButton label={t("usage.refresh")} onClick={() => profiles.forEach((p) => void loadQuota(p, true))} />
+    </>}>
+      <div className="divide-y divide-border">
         {!shown.current && <Loading rows={Math.min(Math.max(profiles.length, 2), 6)} />}
         {shown.current && withGauges.map((card) => {
           const profile = providers?.get(card.fromName ?? card.members[0]!.name);
@@ -152,7 +147,7 @@ function Quotas({ providers, settled }: { providers: ProfileProviders; settled: 
         })}
         {shown.current && without.length > 0 && <div className="py-2.5 text-xs text-subtle">{t("usage.noQuota", { names: without.map((card) => card.name).join(listSep(locale)) })}</div>}
       </div>
-    </section></SettingsEffectCard>
+    </Section>
   );
 }
 
@@ -194,16 +189,12 @@ function AllQuotas({ view }: { view: AllView }) {
   const withGauges = cards.filter((c) => c.gauges.length > 0);
   const without = cards.filter((c) => c.gauges.length === 0);
   return (
-    <SettingsEffectCard><section className="mb-8">
-      <div className="mb-2 flex h-7 items-center gap-2">
-        <h3 className="text-sm font-semibold">{t("usage.quotas")}</h3>
-        {observed && <span className="text-xs text-subtle">{t("usage.updatedAt", { time: observedClock(observed) })}</span>}
-        <span className="ml-auto">
-          {/* A refresh only re-reads the providers' quota (no setting changes): every included host. */}
-          <RefreshButton label={t("usage.all.refresh")} onClick={() => entries.forEach((e) => void loadHostQuota(e.hostId, e.name, true))} />
-        </span>
-      </div>
-      <div className={`${CARD} divide-y divide-border px-4`}>
+    <Section title={t("usage.quotas")} actions={<>
+      {observed && <span className="text-xs text-subtle">{t("usage.updatedAt", { time: observedClock(observed) })}</span>}
+      {/* A refresh only re-reads the providers' quota (no setting changes): every included host. */}
+      <RefreshButton label={t("usage.all.refresh")} onClick={() => entries.forEach((e) => void loadHostQuota(e.hostId, e.name, true))} />
+    </>}>
+      <div className="divide-y divide-border">
         {!shown.current && <Loading rows={Math.min(Math.max(cards.length, 2), 6)} />}
         {shown.current &&
           withGauges.map((c) => {
@@ -234,7 +225,7 @@ function AllQuotas({ view }: { view: AllView }) {
           })}
         {shown.current && without.length > 0 && <div className="py-2.5 text-xs text-subtle">{t("usage.noQuota", { names: without.map(title).join(sep) })}</div>}
       </div>
-    </section></SettingsEffectCard>
+    </Section>
   );
 }
 
@@ -297,7 +288,7 @@ function Summary({ report, previous, range }: { report: UsageReport; previous: U
   const cacheRate = tt.input > 0 ? tt.cachedInput / tt.input : null;
   const apiValue = tt.estimatedCost !== undefined ? formatMoney(tt.estimatedCost, report.currency) : tt.apiEquivalentUsd !== undefined ? formatMoney(tt.apiEquivalentUsd, "USD") : null;
   return (
-    <div className="mb-4 flex flex-wrap items-end gap-x-10 gap-y-3">
+    <div className="mb-4 flex flex-wrap items-end gap-x-10 gap-y-3 pt-3">
       <div>
         <div className="text-xs text-subtle">{t("usage.tokens")}</div>
         <div className="flex items-baseline gap-2">
@@ -384,7 +375,7 @@ function Chart({ report, split, days, metric, mode, focus, onFocus, providers, m
   // Stacked: draw from the top series down so each band's fill covers only its own slice.
   const order = stacked ? series.map((_, i) => series.length - 1 - i) : series.map((_, i) => i);
   return (
-    <div className={`${CARD} mb-4 p-4`}>
+    <div className="mb-3 border-y border-border py-4">
       <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">
         {series.map((s) => (
           <button key={s} onMouseEnter={() => onFocus(s)} onMouseLeave={() => onFocus(null)} className="flex items-center gap-1.5 text-muted hover:text-foreground" style={{ opacity: dim(s) === 1 ? 1 : 0.5 }}>
@@ -528,7 +519,7 @@ function Breakdown({ report, split, metric, focus, onFocus, providers, modelIds 
   const hostColors = useContext(HostColors);
   const th = "whitespace-nowrap py-2 pl-3 text-right font-normal";
   return (
-    <div className={`${CARD} mb-2 px-4 py-1`}>
+    <div className="mb-2 border-b border-border pb-1">
       <table className="w-full text-sm">
         <thead className="text-xs text-subtle">
           <tr className="text-left">
@@ -754,27 +745,17 @@ function Ledger({ providers, sources, refresh }: { providers: ProfileProviders; 
 
   return (
     <ProfileSeriesLabels.Provider value={profileLabels}>
-      <SettingsEffectCard><section className="mb-6">
-        <div className="mb-3 flex min-h-7 flex-wrap items-center gap-2">
-          <h3 className="shrink-0 text-sm font-semibold">{t("usage.ledger")}</h3>
-          {/* Wraps under the title when the page is narrow (「全部主机」 adds a split). */}
-          <div role="toolbar" className="ml-auto flex flex-wrap justify-end gap-2">
+      {/* The toolbar wraps under the title when the page is narrow (「全部主机」 adds a split). */}
+      <Section title={t("usage.ledger")} actions={
+          <div role="toolbar" className="flex flex-wrap justify-end gap-2">
             {hasSources && sourceOptions.length > 2 && <Select width="w-36" value={sourceFilter} options={sourceOptions} onChange={setSource} label={t("usage.sources.filter")} />}
             <Segmented value={split} options={splits.map((s) => ({ value: s, label: t(`usage.by.${s}` as MessageKey) }))} onChange={setSplit} />
             <Segmented value={String(range)} options={RANGES.map((r) => ({ value: String(r), label: t("usage.days", { n: r }) }))} onChange={(v) => setRange(Number(v))} />
           </div>
-        </div>
+      }>
         {error && <ErrorNote>{error}</ErrorNote>}
-        {report === undefined && !error && (
-          <div className={`${CARD} px-4 py-1`}>
-            <Loading rows={3} />
-          </div>
-        )}
-        {report === null && !error && (
-          <div className={`${CARD} px-4 py-1`}>
-            <PlannedCard api="GET /v2/usage">{t("usage.unsupported")}</PlannedCard>
-          </div>
-        )}
+        {report === undefined && !error && <Loading rows={3} />}
+        {report === null && !error && <PlannedCard api="GET /v2/usage">{t("usage.unsupported")}</PlannedCard>}
         {report && (
           <>
             <Summary report={report} previous={previous} range={range} />
@@ -829,7 +810,7 @@ function Ledger({ providers, sources, refresh }: { providers: ProfileProviders; 
             }}
           />
         )}
-      </section></SettingsEffectCard>
+      </Section>
     </ProfileSeriesLabels.Provider>
   );
 }

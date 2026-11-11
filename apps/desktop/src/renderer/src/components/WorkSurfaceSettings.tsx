@@ -252,22 +252,15 @@ export function DeskBrightnessSection() {
   const { t } = useI18n();
   const a = useAppearance();
   return (
-    <Section  id={settingsAnchorId("desk")} title={t("settings.panel.deskBg")}>
-      {/* 桌面亮度 (owner 2026-10-21): the desktop background (and its content when on screen) per state. */}
-      <SettingRow agents="none" source="local"
-        label={t("workSurface.desk")}
-        hint={t("workSurface.deskHint")}
-        reset={<ResetButton disabled={DESK_KEYS.every((k) => a[k] === DEFAULT_APPEARANCE[k])} onClick={() => setAppearance({ deskEmpty: DEFAULT_APPEARANCE.deskEmpty, deskOpen: DEFAULT_APPEARANCE.deskOpen, deskFull: DEFAULT_APPEARANCE.deskFull })} />}
-      >
-        <div data-desk-brightness="" className="flex flex-col items-end gap-1.5">
-          {DESK_KEYS.map((k) => (
-            <div key={k} className="flex items-center gap-2">
-              <span className="text-xs text-muted">{t(`workSurface.desk.${k}`)}</span>
-              <NumberField slider label={t(`workSurface.desk.${k}`)} value={a[k]} range={RANGES[k]} unit="%" step={5} onCommit={(v) => v !== null && setAppearance({ [k]: v })} />
-            </div>
-          ))}
-        </div>
-      </SettingRow>
+    // 桌面亮度 (owner 2026-10-21): the desktop background (and its content when on screen) per state; one row per state.
+    <Section  id={settingsAnchorId("desk")} title={t("workSurface.desk")} hint={t("workSurface.deskHint")}>
+      {DESK_KEYS.map((k) => (
+        <SettingRow key={k} agents="none" source="local" label={t(`workSurface.desk.${k}`)} reset={<ResetButton disabled={a[k] === DEFAULT_APPEARANCE[k]} onClick={() => setAppearance({ [k]: DEFAULT_APPEARANCE[k] })} />}>
+          <span data-desk-brightness={k} className="contents">
+            <NumberField slider label={t(`workSurface.desk.${k}`)} value={a[k]} range={RANGES[k]} unit="%" step={5} onCommit={(v) => v !== null && setAppearance({ [k]: v })} />
+          </span>
+        </SettingRow>
+      ))}
     </Section>
   );
 }

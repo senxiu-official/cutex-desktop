@@ -18,6 +18,7 @@ const ImageBusySection = lazyPage(() => import("../../components/settings/AppSet
 const ConversationWidthSection = lazyPage(() => import("../../components/WorkSurfaceSettings").then((m) => m.ConversationWidthSection));
 const ComposerPage = lazyPage(() => import("../../components/settings/AppSettings").then((m) => m.ComposerPage));
 const GutterSection = lazyPage(() => import("../../components/settings/SidesSettings").then((m) => m.GutterSection));
+const SidesDefaultsSubPage = lazyPage(() => import("../../components/settings/SidesSettings").then((m) => m.SidesDefaultsSubPage));
 const ShelfOnlySection = lazyPage(() => import("../../components/settings/PanelPages").then((m) => m.ShelfOnlySection));
 const GeneralPage = lazyPage(() => import("../../components/settings/AppSettings").then((m) => m.GeneralPage));
 const AppearancePage = lazyPage(() => import("../../components/settings/AppearanceSettings").then((m) => m.AppearancePage));
@@ -78,7 +79,8 @@ export default defineModule({
       { id: "shell.appearance", page: "appearance", group: "app", order: 200, icon: Palette, titleKey: "shell.appearance", source: null, hintKey: "settings.pageHint.appearance", Page: AppearancePage, ...APPEARANCE_SEARCH },
       // By screen region, left to right (owner 2026-10-18): 左侧栏 · 对话 (conversation module, 300) · 输入区 · 状态 · 右侧栏与留白.
       { id: "shell.sidebar", page: "sidebar", group: "app", order: 250, icon: PanelLeft, titleKey: "settings.panel.sidebar", source: "local",  hintKey: "settings.pageHint.sidebar", Page: SidebarPage, ...SIDEBAR_SEARCH },
-      { id: "shell.sides", page: "sides", group: "app", order: 450, icon: PanelRight, titleKey: "settings.panel.shelf", source: "local", hintKey: "settings.pageHint.sides", Page: SidesPage, ...SIDES_SEARCH },
+      { id: "shell.sides", page: "sides", group: "app", order: 450, icon: PanelRight, titleKey: "settings.panel.shelf", source: "local", hintKey: "settings.pageHint.sides", Page: SidesPage, ...SIDES_SEARCH,
+        subPages: { defaults: { titleKey: "shell.sides.defaults", hintKey: "shell.sides.defaultsHint", Page: SidesDefaultsSubPage, anchors: ["defaults-all"] } } },
       { id: "shell.status", page: "status", group: "app", order: 400, icon: Activity, titleKey: "settings.panel.status", source: "local",  hintKey: "settings.pageHint.status", Page: StatusPage, ...STATUS_SEARCH },
       // 面板 (design 006 v1): 托盘 and 桌面, whose rows were in 外观 → 窗口与卡片 (the nav shows the panel pages as their own group).
       { id: "shell.tray", page: "tray", group: "app", order: 460, icon: PanelBottom, titleKey: "settings.panel.tray", source: "local",  hintKey: "settings.pageHint.tray", Page: TrayPage, keywords: ["pane.tray.persistent", "pane.tray.edge", "workspace.threeColumns"] },

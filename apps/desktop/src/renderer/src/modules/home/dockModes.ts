@@ -59,6 +59,7 @@ export function serviceBadge(state: ServiceState): DockBadge {
     case "starting":
       return { dot: "warn", count: null, dim: false };
     case "unreachable":
+    case "crashLooped":
       return { dot: "error", count: null, dim: false };
     case "stopped":
     case "offline":

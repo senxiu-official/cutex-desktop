@@ -167,6 +167,33 @@ describe("文件 explorer", { timeout: 20_000 }, () => {
     expect(host.querySelector('[data-path=".github"]')?.textContent).toContain("workspace.fx.hiddenTag");
   });
 
+  it("dragging the tree / preview line moves the panes by style and stores the split once, on release", async () => {
+    await render();
+    const line = host.querySelector<HTMLElement>("[data-explorer] [role=separator]")!;
+    const panes = line.parentElement!;
+    panes.getBoundingClientRect = () => ({ left: 0, top: 0, width: 400, height: 300, right: 400, bottom: 300, x: 0, y: 0, toJSON: () => ({}) });
+    line.setPointerCapture = () => {};
+    let stores = 0;
+    const off = useExplorerStore.subscribe(() => stores++);
+    const before = useExplorerStore.getState().options.split;
+    const pointer = (type: string, x: number) => {
+      const ev = new MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: 10 });
+      Object.defineProperty(ev, "pointerId", { value: 1 });
+      return ev;
+    };
+    await act(async () => line.dispatchEvent(pointer("pointerdown", 200)));
+    for (const x of [180, 160, 140, 120]) await act(async () => line.dispatchEvent(pointer("pointermove", x)));
+    expect(stores).toBe(0);
+    expect(useExplorerStore.getState().options.split).toBe(before);
+    expect(panes.style.getPropertyValue("--fx-split")).toBe("0.3");
+    await act(async () => line.dispatchEvent(pointer("pointerup", 120)));
+    await act(async () => new Promise<void>((r) => requestAnimationFrame(() => r())));
+    expect(stores).toBe(1);
+    expect(useExplorerStore.getState().options.split).toBe(0.3);
+    expect(panes.style.getPropertyValue("--fx-split")).toBe("");
+    off();
+  });
+
   it("dragging rows carries their paths for the composer", async () => {
     await render();
     const data = new Map<string, string>();

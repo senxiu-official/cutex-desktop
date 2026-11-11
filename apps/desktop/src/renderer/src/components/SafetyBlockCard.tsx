@@ -4,14 +4,17 @@
 // agent, the exact command (monospace, wrapped), Claude Code's own reason, the grant rule and
 // 批准一次 / 不批准; once decided a quiet row that says what happened (批准一次 → used / expired, or
 // 未批准). The agent never waited for it: its turn went on (or ended) when the check declined.
+// A newer cutex (safety-grant-delivery) names the grant's approval notice: the granted line says
+// 「已批准一次，等待当前工具返回后送达 · 最晚 HH:MM 前有效」, then 「已送达 · 有效至 HH:MM」 (lib/safetyGrantNotice).
 import { useState } from "react";
 import { Check, ShieldAlert, ShieldCheck, ShieldX, X } from "lucide-react";
 import type { OwnerNotification, SafetyBlock } from "@cutex-desktop/protocol";
 import { useI18n, type MessageKey } from "../i18n";
 import { safetyBlockState } from "../lib/ownerNotify";
 import { safetyCheckAct } from "../lib/ownerNotifyStore";
-import { formatAbsolute, formatWhen, useClock } from "../lib/time";
-import { useApp } from "../store";
+import { formatAbsolute, formatAt, formatWhen, useClock } from "../lib/time";
+import { grantNoticeOf } from "../lib/safetyGrantNotice";
+import { agentState, useApp } from "../store";
 import { convNotify, convSidebarOf, useConvScope } from "../lib/conversationScope";
 import { rowsOf } from "../lib/viewHost";
 import { ClampBox } from "./ClampBox";
@@ -33,6 +36,8 @@ export function SafetyBlockCard({ record: r, block, hostId }: { record: OwnerNot
   const notify = (text: string, tone?: "info" | "error") => convNotify(conv, text, tone);
   const agentName = useApp((s) => rowsOf(s.sidebar, convSidebarOf(conv, s)).find((x) => x.cutexSessionId === r.agentId)?.displayName ?? r.agentName ?? r.agentId);
   const [busy, setBusy] = useState<null | "grant" | "dismiss">(null);
+  // The grant notice's ledger record (read = in context with evidence), when cutex names one.
+  const ledgerNotice = useApp((s) => (block.noticeInputId ? agentState(s.inputs, hostId, r.agentId)?.records.get(block.noticeInputId) ?? null : null));
   const state = safetyBlockState(block, now);
   const open = state === "blocked";
   const created = Date.parse(r.createdAt) / 1000;
@@ -53,10 +58,19 @@ export function SafetyBlockCard({ record: r, block, hostId }: { record: OwnerNot
   };
 
   const StateIcon = state === "dismissed" ? ShieldX : open ? ShieldAlert : ShieldCheck;
+  // safety-grant-delivery: a newer cutex names the grant's notice; its delivery replaces the plain 「{time} 前有效」.
+  const notice = grantNoticeOf({ ...block, state }, ledgerNotice);
+  const at = (iso: string | null) => (iso && Number.isFinite(Date.parse(iso)) ? formatAt(Date.parse(iso) / 1000, now) : "");
+  const noticeTime = notice ? at(notice.until) : "";
   const stateLine =
-    state === "granted"
-      ? t("safetyBlock.state.granted", { time: Number.isFinite(expires) ? formatAbsolute(expires) : "" })
-      : t(`safetyBlock.state.${state}` as MessageKey);
+    notice?.kind === "waiting"
+      ? noticeTime ? `${t("safetyBlock.notice.waiting")} · ${t("safetyBlock.notice.cap", { time: noticeTime })}` : t("safetyBlock.notice.waiting")
+      : notice?.kind === "read"
+        ? t("safetyBlock.notice.read", { time: noticeTime })
+        : state === "granted"
+          ? t("safetyBlock.state.granted", { time: Number.isFinite(expires) ? formatAbsolute(expires) : "" })
+          : t(`safetyBlock.state.${state}` as MessageKey);
+  const stateHint = notice?.kind === "waiting" ? t("safetyBlock.notice.waitingHint", { minutes, time: noticeTime }) : notice?.kind === "read" ? t("safetyBlock.notice.readHint", { time: noticeTime }) : undefined;
 
   return (
     <div
@@ -81,7 +95,7 @@ export function SafetyBlockCard({ record: r, block, hostId }: { record: OwnerNot
         <span className="text-subtle" title={Number.isFinite(created) ? formatAbsolute(created) : undefined}>
           · {Number.isFinite(created) ? formatWhen(created, now, locale) : ""}
         </span>
-        <span className={`ml-auto flex shrink-0 items-center gap-1 ${state === "granted" || state === "used" ? "text-ok-text" : "text-subtle"}`}>
+        <span className={`ml-auto flex shrink-0 items-center gap-1 ${state === "granted" || state === "used" ? "text-ok-text" : "text-subtle"}`} title={stateHint} data-grant-notice={notice?.kind}>
           <StateIcon size={13} aria-hidden />
           {stateLine}
         </span>

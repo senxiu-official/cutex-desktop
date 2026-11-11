@@ -5,9 +5,12 @@
 // `services-project-scope` (r267): two of desktop's services are project services; old-refactor (archived)
 // left a session one and another lost its registrant (both 认领候选 of desktop); Eva's Director Board has no
 // projectId (转为项目服务 picks the project). PATCH {ownerScope, projectId} validates like cutex.
+// `services-workers-v1` (portless background services): four workers — running, stopped by the owner, kept
+// crashing, and one whose agent (old-refactor) is archived. No port / url; 打开 answers 409 service_has_no_view.
+// `?noworkers` (or `?legacy`) = a cutex without the capability: no workers are listed.
 import { SERVICES_ELIGIBLE_OWNERS_FEATURE, type EligibleServiceOwner } from "../../../../shared/serviceOwners";
 import type { ModuleMock } from "../../dev/mockTypes";
-import { SERVICES_EPHEMERAL_TTL_FEATURE, SERVICES_ORGANIZE_FEATURE, SERVICES_PERSIST_APPROVAL_FEATURE, SERVICES_PROJECT_SCOPE_FEATURE, SERVICES_IDLE_PRESETS_FEATURE, servicesSettingsPatch } from "../../../../shared/servicesSettings";
+import { SERVICES_EPHEMERAL_TTL_FEATURE, SERVICES_ORGANIZE_FEATURE, SERVICES_PERSIST_APPROVAL_FEATURE, SERVICES_PROJECT_SCOPE_FEATURE, SERVICES_IDLE_PRESETS_FEATURE, SERVICES_WORKERS_FEATURE, servicesSettingsPatch } from "../../../../shared/servicesSettings";
 import type { ServicesSettings, ServicesSettingsPatch } from "../../../../shared/ipc";
 
 const params = typeof location !== "undefined" ? new URLSearchParams(location.search) : new URLSearchParams();
@@ -31,7 +34,7 @@ function settingsStore(initial: ServicesSettings, legacy: () => boolean) {
 
 function patchedService(service: MockService, patch: Parameters<NonNullable<import("../../../../shared/ipc").DesktopApi["patchService"]>>[1], settings: ServicesSettings): MockService {
   const next = { ...service, ...patch } as MockService;
-  if (patch.idleStopPreset !== undefined && (next.runtime !== "managed" || next.lifetime !== "persistent" || !["1h", "24h", "7d", "forever"].includes(patch.idleStopPreset))) throw new Error("invalid_request: idleStopPreset requires a persistent managed service");
+  if (patch.idleStopPreset !== undefined && ((next.runtime !== "managed" && next.runtime !== "worker") || next.lifetime !== "persistent" || !["1h", "24h", "7d", "forever"].includes(patch.idleStopPreset))) throw new Error("invalid_request: idleStopPreset requires a persistent managed service");
   if (patch.lifetime === "persistent" && service.lifetime !== "persistent" && next.runtime === "managed" && patch.idleStopPreset === undefined) next.idleStopPreset = "24h";
   // cutex: a project service needs a projectId (409 project_scope_unavailable); unknown scopes are a 400.
   if (patch.ownerScope !== undefined && patch.ownerScope !== "session" && patch.ownerScope !== "project") throw new Error("invalid_request: ownerScope must be session or project");
@@ -43,6 +46,7 @@ function patchedService(service: MockService, patch: Parameters<NonNullable<impo
   return next;
 }
 
+const withWorkers = !params.has("noworkers") && !params.has("legacy");
 const iso = (secondsAgo: number) => new Date(Date.now() - secondsAgo * 1000).toISOString();
 type MockService = import("../../../../shared/ipc").ServiceView;
 function mockService(slug: string, displayName: string, port: number, runtime: MockService["runtime"], health: MockService["health"], owner: string | null, projectId: string | null, extra: Partial<MockService> = {}): MockService {
@@ -64,7 +68,21 @@ let mockServices: MockService[] = [
   mockService("desktop-legacy-board", "Legacy Review Board", 24302, "managed", "reachable", "old1", "desktop", { lifetime: "persistent", purpose: "foreground", groupName: "开发工具" }),
   mockService("desktop-layout-preview", "Layout Preview", 24303, "external", "reachable", null, "desktop"),
   mockService("cutex-e-director-board", "Director Board", 24304, "managed", "reachable", "eva", null, { lifetime: "persistent", purpose: "foreground" }),
+  // Owner report 2026-11-09: cutex's `url` names the daemon machine (http://host-02:24421/), `localUrl` is loopback;
+  // 复制地址 / 复制端口 copy the loopback one (lib/serviceAddress).
+  mockService("photo-manager", "Photo Manager", 24421, "managed", "reachable", "mika", null, { host: "host-02", url: "http://host-02:24421/", localUrl: "http://127.0.0.1:24421/", lifetime: "persistent", purpose: "foreground", groupName: "个人工具" }),
 ];
+/** A background service (cutex `worker`): no port or page; idle defaults to forever. */
+function mockWorker(slug: string, displayName: string, health: MockService["health"], owner: string | null, projectId: string | null, extra: Partial<MockService> = {}): MockService {
+  return mockService(slug, displayName, 0, "worker", health, owner, projectId, { port: null, url: null, localUrl: null, portAllocated: false, lifetime: "persistent", purpose: "background", idleStopPreset: "forever", command: ["/opt/workers/" + slug, "--data", "/srv/" + slug], lastTrafficAt: null, ...extra });
+}
+if (withWorkers) mockServices.push(
+  mockWorker("photo-indexer", "照片索引", "reachable", "mika", "desktop", { ownerScope: "project", groupName: "个人工具", note: "给相册建缩略图和人脸索引" }),
+  mockWorker("mail-sync", "邮件同步", "stopped", "eva", null, { stopped: true, groupName: "个人工具" }),
+  // cutex gives up restarting only an ephemeral service (ephemeralMaxRestarts); a persistent worker keeps backing off.
+  mockWorker("backup-uploader", "备份上传", "crashLooped", "eva", null, { lifetime: "ephemeral", purpose: null, idleStopPreset: undefined, process: { pid: null, startedAt: null, restarts: 5, lastExitCode: 2, lastExitAt: iso(600), nextRestartAt: null } }),
+  mockWorker("rss-fetcher", "RSS 抓取", "reachable", "old1", "desktop", { idleStopPreset: "24h", idleStopAt: iso(-20 * 3600) }),
+);
 // Repeatable conversation-header review: the Director owns thirteen synthetic services.
 if (params.has("idle") && !params.has("legacy") && !params.has("oldidle")) {
   mockServices.push(mockService("idle-preview", "Sleeping preview", 24358, "managed", "stoppedIdle", "eva", "desktop", { lifetime: "persistent", purpose: "foreground", idleStopPreset: "1h", stoppedIdle: true, stoppedIdleAt: iso(3600), idleStopAt: null, lastTrafficAt: iso(7200), stopped: false }));
@@ -209,7 +227,7 @@ function remoteServiceApi(hostId: string, emitHost: (method: string, params: Rec
     },
     async openService(slug) {
       const s = find(slug);
-      return { url: s.url, localUrl: s.localUrl };
+      return { url: s.url ?? "", localUrl: s.localUrl ?? "" };
     },
     async serviceLogs(slug) {
       return { text: `[mock workstation] ${slug} listening on :${find(slug).port}
@@ -219,7 +237,7 @@ function remoteServiceApi(hostId: string, emitHost: (method: string, params: Rec
 }
 export const mock: ModuleMock = {
   remote: remoteServiceApi,
-  features: { new: [SERVICES_PERSIST_APPROVAL_FEATURE, SERVICES_EPHEMERAL_TTL_FEATURE, SERVICES_ORGANIZE_FEATURE, "service-tiles", SERVICES_ELIGIBLE_OWNERS_FEATURE, SERVICES_PROJECT_SCOPE_FEATURE, ...(params.has("oldidle") ? [] : [SERVICES_IDLE_PRESETS_FEATURE])] },
+  features: { new: [...(withWorkers ? [SERVICES_WORKERS_FEATURE] : []), SERVICES_PERSIST_APPROVAL_FEATURE, SERVICES_EPHEMERAL_TTL_FEATURE, SERVICES_ORGANIZE_FEATURE, "service-tiles", SERVICES_ELIGIBLE_OWNERS_FEATURE, SERVICES_PROJECT_SCOPE_FEATURE, ...(params.has("oldidle") ? [] : [SERVICES_IDLE_PRESETS_FEATURE])] },
   api: (core) => serviceApi(core, settingsStore({ portRangeStart: 24400, portRangeEnd: 24999, agentPersistentApproval: params.has("persistoff") ? "off" : "ask", ephemeralIdleMinutes: 120, ephemeralTtlHours: 24 }, () => core.legacy)),
   // service_register with reveal: true by demo-writer (owner of demo-notebook) ~16 s after start
   // (?revealAt=<s>): a card 「demo-writer 想给你看：Demo Notebook · 打开」 in its conversation (live.ts).
@@ -294,9 +312,14 @@ function serviceApi(core: Parameters<NonNullable<ModuleMock["api"]>>[0], setting
     },
     async openService(slug) {
       const s = mockServices.find((x) => x.slug === slug)!;
-      return { url: s.url, localUrl: s.localUrl };
+      if (s.runtime === "worker") throw new Error("409 service_has_no_view: a background service has no web page");
+      return { url: s.url ?? "", localUrl: s.localUrl ?? "" };
     },
     async serviceLogs(slug) {
+      const w = mockServices.find((x) => x.slug === slug);
+      if (w?.runtime === "worker") return { text: w.health === "crashLooped"
+        ? `[stderr] ${slug}: cannot open /srv/${slug}/state.db: permission denied\n[cutex] exited with code 2; restart 5 of 5\n[cutex] restarts used up; stopped\n`
+        : `[stdout] ${slug} started (pid 4188)\n[stdout] scanned 1204 files\n[stdout] indexed 37 new photos\n[stdout] idle, next scan in 10 min\n` };
       return { text: `[mock] ${slug} listening\nGET / 200\nGET /api/state 200\n` };
     },
     // cutex service-tiles (not under ?legacy): the tile answer, and its image through main (a data: URL).

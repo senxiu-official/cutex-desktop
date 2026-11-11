@@ -55,6 +55,7 @@ import { useListings } from "./useListings";
 import { bindingLabel } from "../../../lib/keybindings";
 import { withKey } from "../../../lib/useKeybindings";
 import { useOwnerWindow } from "../../../lib/ownerContext";
+import { ownerWindowOf } from "../../../lib/ownerWindow";
 
 /**
  * The instance state (small; the rest is in ./store): `q` = the 全部搜索 text (v1's search box, restored as
@@ -377,18 +378,27 @@ export function FilesBody({ instance, setState, sessionId, visible }: SideBodyPr
 
   // ---------- layout: preview beside / below / off ----------
   const box = useRef<HTMLDivElement>(null);
-  const [size, setSize] = useState({ w: 600, h: 600 });
+  // Only the two flags the layout reads: a Shelf edge being dragged resizes this box on every step, and a new
+  // size each time re-rendered the whole tree per step (perf/shelf-divider-drag).
+  // (Compared before setting: an updater returning the same state could still render and commit once per step.)
+  const [size, setSize] = useState({ wide: true, tall: true });
+  const sizeNow = useRef(size);
   useEffect(() => {
     const el = box.current;
     if (!el || typeof ResizeObserver === "undefined") return;
-    const ro = new win.ResizeObserver(() => setSize({ w: el.clientWidth, h: el.clientHeight }));
+    const fit = (w: number, h: number) => {
+      const old = sizeNow.current;
+      if (old.wide === w >= WIDE && old.tall === h >= TALL) return;
+      setSize((sizeNow.current = { wide: w >= WIDE, tall: h >= TALL }));
+    };
+    const ro = new win.ResizeObserver(() => fit(el.clientWidth, el.clientHeight));
     ro.observe(el);
-    setSize({ w: el.clientWidth || 600, h: el.clientHeight || 600 });
+    fit(el.clientWidth || 600, el.clientHeight || 600);
     return () => ro.disconnect();
   }, []);
   const [forced, setForced] = useState(false);
-  const beside = size.w >= WIDE;
-  const roomy = beside || size.h >= TALL;
+  const beside = size.wide;
+  const roomy = beside || size.tall;
   const previewShown = options.preview && (roomy || forced);
   const togglePreview = () => {
     if (!roomy) setForced((f) => !f || !options.preview);
@@ -734,7 +744,7 @@ export function FilesBody({ instance, setState, sessionId, visible }: SideBodyPr
     setTimeout(() => filterInput.current?.focus());
   };
   const previewEl = previewShown && (
-    <div className={`flex min-h-0 min-w-0 flex-col ${beside ? "border-l" : "border-t"} border-border/60`} style={{ flex: `${1 - options.split} 1 0` }}>
+    <div className={`flex min-h-0 min-w-0 flex-col ${beside ? "border-l" : "border-t"} border-border/60`} style={{ flex: `calc(1 - var(--fx-split, ${options.split})) 1 0` }}>
       <InlinePreview
         visible={visible}
         api={api}
@@ -864,7 +874,7 @@ export function FilesBody({ instance, setState, sessionId, visible }: SideBodyPr
       </div>
       {/* Tree / gallery / results + the built-in preview */}
       <div className={`flex min-h-0 flex-1 ${beside ? "flex-row" : "flex-col"}`}>
-        <div className="flex min-h-0 min-w-0 flex-col" style={{ flex: previewShown ? `${options.split} 1 0` : "1 1 0" }}>
+        <div className="flex min-h-0 min-w-0 flex-col" style={{ flex: previewShown ? `var(--fx-split, ${options.split}) 1 0` : "1 1 0" }}>
           {search !== null ? (
             <SearchList
               results={results}
@@ -931,7 +941,8 @@ export function FilesBody({ instance, setState, sessionId, visible }: SideBodyPr
   );
 }
 
-/** The line between the tree and the built-in preview: drag to resize (remembered), double-click = half. */
+/** The line between the tree and the built-in preview: drag to resize (remembered), double-click = half.
+ *  During the drag only the panes' --fx-split moves (no render per step); the split is stored once, on release. */
 function Splitter({ beside, split }: { beside: boolean; split: number }) {
   const ref = useRef<HTMLDivElement>(null);
   return (
@@ -948,13 +959,22 @@ function Splitter({ beside, split }: { beside: boolean; split: number }) {
         const rect = parent.getBoundingClientRect();
         const target = e.currentTarget;
         target.setPointerCapture(e.pointerId);
-        const move = (ev: PointerEvent) => setExplorerOptions({ split: clampSplit(beside ? (ev.clientX - rect.left) / rect.width : (ev.clientY - rect.top) / rect.height) });
+        let next: number | null = null;
+        const move = (ev: PointerEvent) => {
+          next = clampSplit(beside ? (ev.clientX - rect.left) / rect.width : (ev.clientY - rect.top) / rect.height);
+          parent.style.setProperty("--fx-split", String(next));
+        };
         const upFn = () => {
           target.removeEventListener("pointermove", move);
           target.removeEventListener("pointerup", upFn);
+          target.removeEventListener("pointercancel", upFn);
+          if (next !== null) setExplorerOptions({ split: next });
+          // The store's split is rendered by then (a sync external-store update): drop the drag's value.
+          ownerWindowOf(parent).requestAnimationFrame(() => parent.style.removeProperty("--fx-split"));
         };
         target.addEventListener("pointermove", move);
         target.addEventListener("pointerup", upFn);
+        target.addEventListener("pointercancel", upFn);
       }}
       className={`relative z-10 shrink-0 ${beside ? "-mx-[3px] w-[7px] cursor-col-resize" : "-my-[3px] h-[7px] cursor-row-resize"} hover:bg-accent/30`}
     />

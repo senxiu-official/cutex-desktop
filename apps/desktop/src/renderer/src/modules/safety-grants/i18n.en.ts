@@ -4,7 +4,7 @@ import type { zhCN } from "./i18n";
 
 export const en: Record<keyof typeof zhCN, string> = {
   "safety-grants.title": "Safety check grants",
-  "safety-grants.description": "Commands a Claude Code safety check stopped under full access: marked in the conversation; the {{owner}} may approve one exact retry",
+  "safety-grants.description": "Review commands blocked by Claude Code in full-access mode; the {{owner}} can approve one retry of the same command",
   "safety-grants.line.blocked": "Stopped, waiting for the {{owner}}",
   "safety-grants.line.granted": "The {{owner}} approved it once",
   "safety-grants.line.dismissed": "The {{owner}} did not approve it",

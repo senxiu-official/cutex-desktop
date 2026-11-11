@@ -188,7 +188,7 @@ export function ModelList({ profile, view, setView, compaction }: { profile: str
       {view.models.length === 0 ? (
         <p className="py-1 text-xs text-subtle">{editable ? t("agent-config.profile.noModels") : (view.modelsUnavailableReason ?? t("agent-config.profile.noModelsNative"))}</p>
       ) : (
-        <div className="rounded-lg border border-border px-3">
+        <div className="border-t border-border">
           <div className={`${GRID} border-b border-border py-1.5 text-caption/[inherit] text-subtle`}>
             <span>{t("agent-config.defaults.profileModel")}</span>
             {cols.context && <span className="text-right">{t("agent-config.profile.colContext")}</span>}

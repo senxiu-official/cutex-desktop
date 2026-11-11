@@ -1,0 +1,7 @@
+copyright: Copyright 2020 IBM Corp. All rights reserved.
+
+trademark: IBM Plex(r) is a trademark of IBM Corp, registered in many jurisdictions worldwide.
+
+designer: Mike Abbink, Paul van der Laan, Pieter van Rosmalen
+
+manufacturer: Bold Monday

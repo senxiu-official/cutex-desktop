@@ -655,6 +655,14 @@ export interface SafetyBlock {
   usedAt: string | null;
   /** How long a grant stays valid (1800). */
   grantSeconds: number;
+  /**
+   * safety-grant-delivery (newer cutex + adapter with safetyGrantReadWindow; absent on older ones): the ledger
+   * input id of the grant's approval notice; when the agent first read it; the cap (approval + 2 h). Before the
+   * read `expiresAt` is the cap, after it read + 30 min (never past the cap).
+   */
+  noticeInputId?: string | null;
+  noticeReadAt?: string | null;
+  hardExpiresAt?: string | null;
 }
 
 /** `GET /v2/owner-notifications` */
@@ -1253,6 +1261,8 @@ export interface InputRecord {
   batchId: string | null;
   /** 057: inputs bundled with this owner message; absent on older hosts. */
   carries?: string[];
+  /** Unread wake agent / peer records to a busy recipient only (absent elsewhere and on older hosts). */
+  wakeSchedule?: InputWakeSchedule;
   askId: string | null;
   remote: InputRemote | null;
   stalled: InputStalled | null;
@@ -1265,6 +1275,20 @@ export interface InputRecord {
   /** The session `stateRevision` of this record's last change. */
   stateRevision: number;
   updatedAt: string;
+}
+
+/**
+ * When a wake to a busy recipient may be read inside the running turn (cutex agentBus.wakeBusyWaitSecs).
+ * `capability`: the recipient reads early (`soon`), only after the turn, or not at all. `timing`: `nextStep` =
+ * past the wait, read at the next read point; `afterTurn` with `nextStepAt` = until then; `afterTurn` without
+ * one = this note waits for the turn end. Says nothing about whether it was read.
+ */
+export interface InputWakeSchedule {
+  nextStepAt: string | null;
+  waitSecs: number | null;
+  capability: "soon" | "afterTurn" | "none" | (string & {});
+  timing: "afterTurn" | "nextStep" | (string & {});
+  held?: string;
 }
 
 export interface InputHoldParams {

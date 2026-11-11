@@ -1,6 +1,6 @@
 export const zhCN = {
   "safety-grants.title": "安全检查放行",
-  "safety-grants.description": "完全访问下被 Claude Code 安全检查拦下的命令：在对话里标出，{{owner}}可以批准原样重试一次",
+  "safety-grants.description": "在会话中查看完全访问模式下被 Claude Code 拦截的命令，由{{owner}}批准原样重试一次",
   "safety-grants.line.blocked": "已拦下，等{{owner}}决定",
   "safety-grants.line.granted": "{{owner}}已批准一次",
   "safety-grants.line.dismissed": "{{owner}}未批准",

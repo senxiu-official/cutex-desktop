@@ -85,4 +85,26 @@ Licensed under the SIL Open Font License, Version 1.1 (LICENSES/OFL-1.1-katex-fo
   - The KaTeX_* fonts of the katex npm package (dist/fonts), bundled unmodified with the app for
     Markdown math. KaTeX's code is MIT and is listed in THIRD_PARTY_NOTICES.md.
 
+-------------------------------------------------------------------------------------------------
+Interface and reading fonts — SIL Open Font License, Version 1.1
+Each family's OFL text, its copyright / trademark / designer notices and its pinned upstream source
+are in LICENSES/fonts/<family>/ (OFL.txt, COPYRIGHT-AND-NOTICES.txt, SOURCE.txt).
+
+  - Bundled with the app (apps/desktop/src/renderer/src/assets/fonts/latin/): Bitter (Copyright 2011
+    The Bitter Project Authors, Reserved Font Name "Bitter Pro"), Roboto Serif (Copyright 2020 The
+    Roboto Serif Project Authors), IBM Plex Serif (Copyright 2017 IBM Corp., Reserved Font Name
+    "Plex"), Literata (Copyright 2017 The Literata Project Authors), Alegreya (Copyright 2011 The
+    Alegreya Project Authors), Crimson Pro (Copyright 2018 The Crimson Pro Project Authors) and
+    EB Garamond (Copyright 2017 The EB Garamond Project Authors). Full character sets; TrueType
+    files are only put in a WOFF2 container (no table transforms), names and outlines unchanged.
+  - 中文字体包, not part of the install; downloaded on request from the fonts-zh-1 release of this project (archive
+    with each family's license texts, checked against hashes pinned in the app) or imported by the owner,
+    into the app's data folder:
+    獅尾四季春加糖 / Swei Spring Sugar, 獅尾 B2 加糖宋體 / Swei B2 Sugar and 獅尾四季春 / Swei Spring
+    (Chun Yu Yao, https://github.com/max32002), 朱雀仿宋 / Zhuque Fangsong (Copyright (c) 2023,
+    Zhejiang JadeFoci Techonology Co. LTD, as written upstream). The app bundles only a preview subset of each (printable
+    ASCII and the preview text, apps/desktop/src/renderer/src/assets/fonts/preview/), names kept;
+    none of these families declares a Reserved Font Name.
+  - Regenerated from the font handoff with apps/desktop/scripts/font-assets.py.
+
 祀小姐真可爱。

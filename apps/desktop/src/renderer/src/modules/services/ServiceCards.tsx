@@ -2,13 +2,15 @@
 // owner fields on the service records (purpose, groupName and sortOrder) are persisted.
 import { isImeComposing } from "../../lib/ime";
 import { DROP_TINT, dropTint } from "../../lib/dropTint";
-import { useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type ReactNode } from "react";
 import { ChevronDown, ChevronRight, GripVertical, MoreHorizontal, Star } from "lucide-react";
 import type { ServicePatch, ServiceView } from "../../../../shared/ipc";
 import { readServiceTile } from "../../../../shared/home";
 import { apiFor } from "../../bridge";
 import { openMenuFrom, type MenuEntry } from "../../lib/contextMenu";
 import { openService } from "../../lib/services";
+import { isWorker, serviceHealthKey } from "../../lib/serviceWorker";
+import { WorkerBadge } from "../../components/WorkerBadge";
 import { useI18n, type MessageKey } from "../../i18n";
 import {
   isOrganizeUnsupported,
@@ -37,6 +39,8 @@ interface Props {
   tileEnabled(row: ServiceCardRow): boolean;
   organizable(row: ServiceCardRow): boolean;
   menu(row: ServiceCardRow, organization: MenuEntry[]): MenuEntry[];
+  /** The logs opened from a card's menu (shown under its group; a background service's main view). */
+  logs?(row: ServiceCardRow): ReactNode;
   refresh(): Promise<void>;
   error(message: string): void;
 }
@@ -98,11 +102,20 @@ function CompactServiceCard({ row, ownerName, ownerTitle, stale, tileEnabled, ca
   }, [row.hostId, row.item.slug, row.item.archived, tileEnabled]);
   const service = row.item;
   const title = tile?.title || service.displayName || service.slug;
-  const health = t(`services.health.${service.health}` as MessageKey) + (service.health === "stoppedIdle" && service.stoppedIdleAt ? ` · ${new Date(service.stoppedIdleAt).toLocaleString()}` : "");
-  const open = () => !stale && !service.archived && void openService(service, row.hostId).catch((reason: unknown) => error(reason instanceof Error ? reason.message : String(reason)));
+  const worker = isWorker(service);
+  const health = t(serviceHealthKey(service)) + (service.health === "stoppedIdle" && service.stoppedIdleAt ? ` · ${new Date(service.stoppedIdleAt).toLocaleString()}` : "");
+  const cardRef = useRef<HTMLDivElement>(null);
+  // A background service has no page: the card opens its menu (start / stop / restart / logs) instead.
+  const open = () => {
+    if (stale || service.archived) return;
+    if (worker) { if (cardRef.current) openMenuFrom(cardRef.current, menu()); return; }
+    void openService(service, row.hostId).catch((reason: unknown) => error(reason instanceof Error ? reason.message : String(reason)));
+  };
   return (
     <div
+      ref={cardRef}
       role="button"
+      data-service-worker={worker || undefined}
       tabIndex={stale || service.archived ? -1 : 0}
       draggable={canDrag}
       data-service-card={row.key}
@@ -118,9 +131,10 @@ function CompactServiceCard({ row, ownerName, ownerTitle, stale, tileEnabled, ca
     >
       <button type="button" aria-label={t("services.more")} onClick={(event) => { event.stopPropagation(); openMenuFrom(event.currentTarget, menu()); }} className="absolute top-1.5 right-1.5 rounded p-1 text-subtle opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 hover:bg-surface-2 hover:text-foreground"><MoreHorizontal size={14} /></button>
       <div className="flex min-w-0 items-center gap-1.5 pr-6">
-        <span aria-hidden="true" className={`size-2 shrink-0 rounded-full ${service.health === "reachable" ? "bg-ok" : service.health === "starting" ? "bg-warn" : "bg-subtle"}`} />
+        <span aria-hidden="true" className={`size-2 shrink-0 rounded-full ${service.health === "reachable" ? "bg-ok" : service.health === "starting" ? "bg-warn" : service.health === "crashLooped" ? "bg-danger" : "bg-subtle"}`} />
         <span className="truncate text-sm font-medium">{title}</span>
         {service.starred ? <Star size={12} className="shrink-0 fill-current text-warn-text" /> : null}
+        {worker ? <WorkerBadge /> : null}
         {tile?.badge ? <span className="max-w-20 truncate rounded bg-accent/10 px-1 py-0.5 text-caption/[inherit] text-accent">{tile.badge}</span> : null}
       </div>
       <div className="mt-1 flex min-w-0 items-center gap-1.5 pl-3.5 text-caption/[inherit] text-subtle"><span className="truncate" title={health}>{health}</span><span aria-hidden="true">·</span><span className="truncate" title={ownerTitle} data-service-scope={ownerTitle ? "project" : undefined}>{ownerName}</span></div>
@@ -128,7 +142,7 @@ function CompactServiceCard({ row, ownerName, ownerTitle, stale, tileEnabled, ca
   );
 }
 
-export function ServiceCards({ rows, ownerName, ownerTitle, hostName, stale, tileEnabled, organizable, menu, refresh, error }: Props) {
+export function ServiceCards({ rows, ownerName, ownerTitle, hostName, stale, tileEnabled, organizable, menu, logs, refresh, error }: Props) {
   const { t } = useI18n();
   const sections = useMemo(() => organizedServiceSections(rows), [rows]);
   const dragRef = useRef<Dragged | null>(null);
@@ -317,6 +331,7 @@ export function ServiceCards({ rows, ownerName, ownerTitle, hostName, stale, til
                 </div>
                 {renaming === group.key ? <form className="mb-2 flex gap-2" onSubmit={(event) => { event.preventDefault(); if (isImeComposing(event)) return; const input = new FormData(event.currentTarget).get("name"); void renameGroup(sectionName, group.name, typeof input === "string" ? input : ""); }}><input name="name" autoFocus defaultValue={group.name} maxLength={80} onKeyDown={(event) => { if (!isImeComposing(event) && event.key === "Escape") setRenaming(null); }} onBlur={(event) => { if (!isImeComposing(event)) setRenaming(null); }} className="min-w-0 flex-1 rounded border border-accent bg-background px-2 py-1 text-xs outline-none" /><span className="self-center text-caption/[inherit] text-subtle">{t("services.group.renameHint")}</span></form> : null}
                 {!folded ? <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-2">{group.rows.map((row) => <CompactServiceCard key={row.key} row={row} ownerName={ownerName(row)} ownerTitle={ownerTitle?.(row)} stale={stale(row)} tileEnabled={tileEnabled(row)} canDrag={!busy} blocked={blockedReason(row)} highlighted={dropHint.startsWith(`card:${row.key}:`)} menu={() => menu(row, organizationEntries(row))} beginDrag={(event) => beginService(row, event)} finishDrag={finishDrag} dragOver={(event) => { const drag = dragRef.current; if (drag?.kind !== "service" || drag.key === row.key) return; event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = "move"; const rect = event.currentTarget.getBoundingClientRect(); const after = event.clientY > rect.top + rect.height / 2 || (Math.abs(event.clientY - (rect.top + rect.height / 2)) < rect.height / 4 && event.clientX > rect.left + rect.width / 2); setDropHint(`card:${row.key}:${after ? "after" : "before"}`); }} drop={(event) => { event.preventDefault(); event.stopPropagation(); const drag = dragRef.current; if (drag?.kind !== "service" || drag.key === row.key) return; const after = dropHint === `card:${row.key}:after`; void moveService(drag.key, sectionName, group.name, row.key, after); }} error={error} />)}</div> : null}
+                {!folded && logs ? group.rows.map((row) => { const body = logs(row); return body ? <div key={`logs:${row.key}`} data-service-card-logs={row.key} className="mt-2 rounded-lg border border-border bg-surface-1 px-2.5 py-2"><div className="mb-1 truncate text-xs font-medium text-muted">{row.item.displayName || row.item.slug}</div>{body}</div> : null; }) : null}
               </div>;
             })}
             <div className={`rounded-lg border border-dashed px-2 py-1.5 text-xs ${dropHint === `new:${sectionName}` ? `border-accent text-accent ${DROP_TINT}` : "border-border text-subtle"}`} style={dropHint === `new:${sectionName}` ? tint : undefined} onDragOver={(event) => { if (dragRef.current?.kind === "service") { event.preventDefault(); event.stopPropagation(); setDropHint(`new:${sectionName}`); } }} onDrop={(event) => { event.preventDefault(); event.stopPropagation(); const drag = dragRef.current; if (drag?.kind === "service") startNewGroup(drag.key, sectionName); }}>{newGroup?.section === sectionName ? <form className="flex items-center gap-2" onSubmit={(event) => { event.preventDefault(); if (isImeComposing(event)) return; const name = new FormData(event.currentTarget).get("name"); if (typeof name === "string" && name.trim()) { const target = newGroup; setNewGroup(null); void moveService(target.rowKey, sectionName, name.trim()); } }}><input name="name" autoFocus maxLength={80} placeholder={t("services.group.namePlaceholder")} onKeyDown={(event) => { if (!isImeComposing(event) && event.key === "Escape") setNewGroup(null); }} className="min-w-0 flex-1 rounded border border-accent bg-background px-2 py-1 text-foreground outline-none" /><button type="submit" className="rounded bg-accent px-2 py-1 text-accent-foreground">{t("services.group.create")}</button></form> : <span>＋ {t("services.group.new")}</span>}</div>

@@ -319,6 +319,10 @@ export function Conversation({ scope }: { scope: WorkspaceScope | null }) {
   // in the same frame. QueuePanel asks again (store.recheck) when its folded list changes size — no layout change.
   // Then the composer's input cap (`--composer-input-max`, lib/shortPane composerInputMax), read after the fold landed:
   // the input grows only while the history keeps its minimum, then scrolls inside itself.
+  // Both caps are written on the composer block (their only readers: the input and QueuePanel's overlay, inside it), not
+  // on <main>: a custom property is inherited, so a write on the pane restyled every row of the timeline (two ~35 ms
+  // recalcs of ~5000 elements whenever a column / Shelf drag re-wrapped the composer, perf/shelf-divider-drag).
+  const capsBox = (main: HTMLElement) => main.querySelector<HTMLElement>(":scope > [data-composer-block]") ?? main;
   const [shortPane] = useState(createShortPaneStore);
   const fitShortPane = (sc: HTMLElement, sync: boolean) => {
     const main = sc.closest("main");
@@ -330,14 +334,16 @@ export function Conversation({ scope }: { scope: WorkspaceScope | null }) {
       else shortPane.set(fold);
     }
     const max = `${overlayMax(sc.clientHeight)}px`;
-    if (main.style.getPropertyValue("--short-pane-overlay-max") !== max) main.style.setProperty("--short-pane-overlay-max", max);
+    const vars = capsBox(main);
+    if (vars.style.getPropertyValue("--short-pane-overlay-max") !== max) vars.style.setProperty("--short-pane-overlay-max", max);
     fitComposerInput(main, sc);
   };
   const fitComposerInput = (main: HTMLElement, sc: HTMLElement) => {
     const input = measureComposerInput(main);
     if (!input) return;
     const cap = `${composerInputMax(main.clientHeight, sc.clientHeight, input)}px`;
-    if (main.style.getPropertyValue("--composer-input-max") !== cap) main.style.setProperty("--composer-input-max", cap);
+    const vars = capsBox(main);
+    if (vars.style.getPropertyValue("--composer-input-max") !== cap) vars.style.setProperty("--composer-input-max", cap);
   };
   useEffect(() => {
     const el = content.current;
@@ -345,10 +351,12 @@ export function Conversation({ scope }: { scope: WorkspaceScope | null }) {
     shortPane.onRecheck = () => {
       if (scroller.current) fitShortPane(scroller.current, false);
     };
-    const ro = new win.ResizeObserver(() => {
+    const ro = new win.ResizeObserver((entries) => {
       const sc = scroller.current;
       if (!sc) return;
-      fitShortPane(sc, true);
+      // The fold and the input cap read only the pane, the history's viewport and the composer block — never the rows'
+      // height: rows that only grew (a streamed reply) skip those queries and are just followed.
+      if (entries.some((entry) => entry.target !== el)) fitShortPane(sc, true);
       if (!stick.current) return;
       sc.scrollTo({ top: sc.scrollHeight });
       keepRowsUp(sc);

@@ -1,7 +1,8 @@
 import { BrowserCursorSettings } from "./BrowserCursorSettings";
+import { BrowserCarrierSettings } from "./BrowserCarrierSettings";
 import { useEffect, useState } from "react";
 import { DEFAULT_BROWSER_CONTROL_SETTINGS, type BrowserControlSettings, type BrowserExternalPagesView, type BrowserSitePermissionForget, type BrowserSitePermissionView } from "../../../../shared/browser";
-import { LinkRow, ListFilter, NumberField, ResetButton, Section, Select, SettingRow, SettingsGroup, SubPageRow, Toggle } from "../../components/settings/Form";
+import { Button, EmptyState, ErrorNote, LinkRow, ListFilter, ListRow, Loading, NumberField, ResetButton, Section, Select, SettingRow, SettingsGroup, SubPageRow, Toggle } from "../../components/settings/Form";
 import { useI18n } from "../../i18n";
 import { browserError, browserErrorKey } from "./browserState";
 import { bridge } from "../../bridge";
@@ -46,7 +47,7 @@ function BrowserExternalPagesSettings() {
       </span>
     </SettingRow>
     {view?.forced && <p role="status" className="text-xs text-subtle">{t("browser.externalPages.forced")}</p>}
-    {error && <p role="alert" className="text-xs text-danger">{t("browser.actionFailed", { reason: t(browserErrorKey(error)) })}</p>}
+    {error && <ErrorNote>{t("browser.actionFailed", { reason: t(browserErrorKey(error)) })}</ErrorNote>}
   </Section>;
 }
 
@@ -81,17 +82,16 @@ export function BrowserSitePermissionSettings({ all = false }: { all?: boolean }
   const rows = all ? listed.filter(site => matchesFilter(filter, site.origin)) : listed.slice(0, SITES_ON_PAGE);
   return <Section id={all ? settingsAnchorId("site-permissions-all") : settingsAnchorId("site-permissions")} title={all ? t("browser.sitePermissions.all", { n: listed.length }) : t("browser.sitePermissions.title")} hint={all ? undefined : t("browser.sitePermissions.hint")}
     actions={sites.size > 0 ? <button type="button" data-browser-site-permissions-forget-all disabled={busy} onClick={() => void forget("all")} className="rounded text-xs text-accent hover:underline disabled:opacity-40">{t("browser.sitePermissions.forgetAll")}</button> : undefined}>
-    <SettingsGroup agents="now" source="local"><div data-browser-site-permissions className="flex flex-col gap-2">
-      {entries && sites.size === 0 && <p className="text-xs text-subtle">{t("browser.sitePermissions.empty")}</p>}
+    {/* One site = one ListRow (origin, what it may use, 忘记), like every other entity list in Settings. */}
+    <SettingsGroup agents="now" source="local"><div data-browser-site-permissions>
+      {!entries && !error && <Loading rows={1} />}
+      {entries && sites.size === 0 && <EmptyState>{t("browser.sitePermissions.empty")}</EmptyState>}
       {all && <div role="search" className="contents"><ListFilter count={listed.length} value={filter} onChange={setFilter} /></div>}
-      {all && listed.length > 0 && rows.length === 0 && <p className="text-xs text-subtle">{t("settings.filterNone")}</p>}
-      {rows.map(site => <div key={`${site.pool} ${site.origin}`} className="flex items-start justify-between gap-3 text-xs">
-        <div className="min-w-0">
-          <div className="truncate font-medium" title={site.origin}>{site.origin}{site.pool === "agent" && <span className="ml-1.5 font-normal text-subtle">({t("browser.sitePermissions.agentPool")})</span>}</div>
-          <div className="text-subtle">{site.items.map(item => `${t(`browser.sitePermission.${item.permission}` as Parameters<typeof t>[0])}: ${t(item.allow ? "browser.sitePermissions.allowed" : "browser.sitePermissions.blocked")}`).join(" · ")}</div>
-        </div>
-        <button type="button" disabled={busy} onClick={() => void forget({ pool: site.pool, origin: site.origin })} className="shrink-0 rounded-md border border-border px-2 py-1 disabled:opacity-40">{t("browser.sitePermissions.forget")}</button>
-      </div>)}
+      {all && listed.length > 0 && rows.length === 0 && <EmptyState>{t("settings.filterNone")}</EmptyState>}
+      {rows.map(site => <ListRow key={`${site.pool} ${site.origin}`}
+        title={<span title={site.origin}>{site.origin}{site.pool === "agent" && <span className="ml-1.5 text-subtle">({t("browser.sitePermissions.agentPool")})</span>}</span>}
+        detail={site.items.map(item => `${t(`browser.sitePermission.${item.permission}` as Parameters<typeof t>[0])}: ${t(item.allow ? "browser.sitePermissions.allowed" : "browser.sitePermissions.blocked")}`).join(" · ")}
+        actions={<Button disabled={busy} onClick={() => void forget({ pool: site.pool, origin: site.origin })}>{t("browser.sitePermissions.forget")}</Button>} />)}
     </div></SettingsGroup>
     {!all && listed.length > SITES_ON_PAGE && <SubPageRow title={t("browser.sitePermissions.all", { n: listed.length })} onOpen={() => useApp.getState().openSettings("browser", { sub: "sites" })} />}
     {error && <p role="alert" className="text-xs text-danger">{t("browser.actionFailed", { reason: t(browserErrorKey(error)) })}</p>}
@@ -147,6 +147,7 @@ export function BrowserSettings() {
       <NumberField value={settings.idleDetachSeconds} range={[5, 600]} label={t("browser.idleDetach")} unit={t("browser.seconds")}
         onCommit={(idleDetachSeconds) => save({ ...settings, idleDetachSeconds: idleDetachSeconds ?? 30 })} />
     </SettingRow>
+    <BrowserCarrierSettings />
     <div id={settingsAnchorId("site-origins")}>
       <SettingRow agents="none" source="local" label={t("browser.origins.reset")} hint={t("browser.origins.resetHint")}>
         <button type="button" data-browser-reset-origins disabled={!enabled || !bridge.browser || resetting} onClick={() => {

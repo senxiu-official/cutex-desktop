@@ -24,7 +24,7 @@ const INDEX_PACKS: NonNullable<ModulePacksView["index"]>["packs"] = [
   { id: "claude-science", version: "1.1.0", moduleApi: "^1.16", compat: "ok", size: 22746, title: { en: "Claude Science", "zh-CN": "Claude Science" } },
   { id: "claude-science", version: "1.0.1", moduleApi: "^1.16", compat: "ok", size: 22701, title: { en: "Claude Science", "zh-CN": "Claude Science" } },
   { id: "claude-science", version: "2.0.0", moduleApi: "^1.21", compat: "needsNewerApp", size: 23950, title: { en: "Claude Science", "zh-CN": "Claude Science" } },
-  { id: "desk-pet", version: "1.2.1", moduleApi: "^1.30", compat: "ok", size: 21000, title: { en: "Desk pet", "zh-CN": "桌宠" }, description: { en: "A little character that types while your agents use tokens", "zh-CN": "一个小角色：智能体用 token 时它敲得起劲" } },
+  { id: "desk-pet", version: "1.2.2", moduleApi: "^1.30", compat: "ok", size: 21000, title: { en: "Desk pet", "zh-CN": "桌宠" }, description: { en: "A little character that types while your agents use tokens", "zh-CN": "一个小角色：智能体用 token 时它敲得起劲" } },
   {
     id: "lab-notes",
     version: "0.3.0",
@@ -121,7 +121,7 @@ export function mockModulePacks(): ModulePacksBridge {
     },
     // Stands in for main's file dialog and confirm: the preview always picks the desk pet.
     async installLocal() {
-      return set({ installed: [...view.installed.filter((p) => p.id !== "desk-pet"), { ...entry("desk-pet", "1.2.1"), local: true }] });
+      return set({ installed: [...view.installed.filter((p) => p.id !== "desk-pet"), { ...entry("desk-pet", "1.2.2"), local: true }] });
     },
     async allowLocal({ allow }) {
       return set({ local: { ...view.local, allowed: allow } });

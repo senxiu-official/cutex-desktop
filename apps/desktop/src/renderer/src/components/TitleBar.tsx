@@ -136,7 +136,7 @@ export function TitleBar() {
       onDoubleClick={(e) => win?.nativeControls === null && e.target === e.currentTarget && void win.control("toggleMaximize")}
     >
       {!fullWindow && (
-        <div data-window-bar="scope" className={`flex min-w-0 shrink-0 items-center gap-1 px-2 ${sidebarOpen ? "max-w-[calc(100%-360px)] min-w-[max(180px,var(--sidebar-w,16rem))]" : ""} ${win?.nativeControls === "left" ? "pl-[76px]" : ""}`}>
+        <div data-window-bar="scope" data-live-width="sidebarWidth" className={`flex min-w-0 shrink-0 items-center gap-1 px-2 ${sidebarOpen ? "max-w-[calc(100%-360px)] min-w-[max(180px,var(--sidebar-w,16rem))]" : ""} ${win?.nativeControls === "left" ? "pl-[76px]" : ""}`}>
           <div className="titlebar-capsule flex h-8 min-w-0 items-center gap-1 px-1">
             {/* The logo is the sidebar toggle; hover / keyboard focus shows the panel icon instead. */}
             <button

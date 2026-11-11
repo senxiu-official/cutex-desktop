@@ -119,6 +119,8 @@ class ContentsMock extends EventEmitter {
   isLoading() { return false; }
   getURL() { return this.url; }
   getTitle() { return "Fixture page"; }
+  isAudioMuted() { return false; }
+  setBackgroundThrottling = vi.fn();
   async loadURL(url: string) { this.loads.push(url); this.url = url; this.emit("did-navigate", {}, url); }
   close() { if (!this.dead) { this.dead = true; this.emit("destroyed"); } }
 }

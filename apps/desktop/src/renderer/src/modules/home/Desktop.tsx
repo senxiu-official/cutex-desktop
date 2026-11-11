@@ -62,7 +62,8 @@ export function DesktopLayer({ reason, hostId: _focus, tray = false }: PaneDeskt
     );
   const box = (i: { top: number; right: number; bottom: number; left: number }) => ({ top: i.top, right: i.right, bottom: i.bottom, left: i.left });
   return (
-    // Right-click on the desktop (design 006 v1): 编辑主页 and 「⚙ 桌面设置…」 (inputs keep the native menu).
+    // Right-click on the desktop (design 006 v1): 编辑主页 and 「⚙ 桌面设置…」 (inputs keep the native menu). No floating
+    // 编辑主页 button (owner 2026-11-10: it sat over the widgets); the menu, a long press and 整理桌面 start editing.
     <div
       className={`home-desk absolute ${editing ? "home-editing" : ""}`}
       style={box(geo.layer)}
@@ -78,12 +79,6 @@ export function DesktopLayer({ reason, hostId: _focus, tray = false }: PaneDeskt
       <div className="relative h-full overflow-y-auto" style={{ paddingTop: geo.content.top, paddingRight: geo.content.right, paddingBottom: tray ? `calc(${geo.content.bottom}px + var(--tray-extra, 0px))` : geo.content.bottom, paddingLeft: geo.content.left }} data-home-content="">
         <DeskSurface />
       </div>
-      {!editing && (
-        <button onClick={() => setHomeEditing(true)} className="home-glass absolute right-5 inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs" style={{ bottom: tray ? 18 : 16 }} data-home-editbtn="">
-          <Pencil size={12} />
-          {t("home.edit")}
-        </button>
-      )}
       {editing && (
         <div className="absolute top-3 left-1/2 flex -translate-x-1/2 items-center gap-3 rounded-full bg-raised py-1.5 pr-1.5 pl-4 text-xs whitespace-nowrap shadow-lg" data-home-editbar="">
           <Pencil size={12} />

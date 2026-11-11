@@ -25,6 +25,7 @@ import { pagePinsKept } from "./model";
 import { openFailedText, openTileAction } from "./open";
 import { gradientOf, tileParts } from "./tile";
 import { CountBadge, Tag } from "../../components/Tag";
+import { WorkerBadge } from "../../components/WorkerBadge";
 
 
 function Icon({ bg, size, children }: { bg: string; size: number; children: ReactNode }) {
@@ -47,8 +48,8 @@ function HostChip({ hostId }: { hostId: string }) {
   );
 }
 
-const HEALTH_KEY: Record<string, MessageKey> = { reachable: "home.tile.running", starting: "home.tile.starting", unreachable: "home.tile.unreachable", stopped: "home.tile.stopped" };
-const HEALTH_DOT: Record<string, string> = { reachable: "bg-ok", starting: "bg-warn", unreachable: "bg-danger", stopped: "bg-subtle opacity-60" };
+const HEALTH_KEY: Record<string, MessageKey> = { reachable: "home.tile.running", starting: "home.tile.starting", unreachable: "home.tile.unreachable", stopped: "home.tile.stopped", stoppedIdle: "services.health.stoppedIdle", crashLooped: "services.health.crashLooped" };
+const HEALTH_DOT: Record<string, string> = { reachable: "bg-ok", starting: "bg-warn", unreachable: "bg-danger", crashLooped: "bg-danger", stopped: "bg-subtle opacity-60", stoppedIdle: "bg-subtle opacity-60" };
 
 /** A service pin: its icon tile, or its template tile (m / w / l) when the host serves one. */
 function ServiceTile({ pin, size, explain }: { pin: HomePin; size: HomeTileSize; explain: (r: string) => string }) {
@@ -61,7 +62,8 @@ function ServiceTile({ pin, size, explain }: { pin: HomePin; size: HomeTileSize;
   const name = view?.displayName || pin.title || pin.key;
   const health = !connected ? "offline" : view ? view.health : listed ? "missing" : "unknown";
   const off = health !== "reachable" && health !== "starting" && health !== "unknown";
-  const status = health === "offline" ? t("home.tile.offline") : health === "missing" ? t("home.tile.missing") : HEALTH_KEY[health] ? t(HEALTH_KEY[health]!) : "";
+  const worker = view?.runtime === "worker";
+  const status = health === "offline" ? t("home.tile.offline") : health === "missing" ? t("home.tile.missing") : worker && health === "unreachable" ? t("services.worker.health.restarting") : HEALTH_KEY[health] ? t(HEALTH_KEY[health]!) : "";
   const dot = <span className={`inline-block size-[7px] shrink-0 rounded-full ${HEALTH_DOT[health] ?? "bg-subtle"}`} data-home-health={health} />;
   const icon = (px: number) => (
     <Icon bg={gradientOf(pin.key)} size={px}>
@@ -87,6 +89,7 @@ function ServiceTile({ pin, size, explain }: { pin: HomePin; size: HomeTileSize;
           <div className="flex items-center gap-1.5 text-xs font-semibold">
             <span className="truncate">{parts?.title ?? name}</span>
             {parts?.badge && <Tag tone="accent">{parts.badge}</Tag>}
+            {worker && <WorkerBadge />}
           </div>
           <div className="mt-0.5 flex items-center gap-1.5 text-caption/[inherit] home-sub">
             {dot}

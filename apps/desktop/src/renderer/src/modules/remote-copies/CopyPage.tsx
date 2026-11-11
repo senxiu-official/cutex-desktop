@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
 import { ArrowUpDown, Check, Download, ExternalLink, FileText, FolderOpen, LayoutList, MoreHorizontal, Pin, RefreshCw, Rows3, Search, X } from "lucide-react";
 import { useI18n, type MessageKey } from "../../i18n";
 import { sidebarOf, useApp } from "../../store";
+import { rowsOf } from "../../lib/viewHost";
 import { Button, btnFace, btnShape } from "../../components/Button";
 import { ArmedButton } from "../../components/ArmedButton";
 import { DataTable, type Column } from "../../components/DataTable";
@@ -13,9 +14,10 @@ import { FILE_KIND_ICON } from "../../lib/fileKindIcons";
 import { contextMenu, openMenuFrom } from "../../lib/contextMenu";
 import { useSizeFlags, widthBelow } from "../../lib/sizeFlags";
 import type { RemoteCopy } from "../../../../shared/remoteCopies";
-import { dismissCopy, refreshCopies, startPrepared, useCopies } from "../../lib/remoteCopies";
+import { chooseDownloadFolder, defaultDownloadFolder, dismissCopy, openDownloadFolder, refreshCopies, refreshDownloadFolder, startPrepared, useCopies } from "../../lib/remoteCopies";
+import type { DownloadFolder } from "../../../../shared/remoteCopyRequests";
 import { cancelCopy, copyCaps, copyMenu, downloadAgain, keepCopy, openCopy, openOriginal, removeCopy, revealCopy } from "./menu";
-import { COPY_SORTS, SORT_DESC_FIRST, copyDate, filterCopies, pickSort, placeOf, placeOptions, setCopyView, sortCopies, useCopyView, type CopySort, type CopyView, type PlaceNames } from "./view";
+import { COPY_SORTS, SORT_DESC_FIRST, copyDate, filterCopies, pickSort, copyLocation, placeOf, placeOptions, setCopyView, sortCopies, useCopyView, type CopySort, type CopyView, type PlaceNames } from "./view";
 
 /** Host labels and project names as the app knows them now (placeOf falls back to what the copy saved). */
 function usePlaceNames(): PlaceNames {
@@ -31,15 +33,45 @@ function usePlaceNames(): PlaceNames {
   }, [hosts, byHost, sidebar]); // eslint-disable-line react-hooks/exhaustive-deps
 }
 
+/** What a copy is from, beyond its host: the project (placeOf), else the agent whose workspace / artifact it is. */
+function useSourceLabel(copy: RemoteCopy): string {
+  const { t } = useI18n();
+  const names = usePlaceNames();
+  const agent = useApp((s) => (copy.source.scope?.kind === "session" ? rowsOf(sidebarOf(s, copy.source.hostId)).find((r) => r.cutexSessionId === copy.source.scope!.id)?.displayName ?? null : null));
+  const place = placeOf(copy, names);
+  const where = [place.host, place.project ?? agent].filter(Boolean).join(" · ");
+  return copy.source.artifact ? `${where} · ${t("remote-copies.artifactVersion", { n: copy.source.artifact.version })}` : `${where} · ${copy.source.path}`;
+}
+
+/** The download folder: where it is, open it, move it (main's dialog) or back to the default. */
+function FolderBar({ folder, busy }: { folder: DownloadFolder | null; busy: boolean }) {
+  const { t } = useI18n();
+  // Two lines: the path keeps the pane's width (a Shelf is narrow), the actions sit under it.
+  return <div className="flex flex-col gap-1 border-b border-border/60 px-3 py-2 text-xs" data-download-folder={folder?.path ?? ""}>
+    <div className="flex min-w-0 items-center gap-2">
+      <FolderOpen size={14} className="shrink-0 text-muted" aria-hidden />
+      <span className="shrink-0 text-muted">{t("remote-copies.folder")}</span>
+      {folder?.isDefault && <span className="min-w-0 truncate text-subtle">{t("remote-copies.folderDefault")}</span>}
+    </div>
+    <span className="min-w-0 truncate font-mono text-caption [direction:rtl] text-left" title={folder?.path}><bdi>{folder?.path ?? "…"}</bdi></span>
+    <span className="-ml-2 flex flex-wrap gap-1">
+      <Button size="sm" variant="ghost" disabled={!folder} onClick={() => void openDownloadFolder()} data-download-folder-open>{t("remote-copies.openFolder")}</Button>
+      <Button size="sm" variant="ghost" disabled={!folder || busy} title={t("remote-copies.changeFolderHint")} onClick={() => void chooseDownloadFolder()} data-download-folder-change>{t("remote-copies.changeFolder")}</Button>
+      {folder && !folder.isDefault && <Button size="sm" variant="ghost" disabled={busy} title={t("remote-copies.changeFolderHint")} onClick={() => void defaultDownloadFolder()}>{t("remote-copies.defaultFolder")}</Button>}
+    </span>
+  </div>;
+}
+
 export function CopyPage() {
   const { t } = useI18n();
-  const { state, pending, busy, starting, error } = useCopies();
+  const { state, folder, pending, busy, starting, error } = useCopies();
   const prefs = useCopyView();
   const names = usePlaceNames();
   const [text, setText] = useState("");
   const [place, setPlace] = useState("");
   useEffect(() => {
     void refreshCopies();
+    void refreshDownloadFolder();
     const timer = window.setInterval(() => void refreshCopies(), 700);
     return () => window.clearInterval(timer);
   }, []);
@@ -63,6 +95,7 @@ export function CopyPage() {
       <p className="min-w-0 flex-1 text-xs text-muted">{t("remote-copies.hint")}</p>
       <Button size="sm" variant="ghost" aria-label={t("remote-copies.refresh")} onClick={() => void refreshCopies()}><RefreshCw size={14} data-icon="inline-start" /></Button>
     </div>
+    <FolderBar folder={folder} busy={!!copies?.some((c) => c.status === "downloading")} />
     {!!copies?.length && <div className="flex flex-wrap items-center gap-2 border-b border-border/60 px-3 py-2" data-copy-toolbar>
       <label className="flex min-w-[8rem] flex-1 items-center gap-1.5 rounded-md border border-border bg-background px-2 py-1 focus-within:border-accent">
         <Search size={13} className="shrink-0 text-subtle" />
@@ -96,9 +129,12 @@ function CopyRow({ copy }: { copy: RemoteCopy }) {
   const { t } = useI18n();
   const host = useApp(s => s.hosts?.hosts.find(h => h.id === copy.source.hostId));
   const { local, remote, active, openable } = copyCaps(copy, host);
+  const source = useSourceLabel(copy);
+  const folder = useCopies((s) => s.folder);
+  const location = local ? copyLocation(folder, copy) : null;
   const date = (value: string) => new Date(value).toLocaleString();
   return <article className="flex flex-col gap-2 rounded-lg border border-border/70 p-3" data-copy-row={copy.id}>
-    <div className="flex items-start gap-2"><FileText size={17} className="mt-0.5 shrink-0 text-muted" /><div className="min-w-0 flex-1"><h3 className="truncate text-sm font-medium" title={copy.name}>{copy.name}</h3><p className="mt-0.5 break-all text-xs text-muted">{host?.label ?? copy.source.hostLabel} · {copy.source.path}{copy.source.artifact ? ` @${copy.source.artifact.version}` : ""}</p></div><span className="shrink-0 text-xs text-muted">{formatSize(copy.size)}</span></div>
+    <div className="flex items-start gap-2"><FileText size={17} className="mt-0.5 shrink-0 text-muted" /><div className="min-w-0 flex-1"><h3 className="truncate text-sm font-medium" title={copy.name}>{copy.name}</h3><p className="mt-0.5 break-all text-xs text-muted" data-copy-source>{source}</p>{location && <p className="mt-0.5 flex min-w-0 gap-1.5 text-caption text-subtle" title={location} data-copy-location><span className="shrink-0">{t("remote-copies.location")}</span><span className="min-w-0 truncate font-mono [direction:rtl] text-left"><bdi>{location}</bdi></span></p>}</div><span className="shrink-0 text-xs text-muted">{formatSize(copy.size)}</span></div>
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted"><span>{t(`remote-copies.${copy.status}`)}</span>{copy.kept ? <span>{t("remote-copies.kept")}</span> : copy.expiresAt ? <span>{t("remote-copies.expires", { at: date(copy.expiresAt) })}</span> : null}</div>
     {copy.downloadedAt && <p className="text-xs text-subtle">{t("remote-copies.downloaded", { at: date(copy.downloadedAt) })}</p>}
     {active && <div className="flex items-center gap-2"><progress className="h-1.5 min-w-0 flex-1 accent-accent" value={copy.received} max={Math.max(copy.size, 1)} aria-label={t("remote-copies.downloading")} /><span className="text-xs tabular-nums text-muted">{formatSize(copy.received)} / {formatSize(copy.size)}</span></div>}
@@ -108,7 +144,8 @@ function CopyRow({ copy }: { copy: RemoteCopy }) {
       <Button size="sm" variant="ghost" disabled={!local} onClick={() => revealCopy(copy)}><FolderOpen size={14} data-icon="inline-start" />{t("remote-copies.reveal")}</Button>
       <Button size="sm" variant="ghost" disabled={!remote} title={!remote ? t("remote-copies.offline") : undefined} onClick={() => openOriginal(copy)}>{t("remote-copies.original")}</Button>
       {active ? <Button size="sm" variant="ghost" onClick={() => cancelCopy(copy)}>{t("remote-copies.cancel")}</Button> : <Button size="sm" variant="ghost" disabled={!remote} title={!remote ? t("remote-copies.offline") : undefined} onClick={() => downloadAgain(copy)}>{t("remote-copies.refresh")}</Button>}
-      <Button size="sm" variant="ghost" disabled={!local} onClick={() => keepCopy(copy)}>{t(copy.kept ? "remote-copies.unkeep" : "remote-copies.keep")}</Button>
+      {/* An artifact saved to this computer is always kept (main remoteCopies): no keep toggle. */}
+      {!copy.source.artifact && <Button size="sm" variant="ghost" disabled={!local} onClick={() => keepCopy(copy)}>{t(copy.kept ? "remote-copies.unkeep" : "remote-copies.keep")}</Button>}
       <ArmedButton shape={btnShape({ size: "sm" })} idle={btnFace({ variant: "ghost", danger: true })} hint={t("remote-copies.removeConfirm")} disabled={active} onConfirm={() => removeCopy(copy)}>{t("remote-copies.remove")}</ArmedButton>
     </div>
   </article>;

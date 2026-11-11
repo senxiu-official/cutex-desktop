@@ -11,11 +11,11 @@
 import { isImeComposing } from "../../lib/ime";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { create as createStore } from "zustand";
-import { ChevronDown, ChevronRight, Fingerprint } from "lucide-react";
+import { ChevronDown, ChevronRight, Fingerprint, MonitorSmartphone } from "lucide-react";
 import { PEERS_FEATURE } from "../../../../shared/peers";
 import { shownUserName, USERS_P2_ACCESS_FEATURE, type PersonKeyRecord, type UserGrant, type UserRecord, type UsersList } from "../../../../shared/users";
 import { ProjectColorPicker } from "../../components/ProjectColorPicker";
-import { AddButton, ArmedRemove, Button, ErrorNote, FormFields, IconButton, ListRow, Loading, Notice, RefreshButton, Section, SettingRow, SettingsGroup, TextField, TextInput, Toggle } from "../../components/settings/Form";
+import { AddButton, ArmedRemove, Banner, Button, ErrorNote, FormFields, IconButton, ListRow, Loading, Notice, RefreshButton, Section, SettingRow, SettingsGroup, TextField, TextInput, Toggle } from "../../components/settings/Form";
 import { useI18n } from "../../i18n";
 import { useApp } from "../../store";
 import { settingsAnchorId } from "../../lib/settingsNav";
@@ -30,6 +30,7 @@ import { DEVICES_ANCHOR, nameIn, PEERS_ANCHOR, USERS_ANCHOR, useT, type Write } 
 import { changePersonKeys } from "./personKeyWrites";
 import { PeersSection } from "./PeersSection";
 import { UserDot } from "./UserDot";
+import { IssueTokenHint } from "../../components/settings/HostTokenImport";
 import { Tag } from "../../components/Tag";
 import { useOwnerWindow } from "../../lib/ownerContext";
 
@@ -82,10 +83,9 @@ export function UsersPeoplePart() {
   return (
     <>
       {waiting > 0 && (
-        <div className="mb-4 flex items-center gap-3 rounded-xl border border-warn/40 bg-warn/10 px-4 py-2 text-sm" role="status" data-testid="users-attention">
-          <span className="min-w-0 flex-1">{t("users.attention", { n: waiting })}</span>
-          <Button onClick={() => showDevices({ kind: "pending" })}>{t("users.attentionView")}</Button>
-        </div>
+        <Banner className="mb-6" attrs={{ role: "status", "data-testid": "users-attention" }} icon={<MonitorSmartphone size={16} />} actions={<Button onClick={() => showDevices({ kind: "pending" })}>{t("users.attentionView")}</Button>}>
+          {t("users.attention", { n: waiting })}
+        </Banner>
       )}
       <UsersSection list={list} write={write} reload={load} onShowDevices={showDevices} onShowPeers={withPeers ? showPeers : undefined} />
     </>
@@ -249,6 +249,7 @@ function UserEditor({ user, list, write, onDeleted }: { user: UserRecord; list: 
         <ProjectColorPicker value={user.color ?? ""} onChange={(c) => void patch({ color: c })} />
       </SettingRow>
       {!user.isOwner && <GrantEditor user={user} onSave={(grant) => patch({ grant })} />}
+      {!user.isOwner && <IssueTokenHint userId={user.id} />}
       <PersonKeys user={user} list={list} write={write} />
       {!user.isOwner && (
         <SettingsGroup agents="access" source="host"><div className="flex items-center justify-end gap-2 pt-1">

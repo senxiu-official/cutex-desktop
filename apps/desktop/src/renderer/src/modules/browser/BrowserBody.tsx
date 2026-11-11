@@ -17,12 +17,16 @@ import { browserActivation } from "./activation";
 import { BrowserMaidRow } from "./BrowserControls";
 import { BrowserOwnerCapture } from "./BrowserOwnerCapture";
 import { createBrowserHold } from "./hold";
+import { createHoldReasons, createMediaHold, onMediaStop } from "./media";
+import { markUncappedHold } from "../../lib/sideKeep";
 import { reserveNewOwnerTab } from "./newOwnerTab";
 import { browserRefusalAction } from "../../../../shared/browser";
 import { BrowserBackgroundView } from "./BrowserBackgroundView";
 import { BROWSER_PREVIEW_BACKGROUND } from "./thumbnails";
 import { ServicePaneLink } from "../../components/ServiceLinks";
 import { serviceSlugOf } from "../../lib/serviceLink";
+import { serviceAddressOf, serviceTabPath } from "../../lib/serviceAddress";
+import { useApp } from "../../store";
 import { btn } from "../../components/Button";
 import { BrowserLoginPoolPill, BrowserLoginWarning } from "./BrowserLoginHint";
 import { browserLoginOrigin, openOwnerLoginCopy } from "./loginHint";
@@ -87,10 +91,30 @@ export function BrowserBody(props: SideBodyProps<BrowserState>) {
   const wantBackground = !!instance.state.agentOpened && !instance.state.front;
   const background = view?.carrier === "background";
   const hold = useRef<ReturnType<typeof createBrowserHold> | null>(null);
+  // One shell hold, two reasons: the agent's lease (counted against sideKeepMounted) and a page that plays (uncapped).
+  const reasons = useRef<ReturnType<typeof createHoldReasons> | null>(null);
+  reasons.current ??= createHoldReasons(value => latest.current.keepMounted(value), on => markUncappedHold(latest.current.instance.id, on));
+  // A page that plays stays mounted in the background (owner 2026-11-10), MEDIA_GRACE_MS after a pause; 停止 lets it go.
+  const playing = !!view?.media?.playing || !!view?.media?.audible;
+  const playingNow = useRef(playing);
+  playingNow.current = playing;
+  const media = useRef<ReturnType<typeof createMediaHold> | null>(null);
+  useEffect(() => {
+    const m = createMediaHold(on => void reasons.current!.set("media", on));
+    media.current = m;
+    m.update(playingNow.current);
+    const offStop = hostId ? onMediaStop(hostId, tabKey, () => m.stop()) : () => {};
+    return () => {
+      offStop(); m.dispose();
+      if (media.current === m) media.current = null;
+      reasons.current!.set("media", false);
+    };
+  }, [hostId, tabKey]);
+  useEffect(() => { media.current?.update(playing); }, [playing]);
   useEffect(() => {
     if (!hostId || !epoch || !bridge.browser || !enabled) return;
     const api = bridge.browser.forHost(hostId);
-    const manager = createBrowserHold({ keepMounted: value => latest.current.keepMounted(value),
+    const manager = createBrowserHold({ keepMounted: value => reasons.current!.set("lease", value),
       ready: (leaseId, held) => api.holdReady(tabKey, leaseId, held), revoke: leaseId => api.releaseLease(tabKey, leaseId), failed: reason => setError(browserError(reason)) });
     hold.current = manager;
     return () => { manager.dispose(); if (hold.current === manager) hold.current = null; };
@@ -328,10 +352,19 @@ export function BrowserBody(props: SideBodyProps<BrowserState>) {
     try { await work(); if (copied) setPageMessage({ text: t("browser.copied"), failed: false }); }
     catch (reason) { setPageMessage({ text: t("browser.actionFailed", { reason: t(browserErrorKey(reason)) }), failed: true }); }
   }
-  const pageMenu = () => browserPageMenu({ url: currentUrl, narrow: addressFlags.narrow, canGoForward: !!view?.canGoForward, ready, working,
+  const pageService = () => {
+    // Read when the ⋯ opens (no subscription): the host's service list, as lib/serviceLinkView useHostServices.
+    const slug = serviceSlugOf(currentUrl), app = useApp.getState();
+    if (!slug || !hostId) return null;
+    const list = hostId === (app.hosts?.active ?? "local") ? app.services : app.byHost?.[hostId]?.services;
+    const found = list?.find((s) => s.slug === slug);
+    return found ? serviceAddressOf(found, hostId, app.hosts?.hosts.find((h) => h.id === hostId), serviceTabPath(currentUrl) ?? undefined) : null;
+  };
+  const pageMenu = () => browserPageMenu({ service: pageService(), url: currentUrl, narrow: addressFlags.narrow, canGoForward: !!view?.canGoForward, ready, working,
     toBackground: ready && view?.pool === "agent" && !background ? { busy: !!view.handover } : null, zoom: view?.zoom }, {
     forward, resetZoom, toBackground,
     copy: () => void pageAction(() => navigator.clipboard.writeText(currentUrl), true),
+    copyText: (text) => void pageAction(() => navigator.clipboard.writeText(text), true),
     openExternal: url => void pageAction(() => bridge.api.openExternal(url)),
   }, t);
   return (

@@ -3,6 +3,10 @@
 // one approved once and used, and one still waiting (需要你, card with 批准一次 / 不批准). The notices
 // arrive with the agent's bootstrap and, for the waiting one, as a live `cutex/ownerNotify/created`
 // shortly after start so 需要你 shows before the agent is opened.
+// 批准一次 answers like cutex safety-grant-delivery: the grant names its approval notice (`noticeInputId`, a
+// ledger alarm record under `?inputLedger`), valid until the 2 h cap; the agent "reads" it a few seconds later
+// (registered → in context), and from then on it is valid for 30 minutes. `?oldSafetyGrant`: an older cutex
+// (no notice fields, 30 minutes from approval).
 import type { OwnerNotification, SafetyBlock } from "@cutex-desktop/protocol";
 import type { SafetyCheckResult } from "../../../../shared/ipc";
 import type { ModuleMock } from "../../dev/mockTypes";
@@ -10,6 +14,10 @@ import type { ModuleMock } from "../../dev/mockTypes";
 const s10PagesScene = typeof location !== "undefined" && new URLSearchParams(location.search).has("s10pages");
 // A loaded turn with no rendered rows reproduces a DOM lookup miss during a running turn.
 const focusScene = typeof location !== "undefined" && (new URLSearchParams(location.search).has("safetyfocus") || location.pathname === "/safety-focus");
+
+const oldGrantScene = typeof location !== "undefined" && new URLSearchParams(location.search).has("oldSafetyGrant");
+/** Seconds after 批准一次 until the mock agent reads the notice. */
+const READ_AFTER_SECS = 8;
 
 const AGENT = "ifm-plot";
 const THREAD = "thread-ifm-plot";
@@ -175,11 +183,33 @@ export const mock: ModuleMock = {
       if (!n?.safetyBlock) return { ok: false, error: { code: "safety_block_not_found", message: "no such safety block" } };
       if (n.safetyBlock.state !== "blocked") return { ok: false, error: { code: "safety_block_closed", message: `already ${n.safetyBlock.state}` }, notification: structuredClone(n) };
       const now = new Date().toISOString();
-      n.safetyBlock = { ...n.safetyBlock, state: decision === "grant" ? "granted" : "dismissed", decidedAt: now, expiresAt: decision === "grant" ? new Date(Date.now() + 1800_000).toISOString() : null };
+      const grant = decision === "grant";
+      const notice = grant && !oldGrantScene ? { inputId: `alarm-approval-mock-${blockId}`, messageId: `alarm-approval-mock-${blockId}` } : null;
+      const hard = new Date(Date.now() + 7200_000).toISOString();
+      n.safetyBlock = {
+        ...n.safetyBlock, state: grant ? "granted" : "dismissed", decidedAt: now,
+        // Before the read the grant runs to the cap; an older cutex: 30 minutes from approval.
+        expiresAt: !grant ? null : notice ? hard : new Date(Date.now() + 1800_000).toISOString(),
+        ...(notice ? { noticeInputId: notice.inputId, noticeReadAt: null, hardExpiresAt: hard } : {}),
+      };
       Object.assign(n, { state: "acknowledged", acknowledgedAt: n.acknowledgedAt ?? now, closedAt: now });
       core.emitCutex(agentId, "cutex/ownerNotify/updated", { notification: structuredClone(n) });
-      console.info(`[mock] cutex/safetyCheck/${decision}`, blockId, decision === "grant" ? `→ 主人已批准一次：${n.safetyBlock.command}（30 分钟内有效，仅此一次）` : "");
-      return { ok: true, notification: structuredClone(n), submitError: null };
+      const text = `主人已批准一次：${n.safetyBlock.command}`;
+      console.info(`[mock] cutex/safetyCheck/${decision}`, blockId, grant ? `→ ${text}` : "");
+      if (notice) {
+        const ledger = (globalThis as { __cutexMockInputLedger?: { put(id: string, inputId: string, patch: Record<string, unknown>): unknown } }).__cutexMockInputLedger;
+        const sender = { kind: "approval", id: "cutex.approvals", name: "cutex", host: null, cutexSessionId: null };
+        ledger?.put(agentId, notice.inputId, { kind: "alarm", sender, intent: { strategy: "auto", deliveryMode: "wake", timing: "nextStep" }, preview: text, state: "accepted", reason: null, stage: "registered", surface: "nextUp" });
+        setTimeout(() => {
+          const b = n.safetyBlock;
+          if (!b || b.state !== "granted" || b.noticeReadAt) return;
+          const read = Date.now();
+          n.safetyBlock = { ...b, noticeReadAt: new Date(read).toISOString(), expiresAt: new Date(Math.min(read + 1800_000, Date.parse(hard))).toISOString() };
+          ledger?.put(agentId, notice.inputId, { state: "inContext", stage: null, surface: "timeline", evidence: "contextPersisted" });
+          core.emitCutex(agentId, "cutex/ownerNotify/updated", { notification: structuredClone(n) });
+        }, READ_AFTER_SECS * 1000);
+      }
+      return { ok: true, notification: structuredClone(n), submitError: null, ...(notice ? { notice } : {}) };
     },
     };
   },

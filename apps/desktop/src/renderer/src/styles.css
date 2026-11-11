@@ -2108,3 +2108,13 @@ body {
   --system-band-hover: color-mix(in oklab, var(--surface-2) 93%, var(--fg));
   --system-band-accent: color-mix(in oklab, var(--accent) 72%, var(--fg));
 }
+
+/* A native <details> inside a Settings card reads like every other disclosure in Settings: a chevron that turns, not
+   the browser's ▶ (运行时's 旧版本 / 清理计划, 主机's 详细信息…). Summaries that draw their own marker use list-none. */
+.group\/card details > summary:not(.list-none) { list-style: none; display: flex; align-items: center; gap: 0.25rem; }
+.group\/card details > summary:not(.list-none)::-webkit-details-marker { display: none; }
+.group\/card details > summary:not(.list-none)::before {
+  content: ""; flex: none; width: 13px; height: 13px; background: currentColor; transition: transform 120ms ease;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m9 18 6-6-6-6'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+.group\/card details[open] > summary:not(.list-none)::before { transform: rotate(90deg); }

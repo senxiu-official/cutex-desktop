@@ -4,7 +4,7 @@ import type { zhCN } from "./i18n";
 
 export const en: Record<keyof typeof zhCN, string> = {
   "connection.title": "Connection",
-  "connection.description": "Host list, host switching, startup host and diagnostics (Settings → Hosts)",
+  "connection.description": "Manage host connections, startup connections and connection diagnostics",
   // ---- settings (moved from the base catalog, 2026-10-09) ----
   "connection.diagnostics": "Diagnostics",
   "connection.page": "Hosts",

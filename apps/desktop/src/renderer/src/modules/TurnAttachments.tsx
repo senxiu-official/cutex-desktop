@@ -5,7 +5,8 @@
 // inline at the end of the turn (a finished turn: in its last reply, after the turn summary and before
 // the action row; else after the turn's last row; components/Timeline.tsx). Only rendered turns get
 // attachments (the recentEntries window).
-import { memo, useDeferredValue, useLayoutEffect, useRef } from "react";
+import { memo, useDeferredValue, useLayoutEffect, useRef, useSyncExternalStore } from "react";
+import { onResizeDrag, resizeDragActive } from "../lib/columnGlide";
 import { COLUMN_PADDING, marginWidth } from "../lib/gutterLayout";
 import { useTurnAttachmentItems } from "../lib/gutterItems";
 import { useGutter } from "../lib/gutterStore";
@@ -44,8 +45,21 @@ export function inlineWidth(columnWidth: number): number {
   return w - (w % INLINE_WIDTH_STEP);
 }
 
+const onDrag = (fn: () => void) => onResizeDrag(() => fn());
+
+/**
+ * The inline width, held while a width is dragged (a Shelf's or a column's edge, lib/columnGlide resizeDrag): the
+ * turns' attachments get the column's new width once, on release — a background render per 8 px of the drag was
+ * still one more commit per step (perf/shelf-divider-drag). No inline attachment draws with its width today.
+ */
 function useInlineWidth(): number {
-  return useGutter((s) => inlineWidth(s.geometry?.columnWidth ?? 0));
+  const dragging = useSyncExternalStore(onDrag, resizeDragActive);
+  const live = useGutter((s) => (dragging ? -1 : inlineWidth(s.geometry?.columnWidth ?? 0)));
+  const held = useRef(-1);
+  if (live >= 0) held.current = live;
+  // Mounted during a drag (a turn streamed in): the width it would have had at that moment.
+  else if (held.current < 0) held.current = inlineWidth(useGutter.getState().geometry?.columnWidth ?? 0);
+  return held.current;
 }
 
 function MarginBox({ entry, sessionId, turnId, width }: { entry: Entry; sessionId: string; turnId: string; width: number }) {

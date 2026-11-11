@@ -10,7 +10,8 @@ import { settingsAnchorId } from "../../lib/settingsNav";
 import { AUTO_TITLES_FEATURE, QUICK_CHAT_PROFILE_FEATURE } from "../../lib/profileCreate";
 import { useThreadDefaults } from "../../lib/threadDefaults";
 import { useApp } from "../../store";
-import { Button, EmptyState, ErrorNote, LinkRow, Loading, Notice, Section, Segmented, Select, SettingRow, TextField, Toggle, SettingsGroup } from "./Form";
+import { FIELD_W } from "../../lib/fieldWidths";
+import { Button, EmptyState, ErrorNote, LinkRow, Loading, Notice, Section, Select, SettingRow, TextField, Toggle, SettingsGroup } from "./Form";
 import { ThreadDefaultRows } from "./ThreadDefaults";
 import { useTargetApi, useTargetFeatures, useTargetHostId, useTargetSidebar, useTargetIsFocus } from "../../lib/targetHost";
 import { useOrderedProfiles } from "../../lib/profileOrder";
@@ -303,9 +304,11 @@ function HarnessSection() {
             <span>{t("agent-config.harness.total", { bytes: formatBytes(shown.bytes) })}</span>
           </div>
           {shown.runtime === "codex" && <div className="text-xs text-subtle">{t("agent-config.harness.codexNote")}</div>}
-          <div className="flex overflow-x-auto">
-            <SettingsGroup agents="none" source="local"><Segmented
+          {/* Up to six long section names: a select (a segmented row scrolled sideways). */}
+          <div className="flex">
+            <SettingsGroup agents="none" source="local"><Select
               label={t("agent-config.harness.preview")}
+              width={FIELD_W.model}
               value={current ? part : "all"}
               options={[{ value: "all", label: t("agent-config.harness.all") }, ...shown.sections.map((s) => ({ value: s.id, label: sectionTitle(s.id) }))]}
               onChange={setPart}

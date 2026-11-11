@@ -6,7 +6,7 @@ import { canOpenCopy } from "../../../../shared/remoteCopyRequests";
 import type { HostView } from "../../../../shared/hosts";
 import type { MenuEntry } from "../../lib/contextMenu";
 import { openSide } from "../../lib/sideOpen";
-import { canDownload, requestCopy, runCopyAction } from "../../lib/remoteCopies";
+import { canDownload, canSaveArtifact, requestCopy, runCopyAction } from "../../lib/remoteCopies";
 import type { useI18n } from "../../i18n";
 
 type T = ReturnType<typeof useI18n>["t"];
@@ -22,7 +22,7 @@ export interface CopyCaps {
 
 export function copyCaps(copy: RemoteCopy, host: Pick<HostView, "conn"> | undefined): CopyCaps {
   const connected = host?.conn?.daemon;
-  const remote = canDownload(copy.source.hostId) && connected?.kind === "connected" && connected.hostId === copy.source.hostIdentity;
+  const remote = (copy.source.artifact ? canSaveArtifact(copy.source.hostId) : canDownload(copy.source.hostId)) && connected?.kind === "connected" && connected.hostId === copy.source.hostIdentity;
   const local = copy.status === "complete" || (!!copy.downloadedAt && copy.status !== "expired" && copy.status !== "missing");
   return { local, remote, active: copy.status === "downloading", openable: local && canOpenCopy(copy.name) };
 }
@@ -51,7 +51,8 @@ export function copyMenu(copy: RemoteCopy, caps: CopyCaps, t: T): MenuEntry[] {
     caps.active
       ? { label: t("remote-copies.cancel"), icon: <X size={14} />, onSelect: () => cancelCopy(copy) }
       : { label: t("remote-copies.refresh"), icon: <RefreshCw size={14} />, disabled: !caps.remote, title: offline, onSelect: () => downloadAgain(copy) },
-    { label: t(copy.kept ? "remote-copies.unkeep" : "remote-copies.keep"), icon: copy.kept ? <PinOff size={14} /> : <Pin size={14} />, disabled: !caps.local, onSelect: () => keepCopy(copy) },
+    // An artifact saved to this computer is always kept (main remoteCopies): no keep toggle.
+    ...(copy.source.artifact ? [] : [{ label: t(copy.kept ? "remote-copies.unkeep" : "remote-copies.keep"), icon: copy.kept ? <PinOff size={14} /> : <Pin size={14} />, disabled: !caps.local, onSelect: () => keepCopy(copy) }]),
     "separator",
     { label: t("remote-copies.remove"), icon: <Trash2 size={14} />, danger: true, disabled: caps.active, armed: t("remote-copies.removeConfirm"), onSelect: () => removeCopy(copy) },
   ];

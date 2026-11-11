@@ -46,7 +46,9 @@ import { UpdateButton } from "../UpdateButton";
 import { AboutDragon } from "./AboutDragon";
 import { SidebarSettingsCards } from "./regions/SidebarSettings";
 import { OwnerNotifySection } from "./OwnerNotifySettings";
-import { ArmedRemove, Button, useCompactSettings, EmptyState, ErrorNote, HintAction, LinkRow, ListRow, Section, Segmented, Select, SettingRow, TextLink, Toggle, SettingsGroup } from "./Form";
+import { ArmedRemove, Button, useCompactSettings, EmptyState, ErrorNote, HintAction, LinkRow, ListFilter, ListRow, PartHeading, PartNav, Section, Segmented, Select, SettingRow, SubPageRow, TextLink, Toggle, SettingsGroup } from "./Form";
+import { matchesFilter } from "../../lib/listFilter";
+import { useScrollToSettingsAnchor } from "../../lib/settingsFocus";
 import { StatusPlaceTable } from "./StatusPlaceTable";
 import { TermsSection } from "./TermsSettings";
 import { SettingsSections } from "../../modules/Outlet";
@@ -80,7 +82,7 @@ export function GeneralPage() {
   const { t, locale, setLocale } = useI18n();
   return (
     <>
-      <Section id={settingsAnchorId("language")} title={t("shell.general.language")}>
+      <Section id={settingsAnchorId("language")} title={t("shell.general.language")} hint={t("settings.ia.formatNote")}>
         <SettingRow agents="none" source="local" label={t("shell.language")}>
           <Select<Locale>
             value={isTraditionalLocale(locale) ? "zh-Hant-CN" : locale}
@@ -97,7 +99,6 @@ export function GeneralPage() {
             />
           </SettingRow>
         )}
-        <p className="py-2 text-xs text-subtle">{t("settings.ia.formatNote")}</p>
       </Section>
       <TermsSection />
       <WindowSection />
@@ -461,11 +462,9 @@ export function ConversationPage() {
   };
   return (
     <>
-      <nav aria-label={t("settings.ia.conversationNav")} className="mb-4 flex flex-wrap gap-3">
-        {([ ["conv-messages", "settings.ia.messages"], ["conv-input", "settings.ia.input"], ["conv-layout", "settings.ia.layout"], ...(sideChatOn ? [["conv-side-chat", "settings.ia.sideChat"]] : []) ] as const).map(([anchor, label]) => <TextLink key={anchor} onClick={() => requestSettingsReveal(anchor)}>{t(label as MessageKey)}</TextLink>)}
-      </nav>
+      <PartNav label={t("settings.ia.conversationNav")} onJump={requestSettingsReveal} parts={([ ["conv-messages", "settings.ia.messages"], ["conv-input", "settings.ia.input"], ["conv-layout", "settings.ia.layout"], ...(sideChatOn ? [["conv-side-chat", "settings.ia.sideChat"]] : []) ] as const).map(([anchor, label]) => ({ anchor, label: t(label as MessageKey) }))} />
       <div id={settingsAnchorId("conv-messages")}>
-      <h2 className="mb-3 text-title">{t("settings.ia.messages")}</h2>
+      <PartHeading>{t("settings.ia.messages")}</PartHeading>
       {/* 对话顶部 (moved from 侧栏与顶栏, owner 2026-10-18: settings grouped by screen region). */}
       <Section id={settingsAnchorId("titleBar")} title={t("shell.sidebar.titleBar")}>
         <SettingRow agents="none" source="local" label={t("appearance.titleTwoLines")} info={t("appearance.titleTwoLinesHint")}>
@@ -564,15 +563,15 @@ export function ConversationPage() {
       <SettingsSections page="conversation" except={CONVERSATION_PLACED_SECTIONS} />
       </div>
       <div id={settingsAnchorId("conv-input")}>
-        <h2 className="mb-3 text-title">{t("settings.ia.input")}</h2>
+        <PartHeading>{t("settings.ia.input")}</PartHeading>
         <SettingsSections page="conversation" only={CONVERSATION_INPUT_SECTIONS} />
       </div>
       <div id={settingsAnchorId("conv-layout")}>
-        <h2 className="mb-3 text-title">{t("settings.ia.layout")}</h2>
+        <PartHeading>{t("settings.ia.layout")}</PartHeading>
         <SettingsSections page="conversation" only={CONVERSATION_LAYOUT_SECTIONS} />
       </div>
       {sideChatOn && <div id={settingsAnchorId("conv-side-chat")}>
-        <h2 className="mb-3 text-title">{t("settings.ia.sideChat")}</h2>
+        <PartHeading>{t("settings.ia.sideChat")}</PartHeading>
         <SettingsSections page="conversation" only={CONVERSATION_SIDE_SECTIONS} />
       </div>}
     </>
@@ -808,26 +807,45 @@ export function OwnerNotifyBlock() {
 
 // ---- 归档 ----
 
+/** Archived agents the 归档 page lists; all of them are on its sub-page. */
+const ARCHIVED_ON_PAGE = 5;
+
 export function ArchivePage() {
+  return (
+    <>
+      <ArchiveBehaviour />
+      <ArchivedList />
+    </>
+  );
+}
+
+/** 归档 → 已归档的智能体: every one, with a filter. */
+export function ArchivedSubPage() {
+  useScrollToSettingsAnchor();
+  return <ArchivedList all />;
+}
+
+function ArchivedList({ all = false }: { all?: boolean }) {
   const { t } = useI18n();
   // The settings host's archived agents (the page header's host picker; lib/targetHost).
   const { archived } = useSidebarModel();
   const canDelete = useTargetFeatures().has(SESSION_FEATURES.delete);
+  const [filter, setFilter] = useState("");
+  const rows = all ? archived.filter((row) => matchesFilter(filter, row.name)) : archived.slice(0, ARCHIVED_ON_PAGE);
   return (
-    <>
-      <ArchiveBehaviour />
-      <Section id={settingsAnchorId("list")} title={t("archive.list")} hint={archived.length ? t(canDelete ? "archive.archiveHintDelete" : "archive.archiveHint") : undefined}>
-        {archived.length === 0 ? (
-          <EmptyState>{t("archive.archiveEmpty")}</EmptyState>
-        ) : (
-          <div>
-            {archived.map((row) => (
-              <ArchivedRow key={row.id} row={row} canDelete={canDelete} />
-            ))}
-          </div>
-        )}
-      </Section>
-    </>
+    <Section id={all ? settingsAnchorId("list-all") : settingsAnchorId("list")} title={all ? t("archive.all", { n: archived.length }) : t("archive.list")} hint={archived.length && !all ? t(canDelete ? "archive.archiveHintDelete" : "archive.archiveHint") : undefined}>
+      {archived.length === 0 ? (
+        <EmptyState>{t("archive.archiveEmpty")}</EmptyState>
+      ) : (
+        <div>
+          {all && <div role="search" className="contents"><ListFilter count={archived.length} value={filter} onChange={setFilter} /></div>}
+          {rows.map((row) => (
+            <ArchivedRow key={row.id} row={row} canDelete={canDelete} />
+          ))}
+          {!all && archived.length > ARCHIVED_ON_PAGE && <SubPageRow title={t("archive.all", { n: archived.length })} onOpen={() => useApp.getState().openSettings("archive", { sub: "list" })} />}
+        </div>
+      )}
+    </Section>
   );
 }
 

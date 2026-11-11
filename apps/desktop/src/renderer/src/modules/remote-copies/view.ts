@@ -2,6 +2,7 @@
 // plus what this machine remembers (sort, direction, view) in localStorage — the filter is per visit.
 import { create } from "zustand";
 import type { RemoteCopy } from "../../../../shared/remoteCopies";
+import type { DownloadFolder } from "../../../../shared/remoteCopyRequests";
 
 export type CopySort = "name" | "size" | "date" | "host";
 export type CopyView = "cards" | "list";
@@ -142,4 +143,11 @@ export function sortCopies(copies: readonly RemoteCopy[], prefs: Pick<CopyViewPr
     .map((c, i) => [c, i] as const)
     .sort(([a, ia], [b, ib]) => (prefs.desc ? -key(a, b) : key(a, b)) || collator.compare(a.name, b.name) || ia - ib)
     .map(([c]) => c);
+}
+
+/** Where a copy's file is on this computer: the download folder, its own folder (the copy id), its name. */
+export function copyLocation(folder: DownloadFolder | null, copy: RemoteCopy): string | null {
+  if (!folder) return null;
+  const sep = folder.path.includes("\\") ? "\\" : "/";
+  return [folder.path.replace(/[\\/]+$/, ""), copy.id, copy.name].join(sep);
 }

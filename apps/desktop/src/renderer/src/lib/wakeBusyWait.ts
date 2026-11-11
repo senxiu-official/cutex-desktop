@@ -1,9 +1,11 @@
 // cutex `wake-busy-wait` (r220): a wake (or delegation results) for a busy Codex agent waits up to
 // `/v2/settings` agentBus.wakeBusyWaitSecs (default 120) for the running turn to end, then is read
 // at the agent's next step (no turn of its own). 0 = next step at once; null = never early (wait
-// for the turn to end, the old behaviour). Claude agents always wait for the turn end.
+// for the turn to end, the old behaviour). Which runtimes can read early: lib/wakeCountdown readsEarly (Codex;
+// Claude with native external input; not DSH / Kimi).
 // Pure (no React, no store) so it is unit-tested; the cached settings hook is wakeBusyWaitView.ts.
 import type { AgentRuntime } from "./agentFeatures";
+import { readsEarly } from "./wakeCountdown";
 import type { GlobalSettings } from "../../../shared/ipc";
 
 export const WAKE_BUSY_WAIT_FEATURE = "wake-busy-wait";
@@ -26,11 +28,12 @@ export function readWakeBusyWait(settings: Pick<GlobalSettings, "agentBus"> | nu
 export type PendingWakeLabel = { key: "afterTurn" } | { key: "nextStep" } | { key: "busyWait"; secs: number };
 
 /**
- * The label for a pending wake to a busy agent: the old 本轮结束后处理 without the capability, for a
- * Claude agent, while the setting is unknown and when it is never early (null); else the wait.
+ * The label for a pending wake to a busy agent: the old 本轮结束后处理 without the capability, for a runtime
+ * that reads only after the turn (`features`: the agent's adapter feature map, lib/agentFeatures), while the
+ * setting is unknown and when it is never early (null); else the wait.
  */
-export function pendingWakeLabel(supported: boolean, runtime: AgentRuntime, wait: WakeBusyWait): PendingWakeLabel {
-  if (!supported || runtime !== "codex" || wait === null || wait === undefined) return { key: "afterTurn" };
+export function pendingWakeLabel(supported: boolean, runtime: AgentRuntime, wait: WakeBusyWait, features: Readonly<Record<string, unknown>> | null = null): PendingWakeLabel {
+  if (!supported || !readsEarly(runtime, features) || wait === null || wait === undefined) return { key: "afterTurn" };
   if (wait <= 0) return { key: "nextStep" };
   return { key: "busyWait", secs: Math.round(wait) };
 }

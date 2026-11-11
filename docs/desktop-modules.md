@@ -394,3 +394,14 @@ a process able to change the application's files can also change module files.
 - **选文件和保存**：`pick` 弹 main 的打开对话框，读出主人选的那一个文件（≤ 16 MB），只把文件名和字节给模块；`save` 弹保存对话框，main 把字节写到主人选的位置，只回文件名。路径从不离开 main，模块不能再次打开同一个文件。模块只能给文件类型过滤（扩展名 `[A-Za-z0-9]{1,16}` 或 `*`）和建议的文件名（只取文件名部分，按数据路径规则检查）；对话框标题由 main 写明是哪个模块在要。同一时间只有一个对话框（`busy`）；窗口隐藏或最小化时不弹（`unavailable`）。
 - **移除模块时的数据。** 移除本地模块（§23.14）不再用 renderer 的确认框，改由 main 的原生对话框确认：有数据文件夹时三个按钮「取消 / 移除，保留数据 / 移除并删除数据」，默认取消，并写明数据大小；没有时只问移除。签名包移除后退回内置版本，数据照旧，不问。从开发者模式移除文件夹不碰数据（同一个 id 之后常常要装成本地模块）。保留下来的数据在 设置 → 模块 → 模块数据 列出（含已不在的模块），「删除…」再走 main 的原生确认（`clear`）。没有任何定时或自动删除。
 - **测试**：`test/moduleData.test.ts`（路径、链接 / junction、硬链接、设备名、限额、未知模块、对话框、一次一个、移除时的三种选择、renderer 一侧的编码和错误码）；`test/moduleAuthorEndToEnd.test.ts` 的 v1.31 用例：`cutex-module new` + `pack` 的真实产物经真实的本地安装路径，主进程提供的入口在真实模块宿主上跑，`activate` 经 main 的请求解析用 `data` 和 `files`（只把原生对话框换成固定答复）。
+
+## Background apps and media tabs
+
+Browser and service tabs can remain mounted while playing media. Their title information
+can include an audio indicator. These are app-internal additions; the public module API
+version and its trust boundary are unchanged.
+
+On capable hosts, cutex can supervise a portless worker process as a background app.
+It has no browser page or port. The desktop shows its status, logs and controls through
+the daemon. See [Portless services](design/portless-services-v1.md). Installing module
+background programs is a later phase and is not provided by this desktop release.

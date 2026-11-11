@@ -47,7 +47,7 @@ export const en: Record<keyof typeof zhCN, string> = {
   "runtimes.nodeVersionUnknown": "unknown",
   "runtimes.nodeUnknown": "Node requirements and detection are reported by the host component",
   "runtimes.title": "Installed runtimes",
-  "runtimes.description": "Runtime versions and the {{agents}} using each",
+  "runtimes.description": "View runtime versions and the {{agents}} using each version",
   "runtimes.installed": "Installed runtimes",
   "runtimes.hint": "Old versions no {{agent}} uses can be cleaned up on the host",
   "runtimes.native": "Codex runtimes",

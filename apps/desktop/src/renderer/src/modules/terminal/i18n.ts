@@ -1,6 +1,6 @@
 export const zhCN = {
   "terminal.moduleTitle": "终端",
-  "terminal.description": "{{shelf}}里的终端窗格：在{{agent}}的工作区里开 cutex 终端（终端在 cutex 里运行）",
+  "terminal.description": "在{{shelf}}中打开{{agent}}工作区的终端，由 cutex 在主机上运行",
   "terminal.title": "终端",
   "terminal.tab": "终端 {n}",
   "terminal.tabEnded": "{title}（已结束）",

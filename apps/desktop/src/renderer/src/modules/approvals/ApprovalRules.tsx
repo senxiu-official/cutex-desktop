@@ -5,7 +5,8 @@ import { CircleHelp } from "lucide-react";
 import type { ApprovalKind, ApprovalRule, ApprovalRuleAudit, ApprovalRuleAuditPage, ApprovalRuleDraft, ApprovalRulesView, DaemonApi } from "../../../../shared/ipc";
 import { Button } from "../../components/Button";
 import { TypedRuleConfirmation } from "../../components/TypedRuleConfirmation";
-import { ErrorNote, ListFilter, Section, SettingsGroup, SubPageRow } from "../../components/settings/Form";
+import { EmptyState, ErrorNote, ListFilter, Loading, RowGroup, Section, SettingsGroup, SubPageRow } from "../../components/settings/Form";
+import { settingsAnchorId } from "../../lib/settingsNav";
 import { useI18n, type MessageKey } from "../../i18n";
 import { approvalRuleDraft, isDirectorRoleRule, ruleSaveAction } from "../../lib/approvalRuleKinds";
 import { matchesFilter } from "../../lib/listFilter";
@@ -80,18 +81,54 @@ export function ApprovalRuleAuditAll() {
   const shown = rows.filter((row) => matchesFilter(filter, t(`approvals.rules.audit.${row.action}` as MessageKey), row.kind && kindLabel(t, row.kind), row.result, row.ruleId));
   return <Section title={log ? t(log.nextCursor !== null ? "approvals.rules.audit.latest" : "approvals.rules.audit.all", { n: rows.length }) : undefined}>
     {error && <ErrorNote>{error}</ErrorNote>}
-    {!log && !error && <p className="text-ui text-subtle">…</p>}
-    {log && !rows.length && <p className="text-ui text-muted">{t("approvals.rules.audit.empty")}</p>}
+    {!log && !error && <Loading rows={2} />}
+    {log && !rows.length && <EmptyState>{t("approvals.rules.audit.empty")}</EmptyState>}
     <div role="search" className="contents"><ListFilter count={rows.length} value={filter} onChange={setFilter} /></div>
     {rows.length > 0 && !shown.length && <p className="text-ui text-muted">{t("settings.filterNone")}</p>}
     <ul>{shown.map((row) => <AuditRow key={row.auditId} row={row} />)}</ul>
   </Section>;
 }
 
+/** Rules per group the 协作 page shows; 全部 is its sub-page. */
+const RULES_ON_PAGE = 5;
+
+/** The two groups of rules (granted with the Director role, added by you), each a row group; `cap` rows per group. */
+function RuleGroups({ api, view, refresh, cap, filter = "" }: { api: ReturnType<typeof useTargetApi>; view: ApprovalRulesView; refresh(): Promise<void>; cap?: number; filter?: string }) {
+  const { t } = useI18n();
+  const sidebar = useTargetSidebar();
+  const names = useMemo(() => new Map([...(sidebar?.active ?? []), ...(sidebar?.retired ?? [])].map((agent) => [agent.cutexSessionId, agent.displayName])), [sidebar]);
+  const nameOf = (rule: ApprovalRulesView["rules"][number]) => names.get(rule.subject.cutexSessionId) ?? rule.subject.displayName ?? rule.subject.cutexSessionId;
+  const pick = (rules: ApprovalRulesView["rules"]) => rules.filter((rule) => matchesFilter(filter, nameOf(rule), rule.projectId ?? "", ...rule.kinds.map((kind) => kindLabel(t, kind)))).slice(0, cap ?? Infinity);
+  const roleRules = pick(view.rules.filter(isDirectorRoleRule));
+  const ownerRules = pick(view.rules.filter((rule) => !isDirectorRoleRule(rule)));
+  const list = (rules: ApprovalRulesView["rules"]) => <ul>{rules.map((rule) => <RuleRow key={rule.ruleId} api={api} view={view} rule={rule} name={nameOf(rule)} refresh={refresh} />)}</ul>;
+  return <>
+    {roleRules.length > 0 && <RowGroup title={t("approvals.rules.roleGranted")} hint={t("approvals.rules.roleGrantedHint")}>{list(roleRules)}</RowGroup>}
+    {ownerRules.length > 0 && <RowGroup title={t("approvals.rules.ownerCreated")}>{list(ownerRules)}</RowGroup>}
+  </>;
+}
+
+/** 协作 → 全部规则: every rule, both groups, with a filter. */
+export function ApprovalRulesAll() {
+  const { t } = useI18n();
+  const api = useTargetApi();
+  const [view, setView] = useState<ApprovalRulesView | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [filter, setFilter] = useState("");
+  const refresh = async () => { try { setError(null); setView(await api.approvalRules()); } catch (e) { setError(message(e)); } };
+  useEffect(() => { void refresh(); }, [api]);
+  return <Section id={settingsAnchorId("approvals.rules.all")} title={view ? t("approvals.rules.all", { n: view.rules.length }) : undefined}>
+    {error && <ErrorNote>{error}</ErrorNote>}
+    {!view && !error && <Loading rows={2} />}
+    {view && !view.rules.length && <EmptyState>{t("approvals.rules.none")}</EmptyState>}
+    <div role="search" className="contents"><ListFilter count={view?.rules.length ?? 0} value={filter} onChange={setFilter} /></div>
+    {view && <RuleGroups api={api} view={view} refresh={refresh} filter={filter} />}
+  </Section>;
+}
+
 export function ApprovalRulesSettings() {
   const { t } = useI18n();
   const api = useTargetApi();
-  const sidebar = useTargetSidebar();
   const [view, setView] = useState<ApprovalRulesView | null>(null);
   const [audit, setAudit] = useState<ApprovalRuleAudit[]>([]);
   const [auditMore, setAuditMore] = useState(false);
@@ -104,19 +141,17 @@ export function ApprovalRulesSettings() {
     } catch (e) { setError(message(e)); }
   };
   useEffect(() => { void refresh(); }, [api]);
-  const names = useMemo(() => new Map([...(sidebar?.active ?? []), ...(sidebar?.retired ?? [])].map((agent) => [agent.cutexSessionId, agent.displayName])), [sidebar]);
-  const roleRules = view?.rules.filter(isDirectorRoleRule) ?? [];
-  const ownerRules = view?.rules.filter((rule) => !isDirectorRoleRule(rule)) ?? [];
-  return <div className="space-y-4" data-approval-rules-settings="">
+  const longest = Math.max(view?.rules.filter(isDirectorRoleRule).length ?? 0, view?.rules.filter((rule) => !isDirectorRoleRule(rule)).length ?? 0);
+  return <div data-approval-rules-settings="">
     <Section title={t("approvals.rules.settings")} hint={t("approvals.rules.settings.hint")} actions={<div className="flex items-center gap-2"><span title={t("approvals.rules.explainer")} aria-label={t("approvals.rules.explainer")} className="text-subtle"><CircleHelp size={15} aria-hidden /></span><SettingsGroup agents="none" source="host" navigation><Button size="sm" onClick={() => void refresh()}>{t("approvals.rules.refresh")}</Button></SettingsGroup></div>}>
       {error && <ErrorNote>{error}</ErrorNote>}
-      {!view && !error && <p className="text-ui text-subtle">…</p>}
-      {view && !view.rules.length && <p className="text-ui text-muted">{t("approvals.rules.none")}</p>}
-      {view && roleRules.length > 0 && <div><h4 className="mt-2 text-meta font-medium text-muted">{t("approvals.rules.roleGranted")}</h4><p className="text-caption text-subtle">{t("approvals.rules.roleGrantedHint")}</p><ul>{roleRules.map((rule) => <RuleRow key={rule.ruleId} api={api} view={view} rule={rule} name={names.get(rule.subject.cutexSessionId) ?? rule.subject.displayName ?? rule.subject.cutexSessionId} refresh={refresh} />)}</ul></div>}
-      {view && ownerRules.length > 0 && <div><h4 className="mt-3 text-meta font-medium text-muted">{t("approvals.rules.ownerCreated")}</h4><ul>{ownerRules.map((rule) => <RuleRow key={rule.ruleId} api={api} view={view} rule={rule} name={names.get(rule.subject.cutexSessionId) ?? rule.subject.displayName ?? rule.subject.cutexSessionId} refresh={refresh} />)}</ul></div>}
+      {!view && !error && <Loading rows={2} />}
+      {view && !view.rules.length && <EmptyState>{t("approvals.rules.none")}</EmptyState>}
+      {view && <RuleGroups api={api} view={view} refresh={refresh} cap={RULES_ON_PAGE} />}
+      {longest > RULES_ON_PAGE && <SubPageRow title={t("approvals.rules.all", { n: view!.rules.length })} onOpen={() => useApp.getState().openSettings("collab", { sub: "rules" })} />}
     </Section>
     <Section title={t("approvals.rules.audit")} hint={t("approvals.rules.audit.hint")}>
-      {!audit.length && <p className="text-ui text-muted">{t("approvals.rules.audit.empty")}</p>}
+      {!audit.length && <EmptyState>{t("approvals.rules.audit.empty")}</EmptyState>}
       <ul>{audit.slice(0, AUDIT_ON_PAGE).map((row) => <AuditRow key={row.auditId} row={row} />)}</ul>
       {audit.length > AUDIT_ON_PAGE && <SubPageRow title={t(auditMore ? "approvals.rules.audit.latest" : "approvals.rules.audit.all", { n: audit.length })} onOpen={() => useApp.getState().openSettings("collab", { sub: "audit" })} />}
     </Section>

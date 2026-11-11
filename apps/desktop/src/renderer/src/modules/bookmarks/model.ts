@@ -96,8 +96,9 @@ export function groupBookmarks(records: readonly BookmarkRecord[], hostId: strin
   }
   return [...groups.values()].sort((a, b) => Number(b.current) - Number(a.current) || Number(b.hostId === hostId) - Number(a.hostId === hostId) || a.hostId.localeCompare(b.hostId) || (a.sessionId ?? "").localeCompare(b.sessionId ?? ""));
 }
-export type ListState = { query?: string; allHosts?: boolean };
+/** The 备忘 card (owner 2026-11-10): tab 要处理 (agent pins, pins/) or 书签; agentOnly filters 要处理 to the open agent. */
+export type ListState = { query?: string; allHosts?: boolean; tab?: "pins" | "bookmarks"; agentOnly?: boolean };
 export function parseList(raw: unknown): ListState | null {
   if (!object(raw)) return null;
-  return { ...(typeof raw.query === "string" ? { query: raw.query.slice(0, 500) } : {}), ...(typeof raw.allHosts === "boolean" ? { allHosts: raw.allHosts } : {}) };
+  return { ...(typeof raw.query === "string" ? { query: raw.query.slice(0, 500) } : {}), ...(typeof raw.allHosts === "boolean" ? { allHosts: raw.allHosts } : {}), ...(raw.tab === "pins" || raw.tab === "bookmarks" ? { tab: raw.tab } : {}), ...(typeof raw.agentOnly === "boolean" ? { agentOnly: raw.agentOnly } : {}) };
 }

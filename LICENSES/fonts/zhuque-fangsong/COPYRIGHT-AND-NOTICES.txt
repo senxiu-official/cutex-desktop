@@ -1,0 +1,9 @@
+copyright: Copyright 2023 JadeFoci
+
+designer: Junyi Yu, Yeong-sy Han, Yehang Yin, Jianqiao Li
+
+designer: 余俊益、韩泳思、殷叶航、李剑桥
+
+manufacturer: TrionesType
+
+manufacturer: 璇玑造字

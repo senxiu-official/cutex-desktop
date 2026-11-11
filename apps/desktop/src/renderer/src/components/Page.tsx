@@ -94,7 +94,7 @@ export function PageBody({ children, scrollKey, aside }: { children: ReactNode; 
 
 /** The row under the title bar for filters / search / page actions (right-aligned). */
 export function PageToolbar({ children }: { children?: ReactNode }) {
-  return <div className="mb-4 flex min-h-7 items-center justify-end gap-2">{children}</div>;
+  return <div className="mb-4 flex min-h-7 flex-wrap items-center justify-end gap-2">{children}</div>;
 }
 
 /** Secondary list on the left of a page (Settings tabs, project list). */

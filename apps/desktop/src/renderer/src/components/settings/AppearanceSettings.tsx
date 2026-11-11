@@ -11,6 +11,8 @@ import { AppearanceNumberRow, FontRow } from "./AppearanceRows";
 import { ResetButton, Section, Segmented, Select, SettingRow, SwatchPicker, Toggle } from "./Form";
 import { PreviewBand } from "./PreviewBand";
 import { LaunchArtSection } from "./LaunchArtSettings";
+import { FontPackSection } from "./FontPackSettings";
+import { BUNDLED_LATIN_FONTS, PACK_FONTS } from "../../../../shared/fontCatalog";
 import { PortraitPackSection } from "./PortraitSettings";
 import { WorkSurfaceSection } from "../WorkSurfaceSettings";
 import { AvatarSettings } from "./AvatarSettings";
@@ -19,8 +21,9 @@ import { radioKeyTarget, useRowA11y } from "../../lib/formA11y";
 import { NAME_GROUPINGS, NAME_READINGS, nameComparer } from "@cutex-desktop/cutex-client/nameOrder";
 import { nameOrderOf } from "../../lib/rosterOrder";
 
-const LATIN = ["Inter", "IBM Plex Sans", "Segoe UI", "Source Sans 3", "Noto Sans", "Source Serif 4", "Lora", "Georgia"];
-const CJK = ["Noto Sans CJK SC", "Noto Sans SC", "Source Han Sans SC", "Microsoft YaHei", "PingFang SC", "HarmonyOS Sans SC", "MiSans", "LXGW WenKai", "Noto Serif CJK SC", "Noto Serif SC", "Source Han Serif SC", "KingHwa_OldSong"];
+// The fonts that come with the desktop (shared/fontCatalog.ts) first: they are always there.
+const LATIN = [...BUNDLED_LATIN_FONTS, "Inter", "IBM Plex Sans", "Segoe UI", "Source Sans 3", "Noto Sans", "Source Serif 4", "Lora", "Georgia"];
+const CJK = [...PACK_FONTS.map((e) => e.family), "Noto Sans CJK SC", "Noto Sans SC", "Source Han Sans SC", "Microsoft YaHei", "PingFang SC", "HarmonyOS Sans SC", "MiSans", "LXGW WenKai", "Noto Serif CJK SC", "Noto Serif SC", "Source Han Serif SC", "KingHwa_OldSong"];
 const MONO = ["JetBrains Mono", "Cascadia Code", "Cascadia Mono", "IBM Plex Mono", "Fira Code", "Consolas", "Maple Mono", "Sarasa Mono SC"];
 // The shared font preview (not translated: it shows glyphs, not words). Mixed Latin / CJK with
 // curly quotes in both contexts, since U+2018/2019/201C/201D pick their font by context
@@ -101,24 +104,26 @@ export function AppearancePage() {
         {fonts.phase === "unsupported" && <p role="status" className="text-xs text-warn">{t("appearance.fontsUnsupported")}</p>}
         {fonts.phase === "ready" && fonts.failedFamilies.length > 0 && <p role="status" className="text-xs text-warn">{t("appearance.fontsFallback", { fonts: fonts.failedFamilies.join(", ") })}</p>}
         {/* 界面 / 对话 / 代码, each CJK first, each followed by its own live preview (owner 2026-10-18, F6). */}
-        <FontRow label={t("appearance.cjkFont")} hint={t("appearance.cjkFontHint")} value={a.cjkFont} fonts={CJK} onChange={(v) => setAppearance({ cjkFont: v })} />
-        <FontRow label={t("appearance.uiFont")} hint={t("appearance.uiFontHint")} value={a.uiFont} fonts={[...LATIN, ...CJK]} onChange={(v) => setAppearance({ uiFont: v })} />
+        <FontRow label={t("appearance.cjkFont")} hint={t("appearance.cjkFontHint")} value={a.cjkFont} fonts={CJK} cjkFonts={CJK} onChange={(v) => setAppearance({ cjkFont: v })} />
+        <FontRow label={t("appearance.uiFont")} hint={t("appearance.uiFontHint")} value={a.uiFont} fonts={[...LATIN, ...CJK]} cjkFonts={CJK} onChange={(v) => setAppearance({ uiFont: v })} />
         <PreviewBand inline label={t("appearance.fontPreview.ui")}>
           <p className="text-ui/[inherit] leading-relaxed whitespace-pre-line" style={{ fontFamily: "var(--font-sans)" }}><ScriptText text={`${t("appearance.fontPreview.uiLine")}\n${SAMPLE_UI}`} /></p>
         </PreviewBand>
-        <FontRow label={t("appearance.chatCjkFont")} value={a.chatCjkFont} fonts={CJK} defaultLabel={t("appearance.followUi")} onChange={(v) => setAppearance({ chatCjkFont: v })} />
-        <FontRow label={t("appearance.chatFont")} value={a.chatFont} fonts={[...LATIN, ...CJK]} defaultLabel={t("appearance.followUi")} onChange={(v) => setAppearance({ chatFont: v })} />
+        <FontRow label={t("appearance.chatCjkFont")} value={a.chatCjkFont} fonts={CJK} cjkFonts={CJK} defaultLabel={t("appearance.followUi")} onChange={(v) => setAppearance({ chatCjkFont: v })} />
+        <FontRow label={t("appearance.chatFont")} value={a.chatFont} fonts={[...LATIN, ...CJK]} cjkFonts={CJK} defaultLabel={t("appearance.followUi")} onChange={(v) => setAppearance({ chatFont: v })} />
         <AppearanceNumberRow field="chatFontSize" label="appearance.chatFontSize" unit="px" />
         <PreviewBand inline label={t("appearance.fontPreview.chat")}>
           <p className="font-chat-context whitespace-pre-line leading-relaxed" style={{ fontSize: "var(--chat-font-size)" }}><ScriptText text={`${t("appearance.fontPreview.chatLine")}\n${SAMPLE_CHAT}`} /></p>
         </PreviewBand>
-        <FontRow label={t("appearance.monoCjkFont")} hint={t("appearance.monoCjkFontHint")} value={a.monoCjkFont} fonts={CJK} defaultLabel={t("appearance.followUi")} onChange={(v) => setAppearance({ monoCjkFont: v })} />
-        <FontRow label={t("appearance.monoFont")} value={a.monoFont} fonts={MONO} onChange={(v) => setAppearance({ monoFont: v })} />
+        <FontRow label={t("appearance.monoCjkFont")} hint={t("appearance.monoCjkFontHint")} value={a.monoCjkFont} fonts={CJK} cjkFonts={CJK} defaultLabel={t("appearance.followUi")} onChange={(v) => setAppearance({ monoCjkFont: v })} />
+        <FontRow label={t("appearance.monoFont")} value={a.monoFont} fonts={MONO} mono onChange={(v) => setAppearance({ monoFont: v })} />
         <AppearanceNumberRow field="monoFontSize" label="appearance.monoFontSize" unit="px" />
         <PreviewBand label={t("appearance.fontPreview.code")}>
           <p className="break-all whitespace-pre-line font-mono" style={{ fontSize: "var(--mono-font-size, 13px)" }}>{`// ${t("appearance.fontPreview.codeLine")}\n${SAMPLE_CODE}`}</p>
         </PreviewBand>
       </Section>
+
+      <FontPackSection />
 
       <Section id={settingsAnchorId("layout")} title={t("appearance.layout")}  >
         <AppearanceNumberRow field="zoom" label="appearance.zoom" hint="appearance.zoomHint" unit="%" step={5} commitOnRelease />
@@ -138,9 +143,9 @@ export function AppearancePage() {
 
       {/* 主管头饰 (lib/directorHeadwear, owner 2026-10-24): what a project Director wears on its avatar. */}
       <Section id={settingsAnchorId("headwear")} title={t("appearance.headwear")}  >
-        <SettingRow agents="none" source="local" label={t("appearance.headwear.style")} hint={t("appearance.headwearHint")} reset={<ResetButton disabled={ui.directorHeadwear === DEFAULT_DIRECTOR_HEADWEAR} onClick={() => setUiPref("directorHeadwear", DEFAULT_DIRECTOR_HEADWEAR)} />}>
-          <HeadwearPicker value={ui.directorHeadwear} onChange={(v) => setUiPref("directorHeadwear", v)} />
-        </SettingRow>
+        {/* A picture picker wider than a segmented control sits under its label, the full width of the card. */}
+        <SettingRow agents="none" source="local" label={t("appearance.headwear.style")} hint={t("appearance.headwearHint")} reset={<ResetButton disabled={ui.directorHeadwear === DEFAULT_DIRECTOR_HEADWEAR} onClick={() => setUiPref("directorHeadwear", DEFAULT_DIRECTOR_HEADWEAR)} />}
+          sample={<HeadwearPicker label={t("appearance.headwear.style")} value={ui.directorHeadwear} onChange={(v) => setUiPref("directorHeadwear", v)} />} />
         <SettingRow agents="none" source="local" label={t("appearance.headwear.operators")} hint={t("appearance.headwear.operatorsHint")} reset={<ResetButton disabled={ui.operatorHeadwear} onClick={() => setUiPref("operatorHeadwear", true)} />}>
           <Toggle checked={ui.operatorHeadwear} onChange={(v) => setUiPref("operatorHeadwear", v)} disabled={ui.directorHeadwear === "none"} />
         </SettingRow>
@@ -160,13 +165,13 @@ export function AppearancePage() {
  * 主管头饰's styles as a grid of small pictures (eleven choices are too many for a segmented row): a radio group,
  * arrow keys move between choices like Segmented's.
  */
-function HeadwearPicker({ value, onChange }: { value: DirectorHeadwear; onChange(v: DirectorHeadwear): void }) {
+function HeadwearPicker({ value, onChange, label }: { value: DirectorHeadwear; onChange(v: DirectorHeadwear): void; label: string }) {
   const { t } = useI18n();
-  const aria = useRowA11y();
+  const aria = useRowA11y(label);
   const refs = useRef<(HTMLButtonElement | null)[]>([]);
   const selected = Math.max(0, DIRECTOR_HEADWEARS.indexOf(value));
   return (
-    <div role="radiogroup" {...aria} data-headwear-picker="" className="grid grid-cols-4 gap-1 rounded-lg bg-surface-2 p-1">
+    <div role="radiogroup" {...aria} data-headwear-picker="" className="mt-2 flex flex-wrap gap-1 rounded-lg bg-surface-2 p-1">
       {DIRECTOR_HEADWEARS.map((v, i) => {
         const on = v === value;
         const label = t(`appearance.headwear.${v}` as MessageKey);

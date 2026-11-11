@@ -27,7 +27,7 @@ import { useUserLayoutToggle } from "../lib/userLayoutToggle";
  * what a wake does to a busy recipient on this host (cutex wake-busy-wait), by `recipientRuntime`
  * (the viewed agent for a received row, the addressee for a sent one).
  */
-export function BusMessage({ direction, name: rawName, mode, text: raw, preview = null, onContextMenu, kind = null, downgraded = false, messageId = null, envelope = null, senderId = null, sourceKind = null, recipientId = null, recipientRuntime = "codex" }: { direction: "in" | "out"; name: string; mode: string | null; text: string; /** Sent only: the one-line text when it differs from the body (the agent's own words, lib/sentToolPairs); opened, the row shows the whole body. */ preview?: string | null; onContextMenu: React.MouseEventHandler; kind?: DeliveryKind | null; downgraded?: boolean; messageId?: string | null; envelope?: AgentEnvelope | null; /** Received only: the sender id / source kind, so cutex services show as 委托系统 / Cutex 系统 (lib/systemSenders). */ senderId?: string | null; sourceKind?: string | null; /** Sent only: the addressee's id, so 发给 shows its avatar (owner 2026-11-01: it drew a round letter on a fill). */ recipientId?: string | null; /** The runtime of the agent the message went to (a Claude agent always waits for the turn end). */ recipientRuntime?: AgentRuntime }) {
+export function BusMessage({ direction, name: rawName, mode, text: raw, preview = null, onContextMenu, kind = null, downgraded = false, messageId = null, envelope = null, senderId = null, sourceKind = null, recipientId = null, recipientRuntime = "codex", recipientFeatures = null }: { direction: "in" | "out"; name: string; mode: string | null; text: string; /** Sent only: the one-line text when it differs from the body (the agent's own words, lib/sentToolPairs); opened, the row shows the whole body. */ preview?: string | null; onContextMenu: React.MouseEventHandler; kind?: DeliveryKind | null; downgraded?: boolean; messageId?: string | null; envelope?: AgentEnvelope | null; /** Received only: the sender id / source kind, so cutex services show as 委托系统 / Cutex 系统 (lib/systemSenders). */ senderId?: string | null; sourceKind?: string | null; /** Sent only: the addressee's id, so 发给 shows its avatar (owner 2026-11-01: it drew a round letter on a fill). */ recipientId?: string | null; /** The runtime of the agent the message went to and its adapter feature map (lib/wakeCountdown readsEarly). */ recipientRuntime?: AgentRuntime; recipientFeatures?: Readonly<Record<string, unknown>> | null }) {
   const { t } = useI18n();
   const userToggle = useUserLayoutToggle();
   const conv = useConvScope();
@@ -42,7 +42,7 @@ export function BusMessage({ direction, name: rawName, mode, text: raw, preview 
   const name = incoming ? senderLabel(t, id, sourceKind, sender.name) : rawName;
   const Arrow = incoming ? ArrowDownLeft : ArrowUpRight;
   const shownKind = kind ?? deliveryKindOf(null, mode);
-  const wakeHint = useWakeHint(v2 && shownKind === "wake", recipientRuntime);
+  const wakeHint = useWakeHint(v2 && shownKind === "wake", recipientRuntime, recipientFeatures);
   return (
     <div className="group/msg my-2 min-w-0 max-w-full" onContextMenu={onContextMenu}>
       <button onClick={() => userToggle(() => setOpen(!open))} className="flex w-full min-w-0 max-w-full items-center gap-1.5 overflow-hidden rounded-md py-0.5 text-left text-xs text-muted hover:text-foreground">

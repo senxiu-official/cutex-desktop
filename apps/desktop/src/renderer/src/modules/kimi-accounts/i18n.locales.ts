@@ -5,6 +5,7 @@ const zhHantCN = {
   "kimi-accounts.title": "Kimi 賬戶",
   "kimi-accounts.description": "Kimi 會員登錄：每個賬戶在主機上有自己的登錄，給 Kimi 賬戶的 Profile 使用",
   "kimi-accounts.section": "Kimi 賬戶",
+  "kimi-accounts.all": "全部 {n} 個賬戶",
   "kimi-accounts.sectionHint": "用 Kimi 會員賬號登錄 Kimi Code。登錄在主機上進行：cutex 給出網址和驗證碼，你在瀏覽器裏確認；桌面不接觸令牌。一個賬戶可以給幾個 Profile 用。",
   "kimi-accounts.add": "添加 Kimi 賬戶",
   "kimi-accounts.empty": "還沒有 Kimi 賬戶。添加一個，用 Kimi 會員賬號登錄。",

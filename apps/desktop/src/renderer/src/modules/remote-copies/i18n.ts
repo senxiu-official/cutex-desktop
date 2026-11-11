@@ -1,9 +1,9 @@
 export const zhCN = {
-  "remote-copies.title": "远程文件副本",
-  "remote-copies.description": "下载、保留和清理这个桌面上的远程文件副本",
-  "remote-copies.hint": "副本保存在这个桌面上，主机离线时也能打开。清理副本不会删除远程原件。",
-  "remote-copies.empty": "还没有远程文件副本",
-  "remote-copies.emptyHint": "在远程文件的菜单中选择「下载到本地」。",
+  "remote-copies.title": "下载",
+  "remote-copies.description": "保存到这台电脑的文件：成果的版本和远程主机的文件；打开、在文件夹中显示、删除",
+  "remote-copies.hint": "保存到这台电脑的文件，主机离线时也能打开。删除这里的文件不会删除成果或远程原件。",
+  "remote-copies.empty": "还没有下载的文件",
+  "remote-copies.emptyHint": "在成果页或成果的菜单里选「保存到这台电脑」，或在远程文件的菜单里选「下载到本机」。",
   "remote-copies.missingFeature": "这台主机尚不支持完整文件下载，请升级 cutex",
   "remote-copies.offline": "来源主机离线或已更换，暂时不能读取原件",
   "remote-copies.download": "下载到本地",
@@ -60,6 +60,15 @@ export const zhCN = {
   "remote-copies.col.dateHint": "下载完成的时间；还没下载完时是开始下载的时间",
   "remote-copies.col.status": "状态",
   "remote-copies.more": "更多操作",
+  "remote-copies.missingArtifacts": "这台主机的 cutex 没有成果库，不能从它保存成果",
+  "remote-copies.folder": "下载文件夹",
+  "remote-copies.folderDefault": "默认 · 由应用管理",
+  "remote-copies.openFolder": "打开文件夹",
+  "remote-copies.changeFolder": "更改…",
+  "remote-copies.defaultFolder": "恢复默认",
+  "remote-copies.changeFolderHint": "已下载的文件会一起移过去（在所选文件夹里新建「Cutex Downloads」）；有文件正在下载时不能更改",
+  "remote-copies.location": "位置",
+  "remote-copies.artifactVersion": "成果 v{n}",
 } as const;
 declare module "../i18nCatalog" { interface ModuleMessages extends Messages {} }
 type Messages = typeof zhCN;

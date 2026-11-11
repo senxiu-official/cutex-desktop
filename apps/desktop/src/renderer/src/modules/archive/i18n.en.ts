@@ -4,9 +4,10 @@ import type { zhCN } from "./i18n";
 
 export const en: Record<keyof typeof zhCN, string> = {
   "archive.title": "Archive",
-  "archive.description": "The archive settings page: archived {{agents}} and archive behaviour",
+  "archive.description": "View and restore archived {{agents}} and set archive behavior",
   // ---- settings (moved from the base catalog, 2026-10-09) ----
   "archive.list": "Archived {{agents}}",
+  "archive.all": "All {n}",
   "archive.page": "Archive",
   "archive.archiveEmpty": "No archived {{agents}}",
   "archive.archiveHint": "Archived {{agents}} are always offline; view their history (read-only) or restore them",

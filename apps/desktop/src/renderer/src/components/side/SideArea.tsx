@@ -10,7 +10,7 @@ import { FillWorkArea } from "./FillWorkArea";
 // has its own width (else appearance.sidePaneWidth), its rail on top of it. A collapsed Shelf (owner
 // 2026-10-21) is its rail only, a strip in place on its outer edge; the box moves between the two widths
 // (lib/shelfMotion). Instances never live here: panes hold placeholders, SideInstanceLayer draws the instances.
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
 import { useI18n } from "../../i18n";
 import { RANGES, setAppearance, useAppearance, useLiveWidth } from "../../lib/appearance";
 import { armRowGlide, glideColumns, noteColumns, onResizeDrag, resizeDrag, resizing } from "../../lib/columnGlide";
@@ -132,7 +132,19 @@ function LiveOwner({ shelfId, collapsed, shared, side }: { shelfId: string; coll
  * One Shelf: its Shelf Rail on its outer edge (or inner, per Shelf) beside its page in view. `resizable`:
  * the panes' edge toward the conversations sizes the Shelf too. `collapsed`: the rail only, on the outer edge.
  */
-function ShelfView({ entry, registry, ctx, resizable, currentWidth, collapsed = false, at }: { entry: ShelfOnScreen; registry: SideRegistry; ctx: SideViewContext; resizable: boolean; currentWidth: () => number; collapsed?: boolean; at?: ShelfSide }) {
+type ShelfViewProps = { entry: ShelfOnScreen; registry: SideRegistry; ctx: SideViewContext; resizable: boolean; currentWidth: () => number; collapsed?: boolean; at?: ShelfSide };
+
+/**
+ * A width drag re-renders the work row on every step (liveWidth): no Shelf's view changes with its width (the box
+ * around it does), so both keep their render (perf/shelf-divider-drag). The entry is new each render but its Shelf and
+ * page are the layout's own (cached per layout, lib/sideLayout withShelves); `currentWidth` reads its box's ref, so the
+ * first closure keeps working.
+ */
+function sameShelfView(a: ShelfViewProps, b: ShelfViewProps): boolean {
+  return a.entry.shelf === b.entry.shelf && a.entry.page === b.entry.page && a.entry.only === b.entry.only && a.registry === b.registry && a.ctx === b.ctx && a.resizable === b.resizable && !!a.collapsed === !!b.collapsed && a.at === b.at;
+}
+
+const ShelfView = memo(function ShelfView({ entry, registry, ctx, resizable, currentWidth, collapsed = false, at }: ShelfViewProps) {
   const layout = useShelfLayout();
   const { shelf, page } = entry;
   // Drawn on its own side, or (two workspaces, 工作区的 Shelf Rail) on the side lib/workspaceRow gives it.
@@ -156,7 +168,7 @@ function ShelfView({ entry, registry, ctx, resizable, currentWidth, collapsed = 
       )}
     </div>
   );
-}
+}, sameShelfView);
 
 /**
  * A rail folded by a maximised / full-screen panel (§24.16): a click on one of its buttons first puts everything
@@ -526,9 +538,11 @@ function PortraitBandHandle({ band, share }: { band: RefObject<HTMLDivElement | 
     if (!d) return;
     drag.current = null;
     setDragging(false);
-    if (d.now === share) return;
-    quietNextStackGlide();
-    setPortraitPrefs(key, { band: d.now });
+    if (d.now !== share) {
+      quietNextStackGlide();
+      setPortraitPrefs(key, { band: d.now });
+    }
+    resizeDrag(false);
   };
   return (
     <div
@@ -550,6 +564,9 @@ function PortraitBandHandle({ band, share }: { band: RefObject<HTMLDivElement | 
         const m = measure();
         drag.current = { x: e.clientX, left: m.left, total: m.total, now: share };
         setDragging(true);
+        // A width drag session (lib/columnGlide): the panes' instances follow by style, the timeline's far rows stay
+        // skipped, the turns' attachments keep their width until the release (perf/shelf-divider-drag).
+        resizeDrag(true);
       }}
       onPointerMove={(e) => {
         const d = drag.current;
@@ -673,10 +690,12 @@ function PortraitDivider({ row, split, swapped, place = null }: { row: RefObject
     if (!d) return;
     drag.current = null;
     setDragging(false);
-    if (d.now === split) return;
-    // The release stores what the drag already shows: no glide toward it (lib/portraitMotion).
-    quietNextStackGlide();
-    setPortraitPrefs(key, { split: d.now });
+    if (d.now !== split) {
+      // The release stores what the drag already shows: no glide toward it (lib/portraitMotion).
+      quietNextStackGlide();
+      setPortraitPrefs(key, { split: d.now });
+    }
+    resizeDrag(false);
   };
   // ↑ moves the divider up: a smaller conversation on top, a bigger one below (swapped).
   const step = (up: boolean, big: boolean) => {
@@ -704,6 +723,8 @@ function PortraitDivider({ row, split, swapped, place = null }: { row: RefObject
         const { conv } = parts();
         drag.current = { y: e.clientY, conv: place ? split * total() : (conv?.getBoundingClientRect().height ?? 0), total: total(), now: split };
         setDragging(true);
+        // As the band handle's: one drag session for the stack's parts (lib/columnGlide resizeDrag).
+        resizeDrag(true);
       }}
       onPointerMove={(e) => {
         const d = drag.current;

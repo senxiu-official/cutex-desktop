@@ -136,6 +136,12 @@
   display: flex;
   align-items: stretch;
   min-width: 0;
+  /* The band is as wide as the conversations but the card may be narrower (centred over the desktop): only the card
+     takes clicks, the empty band passes them to what is under it (the 编辑主页 button, desktop widgets). */
+  pointer-events: none;
+}
+.tray-room > * {
+  pointer-events: auto;
 }
 .tray-room > .pane-tray-dock {
   flex: 1 1 auto;

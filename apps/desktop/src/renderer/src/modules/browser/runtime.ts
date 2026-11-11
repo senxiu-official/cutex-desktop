@@ -13,6 +13,7 @@ import { browserSitePermissionList } from "./sitePermissionText";
 import { openClaimTab } from "./claimOpen";
 import { inBrowserTabWindow, openPopupTab, pressBrowserTab, revealBrowserTab } from "./popupOpen";
 import { browserThumbnails } from "./thumbnails";
+import { watchBrowserMedia } from "./media";
 
 /** A preview intentionally has no browser bridge, hence no real webview or website requests. */
 export async function startBrowser(context: ModuleContext): Promise<void> {
@@ -36,6 +37,7 @@ export async function startBrowser(context: ModuleContext): Promise<void> {
   }, { once: true });
   await browser.setEnabled(true);
   if (context.signal.aborted) return;
+  const offMedia = watchBrowserMedia();
   const offHosts = watchBrowserHosts((hostId, epoch) => opens.invalidateHost(hostId, epoch));
   const offBrowser = browser.subscribe((event) => {
     if (context.signal.aborted || !browserHostCurrent(event.hostId, event.epoch)) return;
@@ -77,7 +79,7 @@ export async function startBrowser(context: ModuleContext): Promise<void> {
       if (event.newTabAgent) context.services.ui.notice(translate(event.newTabGranted ? "browser.newTab.agentGranted" : "browser.newTab.agent", { name: browserTitle(event.lease?.agentName ?? "") }));
     }
   });
-  off = () => { offHosts(); offBrowser(); };
+  off = () => { offMedia(); offHosts(); offBrowser(); };
   browserActivation.complete(activation);
 }
 

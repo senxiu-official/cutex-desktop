@@ -88,7 +88,7 @@ All images sit beside `pet.json`, named in it (lowercase letters, digits, `-` an
 - `canvas` is the whole picture in units; `character` the box the character fills. Size measures the character's box (100 % = 160 pixels on its longest side); the pile beside it comes on top. Bodies, props, pages and `hands` all fill the character's box.
 - A body has one `still` image and optionally 2–48 `breath` images, played round once every `breathMs` whatever else happens.
 - A frame of a clip names a `body`, and optionally a `prop` (held in front), a `page` (a turning page drawn over the prop, with `hands` over it) and `magic` (0–1: the prop appearing or going; `hands` and the optional `sparkle` are drawn over it). `ms` is how long it shows.
-- Clips have fixed names: `idle` and `reading` are required; `opening` and `closing` play when a book comes and goes; `fallAsleep`, `sleeping` and `wake` (all three or none) after a minute at rest; `attention` (optional) while the mark is up.
+- Clips have fixed names: `idle` and `reading` are required; `opening` and `closing` play when she starts and stops reading; `switchOut` and `switchIn` (both or none) take the next book while she keeps reading, without looking up: only bodies used in `reading`, the book in hand on every frame, no page turns (art without them closes and opens between books); `fallAsleep`, `sleeping` and `wake` (all three or none) after a minute at rest; `attention` (optional) while the mark is up.
 - `covers`: each book on the pile has one. `tint` recolours the green pixels of a prop with a `cover` and of the pile image; `image` is projected onto the prop's `cover.quad` and the pile's `cover` (four corners, clockwise from top-left); `cover.over` is drawn over it (fingers in front of the cover).
 - `pile`: one image per book, the lowest at `at` (its top-left), each next one `step` units higher, at most `max` (1–20). New books take their covers from `deck` in turn; `units` (1–8) makes a book thicker.
 
@@ -131,4 +131,4 @@ Hidden or set to click-through, the pet cannot be reached by itself. The way bac
 
 ## Linux
 
-On Wayland the system decides where windows go: the position is not kept across restarts, and transparent parts may catch clicks.
+On Wayland the system decides where windows go: the position is not kept across restarts, and transparent parts may catch clicks. Wayland also has no way for an app to keep its window on top. On KDE Plasma the app asks KWin (through a small KWin script for the pet's window only) to keep the pet above other windows, on every desktop and out of the taskbar; on GNOME and other Wayland desktops the pet goes behind any window you click, and Settings says so.

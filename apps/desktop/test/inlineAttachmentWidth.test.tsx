@@ -18,6 +18,7 @@ const ITEMS = [{ moduleId: "probe", mode: "show", missing: [], waiting: false, i
 const { TurnAttachments, inlineWidth, INLINE_WIDTH_STEP } = await import("../src/renderer/src/modules/TurnAttachments");
 const { useGutter } = await import("../src/renderer/src/lib/gutterStore");
 const { COLUMN_PADDING } = await import("../src/renderer/src/lib/gutterLayout");
+const { resetColumnGlide, resizeDrag } = await import("../src/renderer/src/lib/columnGlide");
 
 const side = { width: 0 };
 const geometry = (columnWidth: number) => ({ columnLeft: 100, columnWidth, left: side, right: side }) as never;
@@ -56,5 +57,22 @@ describe("inline attachment width (modules/TurnAttachments)", () => {
     expect(widths.length).toBe(8);
     expect(widths.every((x) => x % 8 === 0 && x <= 799 - 2 * COLUMN_PADDING)).toBe(true);
     expect(seen.widths.at(-1)).toBe(inlineWidth(736));
+  });
+
+  it("a width drag (a Shelf's or a column's edge) holds the width: the attachment gets the new one once, on release", async () => {
+    // perf/shelf-divider-drag: the 8 px steps were still one background commit each during an edge drag.
+    act(() => useGutter.setState({ geometry: geometry(800) }));
+    await act(async () => root.render(h(TurnAttachments, { sessionId: "eva", turnId: "t1" })));
+    try {
+      await act(async () => resizeDrag(true));
+      const first = seen.widths.length;
+      for (let w = 799; w >= 700; w -= 3) await act(async () => useGutter.setState({ geometry: geometry(w) }));
+      expect(seen.widths.length).toBe(first);
+      await act(async () => resizeDrag(false));
+      expect(seen.widths.length).toBe(first + 1);
+      expect(seen.widths.at(-1)).toBe(inlineWidth(700 + ((799 - 700) % 3)));
+    } finally {
+      resetColumnGlide();
+    }
   });
 });

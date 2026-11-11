@@ -32,6 +32,7 @@ export const en: Record<keyof typeof zhCN, string> = {
   "quick-switch.chats": "Chats",
   "quick-switch.noProject": "No project",
   "quick-switch.sub.service": "Service · {slug}",
+  "quick-switch.sub.worker": "Background app · {slug}",
   "quick-switch.sub.artifact": "{project} · v{n}",
   "quick-switch.sub.page": "Page",
   "quick-switch.sub.footer": "Page · bottom left",

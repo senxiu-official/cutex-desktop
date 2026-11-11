@@ -30,6 +30,16 @@ import { requestSettingsReveal } from "../../lib/settingsSearchView";
 import { profileSearchAnchor } from "../../lib/settingsProfileSearch";
 import { flashElement } from "../../lib/focusRequest";
 import { SettingsSections } from "../../modules/Outlet";
+import { KIMI_ACCOUNTS_ALL_SECTION } from "../../lib/kimiAccounts";
+import { useScrollToSettingsAnchor } from "../../lib/settingsFocus";
+
+/** Cards of the Profile page's sub-pages (not on the page itself). */
+const PROFILES_SUB_SECTIONS = [KIMI_ACCOUNTS_ALL_SECTION];
+/** Profile → Kimi 账户: every account (module kimi-accounts). */
+export function KimiAccountsSubPage() {
+  useScrollToSettingsAnchor();
+  return <SettingsSections page="profiles" only={PROFILES_SUB_SECTIONS} />;
+}
 import { profilePageOf, useApp } from "../../store";
 import { useSettingsShelf } from "../../lib/settingsShelf";
 import { Button, Loading, SettingsGroup } from "./Form";
@@ -456,7 +466,7 @@ function ProfilesBody() {
       ) : null}
       {/* Module sections after the list, by `order` (claude-accounts: Claude 账户). Not folded. */}
       <div className="mt-6">
-        <SettingsSections page="profiles" />
+        <SettingsSections page="profiles" except={PROFILES_SUB_SECTIONS} />
       </div>
       <div className="mt-6">
       {features.has("profile-account-link") && accountLinkHostAllowed(targetHost) && <ProfileLinkSettings />}

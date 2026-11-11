@@ -1,0 +1,5 @@
+copyright: Copyright 2018 The Crimson Pro Project Authors (https://github.com/Fonthausen/CrimsonPro)
+
+designer: Jacques Le Bailly
+
+manufacturer: Baron von Fonthausen

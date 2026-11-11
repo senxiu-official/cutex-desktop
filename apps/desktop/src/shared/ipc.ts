@@ -52,6 +52,7 @@ import type { ResetConsumeResult, ResetCreditsView } from "./resetCredits";
 import type { ClaudeAccountCreate, ClaudeAccountList, ClaudeAccountRemoveResult, ClaudeAccountResult, ProfileQuotaDetail } from "./claudeAccounts";
 import type { KimiAccountList, KimiAccountRemoveResult, KimiAccountResult, KimiLoginResult, KimiRegion } from "./kimiAccounts";
 import type { AlarmCancelResult, AlarmList } from "./alarms";
+import type { OwnerPinChange, OwnerPinList, OwnerPinUpdateResult } from "./ownerPins";
 import type { SkillArchiveList, SkillArchiveResult } from "./skillsArchive";
 import type { UsageSourceCreate, UsageSourceDeleteResult, UsageSourcePatch, UsageSourceResult, UsageSourcesView } from "./usageSources";
 import type { WorkflowRunAction, WorkflowRunList, WorkflowRunView } from "./workflows";
@@ -172,7 +173,7 @@ export interface QuotaConfigView {
 
 export interface CapabilitiesView {
   /** r260 non-durable text opt-in (normalized into featureList by main). */
-  features?: { runtimePruneV1?: boolean; liveTextDeltas?: boolean; ownerAdmissionHeldV1?: boolean; ownerAdmissionStateV1?: boolean; ownerAdmissionBusyV1?: boolean; formalAgentNameRenameV1?: boolean; quickChatPromoteV1?: boolean };
+  features?: { runtimePruneV1?: boolean; liveTextDeltas?: boolean; ownerAdmissionHeldV1?: boolean; ownerAdmissionStateV1?: boolean; ownerAdmissionBusyV1?: boolean; formalAgentNameRenameV1?: boolean; quickChatPromoteV1?: boolean; baiduPan?: boolean; servicesWorkersV1?: boolean };
   /** r258 native event media references (also advertised in featureList). */
   eventMediaBlobs?: boolean;
   /** Build identity (cutex r224+; absent on older cutex). */
@@ -539,7 +540,9 @@ export type OwnerNotifyAction = "ack" | "reply" | "dismiss" | "delete";
  * updated notice; a grant whose follow-up message to the agent failed still stands (`submitError`).
  */
 export type SafetyCheckDecision = "grant" | "dismiss";
-export type SafetyCheckResult = { ok: true; notification: OwnerNotification; submitError: CutexRefusal | null } | { ok: false; error: CutexRefusal; notification?: OwnerNotification };
+export type SafetyCheckResult = { ok: true; notification: OwnerNotification; submitError: CutexRefusal | null; notice?: SafetyGrantNotice } | { ok: false; error: CutexRefusal; notification?: OwnerNotification };
+/** safety-grant-delivery: the approval notice a grant queued (ledger `inputId`, bus `messageId`); absent on an older cutex. */
+export interface SafetyGrantNotice { inputId: string; messageId: string }
 /** Longest owner reply cutex accepts (`cutex/ownerNotify/reply` text 1–20000). */
 export const OWNER_REPLY_MAX = 20000;
 
@@ -1485,6 +1488,7 @@ export interface HostApi {
   sshConfigHosts(): Promise<string[]>;
   /** Pair (ssh → `cutex management client-token issue`) and store the host; failures as a result. */
   addSshHost(request: AddSshHostRequest): Promise<HostResult>;
+  importSshHostToken(request: import("./hosts").ImportSshHostTokenRequest): Promise<HostResult>;
   /** Issue a fresh client token for a stored host (token revoked / lost); keeps its `connectAs`. */
   pairSshHost(hostId: string): Promise<HostResult>;
   /**
@@ -1544,7 +1548,7 @@ export interface HostApi {
 }
 
 /** HostApi method names: served by main `HostManager`, never routed to a daemon (main + preload). */
-export const HOST_METHOD_NAMES = ["profileLinkState", "syncProfileLinks", "resetProfileLinks", "hosts", "sshConfigHosts", "addSshHost", "pairSshHost", "setSshConnectAs", "updateSshHost", "removeSshHost", "switchHost", "setScope", "reconnectHost", "connectHost", "setHostAutoConnect", "setHostAppearance", "saveHostGroups", "testHost", "setHostStartOn", "sshPrompts", "answerSshPrompt", "identityState", "exportIdentity", "importIdentity", "copyIdentityKey", "importIdentityKey", "setIdentityName", "copyProfileToHost"] as const satisfies readonly (keyof HostApi)[];
+export const HOST_METHOD_NAMES = ["profileLinkState", "syncProfileLinks", "resetProfileLinks", "hosts", "sshConfigHosts", "addSshHost", "importSshHostToken", "pairSshHost", "setSshConnectAs", "updateSshHost", "removeSshHost", "switchHost", "setScope", "reconnectHost", "connectHost", "setHostAutoConnect", "setHostAppearance", "saveHostGroups", "testHost", "setHostStartOn", "sshPrompts", "answerSshPrompt", "identityState", "exportIdentity", "importIdentity", "copyIdentityKey", "importIdentityKey", "setIdentityName", "copyProfileToHost"] as const satisfies readonly (keyof HostApi)[];
 
 /** Request/response calls (renderer → main). */
 /** Native Windows sandbox readiness (`windowsSandbox/readiness`; cutex windows-sandbox-readiness). */
@@ -1992,6 +1996,26 @@ export interface DaemonApi extends StorageCleanupApi {
   /** Follow `…/events/stream` (resumes, catches up after `lagged`); rows arrive as `projectEvents`. Returns a watch id. */
   watchProjectEvents(projectId: string, watch: import("./projectEvents").ProjectEventsWatch): Promise<string>;
   unwatchProjectEvents(watchId: string): Promise<void>;
+  // 百度网盘 (capability baidu-pan, main/panApi.ts): this host's Baidu account, browse / search, downloads on this host.
+  panConnection(): Promise<import("./baiduPan").PanResult<import("./baiduPan").PanConnection>>;
+  /** PUT the app (AppId / AppKey / SecretKey, write-only); the connection becomes needsAuth. */
+  panConfigure(input: import("./baiduPan").PanAppInput): Promise<import("./baiduPan").PanResult<import("./baiduPan").PanConnection>>;
+  /** Stops this host's pan downloads and forgets its tokens (Baidu's own grant is not revoked). */
+  panDisconnect(): Promise<import("./baiduPan").PanResult<{ disconnected: true }>>;
+  panAuthStart(): Promise<import("./baiduPan").PanResult<import("./baiduPan").PanAuthStart>>;
+  /** At most once per the start's intervalSeconds. */
+  panAuthPoll(authId: string): Promise<import("./baiduPan").PanResult<import("./baiduPan").PanAuthPoll>>;
+  /** POST /v2/pan/auth/code: the authorization-code / OOB fallback (redirectUri "oob" or the app's registered URL). */
+  panAuthCode(code: string, redirectUri: string): Promise<import("./baiduPan").PanResult<import("./baiduPan").PanConnection>>;
+  panFiles(dir: string, start?: number, limit?: number): Promise<import("./baiduPan").PanResult<import("./baiduPan").PanFilesPage>>;
+  panSearch(key: string, dir: string): Promise<import("./baiduPan").PanResult<import("./baiduPan").PanSearchResult>>;
+  panMeta(path: string): Promise<import("./baiduPan").PanResult<{ file: import("./baiduPan").PanFile }>>;
+  panDownloads(limit?: number): Promise<import("./baiduPan").PanResult<{ downloads: import("./baiduPan").PanDownload[] }>>;
+  panStartDownload(req: import("./baiduPan").PanDownloadRequest): Promise<import("./baiduPan").PanResult<{ download: import("./baiduPan").PanDownload }>>;
+  panDownloadAction(downloadId: string, action: import("./baiduPan").PanDownloadAction): Promise<import("./baiduPan").PanResult<{ download: import("./baiduPan").PanDownload }>>;
+  /** Follow GET /v2/pan/events until unwatchPan; updates arrive as panEvents. Returns a watch id. */
+  watchPan(): Promise<string>;
+  unwatchPan(watchId: string): Promise<void>;
   /** cute-codex `thread/read` of a sub-agent thread spawned by this agent (cutex `subagent-threads`). Raw native result.
    *  `includeTurns: false` = the thread only (nickname / role / status), no history. */
   subAgentThread(sessionId: string, threadId: string, opts?: { includeTurns?: boolean }): Promise<unknown>;
@@ -2029,7 +2053,7 @@ export interface DaemonApi extends StorageCleanupApi {
   /** `GET /v2/artifact-store/{id}` (summary + versions, newest first). */
   artifactStoreGet(artifactId: string): Promise<ArtifactDetail | null>;
   /** `GET /v2/artifact-store/{id}/versions/{n|latest}/content`. */
-  artifactStoreContent(artifactId: string, version: number | "latest", opts?: { offset?: number; maxBytes?: number }): Promise<ArtifactContent | null>;
+  artifactStoreContent(artifactId: string, version: number | "latest", opts?: { offset?: number; maxBytes?: number; imagePreview?: boolean }): Promise<ArtifactContent | null>;
   /** `GET /v2/artifact-store/{id}/diff?from&to`. */
   artifactStoreDiff(artifactId: string, from: number, to: number): Promise<ArtifactDiff | null>;
   /** `POST /v2/artifact-store/resolve` (≤ 200 refs). */
@@ -2046,6 +2070,10 @@ export interface DaemonApi extends StorageCleanupApi {
   alarms(query: { sessionId?: string; state?: "pending" | "all"; limit?: number }): Promise<AlarmList | null>;
   /** `DELETE /v2/alarms/{id}`: the owner cancels a scheduled alarm (409 alarm_already_queued once sent). */
   cancelAlarm(alarmId: string): Promise<AlarmCancelResult>;
+  /** 备忘 · 要处理 (`GET /v2/owner-pins?state=&agentId=&limit=`, cutex owner-pins): what agents pinned for the owner; null on an older cutex. */
+  ownerPins(query: { state?: "open" | "all"; agentId?: string; limit?: number }): Promise<OwnerPinList | null>;
+  /** `PATCH /v2/owner-pins/{id}` (state) or `DELETE` (`{delete: true}`): the owner resolves, reopens or removes a pin. */
+  ownerPinUpdate(pinId: string, change: OwnerPinChange): Promise<OwnerPinUpdateResult>;
   /** `GET /v2/workflows/runs` (cutex workflows): runs, newest first; null on an older cutex. */
   workflowRuns(query: { state?: "open" | "closed" | "all"; sessionId?: string; projectId?: string; limit?: number }): Promise<WorkflowRunList | null>;
   /** `GET /v2/workflows/runs/{id}?include=`: phases, steps, log tail (more with include). */
@@ -2393,7 +2421,8 @@ export interface ServiceView {
   slug: string;
   displayName: string;
   host: string;
-  port: number;
+  /** null for a worker and for static files (cutex sends null; no port). */
+  port: number | null;
   path: string | null;
   /** The registering session (with `ownerScope` project: the registrant; null once cleared / deleted). */
   ownerCutexSessionId: string | null;
@@ -2405,21 +2434,24 @@ export interface ServiceView {
   ownerScope?: "session" | "project";
   /** Agent `service_list` views only (the owner's Management list omits it: the owner manages every service). */
   youMayManage?: boolean;
-  runtime: "external" | "managed" | "static";
+  /** `worker` (cutex services-workers-v1): a supervised background program with no port or web page. */
+  runtime: "external" | "managed" | "static" | "worker";
   portAllocated?: boolean;
   createdAt: string;
   updatedAt?: string;
   lastSeenAt: string | null;
   lastProbeAt?: string | null;
-  health: "reachable" | "unreachable" | "starting" | "stopped" | "stoppedIdle";
+  /** A worker: reachable = its process is alive (no probe), unreachable = waiting to restart. crashLooped = finite restarts used up. */
+  health: "reachable" | "unreachable" | "starting" | "stopped" | "stoppedIdle" | "crashLooped";
   /** service-idle-presets-v1; old registrations report forever. */
   idleStopPreset?: ServiceIdlePreset;
   stoppedIdle?: boolean;
   stoppedIdleAt?: string | null;
   idleWakeFailedAt?: string | null;
   idleStopAt?: string | null;
-  url: string;
-  localUrl: string;
+  /** null for a worker and for static files. */
+  url: string | null;
+  localUrl: string | null;
   command?: string | string[] | null;
   cwd?: string | null;
   envKeys?: string[];
@@ -2572,6 +2604,8 @@ export interface DaemonEvents {
   terminalExit: { terminalId: string; exitCode: number | null };
   /** Live rows / state of a `watchProjectEvents` watch. */
   projectEvents: import("./projectEvents").ProjectEventsMessage;
+  /** Download updates / feed state of a watchPan watch. */
+  panEvents: import("./baiduPan").PanEventsMessage;
   /** cutex `users`: this connection's user or grant changed (the host feed ended with `cutex/access/changed`). */
   accessChanged: { changedAt: string | null };
 }
@@ -2605,6 +2639,7 @@ export interface DesktopEvents {
   terminalOutput: HostTag & DaemonEvents["terminalOutput"];
   terminalExit: HostTag & DaemonEvents["terminalExit"];
   projectEvents: HostTag & DaemonEvents["projectEvents"];
+  panEvents: HostTag & DaemonEvents["panEvents"];
   accessChanged: HostTag & DaemonEvents["accessChanged"];
   /** From the main process (tray menu): "newChat" = the window was shown; start a quick chat. */
   shellCommand: { command: ShellCommand };
@@ -2621,6 +2656,8 @@ export interface DesktopEvents {
   sshPrompts: { prompts: import("./sshPrompt").SshPromptView[] };
   /** Signed module packs: the whole view after any change (check / install progress / remove; main/modulePacks.ts, §23). */
   modulePacks: import("./modulePacks").ModulePacksView;
+  /** 中文字体包 download progress (main/fontPack.ts). */
+  fontPack: import("./fontCatalog").FontPackState;
   /** Modules loaded from a folder: the whole view after any change (main/moduleDev.ts, §30.5). */
   moduleDev: import("./moduleDev").ModuleDevView;
   /** The desk pet window service (main/deskPet.ts, §29): its whole view after any change, and 设置 in its menu. */
@@ -2634,7 +2671,7 @@ export interface DesktopEvents {
 export type HostTaggedEvent = { [K in keyof DesktopEvents]: DesktopEvents[K] extends HostTag ? K : never }[keyof DesktopEvents];
 
 /** Events that carry a `HostTag` (preload drops the ones of a replaced connection). */
-export const HOST_TAGGED_EVENTS = ["daemonState", "hostEvent", "hostResync", "sidebarChanged", "sidebarProgress", "sessionEvent", "sessionLiveDelta", "sessionLiveReset", "sessionFullText", "sessionResync", "sessionStatus", "workspaceChanged", "terminalOutput", "terminalExit", "accessChanged", "browserEvent", "projectEvents"] as const satisfies readonly HostTaggedEvent[];
+export const HOST_TAGGED_EVENTS = ["daemonState", "hostEvent", "hostResync", "sidebarChanged", "sidebarProgress", "sessionEvent", "sessionLiveDelta", "sessionLiveReset", "sessionFullText", "sessionResync", "sessionStatus", "workspaceChanged", "terminalOutput", "terminalExit", "accessChanged", "browserEvent", "projectEvents", "panEvents"] as const satisfies readonly HostTaggedEvent[];
 
 export const INVOKE_CHANNEL = "cutex-desktop:invoke";
 export const EVENT_CHANNEL = "cutex-desktop:event";
@@ -2642,6 +2679,7 @@ export const EVENT_CHANNEL = "cutex-desktop:event";
 export type InvokeMethod = keyof DesktopApi;
 
 export interface PreloadBridge {
+  imageCache?: import("./imageCache").ImageCacheBridge;
   debug?: import("./debug").DebugBridge;
   browser?: import("./browser").BrowserBridge;
   /** Calls to the focus host (`HostsState.active`); host-list calls go to main. */
@@ -2676,6 +2714,8 @@ export interface PreloadBridge {
   launchArt?: import("./launchArt").LaunchArtBridge;
   /** 「Director 头像」 personal portrait folder in userData (shared/directorAvatars.ts). Absent in a plain browser. */
   directorAvatars?: import("./directorAvatars").DirectorAvatarsBridge;
+  /** 中文字体包 in userData (shared/fontCatalog.ts, main/fontPack.ts). Absent in a plain browser. */
+  fontPack?: import("./fontCatalog").FontPackBridge;
   /** 拟人头像包 in the owner's folder in userData (shared/portraitPacks.ts). Absent in a plain browser. */
   portraitPacks?: import("./portraitPacks").PortraitPacksBridge;
 }

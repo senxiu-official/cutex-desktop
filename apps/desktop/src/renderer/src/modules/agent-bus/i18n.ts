@@ -21,7 +21,7 @@ export const zhCN = {
   "agent-bus.settlement.missing": "服务端未找到此事项，已刷新列表。",
   "agent-bus.settlement.unavailable": "服务暂不可用，请重新读取状态。",
   "agent-bus.title": "{{agent}}总线",
-  "agent-bus.description": "{{agent}}之间的消息投递、消息总线和卡住的消息",
+  "agent-bus.description": "管理{{agent}}之间的消息投递，查看未送达的消息",
   // ---- settings (moved from the base catalog, 2026-10-09) ----
   "agent-bus.restartHint": "改动后需要重启 cutex 服务",
   "agent-bus.tokenSet": "已设置",

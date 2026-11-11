@@ -15,7 +15,8 @@ import { setSettingsHost, useSettingsTarget, type SettingsTarget } from "../lib/
 import { TargetHostContext, useTargetFeatures } from "../lib/targetHost";
 import { useHostData, useHostScope } from "../lib/useHostScope";
 import { HostPicker } from "./HostPicker";
-import { EmptyState, Notice, PartSource, Section } from "./settings/Form";
+import { Banner, EmptyState, Notice, PartSource, Section } from "./settings/Form";
+import { WifiOff } from "lucide-react";
 
 // The last data each host reported while its capabilities were known (kept across page visits:
 // opening a page of a host that is offline now still shows what it had).
@@ -41,9 +42,9 @@ export function SettingsHostFrame({ target, children }: { target: SettingsTarget
     <TargetHostContext.Provider value={target.hostId}>
       <HeldHostDataContext.Provider value={target.available ? null : held}>
         {!target.available && (
-          <div role="status" data-settings-host-offline={target.hostId} className="mb-4 rounded-lg border border-warn/40 bg-warn/10 px-3 py-2 text-xs text-warn-text">
+          <Banner className="mb-4" attrs={{ role: "status", "data-settings-host-offline": target.hostId }} icon={<WifiOff size={16} />}>
             {t("settings.hostOffline", { host: label })}
-          </div>
+          </Banner>
         )}
         <fieldset disabled={!target.available} data-settings-host={target.hostId} className="m-0 min-w-0 border-0 p-0 disabled:opacity-70">
           {children}

@@ -51,7 +51,7 @@ async function gated(features: readonly string[] | null) {
 const MOCK_REMOTE = ["management-client-tokens", "session-attachments", "fs-dir-browse"];
 
 /** The side components' derived pane kinds (v1.17, §24.4): id, single / multi, binding (agent / workspace / follow → follow, host → host). */
-const SIDE_KINDS = ["artifacts.library single follow", "artifacts.view multi host", "bookmarks.list single host", "browser.service multi host", "browser.tab multi host", "conversation.projection multi follow", "conversation.turnPeek multi host", "delegations.detail multi host", "diff.view multi follow", "notes.list single host", "notes.note multi host", "remote-copies.list single host", "side-chat.chat single follow", "status:alarms.status single follow", "status:background-terminals.status single follow", "status:delegations.status single follow", "status:goal.status single follow", "status:jobs.status single follow", "status:plan.status single follow", "status:subagents.status single follow", "subagents.thread multi follow", "terminal.pty multi follow", "workspace.changes single follow", "workspace.files single follow", "workspace.preview multi follow"];
+const SIDE_KINDS = ["artifacts.library single follow", "artifacts.view multi host", "baidu-pan.page single host", "bookmarks.list single host", "browser.service multi host", "browser.tab multi host", "conversation.projection multi follow", "conversation.turnPeek multi host", "delegations.detail multi host", "diff.view multi follow", "notes.list single host", "notes.note multi host", "remote-copies.list single host", "side-chat.chat single follow", "status:alarms.status single follow", "status:background-terminals.status single follow", "status:delegations.status single follow", "status:goal.status single follow", "status:jobs.status single follow", "status:plan.status single follow", "status:subagents.status single follow", "subagents.thread multi follow", "terminal.pty multi follow", "workspace.changes single follow", "workspace.files single follow", "workspace.preview multi follow"];
 /** The page kinds the mock install derives (`page:<main.page id>`, pages without an Aside). */
 /** v1.21: the page kinds as Shelf components: id, singleton, host, page group, title (the sidebar entry's), persist. */
 const PAGE_SIDE = [
@@ -159,7 +159,7 @@ describe("module registry", () => {
     // v1.7: the artifact publish card (order 150) needs cutex `artifacts` (a new feature).
     // claude-safety-grants (a new feature): the owner's decision under a declined tool row (order 400).
     // owner-approvals (a new feature): the approval line under a cutex call that answered approval_required (order 350).
-    expect(current.host.snapshot("timeline.tool").map((e) => e.item.id)).toEqual(["delegations.tool", "browser.tool", "artifacts.tool", "task-service.tool", "conversation.agentTools", "subagents.tool", "subagents.claudeAgent", "approvals.tool", "safety-grants.tool", "conversation.standardTools"]);
+    expect(current.host.snapshot("timeline.tool").map((e) => e.item.id)).toEqual(["delegations.tool", "browser.tool", "artifacts.tool", "bookmarks.pinTool", "task-service.tool", "conversation.agentTools", "subagents.tool", "subagents.claudeAgent", "approvals.tool", "safety-grants.tool", "conversation.standardTools"]);
     for (const features of [[...MOCK_REMOTE, ...MOCK_BASE_FEATURES], null]) {
       const { host } = await gated(features);
       // Delegation ASK / results render by schema regardless of agent-asks (baseline, O6).
@@ -170,6 +170,7 @@ describe("module registry", () => {
     await current.host.setEnabled("task-service", false);
     await current.host.setEnabled("subagents", false);
     await current.host.setEnabled("artifacts", false);
+    await current.host.setEnabled("bookmarks", false);
     await current.host.setEnabled("safety-grants", false);
     await current.host.setEnabled("approvals", false);
     expect(current.host.snapshot("timeline.received").map((e) => e.item.id)).toEqual(["conversation.delegationAsk", "conversation.delegationResults"]);
@@ -478,7 +479,7 @@ describe("module import boundaries", () => {
         .snapshot("side.component")
         .map((e) => `${e.item.id} (${e.mode})`)
         .sort(),
-    ).toEqual(["artifacts.library (show)", "artifacts.view (show)", "bookmarks.list (show)", "browser.service (show)", "browser.tab (show)", "conversation.projection (show)", "conversation.turnPeek (show)", "delegations.detail (show)", "diff.view (show)", "notes.list (show)", "notes.note (show)", "remote-copies.list (show)", "side-chat.chat (show)", "subagents.thread (show)", "terminal.pty (show)", "workspace.changes (show)", "workspace.files (show)", "workspace.preview (show)"]);
+    ).toEqual(["artifacts.library (show)", "artifacts.view (show)", "baidu-pan.page (show)", "bookmarks.list (show)", "browser.service (show)", "browser.tab (show)", "conversation.projection (show)", "conversation.turnPeek (show)", "delegations.detail (show)", "diff.view (show)", "notes.list (show)", "notes.note (show)", "remote-copies.list (show)", "side-chat.chat (show)", "subagents.thread (show)", "terminal.pty (show)", "workspace.changes (show)", "workspace.files (show)", "workspace.preview (show)"]);
     // A referable component (toRef) needs an id refs accept as a kind (lowercase, §19.6).
     const referable = host.snapshot("side.component").filter((e) => e.item.toRef);
     expect(referable.length).toBeGreaterThan(0);
@@ -629,7 +630,7 @@ describe("module gating snapshot (mock featureLists)", () => {
     // Profile list (claude-accounts) and 从 CC Switch 导入 after it (profile-import); on 协作 轮换主管 (owner-rotation), 服务 (services-persistent-approval), 消息投递
     // and the 高级 card (消息总线 + 卡住的消息 with agent-bus-stuck-messages) last — page order is by `order`.
     // Design 006 v1: 会话 takes 宽度 / 输入区 / 留白 / 书签条 / 只看 Shelf; 桌面 the home's card; 性能记录 is on 更新与诊断.
-    expect(sections).toEqual(["shell.convWidth", "shell.composer", "shell.gutter", "bookmarks.settings", "side-chat.settings", "side-chat.summarySettings", "shell.shelfOnly", "status-capsule.settings", "workspace.viewerSettings", "artifacts.settings", "artifacts.pageData", "remote-copies.settings", "home.desktopSettings", "owner-notify.settings", "users.people", "users.devices", "users.allDevices", "remote-access.onlineDesktops", "remote-access.pairing", "peers.access", "users.peers", "remote-access.listen", "remote-access.cors", "proxy.update", "proxy.host", "claude-accounts.accounts", "kimi-accounts.accounts", "profile-import.ccSwitch", "projects.rotation.settings", "approvals.rules.settings", "approvals.rules.auditAll", "services.persistApproval.settings", "agent-bus.delivery", "shell.queueOrder", "shell.imageBusy", "agent-bus.advanced", "runtime-packages.settings", "runtimes.installed", "perf-log.section", "about.debug", "onboarding.section", "about.knownIssues", "about.changelog", "about.links"]);
+    expect(sections).toEqual(["shell.convWidth", "shell.composer", "shell.gutter", "bookmarks.settings", "side-chat.settings", "side-chat.summarySettings", "shell.shelfOnly", "status-capsule.settings", "workspace.viewerSettings", "artifacts.settings", "artifacts.pageData", "remote-copies.settings", "home.desktopSettings", "owner-notify.settings", "users.people", "users.devices", "users.allDevices", "remote-access.onlineDesktops", "remote-access.pairing", "peers.access", "users.peers", "remote-access.listen", "remote-access.cors", "proxy.update", "proxy.host", "claude-accounts.accounts", "kimi-accounts.accounts", "kimi-accounts.all", "profile-import.ccSwitch", "projects.rotation.settings", "approvals.rules.settings", "approvals.rules.auditAll", "approvals.rules.all", "services.persistApproval.settings", "agent-bus.delivery", "shell.queueOrder", "shell.imageBusy", "agent-bus.advanced", "runtime-packages.settings", "runtimes.installed", "perf-log.section", "about.debug", "onboarding.section", "about.knownIssues", "about.changelog", "about.links"]);
     expect(status).toEqual([...BASE_STATUS, "delegations.status", "jobs.status", "alarms.status"]);
   });
 

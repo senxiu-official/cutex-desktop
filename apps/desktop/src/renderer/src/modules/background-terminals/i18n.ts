@@ -1,6 +1,6 @@
 export const zhCN = {
   "background-terminals.title": "后台终端",
-  "background-terminals.description": "{{agent}}的后台终端（CPU / 内存、终止）在状态行和胶囊里的一类；/ps",
+  "background-terminals.description": "查看{{agent}}的后台终端、CPU 和内存使用情况，并终止终端",
   "background-terminals.statusTitle": "后台终端",
   "background-terminals.count": "{n} 后台终端",
   "background-terminals.running": "运行中",

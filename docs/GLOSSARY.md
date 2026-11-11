@@ -112,6 +112,7 @@ uses Maid / Chief Maid / Maidling, so screens may read 「44 个 Maid」 where t
 | 开发者模式 | developer mode | Settings → 模块: load a module being written from a folder and swap in each new build. Tagged 开发. | `modules/shell/DevModules.tsx`, `main/moduleDev.ts` |
 | 本地模块 | local module | A module installed from a `.tar.gz` file (Settings → 模块 → 从文件安装…), after main's native confirm; runs with the app's own power. Tagged 本地安装. | `modules/shell/ModulePacks.tsx`, `main/modulePacks.ts` |
 | 模块数据 | module data | A module's own folder on this device (`userData/module-data/<id>/`), and the Settings → 模块 list of those folders, kept or deleted when a module is removed. | `modules/shell/ModuleData.tsx`, `main/moduleData.ts` |
+| 随应用的字体 · 中文字体包 | bundled fonts · Chinese font pack | Settings → 外观 → 字体: seven Latin fonts come with the app (first in the lists). Four large Chinese fonts are the 中文字体包: 下载并安装 (one archive from the `fonts-zh-1` release, size and SHA-256 pinned in the catalog) or 导入字体包… from a folder, into `userData/fonts/` (Settings → 外观 → 中文字体包), loaded only when chosen; the picker shows each choice in its own font. | `shared/fontCatalog.ts`, `main/fontPack.ts`, `FontPackSettings.tsx` |
 | 不透明 frame | opaque frame | The sandboxed, offline frame agent pages and HTML files show in. Not a module and not a plugin. (The frame *plugin* feature that also used it is retired.) | `@cutex-desktop/opaque-frame`, `main/frames.ts` |
 | 主机（设置页） | Hosts page | Settings → 主机: one list of hosts, groups, what connects at launch. | `components/settings/ConnectionSettings.tsx` |
 | 主机详情 | host page | One host's page, opened from a row or from the switcher's ›; its heading is the host's name. Its connection, users and devices. (Was 主机 + 用户与设备.) | `components/settings/AccessSettings.tsx` |
@@ -134,6 +135,23 @@ uses Maid / Chief Maid / Maidling, so screens may read 「44 个 Maid」 where t
 | 终端 | terminal | The built-in terminal. | `modules/terminal` |
 | 项目视图 | project view | A project's counts, its 主管 card, 需要你 / 运行中 / 最近活跃 / 其余 (the sidebar's tier rule, 30-minute window), and 动态. | `modules/project-view/ProjectView.tsx` |
 | 动态 | activity | The project's day-by-day event feed with type chips. | `modules/project-view/ProjectStream.tsx` |
+
+## 设置页的部件 Settings parts
+
+The layout rules for these are at the top of `.claude/reports/settings-layout-audit-20261110.md`; the parts are in
+`components/settings/Form.tsx`.
+
+| 中文 | English | 是什么 | 主要文件 |
+|---|---|---|---|
+| 页头 | page header | A settings page's title, one-line purpose and its place / timing chips (and host picker). | `SettingsPage` |
+| 分部 · 分部导航 | part · part bar | A long page's parts (会话: 消息 / 输入 / 布局 / 旁边对话与批注): a quiet heading on a rule, and the row of chips at the top that jumps to them. | `PartHeading`, `PartNav` |
+| 设置卡片 | settings card | A titled group of settings: title + chips + actions on one line, a hint under it, then the card. A card holds settings; a note alone is a title + hint with no card. | `Section`, `Card` |
+| 设置行 | setting row | One setting: label (+ hint or ⓘ) on the left, its control on the right; under the label in a narrow card. A picture picker sits under its label. | `SettingRow` |
+| 行组 | row group | Several rows under one name inside a card (留白里常驻, 组件默认位置). | `RowGroup` |
+| 列表行 | list row | One thing in a list (host, site, server, rule): a name, one grey detail line, buttons on the right. | `ListRow` |
+| 子页面入口 · 子页面 | sub-page entry · sub-page | A row with a count and › that opens a list too long for its page; the sub-page has 「‹ 页名」 back. | `SubPageRow`, `SettingsPageItem.subPages` |
+| 改过标记 · 恢复默认 | modified mark · restore default | The short accent bar at a changed row's left edge, and 「↺ 恢复默认」 after its label on hover. | `SettingRow` `reset` |
+| 详细信息 | details | A fold at a card's end for developer facts (hashes, paths). | `Details` |
 
 ## 卡片 Cards
 
@@ -174,6 +192,7 @@ uses Maid / Chief Maid / Maidling, so screens may read 「44 个 Maid」 where t
 | 作业（项目视图旧写法：后台任务） | job | A long command run by the Job Service (Linux hosts). | `modules/jobs` |
 | 后台命令（界面标题：后台终端） | background command | A shell command an agent left running. | `modules/background-terminals` |
 | 后台操作 | cutex operation | cutex's own work started from this desktop: batch online/offline, restore, stop idle and its undo, runtime-package upgrades, host-busy retries. The tray shows a button for it only while something runs or a failure is unread (spinner + 3/12, red dot); its list has per-agent results and 重试. Operations started elsewhere are not listed yet (needs a cutex API). | `components/BackgroundOperations.tsx`, `lib/backgroundOperations.ts` |
+| 后台应用（标签「后台应用」，en "Background app"） | background app | A program cutex runs with no port or web page (`runtime: "worker"`, capability `services-workers-v1`). Listed with the web services on 服务; its main actions are 启动后台应用 / 停止后台应用 / 重启 / 日志, and opening it from a link, pin, quick switch or the header shows it on 服务. Not the 「后台」 purpose section of 服务 (kept under that name), which is about web services the owner keeps running in the background. Named by the owner 2026-11-10. | `lib/serviceWorker.ts`, `components/WorkerBadge.tsx` |
 | 计划（旧称 进程） | plan | The model's update_plan checklist. | `modules/plan` |
 | 目标 | goal | The objective an agent works toward, with an optional budget. | `modules/goal` |
 | 工作流 | workflow | A multi-step run of several agents. | `modules/workflows` |

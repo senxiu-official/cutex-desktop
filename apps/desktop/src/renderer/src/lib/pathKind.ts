@@ -11,6 +11,11 @@ const TTL_MS = 30_000;
 const cache = new Map<string, { dir: boolean; at: number }>();
 onHostSwitch(() => cache.clear());
 
+/** The host answered that the path does not exist (cutex `path_not_found`): deleted, moved, or never there. */
+export function isPathMissingError(error: unknown): boolean {
+  return /(?:^|[^a-z_])path_not_found\b/.test(error instanceof Error ? error.message : String(error));
+}
+
 /** A daemon read refused because the path is a folder (`not_a_file: path is not a regular file`). */
 export function isNotAFileError(error: unknown): boolean {
   return /(?:^|[^a-z_])not_a_file\b/.test(error instanceof Error ? error.message : String(error));

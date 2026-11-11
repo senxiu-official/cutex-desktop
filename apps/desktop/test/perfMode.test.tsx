@@ -101,7 +101,7 @@ describe("Settings → 通用 → 性能 (components/settings/AppSettings)", () 
     const card = host.querySelector("#settings-performance")!;
     expect(card).not.toBeNull();
     const radios = [...card.querySelectorAll<HTMLButtonElement>("[role=radiogroup] button")];
-    expect(radios.map((b) => b.textContent)).toEqual(["Save resources", "Smooth first"]);
+    expect(radios.map((b) => b.textContent)).toEqual(["Save resources", "Prefer smoothness"]);
     expect(radios[0]!.getAttribute("aria-checked")).toBe("true");
     expect(card.textContent).toContain("load the first time you open them");
     await act(async () => radios[1]!.click());

@@ -57,11 +57,12 @@ function activate(saved: unknown = null, more: Record<string, unknown> = {}) {
         subscribeUsage: (l: typeof usage) => { usage = l; return () => {}; },
         subscribeOwnerWaiting: (l: typeof waiting) => { waiting = l; l([]); return () => {}; },
       },
-      daemonFor: (hostId: string) => ({ usage: async (query: unknown) => { usageCalls.push({ hostId, query }); return answer; } }),
+      daemonFor: (hostId: string) => ({ usage: async (query: unknown) => { usageCalls.push({ hostId, query }); return typeof answer === "function" ? answer(query) : answer; } }),
       ui: { openSettings: vi.fn() },
     },
   };
   activateDeskPet(ctx as never);
+  live.add(controller);
   return {
     prefs, ctx, usageCalls,
     setAnswer: (a: unknown) => (answer = a),
@@ -72,8 +73,14 @@ function activate(saved: unknown = null, more: Record<string, unknown> = {}) {
   };
 }
 
+/** Controllers a test left running (it failed before its abort): stopped after it, so one failure does not spill over. */
+const live = new Set<AbortController>();
+/** A fixed local noon: the tests run minutes of fake time and must not cross midnight by the wall clock. */
+const NOON = new Date(2026, 10, 10, 12, 0, 0);
+
 beforeEach(() => {
   vi.useFakeTimers();
+  vi.setSystemTime(NOON);
   vi.stubGlobal("window", new EventTarget());
   vi.clearAllMocks();
   storeListeners.clear();
@@ -81,6 +88,8 @@ beforeEach(() => {
   pet.start.mockImplementation(async () => viewOf());
 });
 afterEach(() => {
+  for (const c of live) c.abort();
+  live.clear();
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
@@ -266,6 +275,22 @@ describe("desk pet controller", () => {
     await vi.advanceTimersByTimeAsync(10 * 60_000);
     expect(books().length).toBe(seen);
     m.abort();
+  });
+
+  it("across local midnight the new day's ledger is new tokens, credited once; the balance carries over", async () => {
+    vi.setSystemTime(new Date(2026, 10, 10, 23, 58, 0));
+    const art = { max: 3, deck: [{ cover: "green", kind: "book", units: 1 }] };
+    pet.start.mockImplementation(async () => ({ ...viewOf({ hidden: true }), scenes: true, current: "reader", characters: [{ id: "reader", name: "R", family: null, source: "pack", pixel: false, format: 2, books: art }] }));
+    const m = activate(null, { poolConfig: { tokensPerBook: 10_000, tokensPerMinute: 10_000 } });
+    // Each day's ledger: 700 on the 10th, 50 so far on the 11th.
+    m.setAnswer((q: { from: string }) => ledger(q.from === "2026-11-11" ? { input: 50, cachedInput: 0, output: 0 } : { input: 1000, cachedInput: 400, output: 100 }));
+    await vi.advanceTimersByTimeAsync(0);
+    m.report(1000);
+    await vi.advanceTimersByTimeAsync(3 * 60_000);
+    // Past 00:00:05: the 11th's ledger was read once and its 50 credited; the 10th's 1700 stay, nothing twice.
+    expect(m.usageCalls.map((c) => (c.query as { from: string }).from)).toEqual(["2026-11-10", "2026-11-11"]);
+    m.abort();
+    expect(m.prefs.get("pool")).toMatchObject({ cursor: { day: "2026-11-11", hosts: { local: 50 } }, pile: [{ tokens: 1750 }] });
   });
 
   it("a hidden format 2 pet still credits its pool but does not work it off", async () => {

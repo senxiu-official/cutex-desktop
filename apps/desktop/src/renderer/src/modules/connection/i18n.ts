@@ -1,6 +1,6 @@
 export const zhCN = {
   "connection.title": "连接",
-  "connection.description": "主机列表、切换主机、启动时连接和诊断（设置 → 主机）",
+  "connection.description": "管理主机连接、启动时连接和连接诊断",
   // ---- settings (moved from the base catalog, 2026-10-09) ----
   "connection.diagnostics": "诊断",
   "connection.page": "主机",

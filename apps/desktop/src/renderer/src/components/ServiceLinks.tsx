@@ -20,6 +20,7 @@ import { useShelfPeer } from "../lib/shelfSourceContext";
 import { sidebarOf, useApp } from "../store";
 import { Avatar } from "./Avatar";
 import { keyVar } from "../lib/keybindings";
+import { isWorker, serviceHealthKey } from "../lib/serviceWorker";
 import { pageOf, POP_W, ROW_H_COMPACT, serviceStatusLine, serviceWhere, servicesPopoverLayout, type ServicesPopoverLayout } from "../lib/servicesPopover";
 import { useOwnerWindow } from "../lib/ownerContext";
 
@@ -170,7 +171,7 @@ export function AgentServicesView({ paneId, hostId, sessionId, agentName, compac
   const style: CSSProperties = place
     ? { top: place.top, bottom: place.bottom, left: place.left, width: place.width, maxHeight: place.maxHeight }
     : { visibility: "hidden", width: POP_W };
-  const where = (s: ServiceView) => serviceStatusLine(t(`services.health.${s.health}` as MessageKey), serviceWhere(s, t("svcLink.static")));
+  const where = (s: ServiceView) => serviceStatusLine(t(serviceHealthKey(s)), serviceWhere(s, t("svcLink.static"), t("services.worker.badge")));
   const label = t("svcLink.count", { n: mine.length });
   return (
     <>
@@ -211,7 +212,8 @@ export function AgentServicesView({ paneId, hostId, sessionId, agentName, compac
             <p className="shrink-0 px-1.5 pt-0.5 pb-1.5 text-caption/[inherit] leading-snug text-subtle">{t("svcLink.sub")}</p>
             <div data-agent-services-list="" style={shown.pages > 1 ? { minHeight: (pageSize / 2) * ROW_H_COMPACT } : undefined} className={`min-h-0 flex-1 overflow-y-auto overscroll-contain ${two ? "grid grid-cols-2 content-start gap-x-1" : ""}`}>
             {shown.rows.map((s) => {
-              const there = inShelf(s.slug);
+              const worker = isWorker(s);
+              const there = !worker && inShelf(s.slug);
               const withAgent = withAgentOn(on, hostId, s.slug);
               const name = s.displayName || s.slug;
               const openIt = () => {
@@ -226,6 +228,7 @@ export function AgentServicesView({ paneId, hostId, sessionId, agentName, compac
                       <div className="truncate text-ui/[inherit] font-medium text-foreground" title={name}>{name}</div>
                       <div className="truncate text-caption/[inherit] text-subtle" data-agent-service-status="">{where(s)}</div>
                     </div>
+                    {worker ? <button type="button" data-agent-service-manage={s.slug} onClick={openIt} title={t("services.worker.manageHint")} className="flex h-6 shrink-0 items-center rounded-md border border-border px-2 text-meta/[inherit] text-muted hover:bg-hover hover:text-foreground">{t("services.worker.manage")}</button> : <>
                     <button
                       type="button"
                       data-agent-service-with={s.slug}
@@ -247,6 +250,7 @@ export function AgentServicesView({ paneId, hostId, sessionId, agentName, compac
                     >
                       {there ? <LocateFixed size={13} /> : <PanelRightOpen size={13} />}
                     </button>
+                    </>}
                   </div>
                 );
               return (
@@ -259,19 +263,19 @@ export function AgentServicesView({ paneId, hostId, sessionId, agentName, compac
                         {where(s)}
                       </div>
                     </div>
-                    <button
+                    {worker ? <button type="button" data-agent-service-manage={s.slug} onClick={openIt} title={t("services.worker.manageHint")} className="flex h-6 shrink-0 items-center rounded-md border border-border px-2 text-meta/[inherit] text-muted hover:bg-hover hover:text-foreground">{t("services.worker.manage")}</button> : <button
                       data-agent-service-open={there ? "locate" : "open"}
                       onClick={openIt}
                       className={`flex h-6 shrink-0 items-center gap-1 rounded-md px-2 text-meta/[inherit] ${there ? "border border-border text-muted hover:bg-hover hover:text-foreground" : "bg-accent text-white hover:opacity-90"}`}
                     >
                       {there && <Check size={12} />}
                       {t(there ? "svcLink.locate" : "svcLink.open")}
-                    </button>
+                    </button>}
                   </div>
-                  <label className="mt-1 ml-4 flex cursor-pointer items-center gap-1.5 text-caption/[inherit] text-subtle" title={t("svcLink.withAgentHint")}>
+                  {!worker && <label className="mt-1 ml-4 flex cursor-pointer items-center gap-1.5 text-caption/[inherit] text-subtle" title={t("svcLink.withAgentHint")}>
                     <input type="checkbox" data-agent-service-with={s.slug} checked={withAgent} onChange={(e) => setWithAgent(hostId, s.slug, e.target.checked)} className="size-3 accent-[var(--accent)]" />
                     {t("svcLink.withAgent")}
-                  </label>
+                  </label>}
                 </div>
               );
             })}

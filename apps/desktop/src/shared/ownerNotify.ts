@@ -156,6 +156,8 @@ export function asSafetyBlock(raw: unknown): SafetyBlock | null {
     expiresAt: str(b.expiresAt),
     usedAt: str(b.usedAt),
     grantSeconds: typeof b.grantSeconds === "number" && b.grantSeconds > 0 ? b.grantSeconds : 1800,
+    // safety-grant-delivery: only when cutex sends them (an older one keeps the old wording).
+    ...(str(b.noticeInputId) ? { noticeInputId: str(b.noticeInputId), noticeReadAt: str(b.noticeReadAt), hardExpiresAt: str(b.hardExpiresAt) } : {}),
   };
 }
 

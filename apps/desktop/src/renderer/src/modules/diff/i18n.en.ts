@@ -4,7 +4,7 @@ import type { zhCN } from "./i18n";
 
 export const en: Record<keyof typeof zhCN, string> = {
   "diff.title": "Diff",
-  "diff.description": "The {{shelf}}'s diff pane: a workspace's git changes and one turn's changes to a file share one viewer",
+  "diff.description": "View workspace Git changes and file changes from individual turns in the {{shelf}}",
   "diff.view": "Diff",
   "diff.turnTab": "This turn · {name}",
   "diff.turnBadge": "Changes in this turn",

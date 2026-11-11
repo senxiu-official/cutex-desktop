@@ -4,7 +4,7 @@ import type { zhCN } from "./i18n";
 
 export const en: Record<keyof typeof zhCN, string> = {
   "proxy.title": "Network proxy",
-  "proxy.description": "Settings → Network proxy: this desktop's update proxy and the connected host's cutex proxy side by side; a Profile can override it (cutex proxy-modes / profile-proxy)",
+  "proxy.description": "Set proxies for desktop updates on this device and network requests on the selected host; profiles can override the host proxy",
   "proxy.page": "Network proxy",
   "proxy.pageHint": "Two separate settings: the desktop always connects to cutex directly, whatever is set here.",
   "proxy.mode.system": "Follow system",

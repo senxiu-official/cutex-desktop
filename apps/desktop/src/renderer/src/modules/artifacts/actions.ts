@@ -16,6 +16,7 @@ import { ARTIFACT_REF_KIND, previewKind, VIEW } from "./model";
 import { clearPageData } from "./pageData";
 import { invalidateArtifact, loadDetail } from "./store";
 import { artifactSourceFileEntries } from "./fileActions";
+import { canSaveArtifact, saveArtifact } from "../../lib/remoteCopies";
 
 const notice = (text: string, tone: "info" | "error" = "info") => services.ui.notice(text, tone);
 
@@ -64,6 +65,13 @@ async function patch(hostId: string, a: ArtifactSummary, change: Omit<ArtifactPa
   return false;
 }
 
+/** 保存到这台电脑: this version's bytes into the download folder, from this computer's store or a remote one. */
+export function saveArtifactEntry(hostId: string, version: ArtifactVersion | null | undefined, scope?: ArtifactSummary["scope"]): MenuEntry {
+  if (!version) return false;
+  const can = canSaveArtifact(hostId);
+  return { label: translate("artifacts.save.toComputer"), title: can ? translate("artifacts.save.hint", { n: version.version }) : translate("remote-copies.missingArtifacts"), disabled: !can, onSelect: () => void saveArtifact(hostId, version, scope) };
+}
+
 /** The owner's menu rows for one artifact (library rows, the view's header). */
 export function artifactMenu(hostId: string, a: ArtifactSummary, open: SideOpen | null, version: ArtifactVersion | null = a.latest): MenuEntry[] {
   const latest = artifactRef(a.artifactId, "latest");
@@ -72,6 +80,7 @@ export function artifactMenu(hostId: string, a: ArtifactSummary, open: SideOpen 
     { label: translate("artifacts.openLatest"), onSelect: () => openVersion(open, latest, a.name) },
     { label: translate("artifacts.openPinned", { n: a.latestVersion }), onSelect: () => openVersion(open, pinned, a.name) },
     { label: translate("artifacts.copyLink"), onSelect: () => copyArtifactLink(pinned, a.name) },
+    saveArtifactEntry(hostId, version, a.scope),
     ...artifactSourceFileEntries(hostId, version),
     "separator",
     { label: translate(a.starred ? "artifacts.unstar" : "artifacts.star"), onSelect: () => void patch(hostId, a, { starred: !a.starred }) },

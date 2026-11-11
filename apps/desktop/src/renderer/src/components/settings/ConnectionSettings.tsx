@@ -32,6 +32,9 @@ import { HostDot, HostPlatformIcon } from "../HostMark";
 import { AddButton, Button, EmptyState, IconButton, SettingRow, Section, Segmented, TextInput, Toggle, SettingsGroup } from "./Form";
 import { HostGroupsSection, hostGroupRowId, SwatchPicker } from "./HostGroupsSection";
 import { SettingsDisclosureRow } from "./SettingsDisclosureRow";
+import { HostDetails } from "./HostDetails";
+import { AddHostChooser, ReimportToken, TokenProblemText } from "./HostTokenImport";
+import { isTokenImportHost } from "../../lib/hostTokenImport";
 import { Tag } from "../../components/Tag";
 import { useOwnerWindow } from "../../lib/ownerContext";
 
@@ -66,16 +69,6 @@ function HostStages({ stage }: { stage: HostStage }) {
   );
 }
 
-/** The raw text behind a connection line: closed until asked for. */
-function HostDetails({ children }: { children: ReactNode }) {
-  const { t } = useI18n();
-  return (
-    <details className="mt-1" data-host-details="">
-      <summary className="cursor-pointer text-xs text-subtle select-none hover:text-foreground">{t("host.details")}</summary>
-      <div className="mt-0.5 font-mono text-caption/[inherit] whitespace-pre-wrap text-subtle">{children}</div>
-    </details>
-  );
-}
 
 /** One line for an ssh / pairing failure: what it means, the step it stopped at, then the stderr tail. */
 export function ProblemText({ error }: { error: SshErrorView }) {
@@ -325,6 +318,8 @@ function HostRow({ look, shown, member, onRemoved }: { look: HostLook; shown: bo
   const notify = useApp((s) => s.notify);
   const indicator = look.indicator;
   const [busy, setBusy] = useState<null | "test" | "pair" | "remove" | "save">(null);
+  const tokenHost = isTokenImportHost(host);
+  const [reimport, setReimport] = useState(false);
   const [test, setTest] = useState<HostTestResult | null>(null);
   const [pairError, setPairError] = useState<SshErrorView | null>(null);
   const [editing, setEditing] = useState(false);
@@ -366,7 +361,7 @@ function HostRow({ look, shown, member, onRemoved }: { look: HostLook; shown: bo
   const remove = () =>
     run("remove", async () => {
       const r = await api.removeSshHost(host.id);
-      onRemoved({ text: r.revoked ? t("host.removed") : t("host.removedNotRevoked", { host: host.label }), ok: r.revoked });
+      onRemoved(tokenHost ? { text: t("host.token.forgotten", { host: host.label }), ok: true } : { text: r.revoked ? t("host.removed") : t("host.removedNotRevoked", { host: host.label }), ok: r.revoked });
     });
   const saveName = () =>
     run("save", async () => {
@@ -376,7 +371,7 @@ function HostRow({ look, shown, member, onRemoved }: { look: HostLook; shown: bo
   const save = () =>
     run("save", async () => {
       const port = Number(form.remotePort);
-      const r = await api.updateSshHost(host.id, { label: form.label, targets: form.targets, remotePort: Number.isInteger(port) ? port : -1, cutexPath: form.cutexPath });
+      const r = await api.updateSshHost(host.id, { label: form.label, targets: form.targets, remotePort: Number.isInteger(port) ? port : -1, ...(tokenHost ? {} : { cutexPath: form.cutexPath }) });
       if (r.ok) setEditing(false);
       else setPairError(r.error);
     });
@@ -396,7 +391,9 @@ function HostRow({ look, shown, member, onRemoved }: { look: HostLook; shown: bo
       <div data-host-status={indicator.status} className={`-mx-4 mb-3 flex flex-wrap items-center gap-2 border-b border-border px-4 py-2.5 ${trouble ? "bg-warn/10" : ""}`}>
         <div className="min-w-0 flex-1"><ConnectionLine look={look} /></div>
         <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
-          {host.kind === "ssh" && (tokenRejected || !host.paired) ? (
+          {tokenHost && (tokenRejected || !host.paired) ? (
+            <Button primary disabled={busy !== null || reimport} onClick={() => setReimport(true)}>{t("host.token.reimport")}</Button>
+          ) : host.kind === "ssh" && (tokenRejected || !host.paired) ? (
             <Button primary disabled={busy !== null} onClick={() => void pair()}>
               {busy === "pair" ? t("host.pairing") : t("host.repair")}
             </Button>
@@ -420,7 +417,7 @@ function HostRow({ look, shown, member, onRemoved }: { look: HostLook; shown: bo
             <HostGroupTags hostId={host.id} />
           </div>
           <div className="truncate font-mono text-caption/[inherit] text-subtle">
-            {host.kind === "local" ? t("titlebar.local") : host.kind === "dev-direct" ? `dev ${host.target}` : `ssh :${host.remotePort} · ${host.cutexPath}`}
+            {host.kind === "local" ? t("titlebar.local") : host.kind === "dev-direct" ? `dev ${host.target}` : tokenHost ? `ssh :${host.remotePort} · ${t("host.token.kind")}` : `ssh :${host.remotePort} · ${host.cutexPath}`}
             {Number.isFinite(last) && <span className="ml-2 font-sans">{t("host.lastConnected", { when: formatWhen(last / 1000, now, locale) })}</span>}
           </div>
         </div>
@@ -463,10 +460,11 @@ function HostRow({ look, shown, member, onRemoved }: { look: HostLook; shown: bo
               <span className="mb-1 block">{t("host.add.port")}</span>
               <TextInput width="w-24" mono label={t("host.add.port")} value={form.remotePort} placeholder={String(DEFAULT_REMOTE_PORT)} onChange={(remotePort) => setForm((f) => ({ ...f, remotePort: remotePort.replace(/\D/g, "").slice(0, 5) }))} />
             </label>
-            <label className="block text-xs text-muted">
+            {/* A token host runs nothing over SSH: no cutex path. */}
+            {!tokenHost && <label className="block text-xs text-muted">
               <span className="mb-1 block">{t("host.add.cutexPath")}</span>
               <TextInput width="w-56" mono label={t("host.add.cutexPath")} value={form.cutexPath} placeholder={DEFAULT_CUTEX_PATH} onChange={(cutexPath) => setForm((f) => ({ ...f, cutexPath }))} />
-            </label>
+            </label>}
           </div>
           <div className="max-w-2xl rounded-lg border border-border bg-surface-2/40 p-2.5">
             <div className="mb-1 text-xs font-medium text-muted">{t("host.targets")}</div>
@@ -488,19 +486,23 @@ function HostRow({ look, shown, member, onRemoved }: { look: HostLook; shown: bo
           </div>
         </div>
       )}
+      {reimport && <ReimportToken host={host} onClose={() => setReimport(false)} />}
       <div className="pl-6">
         {test && <TestResult result={test} />}
-        {pairError && <ProblemText error={pairError} />}
+        {pairError && (tokenHost ? <TokenProblemText error={pairError} /> : <ProblemText error={pairError} />)}
       </div>
       {host.kind === "ssh" && (
-        <div className="-mx-4 mt-3 flex justify-end border-t border-border px-4 pt-3">
+        <div className="-mx-4 mt-3 flex justify-end gap-2 border-t border-border px-4 pt-3">
+          {tokenHost && !reimport && !(tokenRejected || !host.paired) && <Button disabled={busy !== null} onClick={() => setReimport(true)}>{t("host.token.reimport")}</Button>}
           <Button
             disabled={busy !== null}
-            onClick={() => void confirmDialog(t("host.removeConfirm", { host: host.label }), true, { ok: t("host.removeConfirmOk"), cancel: t("settings.cancel") }).then((yes) => {
-              if (yes) void remove();
-            })}
+            onClick={() =>
+              void confirmDialog(tokenHost ? t("host.token.forgetConfirm", { host: host.label }) : t("host.removeConfirm", { host: host.label }), true, { ok: tokenHost ? t("host.token.forget") : t("host.removeConfirmOk"), cancel: t("settings.cancel") }).then((yes) => {
+                if (yes) void remove();
+              })
+            }
           >
-            {t("host.remove")}
+            {tokenHost ? t("host.token.forget") : t("host.remove")}
           </Button>
         </div>
       )}
@@ -716,7 +718,7 @@ export function HostsPage() {
       </Section>
       {adding && (
         <Section title={t("connection.add")} hint={t("connection.addHint")}>
-          <AddHostForm onDone={() => setAdding(false)} />
+          <AddHostChooser pair={<AddHostForm onDone={() => setAdding(false)} />} onDone={() => setAdding(false)} />
         </Section>
       )}
       <HostGroupsSection />

@@ -43,7 +43,7 @@ export const zhCN = {
   "runtimes.nodeVersionUnknown": "未知",
   "runtimes.nodeUnknown": "Node 版本要求与检测结果由主机组件提供",
   "runtimes.title": "已安装的运行时",
-  "runtimes.description": "各运行时版本和用着它们的{{agent}}",
+  "runtimes.description": "查看运行时版本及使用各版本的{{agent}}",
   "runtimes.installed": "已安装的运行时",
   "runtimes.hint": "没有{{agent}}用的旧版本可以在主机上清理",
   "runtimes.native": "Codex 运行时",

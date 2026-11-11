@@ -1,6 +1,6 @@
 export const zhCN = {
   "proxy.title": "网络代理",
-  "proxy.description": "设置 → 网络代理：本机桌面应用的更新代理和所连主机 cutex 的代理并排设置；Profile 页可以单独覆盖",
+  "proxy.description": "设置本设备的桌面更新代理和所选主机的网络代理；Profile 可单独覆盖主机代理",
   "proxy.page": "网络代理",
   "proxy.pageHint": "两项各自独立：桌面应用连接 cutex 始终直连，不受这里影响。",
   "proxy.mode.system": "跟随系统",

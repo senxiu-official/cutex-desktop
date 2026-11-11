@@ -43,7 +43,7 @@ vi.mock("../src/renderer/src/components/ProjectMemory", () => ({ ProjectMemoryLi
 vi.mock("../src/renderer/src/components/ServiceLine", () => ({ ServiceLine: () => null }));
 vi.mock("../src/renderer/src/components/Page", () => ({ PageBody: ({ children }: { children: React.ReactNode }) => h("div", null, children), SubNav: ({ children }: { children: React.ReactNode }) => h("nav", null, children), SUBNAV_ITEM: "", SUBNAV_ON: "", SUBNAV_OFF: "" }));
 vi.mock("../src/renderer/src/components/settings/Form", () => ({ SettingsGroup: ({ children }: any) => children, Button: () => null, SettingRow: ({ children }: any) => fx.state.colorTest ? children : null, Section: ({ children }: any) => fx.state.colorTest ? children : null, Select: () => null, TextInput: () => null }));
-vi.mock("../src/renderer/src/components/ProjectColorPicker", () => ({ ProjectColorPicker: () => null }));
+vi.mock("../src/renderer/src/components/ProjectColorPicker", () => ({ ProjectColorPicker: ({ value, onChange, preview }: any) => fx.state.colorTest && preview ? h("button", { "data-test-color-row": preview.badge, onClick: () => onChange("#123456") }, value) : null }));
 vi.mock("../src/renderer/src/components/ProjectBadge", () => ({ ProjectBadge: () => null }));
 vi.mock("../src/renderer/src/components/ProjectIconPicker", () => ({ ProjectIconPicker: ({ color, onColor, disabled }: any) => fx.state.colorTest ? h("button", { "data-test-project-color": "", disabled, onClick: () => onColor("#A87956") }, color) : null }));
 vi.mock("../src/renderer/src/components/HostPicker", () => ({ HostPicker: () => null }));
@@ -149,6 +149,21 @@ it("explains that an Operator must be revoked before becoming Director, without 
   expect(fx.api.projectMutation).not.toHaveBeenCalled();
 });
 
+
+it("settings shows the colour as its own row with a badge preview, saved at once", async () => {
+  fx.state.colorTest = true;
+  fx.tabs.push({ tab: "settings", titleKey: "projects.tab.settings", entry: null });
+  fx.api.projectPresentation = vi.fn().mockResolvedValue({});
+  try {
+    await mount("settings");
+    const row = () => host.querySelector<HTMLButtonElement>("[data-test-color-row]")!;
+    expect(row().getAttribute("data-test-color-row")).toBe("P");
+    expect(row().textContent).toBe("cyan");
+    await act(async () => row().click());
+    expect(fx.api.projectPresentation).toHaveBeenLastCalledWith("p", { authorityEpoch: 1, presentationRevision: 0 }, { display_name: "Project", badge_label: "P", color: "#123456" });
+    expect(row().textContent).toBe("#123456");
+  } finally { fx.tabs.pop(); fx.state.colorTest = false; }
+});
 
 it("keeps the saved colour and reports legacy RGB rejection; applies only after success", async () => {
   fx.state.colorTest = true;

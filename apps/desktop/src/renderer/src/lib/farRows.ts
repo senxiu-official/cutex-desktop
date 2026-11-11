@@ -10,6 +10,7 @@
 // far row draws it first (drawRow). The app has no browser find-in-page.
 import { useEffect, type RefObject } from "react";
 import { intersectionObserverFor, isElement, isHTMLElement } from "./ownerWindow";
+import { resizing } from "./columnGlide";
 
 /** How far (in heights of the scrolling box) rows stay fully drawn, above and below what shows. */
 export const FAR_MARGIN = 2;
@@ -74,7 +75,10 @@ export function farGaps(list: HTMLElement, rows: readonly HTMLElement[]): [numbe
 }
 
 /** Keep rows drawn throughout a scroll gesture: compositor scrolling can enter a hidden row
- * before IntersectionObserver gets a main-thread turn, even with its two-screen buffer. */
+ * before IntersectionObserver gets a main-thread turn, even with its two-screen buffer. Not for the scrolls of a
+ * width drag (lib/columnGlide resizing): there the history only scrolls from Conversation's observer, to stay at
+ * the bottom / keep its rows up, so no far row comes into view — yet drawing them all restyled and laid out the
+ * whole timeline, and kept it drawn for every step of the drag (perf/shelf-divider-drag). */
 export function watchFarRowsScroll(root: HTMLElement, list: HTMLElement, recheck: () => void): { active: () => boolean; stop: () => void } {
   const win = root.ownerDocument.defaultView!;
   let active = false;
@@ -92,7 +96,10 @@ export function watchFarRowsScroll(root: HTMLElement, list: HTMLElement, recheck
   };
   root.addEventListener("wheel", onScroll, { capture: true, passive: true });
   root.addEventListener("touchmove", onScroll, { capture: true, passive: true });
-  root.addEventListener("scroll", onScroll, { passive: true });
+  const onScrollEvent = () => {
+    if (!resizing()) onScroll();
+  };
+  root.addEventListener("scroll", onScrollEvent, { passive: true });
   root.addEventListener("keydown", onKey, true);
   return {
     active: () => active,
@@ -100,7 +107,7 @@ export function watchFarRowsScroll(root: HTMLElement, list: HTMLElement, recheck
       win.clearTimeout(timer);
       root.removeEventListener("wheel", onScroll, true);
       root.removeEventListener("touchmove", onScroll, true);
-      root.removeEventListener("scroll", onScroll);
+      root.removeEventListener("scroll", onScrollEvent);
       root.removeEventListener("keydown", onKey, true);
     },
   };

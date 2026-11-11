@@ -1,10 +1,10 @@
 // Generated from zh-CN by OpenCC cn → t; mainland terminology retained.
 export const locales = { "zh-Hant-CN": {
-  "remote-copies.title": "遠程文件副本",
-  "remote-copies.description": "下載、保留和清理這個桌面上的遠程文件副本",
-  "remote-copies.hint": "副本保存在這個桌面上，主機離線時也能打開。清理副本不會刪除遠程原件。",
-  "remote-copies.empty": "還沒有遠程文件副本",
-  "remote-copies.emptyHint": "在遠程文件的菜單中選擇「下載到本地」。",
+  "remote-copies.title": "下載",
+  "remote-copies.description": "保存到這臺電腦的文件：成果的版本和遠程主機的文件；打開、在文件夾中顯示、刪除",
+  "remote-copies.hint": "保存到這臺電腦的文件，主機離線時也能打開。刪除這裡的文件不會刪除成果或遠程原件。",
+  "remote-copies.empty": "還沒有下載的文件",
+  "remote-copies.emptyHint": "在成果頁或成果的菜單裡選「保存到這臺電腦」，或在遠程文件的菜單裡選「下載到本機」。",
   "remote-copies.missingFeature": "這臺主機尚不支持完整文件下載，請升級 cutex",
   "remote-copies.offline": "來源主機離線或已更換，暫時不能讀取原件",
   "remote-copies.download": "下載到本地",
@@ -60,6 +60,15 @@ export const locales = { "zh-Hant-CN": {
   "remote-copies.col.date": "日期",
   "remote-copies.col.dateHint": "下載完成的時間；還沒下載完時是開始下載的時間",
   "remote-copies.col.status": "狀態",
-  "remote-copies.more": "更多操作"
+  "remote-copies.more": "更多操作",
+  "remote-copies.missingArtifacts": "這臺主機的 cutex 沒有成果庫，不能從它保存成果",
+  "remote-copies.folder": "下載文件夾",
+  "remote-copies.folderDefault": "默認 · 由應用管理",
+  "remote-copies.openFolder": "打開文件夾",
+  "remote-copies.changeFolder": "更改…",
+  "remote-copies.defaultFolder": "恢復默認",
+  "remote-copies.changeFolderHint": "已下載的文件會一起移過去（在所選文件夾裡新建「Cutex Downloads」）；有文件正在下載時不能更改",
+  "remote-copies.location": "位置",
+  "remote-copies.artifactVersion": "成果 v{n}",
 } };
 declare module "../i18nCatalog" { interface ModuleZhHantMessages extends Record<keyof typeof locales["zh-Hant-CN"], string> {} }

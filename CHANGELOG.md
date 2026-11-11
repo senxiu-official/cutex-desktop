@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.2.4 "Beautiful World" (2026-11-11)
+
+- Fixes a crash when opening the tray from its handle (React error #310).
+  修复从把手打开托盘时的崩溃（React 错误 #310）。
+
+- Streaming replies cause fewer tray renders and layout measurements. Divider drags update only the affected pane; hidden service tiles pause refreshes.
+  流式回复减少托盘的重复渲染和布局测量；拖动分隔线时只更新对应区域，隐藏窗口中的服务卡暂停刷新。
+
+- Images can be previewed through windowed reads with progress. A persistent image cache has storage controls. Artifacts can be saved to this computer from any host; saved files are never removed automatically.
+  图片预览支持分段读取和进度显示，持久图片缓存可在存储设置中管理。任意主机上的成果均可保存到这台电脑，保存的文件不会自动删除。
+
+- Adds seven bundled Latin fonts, font previews in the appearance pickers, and a Chinese font pack available through one-click download and verified installation.
+  新增七款随应用提供的西文字体，外观选择器可预览字体；中文字体包支持一键下载并校验安装。
+
+- Browser and service tabs keep playing audio after switching agents, with playing indicators. Agent-held browser tabs keep timers running in the background; background page frame rate is configurable.
+  浏览器和服务标签在切换智能体后继续播放声音，并显示播放标记。智能体持有的浏览器标签可在后台持续运行计时器，后台网页帧率可配置。
+
+- Settings use clearer cards, row groups and searchable sub-pages. Sidebar keyboard navigation, desktop widget reflow beside an open Shelf, narrow approval panels, Windows file links and quota countdown layout are improved.
+  设置采用更清晰的卡片、行组和可搜索子页；改进侧栏键盘导航、Shelf 打开时的桌面组件排布、窄审批面板、Windows 文件链接和额度倒计时布局。
+
+- Memos brings bookmarks together with agent-submitted items on hosts that support owner pins. Hosts with newer capabilities can also expose background apps and Baidu Netdisk browsing and downloads. Token-based SSH connections can use a member's own SSH account.
+  备忘汇集书签；支持 owner pins 的主机还可显示智能体提交的要处理事项。较新主机可提供后台应用、百度网盘浏览与下载；令牌式 SSH 连接可使用成员自己的 SSH 账户。
+
+- Improves queued-message placement, wake countdowns and approval notices when the host supplies the corresponding information. Completes eight additional language catalogs.
+  改进排队消息的位置；主机提供相应信息时，显示更准确的唤醒倒计时和审批通知。补齐另外八种语言的翻译。
+
+- Compatibility: cutex 0.2.2 and the existing runtime and module releases remain supported. New host-dependent features appear only when the connected host supports them; this desktop release does not update backend or runtime selections.
+  兼容性：继续支持 cutex 0.2.2 及现有运行时和模块发布。新主机功能仅在连接的主机支持时显示；本次桌面更新不更改后端或运行时选择。
+
 ## 0.2.3 "Beautiful World" (2026-11-09)
 
 - Git status reads for one repository share a request; filesystem identity checks are cached and git work uses a separate worker pool. Slow repositories no longer occupy the workers used by other management requests.

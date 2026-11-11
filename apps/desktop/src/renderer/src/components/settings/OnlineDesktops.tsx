@@ -19,7 +19,7 @@ import { showShelfToast } from "../../lib/shelves";
 import { settingsAnchorId } from "../../lib/settingsNav";
 import { useTargetFeatures, useTargetHostId } from "../../lib/targetHost";
 import { formatAbsolute, formatWhen, useClock } from "../../lib/time";
-import { Button, EmptyState, ErrorNote, ListRow, Loading, Section, SettingsGroup } from "./Form";
+import { Button, EmptyState, ErrorNote, ListRow, Loading, Notice, Section, SettingsGroup } from "./Form";
 import { Tag } from "../../components/Tag";
 
 type T = ReturnType<typeof useI18n>["t"];
@@ -105,7 +105,7 @@ export function OnlineDesktopsSection() {
       {view.error && !view.rows.length && <ErrorNote>{remoteCloseRefusalText(t, view.error)}</ErrorNote>}
       {!view.read && view.loading && <Loading rows={1} />}
       {view.read && !view.error && view.rows.length === 0 && <EmptyState>{t("remoteClose.none")}</EmptyState>}
-      {sameComputerTwice && <p className="mb-3 text-meta text-muted">{t("remoteClose.instancesHint")}</p>}
+      {sameComputerTwice && <Notice tone="info">{t("remoteClose.instancesHint")}</Notice>}
       {view.rows.map((row) => (
         <DesktopRow key={row.instanceId} row={row} user={userName(row.userId)} busy={busy === row.instanceId} narrowed={narrowed} tellApart={sameComputerTwice} onClose={() => void close(row)} />
       ))}

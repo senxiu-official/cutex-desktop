@@ -21,7 +21,7 @@ export interface DeskPetSceneFrame {
 }
 
 /** Clip roles the renderer plays. `idle` and `reading` are required; the sleep trio is all or none. */
-export const DESK_PET_CLIP_ROLES = ["idle", "reading", "opening", "closing", "fallAsleep", "sleeping", "wake", "attention"] as const;
+export const DESK_PET_CLIP_ROLES = ["idle", "reading", "opening", "closing", "switchOut", "switchIn", "fallAsleep", "sleeping", "wake", "attention"] as const;
 export type DeskPetClipRole = (typeof DESK_PET_CLIP_ROLES)[number];
 
 export interface DeskPetCover {
@@ -240,6 +240,11 @@ export function parseDeskPetScene(raw: unknown): DeskPetScene | null {
   if (!clips.idle || !clips.reading) return null;
   const sleep = [clips.fallAsleep, clips.sleeping, clips.wake].filter(Boolean).length;
   if (sleep !== 0 && sleep !== 3) return null;
+  // Changing books while reading: both or neither; she keeps reading (only bodies of `reading`), the book stays in her
+  // hands (a prop on every frame), no page turns.
+  if (!clips.switchOut !== !clips.switchIn) return null;
+  const readingBodies = new Set(clips.reading.map((f) => f.body));
+  for (const f of [...(clips.switchOut ?? []), ...(clips.switchIn ?? [])]) if (!readingBodies.has(f.body) || f.prop === null || f.page !== null) return null;
 
   const scene: DeskPetScene = { canvas, character, breathMs, bodies, props, pages, hands, sparkle, covers, pile, clips };
   if (deskPetSceneFiles(scene).length > L.maxImages) return null;

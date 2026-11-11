@@ -149,6 +149,29 @@ describe("page", () => {
   });
   afterEach(() => { act(() => root.unmount()); host.remove(); });
 
+  it("the download folder: shown with its path, opened, changed in main's dialog; each saved file says where it is and where it came from", async () => {
+    const folder = { path: String.raw`C:\Users\me\AppData\Roaming\cutex\remote-copies`, isDefault: true };
+    const picked = { path: String.raw`E:\Saved\Cutex Downloads`, isDefault: false };
+    const at = (dir: string) => [dir, art.id, "deck.pdf"].join("\\");
+    const art = copy("deck.pdf", { at: "2026-10-09T00:00:00Z", source: { ...base, path: "af-1@3", artifact: { id: "af-1", version: 3 } } });
+    f.call.mockImplementation(async (req: { kind: string }) => req.kind === "list" ? structuredClone({ ...state, copies: [...rows, art] }) : req.kind === "folder" ? folder : req.kind === "chooseFolder" ? picked : undefined);
+    useCopies.setState({ state: structuredClone({ ...state, copies: [...rows, art] }), folder: null });
+    await mount();
+    const bar = host.querySelector<HTMLElement>("[data-download-folder]")!;
+    expect(bar.getAttribute("data-download-folder")).toBe(folder.path);
+    expect(bar.textContent).toContain("Default · managed by the app");
+    await act(async () => host.querySelector<HTMLButtonElement>("[data-download-folder-open]")!.click());
+    expect(f.call).toHaveBeenCalledWith({ kind: "openFolder" });
+    const card = host.querySelector(`[data-copy-row="${art.id}"]`)!;
+    expect(card.querySelector("[data-copy-source]")!.textContent).toBe("workstation · Artifact v3");
+    expect(card.querySelector("[data-copy-location]")!.textContent).toBe(`Location${at(folder.path)}`);
+    await act(async () => host.querySelector<HTMLButtonElement>("[data-download-folder-change]")!.click());
+    expect(f.call).toHaveBeenCalledWith({ kind: "chooseFolder" });
+    expect(host.querySelector("[data-download-folder]")!.getAttribute("data-download-folder")).toBe(picked.path);
+    expect(host.querySelector("[data-download-folder]")!.textContent).toContain("Use the default");
+    expect(card.querySelector("[data-copy-location]")!.textContent).toBe(`Location${at(picked.path)}`);
+  });
+
   it("cards: newest first, the text filter narrows and clears, the sort menu offers every key", async () => {
     await mount();
     expect(cardNames()).toEqual(["zeta.pdf", "mid.bin", "alpha.csv"]);

@@ -4,7 +4,7 @@ import { Info } from "lucide-react";
 
 export function InfoMark({ text, size = 12, className = "" }: { text: string; size?: number; className?: string }) {
   return (
-    <span role="img" tabIndex={0} aria-label={text} data-tip={text} data-info-mark="" className={`inline-flex shrink-0 cursor-help items-center text-subtle outline-none hover:text-muted focus-visible:text-foreground ${className}`}>
+    <span role="img" tabIndex={0} aria-label={text} data-tip={text} data-info-mark="" className={`inline-flex shrink-0 cursor-help items-center rounded-full text-subtle outline-none hover:text-muted focus-visible:text-foreground focus-visible:ring-2 focus-visible:ring-accent/60 ${className}`}>
       <Info aria-hidden size={size} />
     </span>
   );

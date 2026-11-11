@@ -31,7 +31,7 @@ export const en: Record<keyof typeof zhCN, string> = {
   "side-chat.modelSame": "Same as the main {{agent}}",
   "side-chat.modelHint": "Leave blank to follow the main {{agent}}, or name a model available in the same profile",
   "side-chat.title": "Side chat",
-  "side-chat.description": "An ephemeral chat with inherited context, separate from the main conversation",
+  "side-chat.description": "Start temporary side chats with the current context; their content stays out of the main conversation",
   "side-chat.settingsHint": "A temporary chat opened from a turn; it is not written to the main conversation.",
   "side-chat.open": "Side chat from this turn", "side-chat.back": "Back to main chat", "side-chat.end": "End side chat",
   "side-chat.loading": "Opening side chat…", "side-chat.temporary": "Temporary · discarded when ended · separate from main chat",

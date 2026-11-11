@@ -1,3 +1,4 @@
+import { ImageCache, currentImageCache, installImageCache } from "./imageCache";
 import { DEBUG_CHANNEL, debugEntries, type DebugRequest } from "../shared/debug";
 import { DebugMode } from "./debugMode";
 import { guardStdio } from "./stdioGuard";
@@ -31,6 +32,9 @@ import { randomUUID } from "node:crypto";
 import { DirectorAvatarStore, handleDirectorAvatarsRequest } from "./directorAvatars";
 import { DIRECTOR_AVATAR_DIR, DIRECTOR_AVATAR_PX, DIRECTOR_AVATARS_CHANNEL, type DirectorAvatarsRequest } from "../shared/directorAvatars";
 import { handlePortraitPacksRequest, PortraitPackStore } from "./portraitPacks";
+import { FontPackStore, handleFontPackRequest } from "./fontPack";
+import type { Transport } from "./updateTransport";
+import { FONT_PACK_CHANNEL, FONT_PACK_DIR, FONT_SCHEME, parseFontPackRequest } from "../shared/fontCatalog";
 import { PORTRAIT_PACK_DIR, PORTRAIT_PACKS_CHANNEL, type PortraitPacksRequest } from "../shared/portraitPacks";
 import { resolveUpdateRemote } from "../shared/update";
 import { resolveQuickstart, type QuickstartTarget } from "../shared/quickstart";
@@ -92,6 +96,8 @@ applyLoopbackNoProxy(process.env);
 protocol.registerSchemesAsPrivileged([
   { scheme: FRAME_SCHEME, privileges: { standard: true, secure: true } },
   { scheme: MODULE_PACK_SCHEME, privileges: { standard: true, secure: true, corsEnabled: true } },
+  // 中文字体包 files for the app window's fonts (main/fontPack.ts): catalog names only.
+  { scheme: FONT_SCHEME, privileges: { standard: true, secure: true, corsEnabled: true } },
 ]);
 
 // Windows taskbar grouping: an explicit AppUserModelID shared with the launchers (before any window).
@@ -261,6 +267,7 @@ const ALLOWED: ReadonlySet<InvokeMethod> = new Set<InvokeMethod>([
   "hosts",
   "sshConfigHosts",
   "addSshHost",
+  "importSshHostToken",
   "pairSshHost",
   "setSshConnectAs",
   "updateSshHost",
@@ -463,6 +470,8 @@ const ALLOWED: ReadonlySet<InvokeMethod> = new Set<InvokeMethod>([
   "artifactStoreDelete",
   "alarms",
   "cancelAlarm",
+  "ownerPins",
+  "ownerPinUpdate",
   "workflowRuns",
   "workflowRun",
   "workflowRunAction",
@@ -555,6 +564,20 @@ const ALLOWED: ReadonlySet<InvokeMethod> = new Set<InvokeMethod>([
   "projectBackground",
   "watchProjectEvents",
   "unwatchProjectEvents",
+  "panConnection",
+  "panConfigure",
+  "panDisconnect",
+  "panAuthStart",
+  "panAuthPoll",
+  "panAuthCode",
+  "panFiles",
+  "panSearch",
+  "panMeta",
+  "panDownloads",
+  "panStartDownload",
+  "panDownloadAction",
+  "watchPan",
+  "unwatchPan",
   "putUserInstructions",
   "userInstructions",
   "agentHarness",
@@ -638,6 +661,14 @@ const ALLOWED: ReadonlySet<InvokeMethod> = new Set<InvokeMethod>([
 /** Host list / scope / connection calls go to HostManager; everything else to the bound host's daemon. */
 const HOST_METHODS: ReadonlySet<string> = new Set<keyof HostApi>(HOST_METHOD_NAMES);
 
+ipcMain.handle("cutex-desktop:image-cache", async (event, request) => {
+  if (!isAppSender(event)) throw Error("untrusted sender");
+  const cache = currentImageCache(); if (!cache) throw Error("starting up");
+  if (request?.op === "state") return cache.state();
+  if (request?.op === "configure") return cache.configure(request.settings);
+  if (request?.op === "clear") return cache.clear();
+  throw Error("unknown image cache operation");
+});
 ipcMain.handle(INVOKE_CHANNEL, async (event, method: InvokeMethod, args: unknown[], expected: HostBinding | null) => {
   if (!isAppSender(event)) throw new Error("untrusted sender");
   if (!ALLOWED.has(method)) throw new Error(`unknown method ${String(method)}`);
@@ -826,6 +857,25 @@ ipcMain.handle(LAUNCH_ART_CHANNEL, (event, request: LaunchArtRequest) => {
     const picked = parent ? await dialog.showOpenDialog(parent, options) : await dialog.showOpenDialog(options);
     return picked.canceled ? null : (picked.filePaths[0] ?? null);
   });
+});
+
+// 中文字体包: the big CJK fonts in userData (main/fontPack.ts), imported from a folder picked in main's own dialog or
+// downloaded (下载并安装) through the updater's own network session — the user's update proxy; once plugin
+// containment is engaged, Node through that proxy — never a renderer, page or frame session.
+let fontPack: FontPackStore | null = null;
+const fontPackStore = () => (fontPack ??= new FontPackStore(join(app.getPath("userData"), FONT_PACK_DIR), undefined, (state) => sendEvent("fontPack", state)));
+let fontPackTransport: Transport | null = null;
+const fontPackNetwork = () => ({ transport: (fontPackTransport ??= createUpdateNet({ contained: () => pluginNetwork?.engaged() ?? false, proxy: () => desktopShell.updateProxyConfig() }).transport) });
+ipcMain.handle(FONT_PACK_CHANNEL, (event, raw: unknown) => {
+  if (!isAppSender(event)) throw new Error("untrusted sender");
+  const request = parseFontPackRequest(raw);
+  if (!request) throw new Error("unknown font-pack op");
+  return handleFontPackRequest(fontPackStore(), request, async () => {
+    const options = { properties: ["openDirectory"] as "openDirectory"[] };
+    const parent = ownerWindow(mainWindow);
+    const picked = parent ? await dialog.showOpenDialog(parent, options) : await dialog.showOpenDialog(options);
+    return picked.canceled ? null : (picked.filePaths[0] ?? null);
+  }, (dir) => shell.openPath(dir), join(app.getPath("userData"), FONT_PACK_DIR), fontPackNetwork);
 });
 
 // 「Director 头像」: the personal portrait folder in userData (main/directorAvatars.ts), read here and
@@ -1167,6 +1217,12 @@ app.on("web-contents-created", (_event, contents) => contents.setWebRTCIPHandlin
 
 app.whenReady().then(async () => {
   if (!primaryInstance) return;
+  const imageCache = new ImageCache(join(app.getPath("userData"), "image-cache"));
+  installImageCache(imageCache);
+  void imageCache.cleanup().catch(() => {});
+  const imageCacheTimer = setInterval(() => { void imageCache.cleanup().catch(() => {}); }, 60 * 60_000);
+  imageCacheTimer.unref?.();
+  app.on("will-quit", () => clearInterval(imageCacheTimer));
   debugMode.setEnabled(desktopShell.state().prefs.debugMode === true);
   frameDocuments = createFrameDocumentStore({ scheme: FRAME_SCHEME, limitMessage: "Too many prepared frame documents" });
   pluginNetwork = createPluginNetworkLockdown({
@@ -1258,6 +1314,7 @@ app.whenReady().then(async () => {
     onChange: (view) => sendEvent("moduleDev", view),
   });
   moduleDev = devModules;
+  protocol.handle(FONT_SCHEME, request => fontPackStore().respond(request));
   protocol.handle(MODULE_PACK_SCHEME, request => (new URL(request.url).hostname === MODULE_DEV_HOST ? devModules.respond(request) : packs.respond(request)));
   // Electron keeps ONE onBeforeRequest listener per session (a second call replaces the first), so both
   // privileged schemes share this one; each branch decides only for its own scheme.
@@ -1325,7 +1382,13 @@ app.whenReady().then(async () => {
   // Dev only: sample big alerts without a daemon (screenshots).
   if (demoOwnerAlertRequested()) setTimeout(() => ownerAlerts.showDemo(), 1500);
   await hosts.start();
-  remoteCopies = createRemoteCopies(app.getPath("userData"), () => hosts, shell);
+  remoteCopies = createRemoteCopies(app.getPath("userData"), () => hosts, shell, async () => {
+    // Downloads page → 更改文件夹: main's own dialog, on the window the owner is using.
+    const options = { properties: ["openDirectory", "createDirectory"] as ("openDirectory" | "createDirectory")[] };
+    const parent = ownerWindow(mainWindow);
+    const picked = parent ? await dialog.showOpenDialog(parent, options) : await dialog.showOpenDialog(options);
+    return picked.canceled ? null : (picked.filePaths[0] ?? null);
+  });
   app.on("activate", () => {
     if (appWindows().length === 0) createWindow();
     else desktopShell.show();

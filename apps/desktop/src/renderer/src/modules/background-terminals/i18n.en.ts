@@ -4,7 +4,7 @@ import type { zhCN } from "./i18n";
 
 export const en: Record<keyof typeof zhCN, string> = {
   "background-terminals.title": "Background terminals",
-  "background-terminals.description": "The {{agent}}'s background terminals (CPU / memory, terminate) as a status category; /ps",
+  "background-terminals.description": "View {{agents}}’ background terminals, check CPU and memory use, and terminate terminals",
   "background-terminals.statusTitle": "Background terminals",
   "background-terminals.count": "{n} terminals",
   "background-terminals.running": "Running",

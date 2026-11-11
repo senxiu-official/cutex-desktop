@@ -76,8 +76,12 @@
   color: #fff;
   text-shadow: 0 0 1px rgba(16, 24, 48, 0.5), 0 1px 3px rgba(16, 24, 48, 0.4), 0 2px 12px rgba(16, 24, 48, 0.32);
 }
+/* The second line is small: a tighter, darker edge than the title's so it stays readable on a light wallpaper
+   (owner 2026-11-10: 「运行中」「成果」 on the light sky). */
 .home-bare .home-sub {
-  color: rgba(255, 255, 255, 0.84);
+  color: rgba(255, 255, 255, 0.94);
+  font-weight: 500;
+  text-shadow: 0 0 1px rgba(16, 24, 48, 0.9), 0 0 3px rgba(16, 24, 48, 0.65), 0 0 8px rgba(16, 24, 48, 0.55), 0 1px 14px rgba(16, 24, 48, 0.4);
 }
 /* A clickable bare widget: on hover a faint acrylic shows that it is one thing to click. */
 .home-bare-hit {

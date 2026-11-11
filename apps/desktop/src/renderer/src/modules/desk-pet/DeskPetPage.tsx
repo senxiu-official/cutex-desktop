@@ -77,6 +77,7 @@ export function DeskPetPage() {
         {toggleRow("onlyInFront", "desk-pet.onlyInFront", "desk-pet.onlyInFrontHint")}
         {toggleRow("idleBlink", "desk-pet.idleBlink")}
         {view.placement === "limited" && <p className="px-1 py-2 text-xs text-subtle">{t("desk-pet.limitedPlacement")}</p>}
+        {view.onTop === false && <p className="px-1 py-2 text-xs text-subtle">{t("desk-pet.notOnTop")}</p>}
         {!view.shape && view.placement !== "limited" && <p className="px-1 py-2 text-xs text-subtle">{t("desk-pet.noShape")}</p>}
       </Section>
       <Section title={t("desk-pet.section.energy")} hint={t("desk-pet.energyHint")}>

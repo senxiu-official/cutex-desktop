@@ -91,6 +91,7 @@ export function SidebarPeek({ children }: { children: ReactNode }) {
             if (e.relatedTarget && !e.currentTarget.contains(e.relatedTarget as Node)) focused.current = false;
           }}
           className="sidebar-card absolute inset-y-0 left-0 z-40 flex w-[max(180px,var(--sidebar-w,16rem))] flex-col"
+          data-live-width="sidebarWidth"
           onPointerEnter={() => {
             inside.current = true;
             retract.stay();

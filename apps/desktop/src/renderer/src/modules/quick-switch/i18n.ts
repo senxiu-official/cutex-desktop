@@ -28,6 +28,7 @@ export const zhCN = {
   "quick-switch.chats": "工作",
   "quick-switch.noProject": "无项目",
   "quick-switch.sub.service": "服务 · {slug}",
+  "quick-switch.sub.worker": "后台应用 · {slug}",
   "quick-switch.sub.artifact": "{project} · v{n}",
   "quick-switch.sub.page": "页面",
   "quick-switch.sub.footer": "页面 · 左下角",

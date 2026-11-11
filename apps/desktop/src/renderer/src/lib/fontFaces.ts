@@ -1,5 +1,6 @@
 import type { Appearance } from "./appearanceModel";
 import { FONT_UNICODE_RANGES } from "./fontRanges";
+import { catalogFaceSources, weightCovers, type CatalogFaceSource } from "./fontSources";
 
 export const FONT_VARIABLES = ["--font-sans", "--font-chat", "--font-mono", "--font-sans-latin", "--font-sans-cjk", "--font-chat-latin", "--font-chat-cjk"] as const;
 export type FontVariable = typeof FONT_VARIABLES[number];
@@ -64,6 +65,12 @@ export interface RoutedFace {
   family: string;
   source: string;
   descriptors: { weight: string; style: string; unicodeRange: string; display: "swap" };
+  /**
+   * A file face (a font that comes with the desktop, shared/fontCatalog.ts) other than the regular one: registered
+   * without loading it, so the browser fetches it only when text uses that weight / style. Added only when the
+   * family's regular face loaded.
+   */
+  lazy?: true;
 }
 export interface FontPlan { faces: RoutedFace[]; variables: FontVariables; requestedFamilies: string[] }
 
@@ -82,7 +89,7 @@ export function uiCjkFamilies(a: Pick<Appearance, "cjkFont">): string[] {
 }
 
 /** Each source, including fallbacks, is restricted. No chosen raw family leaks into a stack. */
-export function buildFontPlan(a: Appearance, generation: number): FontPlan {
+export function buildFontPlan(a: Appearance, generation: number, fileFaces: (family: string) => CatalogFaceSource[] | undefined = catalogFaceSources): FontPlan {
   const faces: RoutedFace[] = [];
   const aliases = new Map<string, string>();
   const route = (family: string, unicodeRange: string): string => {
@@ -91,8 +98,17 @@ export function buildFontPlan(a: Appearance, generation: number): FontPlan {
     if (!alias) {
       alias = `cutex-font-${generation}-${aliases.size}`;
       aliases.set(key, alias);
-      for (const { weight, style, names } of localStyles(family)) {
-        faces.push({ alias, family, source: names.map((name) => `local(${cssString(name)})`).join(", "), descriptors: { weight, style, unicodeRange, display: "swap" } });
+      const files = fileFaces(family);
+      if (files) {
+        // A font that comes with the desktop: its own files, never a same-named installed font.
+        const regular = files.find((f) => f.style === "normal" && weightCovers(f.weight, 400)) ?? files[0];
+        for (const face of files) {
+          faces.push({ alias, family, source: face.source, descriptors: { weight: face.weight, style: face.style, unicodeRange, display: "swap" }, ...(face === regular ? {} : { lazy: true as const }) });
+        }
+      } else {
+        for (const { weight, style, names } of localStyles(family)) {
+          faces.push({ alias, family, source: names.map((name) => `local(${cssString(name)})`).join(", "), descriptors: { weight, style, unicodeRange, display: "swap" } });
+        }
       }
     }
     return cssString(alias);
@@ -150,6 +166,12 @@ export class FontRoutingController<F extends LoadableFont> {
 
   getStatus(): FontStatus { return this.status; }
 
+  /** Plans again with the same fonts (a 中文字体包 family was imported or removed). */
+  reload(a: Appearance): Promise<void> {
+    this.key = "";
+    return this.update(a);
+  }
+
   update(a: Appearance): Promise<void> {
     const key = JSON.stringify([a.uiFont, a.cjkFont, a.chatFont || a.uiFont, a.chatCjkFont || a.cjkFont, a.monoFont, a.monoCjkFont || a.cjkFont]);
     if (key === this.key) return this.pending;
@@ -167,7 +189,7 @@ export class FontRoutingController<F extends LoadableFont> {
   }
 
   private async prepare(plan: FontPlan, generation: number): Promise<void> {
-    const loaded = await Promise.all(plan.faces.map(async (spec) => {
+    const loaded = await Promise.all(plan.faces.filter((spec) => !spec.lazy).map(async (spec) => {
       let timer: ReturnType<typeof setTimeout> | undefined;
       try {
         const face = this.environment.createFace(spec);
@@ -181,7 +203,12 @@ export class FontRoutingController<F extends LoadableFont> {
     }));
     // Stale faces were never registered, so cannot affect rendering or leak.
     if (generation !== this.generation) return;
-    const ready = loaded.filter((entry) => entry !== null);
+    const ready: { face: F; spec: RoutedFace }[] = loaded.filter((entry) => entry !== null);
+    const loadedAliases = new Set(ready.map(({ spec }) => spec.alias));
+    for (const spec of plan.faces) {
+      if (!spec.lazy || !loadedAliases.has(spec.alias)) continue;
+      try { ready.push({ face: this.environment.createFace(spec), spec }); } catch { /* an unusable source: the browser synthesizes that style */ }
+    }
     const regularFamilies = new Set(ready.filter(({ spec }) => spec.descriptors.weight === "400" && spec.descriptors.style === "normal").map(({ spec }) => spec.family.toLowerCase()));
     const failedFamilies = plan.requestedFamilies.filter((family) => !regularFamilies.has(family.toLowerCase()));
     const previous = this.active;

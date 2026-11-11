@@ -22,6 +22,7 @@ const zhHantCN: Record<keyof typeof zhCN, string> = {
   "desk-pet.idleBlink": "空閒時眨眼",
   "desk-pet.size": "大小",
   "desk-pet.character": "角色",
+  "desk-pet.notOnTop": "這個桌面不讓應用把窗口一直放在最上面：點別的窗口後，桌寵會被擋住。KDE Plasma 可以；GNOME 等暫時沒有辦法。",
   "desk-pet.limitedPlacement": "這個 Linux 會話用 Wayland：窗口位置由系統決定，所以重啓後不記位置，透明部分也可能擋住鼠標。",
   "desk-pet.noShape": "系統拒絕了窗口形狀：透明部分也會擋住鼠標。",
   "desk-pet.showCount": "在桌寵下面顯示今天的 token 數",

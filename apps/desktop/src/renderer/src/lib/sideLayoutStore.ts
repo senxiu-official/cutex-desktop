@@ -219,6 +219,20 @@ export function instanceOwner(id: string): string | null | undefined {
   return undefined;
 }
 
+/**
+ * The first instance in any Shelf of this window that `test` accepts — the live layout, the other workspace's live Shelf,
+ * or a conversation's own Shelf left earlier in this session — with the conversation that holds it (`convKey`; null: the
+ * live layout belongs to no conversation, or the instance is on a shared page every conversation shows).
+ */
+export function findInstanceInAnyShelf(test: (inst: SideInstance, id: string) => boolean): { id: string; conv: string | null } | null {
+  const s = useSide.getState();
+  const shared = new Set(Object.keys(splitShared(s.layout).shared.instances));
+  for (const [id, inst] of Object.entries(s.layout.instances)) if (test(inst, id)) return { id, conv: shared.has(id) ? null : curConv() };
+  for (const [key, peer] of Object.entries(s.peers)) for (const [id, inst] of Object.entries(peer.own.instances)) if (test(inst, id)) return { id, conv: key };
+  for (const [key, mem] of ownMem) if (key !== curConv() && !s.peers[key]) for (const [id, inst] of Object.entries(mem.own.instances)) if (test(inst, id)) return { id, conv: key };
+  return null;
+}
+
 /** The first instance, in the live layout or another workspace's live Shelf, that `test` accepts (its id). */
 export function findInstanceAnywhere(test: (inst: SideInstance, id: string) => boolean): string | null {
   const s = useSide.getState();
@@ -757,7 +771,7 @@ export function reportTabInfo(id: string, info: SideTabInfo | null): void {
     useSide.setState({ tabInfo: next });
     return;
   }
-  if (old && old.title === info.title && old.tooltip === info.tooltip && !!old.busy === !!info.busy && (old.attention ?? 0) === (info.attention ?? 0) && !!old.unread === !!info.unread) return;
+  if (old && old.title === info.title && old.tooltip === info.tooltip && !!old.busy === !!info.busy && (old.attention ?? 0) === (info.attention ?? 0) && !!old.unread === !!info.unread && old.favicon === info.favicon && old.audio?.muted === info.audio?.muted) return;
   useSide.setState({ tabInfo: { ...current, [id]: info } });
 }
 

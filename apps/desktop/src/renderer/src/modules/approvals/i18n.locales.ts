@@ -83,6 +83,8 @@ const zhHantCN: Partial<Record<keyof typeof zhCN, string>> = {
   "approvals.rules.audit.hint": "建立、修改、撤銷、自動匹配和拒絕匹配都由 cutex 記錄。",
   "approvals.rules.audit.empty": "還沒有稽核記錄",
   "approvals.rules.audit.all": "全部 {n} 條",
+  "approvals.rules.all": "全部 {n} 條規則",
+  "approvals.rules.allTitle": "全部自動審批規則",
   "approvals.rules.audit.latest": "最近 {n} 條",
   "approvals.rules.audit.created": "已建立規則",
   "approvals.rules.audit.updated": "已修改規則",

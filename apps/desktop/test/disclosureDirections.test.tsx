@@ -95,6 +95,14 @@ it("the pending reply composer uses right/down and closes through its existing c
   icon(button, "right"); expect(host.querySelector("[data-pending-reply-panel]")).toBeNull();
 });
 
+it("the desktop has no floating 编辑主页 button (owner 2026-11-10); the right-click menu starts editing", () => {
+  home.state = { editing: false, panel: false };
+  act(() => root.render(h(DesktopLayer, { reason: "empty", hostId: "local", tray: true })));
+  expect(host.querySelector("[data-home-editbtn]")).toBeNull();
+  expect([...host.querySelectorAll("button")].some((b) => b.textContent?.includes("home.edit"))).toBe(false);
+  expect(host.querySelector("[data-home-editbar]")).toBeNull();
+});
+
 it("the desktop edit panel uses right/down while preserving its edit mode", () => {
   act(() => root.render(h(DesktopLayer, { reason: "empty", hostId: "local", tray: false })));
   const button = host.querySelector<HTMLButtonElement>("[data-home-openpanel]")!;

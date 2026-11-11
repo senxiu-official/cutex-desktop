@@ -1,7 +1,8 @@
 export const zhCN = {
   "kimi-accounts.title": "Kimi 账户",
-  "kimi-accounts.description": "Kimi 会员登录：每个账户在主机上有自己的登录，给 Kimi 账户的 Profile 使用",
+  "kimi-accounts.description": "管理 Kimi 会员登录；各账号在主机上独立保存登录状态，供 Kimi Profile 使用",
   "kimi-accounts.section": "Kimi 账户",
+  "kimi-accounts.all": "全部 {n} 个账户",
   "kimi-accounts.sectionHint": "用 Kimi 会员账号登录 Kimi Code。登录在主机上进行：cutex 给出网址和验证码，你在浏览器里确认；桌面不接触令牌。一个账户可以给几个 Profile 用。",
   "kimi-accounts.add": "添加 Kimi 账户",
   "kimi-accounts.empty": "还没有 Kimi 账户。添加一个，用 Kimi 会员账号登录。",

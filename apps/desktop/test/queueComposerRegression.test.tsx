@@ -399,6 +399,12 @@ describe("「接下来」 above the input box (owner 2026-10-26)", () => {
     expect(readFileSync("src/renderer/src/components/Composer.tsx", "utf8")).toMatch(/<div className="side-col side-col-composer flex min-h-0 w-full flex-col px-4 pb-3">/);
     const sh = vi.spyOn(HTMLElement.prototype, "scrollHeight", "get");
     const ch = vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(100);
+    // The list is measured on mount and when its observer reports a size change (not on every render).
+    const reports: ResizeObserverCallback[] = [];
+    const g = globalThis as { ResizeObserver?: unknown };
+    const hadObserver = "ResizeObserver" in g;
+    const previousObserver = g.ResizeObserver;
+    g.ResizeObserver = class { constructor(cb: ResizeObserverCallback) { reports.push(cb); } observe() {} unobserve() {} disconnect() {} };
     try {
       sh.mockReturnValue(100);
       mount();
@@ -410,12 +416,15 @@ describe("「接下来」 above the input box (owner 2026-10-26)", () => {
       expect(body.className).not.toMatch(/overflow-y-auto/);
       // Taller than the room it got: it scrolls.
       sh.mockReturnValue(160);
+      act(() => { for (const report of reports) report([], {} as ResizeObserver); });
       mount();
       expect(q("[data-queue-body]").getAttribute("data-scrolls")).toBe("true");
       expect(q("[data-queue-body]").className).toMatch(/overflow-y-auto/);
     } finally {
       sh.mockRestore();
       ch.mockRestore();
+      if (hadObserver) g.ResizeObserver = previousObserver;
+      else delete g.ResizeObserver;
     }
   });
 });

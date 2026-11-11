@@ -89,6 +89,11 @@ describe("wiring", () => {
     const conv = src("components/Conversation.tsx");
     const fit = conv.slice(conv.indexOf("const fitShortPane"), conv.indexOf("useEffect(", conv.indexOf("const fitShortPane")));
     expect(fit).toMatch(/shortPaneFold\(m\)[\s\S]*measureComposerInput\(main\)[\s\S]*setProperty\("--composer-input-max"/);
+    // …on the composer block (its input and QueuePanel's overlay read them), not on <main>: an inherited custom property
+    // set on the pane restyled the whole timeline on every write (perf/shelf-divider-drag).
+    expect(conv).toMatch(/const capsBox = \(main: HTMLElement\) => main\.querySelector<HTMLElement>\(":scope > \[data-composer-block\]"\) \?\? main;/);
+    expect(fit.match(/const vars = capsBox\(main\);/g)).toHaveLength(2);
+    expect(fit).not.toMatch(/main\.style\.setProperty/);
     // …and again when only the composer block resized (an overflowing pane: the history stays 0 px).
     expect(conv).toMatch(/querySelector\("\[data-composer-block\]"\)[\s\S]{0,200}fitComposerInput\(pane, scroller\.current\)[\s\S]{0,80}capRo\.observe\(block\)/);
   });

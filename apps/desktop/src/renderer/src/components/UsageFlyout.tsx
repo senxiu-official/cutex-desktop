@@ -130,7 +130,8 @@ export function GaugeRow({ gauge: g, view }: { gauge: QuotaGauge; view: QuotaVie
         </>
       )}
       {/* Windows without a reset time (balances, points) leave the slot empty so the columns line up. */}
-      <span className="w-11 shrink-0 text-right text-subtle" data-usage-reset="">{!g.error && g.resetAt ? resetsInCompact(g.resetAt) : ""}</span>
+      {/* Six characters at most ("20h17m", "10d23h"): sized in ch so the longest never wraps. */}
+      <span className="w-[6.5ch] shrink-0 whitespace-nowrap text-right text-subtle" data-usage-reset="">{!g.error && g.resetAt ? resetsInCompact(g.resetAt) : ""}</span>
     </span>
   );
 }

@@ -15,21 +15,23 @@ const state: CopyState = { settings: { retentionDays: 7, largeFileBytes: 200 * 1
   example("preview-copy-5", "ema_panel_cleaned.parquet", { source: { ...source, path: "/home/sam/demo/data/ema_panel_cleaned.parquet", scope: { kind: "project", id: "demo" } }, size: 8_432_190, received: 8_432_190, downloadedAt: new Date(Date.now() - 5 * 3600000).toISOString() }),
   example("preview-copy-6", "train_log_epoch12.txt", { source: { hostId: "ssh-ae3e47b1", hostLabel: "alpha", hostIdentity: "ALPHA", path: "/Users/alex/runs/train_log_epoch12.txt" }, status: "failed", error: "connection reset while reading chunk 3", size: 1_204_331, received: 400_000, downloadedAt: null, createdAt: new Date(Date.now() - 26 * 3600000).toISOString(), expiresAt: null }),
 ] };
+const DEFAULT_FOLDER = String.raw`C:\Users\sam\AppData\Roaming\cutex-desktop\remote-copies`;
+let folder = { path: DEFAULT_FOLDER, isDefault: true };
 export async function mockCopyRequest<T = CopyState>(request: CopyRequest): Promise<T> {
   let result: unknown;
   const row = "id" in request ? state.copies.find(c => c.id === request.id) : undefined;
   switch (request.kind) {
     case "list": result = structuredClone(state); break;
-    case "inspect": result = { source: { ...request.source, hostIdentity: "WORKSTATION", hostLabel: "workstation" }, meta: { path: request.source.path, name: request.source.path.split(/[\\/]/).pop() || "report.bin", size: /large|archive|dataset/.test(request.source.path) ? 640 * 1024 * 1024 : 8_432_190, modifiedAt: at, revision: "a".repeat(64), maxChunkBytes: 4 * 1024 * 1024 } }; break;
+    case "inspect": result = { source: { ...request.source, hostIdentity: "WORKSTATION", hostLabel: request.source.hostId === hostId ? "workstation" : request.source.hostId }, meta: { path: request.source.path, name: request.source.artifact ? `artifact-v${request.source.artifact.version}.md` : request.source.path.split(/[\\/]/).pop() || "report.bin", size: /large|archive|dataset/.test(request.source.path) ? 640 * 1024 * 1024 : 8_432_190, modifiedAt: at, revision: "a".repeat(64), maxChunkBytes: 4 * 1024 * 1024 } }; break;
     case "start": {
       const id = request.replaceId ?? `preview-copy-${Date.now()}`;
-      const copy = example(id, request.source.path.split(/[\\/]/).pop() || "report.bin", { source: request.source, status: "downloading", size: request.expected.size, received: 0, downloadedAt: null, expiresAt: null });
+      const copy = example(id, request.source.artifact ? `artifact-v${request.source.artifact.version}.md` : request.source.path.split(/[\\/]/).pop() || "report.bin", { source: request.source, status: "downloading", size: request.expected.size, received: 0, createdAt: new Date().toISOString(), downloadedAt: null, expiresAt: null, kept: !!request.source.artifact });
       const index = state.copies.findIndex(c => c.id === id);
       if (index >= 0) state.copies[index] = copy; else state.copies.unshift(copy);
       const timer = setInterval(() => {
         if (copy.status !== "downloading") { clearInterval(timer); return; }
         copy.received = Math.min(copy.size, copy.received + 8 * 1024 * 1024);
-        if (copy.received === copy.size) { copy.status = "complete"; copy.downloadedAt = new Date().toISOString(); copy.expiresAt = state.settings.retentionDays ? new Date(Date.now() + state.settings.retentionDays * 86400000).toISOString() : null; clearInterval(timer); }
+        if (copy.received === copy.size) { copy.status = "complete"; copy.downloadedAt = new Date().toISOString(); copy.expiresAt = !copy.kept && state.settings.retentionDays ? new Date(Date.now() + state.settings.retentionDays * 86400000).toISOString() : null; clearInterval(timer); }
       }, 500);
       result = id; break;
     }
@@ -37,6 +39,10 @@ export async function mockCopyRequest<T = CopyState>(request: CopyRequest): Prom
     case "keep": if (row) { row.kept = request.value; if (row.kept) row.expiresAt = null; } break;
     case "remove": state.copies = state.copies.filter(c => c.id !== request.id); break;
     case "settings": state.settings.retentionDays = request.retentionDays; result = state.settings; break;
+    case "folder": result = folder; break;
+    case "chooseFolder": folder = { path: String.raw`E:\Saved\Cutex Downloads`, isDefault: false }; result = folder; break;
+    case "defaultFolder": folder = { path: DEFAULT_FOLDER, isDefault: true }; result = folder; break;
+    case "openFolder": console.info("[mock owned copy] open folder", folder.path); break;
     case "open": case "reveal": console.info("[mock owned copy]", request.kind, request.id); break;
   }
   return structuredClone(result) as T;

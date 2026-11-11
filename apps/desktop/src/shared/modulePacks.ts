@@ -33,7 +33,7 @@ export const LIMITS = {
 /** Ids of the modules in registry.ts: a local module may not use them (§23.14; test/modulePacksLocal keeps this in step). */
 export const BUILT_IN_MODULE_IDS: readonly string[] = [
   "about", "agent-bus", "agent-config", "alarms", "approvals", "archive", "artifacts", "backend-upgrade",
-  "background-terminals", "bookmarks", "browser", "claude-accounts", "claude-science", "codex-config",
+  "background-terminals", "baidu-pan", "bookmarks", "browser", "claude-accounts", "claude-science", "codex-config",
   "connection", "conversation", "delegations", "diff", "goal", "home", "intro", "jobs", "kimi-accounts",
   "nci", "notes", "notifications", "onboarding", "owner-notify", "peers", "perf-log", "plan",
   "profile-import", "project-view", "projects", "proxy", "quick-chats", "quick-switch", "remote-access",

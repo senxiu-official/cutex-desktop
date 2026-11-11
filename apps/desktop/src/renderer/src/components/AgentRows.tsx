@@ -6,7 +6,8 @@
 // Shared by the sidebar, the project flyout and the Projects page.
 import { useAgentPause } from "../lib/agentPause";
 import { AgentPauseTag } from "./AgentPauseParts";
-import { MoreHorizontal, Pin } from "lucide-react";
+import { MoreHorizontal, Pin, Volume2, VolumeX } from "lucide-react";
+import { useAgentAudio } from "../lib/agentAudio";
 import { memo, useContext, useMemo, useSyncExternalStore, type FocusEvent as ReactFocusEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { useI18n } from "../i18n";
 import { resolveSidebarRoleLabel, useTermOverrides } from "../lib/terms";
@@ -60,6 +61,19 @@ function AvatarCell({ children, min }: { children: ReactNode; min?: number }) {
   return (
     <span data-avatar-col="" className="flex shrink-0 items-center justify-center" style={{ width: `var(--avatar-col, ${AVATAR_COL}px)`, minWidth: min }}>
       {children}
+    </span>
+  );
+}
+
+/** A speaker after the name while a tab in this agent's own Shelf plays sound (lib/agentAudio; owner 2026-11-10). */
+function AudioMark({ hostId, sessionId }: { hostId: string | null | undefined; sessionId: string }) {
+  const { t } = useI18n();
+  const audio = useAgentAudio(hostId, sessionId);
+  if (!audio) return null;
+  const label = t(audio === "muted" ? "sidebar.audioMuted" : "sidebar.audioPlaying");
+  return (
+    <span className="flex shrink-0 text-subtle" data-tip={label} data-row-audio={audio}>
+      {audio === "muted" ? <VolumeX size={11} aria-label={label} /> : <Volume2 size={11} aria-label={label} />}
     </span>
   );
 }
@@ -295,6 +309,7 @@ export const AgentRowButton = memo(function AgentRowButton({ row, compact: compa
             {look && <HostMark host={look} dotOnly />}
             <span data-tip={row.shortName ? labelOf(row) : undefined} className={`min-w-0 truncate text-ui/[inherit] ${flagged ? "font-semibold" : "font-medium"} ${signal === "offline" || signal === "unknown" ? "text-muted" : ""}`}><ScriptText text={shownName(row)} /></span>
             <TurnErrorBadge session={row.session} hostId={host} />
+            <AudioMark hostId={row.hostId} sessionId={row.session.cutexSessionId} />
             <AgentBadge badge={row.session.badge} hostId={row.hostId} onAvatar={avatarCarriesMark(avatar)} />
             {nameTags}
             <span className="ml-auto" />
@@ -318,6 +333,7 @@ export const AgentRowButton = memo(function AgentRowButton({ row, compact: compa
             <AgentBadge badge={row.session.badge} hostId={row.hostId} onAvatar={avatarCarriesMark(avatar)} />
             <span data-fit-name="" className={`min-w-0 truncate text-ui/[inherit] ${flagged ? "font-semibold" : signal === "offline" || signal === "unknown" ? "text-muted" : ""}`}><ScriptText text={shownName(row)} /></span>
             <TurnErrorBadge session={row.session} hostId={host} />
+            <AudioMark hostId={row.hostId} sessionId={row.session.cutexSessionId} />
             {nameTags}
             <span className="ml-auto" />
             {background && <BackgroundBot />}
@@ -405,6 +421,7 @@ export const OfflineRow = memo(function OfflineRow({ row }: { row: AgentRow }) {
         <AgentBadge badge={row.session.badge} hostId={row.hostId} />
         <span className={`min-w-0 truncate text-ui/[inherit] ${selected ? "text-foreground" : "text-muted group-hover:text-foreground"}`}><ScriptText text={shownName(row)} /></span>
         <TurnErrorBadge session={row.session} hostId={host} />
+        <AudioMark hostId={row.hostId} sessionId={row.session.cutexSessionId} />
         {row.isDirector && director && <Tag fit className="flex-1 max-w-max" data-tip={t("sidebar.director")} data-director-tag="">{director}</Tag>}
         {row.isOperator && operator && <Tag fit className="flex-1 max-w-max" data-tip={t("sidebar.operator")} data-operator-tag="">{operator}</Tag>}
         <AgentPauseTag hostId={host} sessionId={row.session.cutexSessionId} />

@@ -1,12 +1,13 @@
 import { createBrowserAudit } from "./audit";
 import { BrowserCursorPreferencesStore } from "./cursorPreferences";
+import { BrowserCarrierPreferencesStore } from "./carrierPreferences";
 import { randomBytes, randomUUID } from "node:crypto";
 import type { BrowserOperationResult } from "@cutex-desktop/browser-protocol";
 import { join } from "node:path";
 import { networkInterfaces } from "node:os";
 import { app, dialog, ipcMain, Menu, nativeImage, screen, session, type AuthInfo, type ContextMenuParams, type DownloadItem, type BrowserWindow, type IpcMainInvokeEvent, type Session, type WebContents, type WebPreferences } from "electron";
 import type { EventEnvelope } from "@cutex-desktop/protocol";
-import { BROWSER_CHANNEL, DEFAULT_BROWSER_CONTROL_SETTINGS, type BrowserControlSettings, type BrowserEvent, type BrowserRequest, type BrowserSitePermissionPromptView, type BrowserTabMount, type BrowserTabView } from "../../shared/browser";
+import { BROWSER_CHANNEL, DEFAULT_BROWSER_CONTROL_SETTINGS, type BrowserControlSettings, type BrowserEvent, type BrowserRequest, type BrowserMediaView, type BrowserSitePermissionPromptView, type BrowserTabMount, type BrowserTabView } from "../../shared/browser";
 import { browserClaimOrigin, type BrowserClaimAutoReason, type BrowserClaimTab } from "../../shared/browserClaim";
 import type { ApprovalRecord } from "../../shared/ipc";
 import type { HostBinding } from "../../shared/hosts";
@@ -65,8 +66,11 @@ const OWNER_DOWNLOAD_GESTURE_MS = 10_000;
  */
 type Handover = { to: "front" | "background"; url: string; leaseId?: string; settings?: BrowserControlSettings; paused: boolean; release(): void; timer?: ReturnType<typeof setTimeout> };
 const HANDOVER_TIMEOUT_MS = 15_000;
-type TabData = { url: string; title: string; loadFailure?: RelayErrorDetail; loginOrigin?: string; confirmedOpen?: string; sitePermission?: BrowserSitePermissionPromptView; documentEpoch?: number; favicon?: string; error?: string; service?: BrowserServiceSession; navigation: number; authRetries: number; subresourceReticketAt?: number; zoom?: number; dispose?: () => void };
+type TabData = { url: string; title: string; loadFailure?: RelayErrorDetail; loginOrigin?: string; confirmedOpen?: string; sitePermission?: BrowserSitePermissionPromptView; documentEpoch?: number; favicon?: string; error?: string; service?: BrowserServiceSession; navigation: number; authRetries: number; subresourceReticketAt?: number; zoom?: number; media?: { playing: boolean; audible: boolean }; dispose?: () => void };
 const AUTH_PATH = "/__cutex/auth";
+/** The owner's 停止 (正在播放): every audio / video element of the page's main document and its same-origin frames pauses. */
+export const BROWSER_PAUSE_MEDIA_SCRIPT = `(() => { const docs = [document]; for (const f of document.querySelectorAll('iframe')) { try { if (f.contentDocument) docs.push(f.contentDocument); } catch {} }
+  let n = 0; for (const d of docs) for (const m of d.querySelectorAll('audio,video')) { try { if (!m.paused) { m.pause(); n++; } } catch {} } return n; })()`;
 const SECRET = /(?:^|[-_])(?:access[-_]?token|refresh[-_]?token|id[-_]?token|token|auth|authorization|password|passwd|secret|signature|sig|jwt|bearer|otp|credential|api[-_]?key|key|code|ticket|session|sessionid)(?:$|[-_])/i;
 let previousWindow: (() => void) | undefined;
 let currentAddWindow: ((window: BrowserWindow) => boolean) | undefined;
@@ -95,6 +99,8 @@ const claimAudit = new BrowserClaimAudit();
 let claimPolicies: BrowserClaimPolicyStore | undefined;
 let cursorPreferences: BrowserCursorPreferencesStore | undefined;
 const cursorPreferencesStore = () => cursorPreferences ??= new BrowserCursorPreferencesStore(join(app.getPath("userData"), "browser-cursor.json"));
+let carrierPreferences: BrowserCarrierPreferencesStore | undefined;
+const carrierPreferencesStore = () => carrierPreferences ??= new BrowserCarrierPreferencesStore(join(app.getPath("userData"), "browser-carrier.json"));
 const claimPolicyStore = () => claimPolicies ??= new BrowserClaimPolicyStore(join(app.getPath("userData"), "browser-claim-policy.json"));
 /** Keep one-use auth navigation and potentially credential-bearing metadata out of renderer/state. */
 /** Electron's loadURL rejection (code ERR_*, errno) as relay detail; the URL is display-redacted. */
@@ -326,8 +332,22 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
     },
     prepare: (lease, settings) => provider.grant(lease.target.guestId, settings, { grantee: lease.agentName, deferBinding: lease.origin === "agent" }),
     releaseProvider(guestId, leaseId) { adapters.delete(leaseId); cancelPendingGuest(guestId); provider.release(guestId); },
-    changed(guestId) { const record = registry.get(guestId); if (record) publish(record); },
+    changed(guestId) { syncThrottling(guestId); const record = registry.get(guestId); if (record) publish(record); },
   });
+  // Owner 2026-11-10 (「修吧」): a card webview an agent holds a lease on keeps running at full speed while it is not on
+  // screen (an agent idling a web game for the owner); Chromium otherwise clamps its timers to ~1/s (~1/min after
+  // 5 min) and stops animation frames. Main decides from its own lease table, never from a renderer or agent flag.
+  // Main's background carrier is created unthrottled and is never touched here. Last value set per guest;
+  // a new document sets it again (`renew`) so a cross-process navigation cannot drop it.
+  const unthrottled = new WeakSet<WebContents>();
+  function syncThrottling(guestId: string, renew = false): void {
+    const guest = registry.getWebContents(guestId);
+    if (!guest || guest.isDestroyed() || isBackground(guestId)) return;
+    const leased = !!leases.forGuest(guestId);
+    if (leased === unthrottled.has(guest) && !(renew && leased)) return;
+    if (leased) unthrottled.add(guest); else unthrottled.delete(guest);
+    try { guest.setBackgroundThrottling(!leased); } catch { /* Destroyed meanwhile. */ }
+  }
   // Lease id → why main granted a claim without the owner's click (shown on the control banner).
   const autoReasons = new Map<string, BrowserClaimAutoReason>();
   // Automatic claim grants use the owner's last explicit control settings of this run.
@@ -350,7 +370,14 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
       ...(tab && networkHost(record.hostId)?.kind === "ssh" && desktopLoopbackUrl(tab.url) ? { desktopLoopback: true as const } : {}),
       ...(tab?.sitePermission ? { sitePermission: { ...tab.sitePermission, permissions: [...tab.sitePermission.permissions] } } : {}),
       ...(tab?.error ? { error: tab.error } : {}), ...(tab?.favicon ? { favicon: tab.favicon } : {}), ...(tab?.zoom && tab.zoom !== 1 ? { zoom: tab.zoom } : {}),
-      ...(isBackground(record.guestId) ? { carrier: "background" as const } : {}), ...(handovers.has(record.guestId) ? { handover: true as const } : {}) };
+      ...(isBackground(record.guestId) ? { carrier: "background" as const } : {}), ...(handovers.has(record.guestId) ? { handover: true as const } : {}),
+      ...mediaView(tab, alive ? guest : undefined) };
+  }
+  /** Chromium's own media state of the guest (events below); only what is on (playing, audible, muted). */
+  function mediaView(tab: TabData | undefined, guest: WebContents | undefined): { media?: BrowserMediaView } {
+    const muted = !!guest && guest.isAudioMuted();
+    const playing = !!tab?.media?.playing, audible = !!tab?.media?.audible;
+    return playing || audible || muted ? { media: { playing, audible, muted } } : {};
   }
   function publish(record: BrowserGuestRecord, status?: BrowserTabView["status"], newTabUrl?: string): void {
     if (disposed || owner.isDestroyed()) return;
@@ -1191,7 +1218,7 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
     let carrier: BrowserCarrier | undefined;
     // The page renders at the scale of the screen the app window is on, so its card thumbnail is as sharp as the page.
     const scaleFactor = window.isDestroyed() ? undefined : screen.getDisplayMatching(window.getBounds()).scaleFactor;
-    carrier = createBrowserCarrier({ hostId: record.hostId, viewport: settings.viewport, scaleFactor,
+    carrier = createBrowserCarrier({ hostId: record.hostId, viewport: settings.viewport, scaleFactor, frameRate: carrierPreferencesStore().get().frameRate,
       guard: guest => { guardGuest(guest); if (guest.isDestroyed()) throw new BrowserRelayError("invalid_request"); guest.setWebRTCIPHandlingPolicy("disable_non_proxied_udp"); },
       wanted: () => moduleEnabled && !disposed && anyWindowVisible(),
       thumbnail: image => {
@@ -1427,8 +1454,8 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
       // Before the new document paints: an own page starts in the app's scheme, a site leaving one drops it.
       if (!inPlace && typeof url === "string") { ownPage = !!parseBrowserServiceUrl(url, networkHost(record.hostId)?.connectionPort); rescheme(); }
     };
-    const inPage = () => { ++loginDocumentEpoch; tab.documentEpoch = (tab.documentEpoch ?? 0) + 1; tab.loginOrigin = undefined; changed(); };
-    const navigated = () => { ++loginDocumentEpoch; tab.documentEpoch = (tab.documentEpoch ?? 0) + 1; tab.loginOrigin = undefined; tab.favicon = undefined; if (tab.sitePermission?.state !== "waiting") tab.sitePermission = undefined; if (registry.get(record.guestId)) registry.nextPageGeneration(record.guestId); changed(); };
+    const inPage = () => { syncThrottling(record.guestId); ++loginDocumentEpoch; tab.documentEpoch = (tab.documentEpoch ?? 0) + 1; tab.loginOrigin = undefined; changed(); };
+    const navigated = () => { syncThrottling(record.guestId, true); ++loginDocumentEpoch; tab.documentEpoch = (tab.documentEpoch ?? 0) + 1; tab.loginOrigin = undefined; tab.favicon = undefined; tab.media = undefined; if (tab.sitePermission?.state !== "waiting") tab.sitePermission = undefined; if (registry.get(record.guestId)) registry.nextPageGeneration(record.guestId); changed(); };
     const favicon = (_event: unknown, urls: string[]) => {
       const sequence = ++faviconSequence;
       const current = registry.get(record.guestId);
@@ -1450,6 +1477,16 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
     guest.on("did-start-navigation", documentStarted); guest.on("did-navigate", navigated); guest.on("did-navigate-in-page", inPage);
     guest.on("page-favicon-updated", favicon);
     guest.on("page-title-updated", title); guest.on("did-start-loading", loading); guest.on("did-stop-loading", loading);
+    // Media (owner 2026-11-10: a tab that plays stays alive in the background): Chromium's own events, per document.
+    const mediaPublish = () => { const current = registry.get(record.guestId); if (current && registry.getWebContents(record.guestId) === guest) publish(current); };
+    const mediaStarted = () => { tab.media = { playing: true, audible: tab.media?.audible ?? false }; mediaPublish(); };
+    const mediaPaused = () => { if (!tab.media?.playing) return; tab.media = { ...tab.media, playing: false }; mediaPublish(); };
+    const audioState = (event: { audible?: boolean }) => {
+      const audible = event?.audible === true;
+      if (!!tab.media?.audible === audible) return;
+      tab.media = { playing: tab.media?.playing ?? false, audible }; mediaPublish();
+    };
+    guest.on("media-started-playing", mediaStarted); guest.on("media-paused", mediaPaused); guest.on("audio-state-changed", audioState);
     guest.on("enter-html-full-screen", () => { const shown = windowOf(record.guestId); if (shown && !shown.isDestroyed() && shown.isFullScreen()) shown.setFullScreen(false); });
     // A hand-over guest is already at its URL; a fresh one syncs on its first navigation (changed).
     syncZoom();
@@ -1462,11 +1499,13 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
       guest.removeListener("did-start-navigation", documentStarted); guest.removeListener("did-navigate", navigated); guest.removeListener("did-navigate-in-page", inPage);
       guest.removeListener("page-favicon-updated", favicon);
       guest.removeListener("page-title-updated", title); guest.removeListener("did-start-loading", loading); guest.removeListener("did-stop-loading", loading);
+      guest.removeListener("media-started-playing", mediaStarted); guest.removeListener("media-paused", mediaPaused); guest.removeListener("audio-state-changed", audioState);
       reschemes.delete(rescheme); schemes.delete(guest); scheme.dispose();
     };
     guestDisposers.set(guest, tab.dispose);
+    syncThrottling(record.guestId);
   }
-  async function execute(request: Exclude<BrowserRequest, { op: "setEnabled" | "resetOrigins" | "externalPages" | "sitePermissions" | "cursorColor" }>, hostId: string, fence?: HostFence<DaemonService>): Promise<unknown> {
+  async function execute(request: Exclude<BrowserRequest, { op: "setEnabled" | "resetOrigins" | "externalPages" | "sitePermissions" | "cursorColor" | "carrierFrameRate" }>, hostId: string, fence?: HostFence<DaemonService>): Promise<unknown> {
     if (!moduleEnabled || disposed) throw new BrowserRelayError("browser_disabled");
     const admittedLifecycle = lifecycle;
     const checkLifecycle = () => { if (!moduleEnabled || disposed || admittedLifecycle !== lifecycle) throw new BrowserRelayError("browser_disabled"); };
@@ -1579,6 +1618,16 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
       const record = registry.getByTab(hostId, request.tabKey);
       if (!record) throw new BrowserRelayError("target_closed");
       zoomBy(record, request.action);
+      return;
+    }
+    if (request.op === "setMuted" || request.op === "pauseMedia") {
+      // The owner's speaker / 停止 (owner UI only: this channel takes the app's own frame). Any tab of this host.
+      const record = registry.getByTab(hostId, request.tabKey);
+      const guest = record && registry.getWebContents(record.guestId);
+      if (!record || !guest || guest.isDestroyed()) throw new BrowserRelayError("target_closed");
+      if (request.op === "setMuted") { guest.setAudioMuted(request.muted); publish(record); return; }
+      // Fixed main-owned script in an isolated world (never page or agent code): every audio / video element pauses.
+      await guest.executeJavaScriptInIsolatedWorld(1006, [{ code: BROWSER_PAUSE_MEDIA_SCRIPT }], false).catch(() => {});
       return;
     }
     if (request.op === "close" || request.op === "stop") {
@@ -1775,6 +1824,10 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
     }, cursorColor(color) {
       const store = cursorPreferencesStore();
       if (color !== undefined) { store.set(color); for (const record of registry.list()) publish(record); }
+      return store.get();
+    }, carrierFrameRate(frameRate) {
+      const store = carrierPreferencesStore();
+      if (frameRate !== undefined) { store.set(frameRate); for (const carrier of carriers.values()) carrier.setFrameRate(frameRate); }
       return store.get();
     }, externalPages(enabled) {
       if (enabled === undefined) return externalPages().view();

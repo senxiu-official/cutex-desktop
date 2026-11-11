@@ -3,6 +3,7 @@ import { mockLayoutInstance, mockUserLayoutApi, prepareMockLayout } from "./mock
 import { mockNotificationPage, mockNotificationRows, registerMockOwnerNotes } from "./mockNotificationPages";
 import { createMockInputLedger, inputLedgerMockEnabled, LEDGER_SCENES, type LedgerScene } from "./mockInputLedger";
 import { mockDebug } from "./mockDebug";
+import { mockImageCache } from "./mockImageCache";
 import { IMAGE_HEAVY, IMAGE_HEAVY_SESSION, prepareImageHeavy, imageHeavyThread, imageHeavyResponse, imageHeavyMedia, imageHeavyFile } from "./devImageHeavy";
 import { OVERLOAD_RETRY_SCENE, OVERLOAD_RETRY_SESSION, overloadRetryResource, overloadRetryThread, overloadRetryAdmission } from "./mockOverloadRetry";
 import { TURN_ERROR_SCENE, TURN_ERROR_SESSIONS, turnErrorResource, turnErrorThread } from "./mockTurnError";
@@ -42,6 +43,7 @@ import type { ResetCredit, ResetCreditsView } from "../../../shared/resetCredits
 import { MODULE_MOCKS } from "./mockModules";
 import { mockClaudeRules, mockRememberClaudeRules, mockSetClaudeRules, soraPendingApproval } from "./mockClaudePermissions";
 import { mockLaunchArt } from "./mockLaunchArt";
+import { mockFontPack } from "./mockFontPack";
 import { BLOCKING_REASONS, type IdleReason } from "../../../shared/stopIdle";
 import { registerMockTokenList, renameMockToken, revokeMockToken, scopeMockToken } from "./mockTokenNames";
 import type { MockCore, MockEvents, MockProfileRef } from "./mockTypes";
@@ -2746,6 +2748,8 @@ const routeNotFound = async (): Promise<never> => { throw new Error("route_not_f
  * (auto → member); any other new host is an older cutex (auto → owner). `?legacy`: no capability anywhere.
  */
 const MOCK_SELF_FINGERPRINT = "116df1968daccae0";
+/** 用令牌连接: who the imported token is on the shared host (user ema, two projects, may send). */
+const MOCK_TOKEN_USER: import("../../../shared/users").HostUserAccess = { isOwner: false, pending: false, userId: "u-ema", name: "ema", displayName: "Ema", grant: { projects: ["proj-thesis", "proj-lab-notes"], standaloneAgents: [], send: true }, scope: "full" };
 const MOCK_OTHER_OWNER: HostOwner = { displayName: "ema", fingerprint: "6060078263515bfd", confirmed: true, source: "firstRootClaim" };
 const OWNER_UNCONFIRMED = typeof location !== "undefined" && new URLSearchParams(location.search).has("ownerunconfirmed");
 const mockOwners: Record<string, HostOwner | null> = {
@@ -3456,6 +3460,7 @@ export function installMockBridge(): void {
   const remoteCloseShell = mockRemoteCloseShell({ state: shellState, emitView: (view) => emit("remoteClose", { view }), emitHost: (method, params) => core.emitHost(method, params) });
   const bridge: PreloadBridge = {
     debug: mockDebug(MOCK_PLATFORM, event => emit("debug", event)),
+    imageCache: mockImageCache(),
     platform: MOCK_PLATFORM,
     // ?platform=darwin: the title bar keeps clear of the traffic lights (no real buttons in a browser).
     ...(MOCK_PLATFORM === "darwin" ? { window: { control: async () => {}, setChrome: async () => {}, nativeControls: "left" as const } } : {}),
@@ -3529,6 +3534,7 @@ export function installMockBridge(): void {
       },
     },
     launchArt: mockLaunchArt(),
+    fontPack: mockFontPack(),
     update: {
       async state() {
         return structuredClone(update);
@@ -3613,6 +3619,37 @@ export function installMockBridge(): void {
         if (!mockHosts.hosts.some((h) => h.id === "local") && mockHosts.hosts.length === 1) mockActivate(id);
         console.info("[mock] ssh", target, `${cutexPath} management client-token issue --label desktop-HOST-A${connectAs === "member" ? " --pending" : ""}`);
         return { ok: true, hostId: id, cutexPath, connectAs, ...(connectAs === "member" ? { pending: true, userId: null } : {}), ...(mode === "auto" ? { autoReason: mockOwners[id] ? "ownerIsSomeoneElse" : "noCapability" } : {}) };
+      },
+      // 用令牌连接 (owner-approved 2026-11-10): only the tunnel + the token, nothing runs over SSH. Errors by the
+      // address / token: "nofwd" forwarding disabled, "refuse" refused, "nosuch" unknown name, "other" another
+      // host, "noport" nothing on the port; token "bad…" refused, "short" malformed, "pending…" unassigned.
+      async importSshHostToken(request) {
+        await new Promise((r) => setTimeout(r, 900));
+        const token = request.token.trim();
+        if (request.hostId) {
+          const host = mockHosts.hosts.find((h) => h.id === request.hostId && h.kind === "ssh" && h.pairingMode === "tokenImport");
+          if (!host) return { ok: false, error: { code: "badInput", detail: "hostId" } };
+          if (token.startsWith("bad")) return { ok: false, error: { code: "tokenRejected", detail: "HTTP 401 from the remote management port" } };
+          mockHosts = { ...mockHosts, hosts: mockHosts.hosts.map((h) => (h.id === host.id ? { ...h, paired: true } : h)) };
+          emit("hostsState", mockHostsOut());
+          return { ok: true, hostId: host.id, connectAs: "member", access: { hostId: host.id, user: MOCK_TOKEN_USER, featureList: [] } };
+        }
+        const target = request.target?.trim() ?? "";
+        if (!target || token.length < 8) return { ok: false, error: { code: "badInput", detail: !target ? "target" : "token" } };
+        if (target.includes("nosuch")) return { ok: false, error: { code: "resolve", detail: `ssh: Could not resolve hostname ${target}: No such host is known.` } };
+        if (target.includes("refuse")) return { ok: false, error: { code: "refused", detail: `ssh: connect to host ${target} port 22: Connection refused` } };
+        if (target.includes("nofwd")) return { ok: false, error: { code: "forwardDenied", detail: "channel 2: open failed: administratively prohibited: open failed" } };
+        if (target.includes("noport")) return { ok: false, error: { code: "remoteDaemon", detail: `connect to 127.0.0.1 port ${request.remotePort ?? 24270} failed: Connection refused` } };
+        if (target.includes("other")) return { ok: false, error: { code: "hostMismatch", detail: "expected host 7f3e…, the daemon answered as 19ac…" } };
+        if (token.startsWith("bad")) return { ok: false, error: { code: "tokenRejected", detail: "HTTP 401 from the remote management port" } };
+        const id = `ssh-${Math.random().toString(16).slice(2, 10)}`;
+        const label = request.label?.trim() || target.replace(/^.*@/, "").replace(/:\d+$/, "");
+        if (!LEGACY) mockOwners[id] = MOCK_OTHER_OWNER;
+        mockHosts = { ...mockHosts, hosts: [...mockHosts.hosts, { id, kind: "ssh", label, target, targets: [target], remotePort: request.remotePort ?? 24270, cutexPath: "cutex", paired: true, lastConnectedAt: null, autoConnect: true, color: HOST_PALETTE[1 + (mockHosts.hosts.length % (HOST_PALETTE.length - 1))], platform: null, connectAs: "member", pairingMode: "tokenImport" }] };
+        emit("hostsState", mockHostsOut());
+        console.info("[mock] ssh -L only", target, "→ remote", request.remotePort ?? 24270, "(token import, no remote command)");
+        const user = token.startsWith("pending") ? { ...MOCK_TOKEN_USER, pending: true, userId: null, name: null, displayName: null, grant: null } : MOCK_TOKEN_USER;
+        return { ok: true, hostId: id, connectAs: "member", userId: user.userId, access: { hostId: id, user, featureList: ["users", "device-scope"] } };
       },
       async setSshConnectAs(hostId, mode) {
         await new Promise((r) => setTimeout(r, 800));
@@ -3937,7 +3974,8 @@ export function installMockBridge(): void {
       },
       ...mockInputLedger.api,
       async queueList(sessionId) {
-        if (INPUT_LEDGER) return mockInputLedger.queueSnapshot(sessionId);
+        // r281 with the ledger on still lists the admission ride-alongs (stale: order and server deadlines only).
+        if (INPUT_LEDGER) return { ...mockInputLedger.queueSnapshot(sessionId), admission: { ...admissionOf(sessionId), stale: true } };
         const pause = pauses.get(sessionId) ?? null;
         const items = (queues.get(sessionId) ?? []).map((q, i) => ({ ...q, position: i }));
         return { revision: seq, items, paused: !!pause, pause, asksPaused: asksPauses.get(sessionId) ?? null, ...(LEGACY ? {} : { admission: admissionOf(sessionId) }) };
@@ -5036,9 +5074,11 @@ export function installMockBridge(): void {
   bridge.moduleDev = mockModuleDev();
   for (const { mock } of MODULE_MOCKS) if (mock.bridge) Object.assign(bridge, mock.bridge(core));
   if (SETTINGS_LISTS) {
+    let carrierFrameRate: 15 | 30 = 15;
     let sites = Array.from({ length: 12 }, (_, i) => ({ pool: i % 4 === 3 ? "agent" as const : "owner" as const, origin: `https://site-${String(i + 1).padStart(2, "0")}.example`, permission: i % 2 ? "camera" as const : "notifications" as const, allow: i % 3 !== 0, updatedAt: 0 }));
     const known: Record<string, unknown> = {
       externalPages: async () => ({ stored: true, forced: false }),
+      carrierFrameRate: async (frameRate?: 15 | 30) => ({ frameRate: carrierFrameRate = frameRate ?? carrierFrameRate }),
       sitePermissions: async (forget?: BrowserSitePermissionForget) => {
         sites = forget === "all" ? [] : forget ? sites.filter((s) => s.pool !== forget.pool || s.origin !== forget.origin) : sites;
         return structuredClone(sites);

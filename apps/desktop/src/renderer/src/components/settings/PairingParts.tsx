@@ -10,7 +10,7 @@ import { qrPath } from "../../lib/qr";
 import { formatCountdown, secondsLeft } from "../../lib/remoteAccess";
 import { useNow } from "../../lib/time";
 import { useApp } from "../../store";
-import { Button, SettingsGroup, TextLink } from "./Form";
+import { Button, SettingsGroup, TextLink, RadioList, RowGroup } from "./Form";
 import { scopeOptions } from "./OwnerDevices";
 
 export type PairPath = "mine" | "invite";
@@ -30,19 +30,15 @@ export function QrCode({ text, label, size = "h-48 w-48" }: { text: string; labe
 export function PairScope({ value, ownerDevice, onChange, labels }: { value: DeviceScope; ownerDevice: boolean; onChange(scope: DeviceScope): void; /** Plainer labels by scope (添加设备 v2: 完全控制，可以运行命令). */ labels?: Partial<Record<DeviceScope, string>> }) {
   const { t } = useI18n();
   return (
-    <SettingsGroup agents="access" source="host"><div className="-mx-4 border-b border-border px-4 py-2.5" role="radiogroup" aria-label={t("ownerDev.scope")}>
-      <div className="mb-1 text-sm">{t("ownerDev.scope")}</div>
-      {scopeOptions(t, ownerDevice, true).map((o) => (
-        <label key={o.value} className="flex cursor-pointer items-start gap-2 py-1 text-sm">
-          <input type="radio" name="pair-scope" checked={value === o.value} onChange={() => onChange(o.value)} className="mt-1 accent-[var(--color-accent)]" />
-          <span>
-            {(ownerDevice && labels?.[o.value]) || o.label}
-            {o.value === "full" && ownerDevice && <span className="ml-1 text-xs text-subtle">{t("ownerDev.scope.ownerDefault")}</span>}
-            <span className="block text-xs text-subtle">{o.value === "full" && !ownerDevice ? t("ownerDev.scope.byUser.hint") : o.title}</span>
-          </span>
-        </label>
-      ))}
-    </div></SettingsGroup>
+    // A row group of radios (the rights need a line each), like every other in-card group.
+    <SettingsGroup agents="access" source="host"><RowGroup title={t("ownerDev.scope")}>
+      <RadioList name="pair-scope" label={t("ownerDev.scope")} value={value} onChange={onChange} options={scopeOptions(t, ownerDevice, true).map((o) => ({
+        value: o.value,
+        label: (ownerDevice && labels?.[o.value]) || o.label,
+        extra: o.value === "full" && ownerDevice ? <span className="ml-1 text-xs text-subtle">{t("ownerDev.scope.ownerDefault")}</span> : undefined,
+        hint: o.value === "full" && !ownerDevice ? t("ownerDev.scope.byUser.hint") : o.title,
+      }))} />
+    </RowGroup></SettingsGroup>
   );
 }
 
@@ -72,7 +68,7 @@ export function PairPaths({ value, onChange }: { value: PairPath; onChange(path:
 export function OwnerCodeWarning({ host, title, once }: { host: string; /** Default: the v1 code's wording. */ title?: string; once?: string }) {
   const { t } = useI18n();
   return (
-    <div className="-mx-4 border-b border-border bg-warn/10 px-4 py-3 text-xs text-warn-text" data-testid="owner-code-warning">
+    <div className="my-2 rounded-lg border border-warn/40 bg-warn/10 px-3 py-2.5 text-xs text-warn-text" data-testid="owner-code-warning">
       <div className="mb-1 flex items-center gap-1.5 text-sm font-medium">
         <ShieldAlert size={14} className="shrink-0" />
         {title ?? t("ownerDev.code.title", { host })}

@@ -2,7 +2,7 @@
 // docs/known-issues.json (per-locale strings; ./knownIssues.ts), the changelog in CHANGELOG.md (./changelog.ts).
 export const zhCN = {
   "about.title": "关于与已知问题",
-  "about.description": "设置 → 关于：已知问题、更新记录、项目链接和许可证",
+  "about.description": "查看已知问题、更新记录、项目链接和许可证",
   "about.links.section": "项目",
   "about.source": "源代码",
   "about.sourceHint": "觉得有用的话，欢迎在 GitHub 上左键点击 Star",

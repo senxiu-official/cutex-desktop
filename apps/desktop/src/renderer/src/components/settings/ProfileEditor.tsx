@@ -41,7 +41,7 @@ import { ProfileAvatar } from "../ProfileAvatar";
 import { AccountRows } from "./AccountSection";
 import { PROFILE_AUTO_PICK_FEATURE, providerTermsUrl } from "../../../../shared/profileAutoPick";
 import { api as appApi } from "../../bridge";
-import { Button, DefaultableToggleRow, HintAction, InfoTip, Loading, NumberField, SettingRow, Section, SettingsGroup, Segmented, TextInput, Toggle } from "./Form";
+import { Button, DefaultableToggleRow, HintAction, InfoTip, Loading, NumberField, SettingRow, Section, SettingsGroup, Segmented, TextInput, Toggle, RowGroup } from "./Form";
 import { ClaudeAccountRow } from "./ProfileClaudeAccount";
 import { ComponentNotice } from "../ComponentCard";
 import { CLAUDE_RUNTIME_COMPONENT } from "../../lib/componentCard";
@@ -183,7 +183,7 @@ function Overview({ detail, livePlan, patch, set, picture, onPicture, isDefault,
     void onDelete().finally(() => (setDeleting(false), setArmed(false)));
   };
   return (
-    <section className={`mb-6 rounded-xl border ${armed ? ARMED_FRAME : "border-border bg-surface"}`}>
+    <section className={`mb-6 rounded-xl border ${armed ? ARMED_FRAME : "border-card-border bg-surface"}`}>
       {/* Narrow panel (r265 D6): the actions wrap under the name instead of squeezing it to 「ds-fina」. */}
       <div className="flex flex-wrap items-center gap-4 p-4">
         <SettingsGroup agents="none" source={pictureSynced ? "host" : "local"}>
@@ -849,9 +849,10 @@ export function ProfileEditor({ profile, item, isDefault, refusal, onChanged, on
       </div>
 
       <Section id="profile-models"   title={t("settings.profileIa.modelsContext" as MessageKey)} hint={t("settings.profileIa.hostProfile" as MessageKey, { name: detail.name })}>
-        <h4 className="mt-2 text-xs font-medium text-muted">{t("settings.profileIa.profileDefaults" as MessageKey)}</h4>
+        <RowGroup title={t("settings.profileIa.profileDefaults" as MessageKey)}>
         {/* A Kimi-kind Profile's default model / effort are its kimi variant's (运行时变体 above). */}
         {kind === "dsh" ? <DshModelFields detail={detail} patch={patch} set={set} /> : kind === "kimi" ? <p className="py-2 text-xs text-subtle">{t("variants.kimiDefaultsAbove")}</p> : <ProfileModelFields detail={detail} models={models} cfg={cfg} set={set} />}
+        </RowGroup>
         <ClaudeCompactionRow
           detail={detail}
           draft={patch.claudeCompaction}

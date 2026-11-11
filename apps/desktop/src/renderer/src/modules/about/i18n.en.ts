@@ -4,7 +4,7 @@ import type { zhCN } from "./i18n";
 
 export const en: Record<keyof typeof zhCN, string> = {
   "about.title": "About & known issues",
-  "about.description": "Settings → About: known issues, changelog, project links and license",
+  "about.description": "View known issues, release notes, project links and licenses",
   "about.links.section": "Project",
   "about.source": "Source code",
   "about.sourceHint": "If it's useful to you, a star on GitHub helps",

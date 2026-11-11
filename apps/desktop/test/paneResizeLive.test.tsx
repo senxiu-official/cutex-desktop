@@ -69,10 +69,12 @@ describe("column divider: live flex-grow, stored on release", () => {
 });
 
 describe("sidebar width: live CSS variable, appearance stored on release", () => {
-  it("drags with --sidebar-w only, then stores once (zoom IPC once)", async () => {
+  it("drags with --sidebar-w only (on its readers, not <html>), then stores once (zoom IPC once)", async () => {
     const before = appearance.getAppearance().sidebarWidth;
+    const rootBefore = document.documentElement.style.getPropertyValue("--sidebar-w");
     const row = document.createElement("div");
     const pane = document.createElement("aside");
+    pane.setAttribute("data-live-width", "sidebarWidth");
     row.append(pane);
     document.body.append(row);
     Object.defineProperty(row, "clientWidth", { configurable: true, value: 1600 });
@@ -89,7 +91,8 @@ describe("sidebar width: live CSS variable, appearance stored on release", () =>
     const handle = pane.querySelector("[role=separator]")!;
     act(() => void pointer(handle, "pointerdown", 300));
     for (const x of [320, 340, 360]) act(() => void pointer(handle, "pointermove", x));
-    expect(document.documentElement.style.getPropertyValue("--sidebar-w")).toBe(`${before + 60}px`);
+    expect(pane.style.getPropertyValue("--sidebar-w")).toBe(`${before + 60}px`);
+    expect(document.documentElement.style.getPropertyValue("--sidebar-w")).toBe(rootBefore);
     expect(appearance.getAppearance().sidebarWidth).toBe(before);
     expect(appearance.getLiveWidth("sidebarWidth")).toBe(before + 60);
     expect(localStorage.getItem("cutex-desktop.appearance")).toBeNull();
@@ -101,6 +104,8 @@ describe("sidebar width: live CSS variable, appearance stored on release", () =>
     expect(JSON.parse(localStorage.getItem("cutex-desktop.appearance")!).sidebarWidth).toBe(before + 60);
     expect(fx.setZoom).toHaveBeenCalledTimes(1);
     expect(appearance.getLiveWidth("sidebarWidth")).toBe(before + 60);
+    expect(document.documentElement.style.getPropertyValue("--sidebar-w")).toBe(`${before + 60}px`);
+    expect(pane.style.getPropertyValue("--sidebar-w")).toBe("");
   });
 
   it("keys are a short drag (宽度规则 1): live at once in a drag session, stored once when the keys rest", async () => {

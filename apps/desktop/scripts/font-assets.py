@@ -1,0 +1,127 @@
+# Builds the desktop's font assets from the font handoff folder (cutex-font-handoff-*/: fonts/, licenses/, manifest.json).
+#
+#   py -3.12 -I apps/desktop/scripts/font-assets.py <handoff-dir> <repo-root>
+#   (needs fonttools + brotli)
+#
+# - Latin families: bundled. WOFF2 files are copied as they are; TTFs are put in a WOFF2 container with no table
+#   transforms (compression only, OFL FAQ 2.2.1: names and every table's data unchanged, as the handoff did for its
+#   own WOFF2 files).
+# - CJK families: not bundled (font pack, main/fontPack.ts). Only a tiny preview subset of the regular face is bundled
+#   for the font picker: printable ASCII plus the preview text. None of these families declares a Reserved Font Name;
+#   the name table is kept as is.
+# - Writes src/shared/fontCatalog.generated.ts (files, weights, SHA-256, sizes, pinned upstream sources) and copies
+#   licenses/<family>/ to LICENSES/fonts/<family>/.
+import hashlib
+import io
+import json
+import shutil
+import sys
+from pathlib import Path
+
+from fontTools import subset
+from fontTools.ttLib import TTFont
+
+PREVIEW_TEXT = "永和 Aa 123"
+# Owner-facing names; the CSS family stays the handoff's.
+CJK_NAMES = {
+    "swei-spring-sugar": ("狮尾四季春加糖", "Swei Spring Sugar"),
+    "swei-b2-sugar": ("狮尾 B2 加糖宋体", "Swei B2 Sugar"),
+    "swei-spring": ("狮尾四季春", "Swei Spring"),
+    "zhuque-fangsong": ("朱雀仿宋", "Zhuque Fangsong"),
+}
+
+
+def sha256(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def woff2_untransformed(src: Path) -> bytes:
+    """The container only: no glyf/loca or hmtx transforms (needs brotli)."""
+    from fontTools.ttLib import woff2 as w2
+    out = io.BytesIO()
+    w2.compress(str(src), out, transform_tables=[])
+    return out.getvalue()
+
+
+def preview_subset(src: Path, text: str) -> bytes:
+    options = subset.Options()
+    options.flavor = "woff2"
+    options.name_IDs = ["*"]
+    options.name_languages = ["*"]
+    options.name_legacy = True
+    options.layout_features = ["*"]
+    options.notdef_outline = True
+    options.drop_tables = []
+    font = TTFont(src)
+    sub = subset.Subsetter(options)
+    sub.populate(text=text)
+    sub.subset(font)
+    font.flavor = "woff2"
+    out = io.BytesIO()
+    font.save(out)
+    return out.getvalue()
+
+
+def main() -> None:
+    handoff, repo = Path(sys.argv[1]), Path(sys.argv[2])
+    manifest = json.loads((handoff / "manifest.json").read_text(encoding="utf-8"))
+    app = repo / "apps" / "desktop"
+    latin_dir = app / "src" / "renderer" / "src" / "assets" / "fonts" / "latin"
+    preview_dir = app / "src" / "renderer" / "src" / "assets" / "fonts" / "preview"
+    for d in (latin_dir, preview_dir):
+        if d.exists():
+            shutil.rmtree(d)
+        d.mkdir(parents=True)
+    families = []
+    for fam in manifest["families"]:
+        fid, cjk = fam["id"], fam["language"].startswith("zh")
+        faces = []
+        for face in fam["faces"]:
+            src = handoff / face["file"]
+            data = src.read_bytes()
+            if sha256(data) != face["sha256"]:
+                raise SystemExit(f"SHA-256 mismatch: {src}")
+            w = face["weight"]
+            entry = {
+                "weight": f"{w[0]}" if w[0] == w[1] else f"{w[0]} {w[1]}",
+                "style": face["style"],
+            }
+            if cjk:
+                name = Path(face["file"]).name
+                entry.update({"file": name, "sha256": face["sha256"], "bytes": face["bytes"],
+                              "source": {"url": face["sourceUrl"], "sha256": face["sourceSha256"]}})
+            else:
+                stem = Path(face["file"]).stem
+                out = data if src.suffix == ".woff2" else woff2_untransformed(src)
+                # The compressed file must open and keep every table's data.
+                TTFont(io.BytesIO(out))
+                (latin_dir / f"{stem}.woff2").write_bytes(out)
+                entry.update({"file": f"{stem}.woff2", "bytes": len(out)})
+            faces.append(entry)
+        item = {"id": fid, "family": fam["cssFamily"], "script": "cjk" if cjk else "latin",
+                "delivery": "pack" if cjk else "bundled", "faces": faces}
+        if cjk:
+            zh, en = CJK_NAMES[fid]
+            item["names"] = {"zh": zh, "en": en}
+            regular = next(f for f in fam["faces"] if f["style"] == "normal" and f["weight"][0] <= 400 <= f["weight"][1])
+            text = "".join(chr(c) for c in range(0x20, 0x7F)) + zh + PREVIEW_TEXT
+            data = preview_subset(handoff / regular["file"], text)
+            (preview_dir / f"{fid}.woff2").write_bytes(data)
+            item["preview"] = {"file": f"{fid}.woff2", "bytes": len(data)}
+        families.append(item)
+        lic_src, lic_dst = handoff / "licenses" / fid, repo / "LICENSES" / "fonts" / fid
+        if lic_dst.exists():
+            shutil.rmtree(lic_dst)
+        shutil.copytree(lic_src, lic_dst)
+    header = ("// Generated by apps/desktop/scripts/font-assets.py from the font handoff (manifest.json); do not edit.\n"
+              "// SIL OFL 1.1 fonts; license texts in LICENSES/fonts/<id>/.\n"
+              "import type { FontCatalogEntry } from \"./fontCatalog\";\n\n")
+    body = "export const FONT_CATALOG: readonly FontCatalogEntry[] = " + json.dumps(families, ensure_ascii=False, indent=2) + ";\n"
+    (app / "src" / "shared" / "fontCatalog.generated.ts").write_text(header + body, encoding="utf-8", newline="\n")
+    for d in (latin_dir, preview_dir):
+        total = sum(p.stat().st_size for p in d.iterdir())
+        print(f"{d.name}: {len(list(d.iterdir()))} files, {total} bytes")
+
+
+if __name__ == "__main__":
+    main()

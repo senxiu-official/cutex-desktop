@@ -53,10 +53,11 @@ export const RESTRICTED_FEATURE = "desktop:restricted";
  * notices, creating agents / chats, peers, runtimes, Claude accounts, Kimi accounts, Director rotation, NCI mail,
  * remote access, the agent bus, structural session actions (fork / delete / revert), delegation
  * pause, quota auto-continue, notification levels, attachments (non-text input), users, backend upgrades,
- * renaming client / device tokens, optional components (install / remove).
+ * renaming client / device tokens, optional components (install / remove), 百度网盘.
  */
 export const OWNER_ONLY_CAPABILITIES: readonly string[] = [
   "profile-account-link",
+  "baidu-pan",
   "terminal", "workspace-fs", "fs-dir-browse", "fs-file-read", "session-attachments",
   "owner-approvals", "services", "services-persistent-approval", "services-login-link", "job-service", "alarms-api",
   "artifacts", "notes", "side-chat", "owner-messages", "owner-notify-delete", "notification-levels",

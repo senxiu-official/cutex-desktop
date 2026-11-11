@@ -106,7 +106,11 @@ export const en: Record<keyof typeof zhCN, string> = {
   "artifacts.binary": "No preview for this file ({type}, {size}).",
   "artifacts.json.record": "Record",
   "artifacts.json.raw": "JSON",
-  "artifacts.imageTooLarge": "The image is too large to preview ({size}).",
+  "artifacts.image.large": "The image is {size}; previewing it takes about as much memory.",
+  "artifacts.image.openAnyway": "Open anyway",
+  "artifacts.image.openSystem": "Open with the system app",
+  "artifacts.image.loading": "Reading the image {done} / {total}",
+  "artifacts.image.loadingLabel": "Reading progress",
   "artifacts.src.producer": "Producer",
   "artifacts.src.runtime": "Runtime",
   "artifacts.src.turn": "Turn",
@@ -188,4 +192,7 @@ export const en: Record<keyof typeof zhCN, string> = {
   "artifacts.link.forbidden": "no access",
   "artifacts.link.archived": "archived",
   "artifacts.link.tooltip": "{name} · v{n} · {kind}",
+  // 保存到这台电脑 (the 下载 page shows progress, errors and where it went)
+  "artifacts.save.toComputer": "Save to this computer",
+  "artifacts.save.hint": "Saves v{n} to the download folder; progress and location on the Downloads page",
 };

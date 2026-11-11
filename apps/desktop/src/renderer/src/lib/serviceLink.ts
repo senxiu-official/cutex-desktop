@@ -28,6 +28,7 @@ import { sideReveal, sideShowsHost } from "./sideServices";
 import { showShelfToast } from "./shelves";
 import { trayPins, type TrayPinRef } from "./trayPins";
 import { SERVICE_COMPONENT } from "./sideKinds";
+import { isWorker, isWorkerOn, showWorker } from "./serviceWorker";
 
 /** The in-app browser tab (module `browser`, opened by id — never imported). */
 export const SERVICE_TAB = SERVICE_COMPONENT;
@@ -172,7 +173,9 @@ export function openServiceInShelf(hostId: string, slug: string, opts: { paneId?
 }
 
 /** The conversation header's row: into THIS conversation's Shelf, linked to its agent (定位 when there). */
-export function openFromHeader(paneId: string, hostId: string, sessionId: string, service: Pick<ServiceView, "slug" | "displayName">): ServiceOpenResult {
+export function openFromHeader(paneId: string, hostId: string, sessionId: string, service: Pick<ServiceView, "slug" | "displayName"> & { runtime?: ServiceView["runtime"] }): ServiceOpenResult {
+  // A background service has no page for the Shelf: it is shown on the 服务 page.
+  if (service.runtime === "worker" || isWorkerOn(hostId, service.slug)) { showWorker(service.slug); return "opened"; }
   const r = openServiceInShelf(hostId, service.slug, { paneId, linkTo: sessionId });
   if (r === "unavailable") useApp.getState().notify(translate("svcLink.openFailed", { name: service.displayName || service.slug }), "error");
   return r;
@@ -218,7 +221,7 @@ export async function unlinkServicePane(instanceId: string, hostId: string, slug
  */
 export function servicesToOpen(list: readonly ServiceView[] | null | undefined, on: WithAgent, layout: SideLayout | null, hostId: string, sessionId: string): string[] {
   return agentServices(list, sessionId)
-    .filter((s) => withAgentOn(on, hostId, s.slug) && servicePanes(layout, hostId, s.slug).length === 0)
+    .filter((s) => !isWorker(s) && withAgentOn(on, hostId, s.slug) && servicePanes(layout, hostId, s.slug).length === 0)
     .map((s) => s.slug);
 }
 

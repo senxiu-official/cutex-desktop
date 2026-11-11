@@ -14,6 +14,7 @@ vi.mock("../src/renderer/src/i18n", async () => {
 vi.mock("../src/renderer/src/lib/time", () => ({ useNow: () => Date.now() }));
 vi.mock("../src/renderer/src/lib/openOverlays", () => ({ useTrackOverlay: () => {} }));
 vi.mock("../src/renderer/src/components/settings/Form", () => ({
+  EmptyState: ({ children }: { children: ReactNode }) => h("p", null, children), SettingRow: ({ label, hint, children }: { label?: ReactNode; hint?: ReactNode; children?: ReactNode }) => h("div", null, label, hint, children), Select: ({ value, options, onChange, label, disabled }: { value: string; options: { value: string; label: string }[]; onChange(v: string): void; label?: string; disabled?: boolean }) => h("select", { "aria-label": label, value, disabled, onChange: (e: { target: { value: string } }) => onChange(e.target.value) }, options.map((o) => h("option", { key: o.value, value: o.value }, o.label))), 
   SettingsGroup: ({ children }: { children: ReactNode }) => children,
   Button: (props: object) => h("button", props),
   ErrorNote: ({ children }: { children: ReactNode }) => h("p", { role: "alert" }, children),

@@ -73,7 +73,8 @@ export function PortraitPackSection() {
     void run(() => applyPortraitChanges(kind, changes), (n) => t(kind === "replace" ? "appearance.portraits.replaced" : "appearance.portraits.reassigned", { n }));
   };
   const canOpen = canOpenPortraitPackFolder();
-  return (
+  // Two cards: the style is this desktop's, the bulk changes write every host's agents, so each card names its own place.
+  return (<>
     <Section
       id={settingsAnchorId("portraits")}
       title={t("avatarStyle.title")}
@@ -90,6 +91,10 @@ export function PortraitPackSection() {
     >
       <div className="space-y-3 py-2" data-portrait-settings data-avatar-style-settings="">
         <SettingsGroup agents="none" source="local"><AvatarStylePicker value={style} onChange={(next) => next && setAppAvatarStyle(next)} /></SettingsGroup>
+      </div>
+    </Section>
+    <Section id={settingsAnchorId("portraits-bulk")} title={t("avatarStyle.bulk.title")} hint={<span role="note" data-portrait-bulk-scope="">{t("settings.ia.bulkScope", { hosts: hostsOf(planned) || "—", n: planned.length })}</span>}>
+      <div className="space-y-3 py-3" data-portrait-bulk="">
         {(fallen > 0 || mismatched > 0) && (
           <div className="flex flex-wrap items-center gap-2" data-portrait-fallen={fallen} data-portrait-mismatched={mismatched}>
             {fallen > 0 && <Notice tone="info">{t("appearance.portraits.fallen", { n: fallen })}</Notice>}
@@ -99,7 +104,6 @@ export function PortraitPackSection() {
             </Button></SettingsGroup>
           </div>
         )}
-        <p role="note" data-portrait-bulk-scope="" className="text-xs text-muted">{t("settings.ia.bulkScope", { hosts: hostsOf(planned) || "—", n: planned.length })}</p>
         <div className="flex flex-wrap items-center gap-2">
           <SettingsGroup agents="none" source="host" allHosts><Button disabled={busy || !planned.length} onClick={() => ask("replace")}>{t("avatarStyle.bulk.replaceAll")}</Button></SettingsGroup>
           <SettingsGroup agents="none" source="host" allHosts><Button disabled={busy || !rerollable.length} onClick={() => ask("reassign")}>{t("avatarStyle.bulk.reassign")}</Button></SettingsGroup>
@@ -126,5 +130,5 @@ export function PortraitPackSection() {
         {skipped > 0 && <Notice tone="info">{t("appearance.portraits.skipped", { n: skipped })}</Notice>}
       </div>
     </Section>
-  );
+  </>);
 }

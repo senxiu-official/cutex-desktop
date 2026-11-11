@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { firstRunView } from "../src/renderer/src/lib/firstRun";
+import { firstRunCardShown, firstRunView } from "../src/renderer/src/lib/firstRun";
 import { localDaemonSetup } from "../src/shared/hosts";
 
 describe("first run on this machine", () => {
@@ -23,5 +23,17 @@ describe("first run on this machine", () => {
     expect(firstRunView({ kind: "connected", baseUrl: "x", hostId: "h" }, false, 2)).toBeNull();
     expect(firstRunView({ kind: "connected", baseUrl: "x", hostId: "h" }, false, null)).toBeNull();
     expect(firstRunView({ kind: "connecting", baseUrl: "x" }, false, 0)).toBeNull();
+  });
+});
+
+describe("the top banner leaves the first-run card alone (owner 2026-11-10)", () => {
+  it("not installed / not running with no conversation on screen: the card says it, no banner line", () => {
+    expect(firstRunCardShown({ kind: "unreachable", baseUrl: "x", setup: "notInstalled" } as never, false)).toBe(true);
+    expect(firstRunCardShown({ kind: "unreachable", baseUrl: "x", setup: "notRunning" } as never, false)).toBe(true);
+  });
+  it("a conversation on screen, or another failure: the banner line stays", () => {
+    expect(firstRunCardShown({ kind: "unreachable", baseUrl: "x", setup: "notRunning" } as never, true)).toBe(false);
+    expect(firstRunCardShown({ kind: "unreachable", baseUrl: "x" } as never, false)).toBe(false);
+    expect(firstRunCardShown({ kind: "connecting" } as never, false)).toBe(false);
   });
 });

@@ -22,7 +22,7 @@ import { useDevicePixelRatio } from "../lib/pixelRatio";
 import { Image as ImageIcon } from "lucide-react";
 import { defaultComponents, defaultRehypePlugins, Streamdown } from "streamdown";
 import type { FsFile } from "../../../shared/ipc";
-import { baseName, escapeFileHref, HOST_FILE_READ_FEATURE, resolveFileHref, rootFor, scopeFor, scopeKey, unescapeFileHref } from "../lib/workspace";
+import { baseName, escapeFileHref, HOST_FILE_READ_FEATURE, resolveFileHref, rootFor, scopeFor, scopeKey, unescapeFileHref, writtenWindowsPath } from "../lib/workspace";
 import { useHostHome } from "../lib/hostHome";
 import { LOCAL_HOST_ID } from "../../../shared/hosts";
 import { hostApi, useApp } from "../store";
@@ -60,23 +60,33 @@ preloadKatex();
 // exactly our workspace file links. Link safety is enforced in `FileAwareLink` instead.
 // `D:/x`, `file:///x` and `README.md:12` would lose their href (or an image its src) in `sanitize`
 // (unknown "protocol"): carry them through it escaped (see `escapeFileHref`), right before it.
+// A Windows path keeps the backslashes it was written with (lib/workspace writtenWindowsPath): read back from the
+// node's markdown source, which CommonMark's escapes would otherwise change (`me\.cutex` → `me.cutex`).
 interface HastNode {
   type: string;
   tagName?: string;
   properties?: Record<string, unknown>;
   children?: HastNode[];
+  position?: { start: { offset?: number }; end: { offset?: number } };
 }
 function escapeFileHrefs() {
+  let source = "";
   const walk = (node: HastNode) => {
     const attr = node.type === "element" ? (node.tagName === "a" ? "href" : node.tagName === "img" ? "src" : null) : null;
-    const value = attr ? node.properties?.[attr] : undefined;
-    if (attr && typeof value === "string") {
+    const parsed = attr ? node.properties?.[attr] : undefined;
+    if (attr && typeof parsed === "string") {
+      const { start, end } = node.position ?? {};
+      const written = start?.offset !== undefined && end?.offset !== undefined ? writtenWindowsPath(source.slice(start.offset, end.offset), parsed) : null;
+      const value = written ?? parsed;
       const escaped = escapeCutexHref(value) ?? escapeFileHref(value);
-      if (escaped) node.properties![attr] = escaped;
+      if (escaped || written) node.properties![attr] = escaped ?? value;
     }
     node.children?.forEach(walk);
   };
-  return (tree: HastNode) => walk(tree);
+  return (tree: HastNode, file: { value?: unknown }) => {
+    source = typeof file?.value === "string" ? file.value : "";
+    walk(tree);
+  };
 }
 const rehypePlugins = [
   ...Object.entries(defaultRehypePlugins)
@@ -201,7 +211,7 @@ function useFileLink(href: string | undefined): FileLink | null {
  * cutex. Renders `fallback` when the image cannot be shown (missing, too big, no capability).
  */
 function Thumbnail({ link, alt, fallback }: { link: FileLink; alt: string; fallback: ReactNode }) {
-  const { ref, state } = useThumbnail(link.key, link.read);
+  const { ref, state } = useThumbnail(link.key, link.read, { revalidate: true });
   if (state.status === "failed") return <>{fallback}</>;
   return (
     <span ref={ref} className="my-1.5 block">

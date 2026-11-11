@@ -1,4 +1,5 @@
 import { isBrowserCursorColor } from "../../shared/browserCursor";
+import { isBrowserCarrierFrameRate, type BrowserCarrierFrameRate } from "../../shared/browserCarrier";
 import { BROWSER_OWNER_INPUT_KINDS, isBrowserControlSettings, isBrowserToolSurface, type BrowserOwnerInputKind, type BrowserRequest } from "../../shared/browser";
 import { browserLoginOrigin } from "./loginWarning";
 import { isBrowserClaimMode } from "../../shared/browserClaim";
@@ -15,6 +16,10 @@ export function parseBrowserRequest(raw: unknown): BrowserRequest {
   if (value.op === "cursorColor") {
     if (Object.keys(value).some(k => !["op", "color"].includes(k)) || (value.color !== undefined && value.color !== null && !isBrowserCursorColor(value.color))) throw Error("invalid_browser_request");
     return value.color === undefined ? { op: "cursorColor" } : { op: "cursorColor", color: value.color as string | null };
+  }
+  if (value.op === "carrierFrameRate") {
+    if (Object.keys(value).some(k => !["op", "frameRate"].includes(k)) || (value.frameRate !== undefined && !isBrowserCarrierFrameRate(value.frameRate))) throw Error("invalid_browser_request");
+    return value.frameRate === undefined ? { op: "carrierFrameRate" } : { op: "carrierFrameRate", frameRate: value.frameRate as BrowserCarrierFrameRate };
   }
   if (value.op === "externalPages") {
     if (Object.keys(value).some(k => !["op", "enabled"].includes(k)) || (value.enabled !== undefined && typeof value.enabled !== "boolean")) throw Error("invalid_browser_request");
@@ -103,7 +108,7 @@ export function parseBrowserRequest(raw: unknown): BrowserRequest {
   }
   const allowed = value.op === "list" || value.op === "agents" ? ["op"] : value.op === "open" ? ["op", "tabKey", "url", "receipt", "identity", "desktopLoopback"] : value.op === "navigate" ? ["op", "tabKey", "url", "desktopLoopback"] :
     value.op === "close" ? ["op", "tabKey", "unmount"] :
-      value.op === "ownerInput" ? ["op", "tabKey", "kind"] : value.op === "setZoom" ? ["op", "tabKey", "action"] : ["op", "tabKey"];
+      value.op === "ownerInput" ? ["op", "tabKey", "kind"] : value.op === "setZoom" ? ["op", "tabKey", "action"] : value.op === "setMuted" ? ["op", "tabKey", "muted"] : ["op", "tabKey"];
   if (!Object.keys(value).every(k => allowed.includes(k))) throw new Error("invalid_browser_request");
   if (value.op === "list") return { op: "list" };
   if (value.op === "agents") return { op: "agents" };
@@ -119,6 +124,11 @@ export function parseBrowserRequest(raw: unknown): BrowserRequest {
     if (value.action !== "in" && value.action !== "out" && value.action !== "reset") throw new Error("invalid_browser_request");
     return { op: "setZoom", tabKey, action: value.action };
   }
+  if (value.op === "setMuted") {
+    if (typeof value.muted !== "boolean") throw new Error("invalid_browser_request");
+    return { op: "setMuted", tabKey, muted: value.muted };
+  }
+  if (value.op === "pauseMedia") return { op: "pauseMedia", tabKey };
   if (value.op === "open" || value.op === "navigate") {
     if (typeof value.url !== "string" || value.url.length > 8000 || !value.url || /[\x00-\x1f\x7f]/.test(value.url)) throw new Error("invalid_browser_url");
     let identity: Extract<BrowserRequest, {op:"open"}>["identity"];
@@ -157,9 +167,10 @@ export function createBrowserChannel<E, D extends { readonly generation: number 
    * widens what a later browser tab may reach; main enforces it on every request). */
   externalPages?(enabled?: boolean): unknown;
   cursorColor?(color?: string | null): unknown;
+  carrierFrameRate?(frameRate?: BrowserCarrierFrameRate): unknown;
   /** Remembered site permissions (host-independent, owner UI only). */
   sitePermissions?(forget?: Extract<BrowserRequest, { op: "sitePermissions" }>["forget"]): unknown;
-  execute(request: Exclude<BrowserRequest, { op: "setEnabled" | "resetOrigins" | "externalPages" | "sitePermissions" | "cursorColor" }>, hostId: string, fence?: HostFence<D>): Promise<unknown>;
+  execute(request: Exclude<BrowserRequest, { op: "setEnabled" | "resetOrigins" | "externalPages" | "sitePermissions" | "cursorColor" | "carrierFrameRate" }>, hostId: string, fence?: HostFence<D>): Promise<unknown>;
 }) {
   return async (event: E, raw: unknown, binding: HostBinding | null | undefined): Promise<unknown> => {
     if (!options.isAppSender(event)) throw new Error("untrusted_sender");
@@ -168,6 +179,10 @@ export function createBrowserChannel<E, D extends { readonly generation: number 
     if (request.op === "cursorColor") {
       if (!options.cursorColor) throw Error("unsupported_operation");
       return options.cursorColor(request.color);
+    }
+    if (request.op === "carrierFrameRate") {
+      if (!options.carrierFrameRate) throw Error("unsupported_operation");
+      return options.carrierFrameRate(request.frameRate);
     }
     if (request.op === "externalPages") {
       if (!options.externalPages) throw Error("unsupported_operation");

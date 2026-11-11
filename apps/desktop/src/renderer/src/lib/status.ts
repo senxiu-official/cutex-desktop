@@ -15,6 +15,6 @@ export function serviceStatus(s: ServiceView): StatusKind {
   if (s.health === "stoppedIdle") return "stopped";
   if (s.health === "reachable") return "running";
   if (s.health === "starting") return "starting";
-  if (s.health === "unreachable" || (s.process?.restarts ?? 0) > 0) return "error";
+  if (s.health === "unreachable" || s.health === "crashLooped" || (s.process?.restarts ?? 0) > 0) return "error";
   return "stopped";
 }

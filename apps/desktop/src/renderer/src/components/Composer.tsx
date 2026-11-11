@@ -1371,7 +1371,7 @@ export function Composer({
           sections={[
             // Slot 0: 待读留言 (agent messages v2). With admission-order the turn-starting ones are the turn
             // frame's ride-along items (admission.nextStep); passive notes (never there) stay here.
-            !ledgerMode && sectionMessages.length > 0 ? { node: <PendingMessagesSection sessionId={sessionId} messages={sectionMessages} busy={busy} runtime={agent.runtime} readSince={lastFinishedTurnStart(timeline?.turns)} />, chip: { kind: "messages", n: sectionMessages.length } } : null,
+            !ledgerMode && sectionMessages.length > 0 ? { node: <PendingMessagesSection sessionId={sessionId} messages={sectionMessages} busy={busy} runtime={agent.runtime} features={agent.map} readSince={lastFinishedTurnStart(timeline?.turns)} />, chip: { kind: "messages", n: sectionMessages.length } } : null,
             // Slot 1: 待处理委托 (delegations; with admission-order only those the merged list does not have).
             !ledgerMode && otherDelegations.length > 0 ? { node: <DelegationQueueSection rows={otherDelegations} sessionId={sessionId} pauseButton={!orderedAsks} railed={!!groups} />, chip: { kind: "delegations", n: otherDelegations.length } } : null,
             // 智能体已暂停 · 继续 (agent-pause): before everything else that waits, since it holds all of it.

@@ -59,6 +59,38 @@ it("shows an arbitrary stored RGB as selected custom, validates a full hex value
   expect(sameProjectColor("red", "#E5484D")).toBe(false);
 });
 
+it("previews the badge in the colour under the pointer, then the chosen one", () => {
+  const change = vi.fn();
+  act(() => root.render(<ProjectColorPicker value="blue" onChange={change} preview={{ badge: "CD" }} />));
+  const preview = () => host.querySelector("[data-project-color-preview]")!.getAttribute("data-project-color-preview");
+  expect(preview()).toBe("#4c8dff");
+  expect(host.querySelector("[data-project-color-mark]")!.textContent).toBe("CD");
+  const red = host.querySelector<HTMLButtonElement>('button[title="projects.iconColor.red"]')!;
+  act(() => red.dispatchEvent(new PointerEvent("pointerover", { bubbles: true })));
+  expect(preview()).toBe("#fa5252");
+  act(() => red.dispatchEvent(new PointerEvent("pointerout", { bubbles: true })));
+  expect(preview()).toBe("#4c8dff");
+  expect(change).not.toHaveBeenCalled();
+});
+
+it("the colour well and the hex field follow each other; the preview shows the colour being picked", () => {
+  const change = vi.fn();
+  act(() => root.render(<ProjectColorPicker value="cyan" onChange={change} preview={{ badge: "CD" }} />));
+  act(() => host.querySelector<HTMLButtonElement>("button[aria-expanded]")!.click());
+  const well = host.querySelector<HTMLInputElement>("[data-project-color-well]")!;
+  const text = host.querySelector<HTMLInputElement>('input[type="text"]')!;
+  expect(text.value).toBe("#22B8CF");
+  act(() => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(well, "#00ff88");
+    well.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  expect(text.value).toBe("#00FF88");
+  expect(host.querySelector("[data-project-color-preview]")!.getAttribute("data-project-color-preview")).toBe("#00FF88");
+  expect(change).not.toHaveBeenCalled();
+  act(() => [...host.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent === "settings.save")!.click());
+  expect(change.mock.calls).toEqual([["#00FF88"]]);
+});
+
 it("round-trips RGB through project creation and the mock host, while legacy rejection leaves the saved colour intact", async () => {
   let saved = "blue";
   const projectMutation = vi.fn(async (_id, _fresh, op) => {

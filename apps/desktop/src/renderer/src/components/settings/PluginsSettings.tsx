@@ -21,7 +21,7 @@ import {
   pluginRows,
   type PluginRow,
 } from "../../lib/codexPlugins";
-import { ArmedRemove, Button, EmptyState, ErrorNote, IconButton, Loading, RefreshButton, Section, Segmented, SettingRow, TextInput, Toggle, SettingsGroup } from "./Form";
+import { ArmedRemove, Banner, Button, EmptyState, RowGroup, ErrorNote, IconButton, Loading, RefreshButton, Section, Segmented, SettingRow, TextInput, Toggle, SettingsGroup } from "./Form";
 import { ARMED_FORM_BUTTON, useArmed } from "../../lib/armedConfirm";
 import { FollowSharedSection } from "./FollowShared";
 import { useTargetApi, useTargetFeatures } from "../../lib/targetHost";
@@ -377,14 +377,9 @@ export function PluginsPage() {
 
   const loadErrors = list?.marketplaceLoadErrors ?? [];
   const refresh = <RefreshButton disabled={busy} onClick={reload} />;
-  return (
-    <>
-      <FollowSharedSection />
-      <p className="mb-4 flex items-start gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">
-        <AlertTriangle size={14} className="mt-px shrink-0" />
-        {t("codex-config.plugins.warning")}
-      </p>
-      <div role="toolbar" className="mb-3 flex flex-wrap items-center gap-2">
+  // The tab bar is the header of the card it switches (one card per tab).
+  const tabs = (
+      <div role="toolbar" className="contents">
         <Segmented
           value={tab}
           options={[
@@ -397,48 +392,46 @@ export function PluginsPage() {
             setOpen(null);
           }}
         />
-        {tab === "browse" && <TextInput value={query} onChange={setQuery} placeholder={t("codex-config.plugins.search")} width="w-56" />}
       </div>
+  );
+  return (
+    <>
+      <FollowSharedSection />
+      <Banner className="mb-6" icon={<AlertTriangle size={15} />}>{t("codex-config.plugins.warning")}</Banner>
       {notice && (
-        <p className="mb-3 rounded-lg bg-surface-2 px-3 py-2 text-xs text-foreground">
-          {notice}{" "}
-          <span className="inline-flex align-middle">
-            <IconButton label={t("codex-config.plugins.dismiss")} onClick={() => setNotice(null)}>
-              <X size={13} />
-            </IconButton>
-          </span>
-        </p>
+        <Banner tone="info" className="mb-3" actions={<IconButton label={t("codex-config.plugins.dismiss")} onClick={() => setNotice(null)}><X size={13} /></IconButton>}>{notice}</Banner>
       )}
       {error && <ErrorNote>{error}</ErrorNote>}
       {!list && !error && (
-        <Section>
+        <Section tabs={tabs}>
           <Loading rows={3} />
         </Section>
       )}
 
       {list && tab === "installed" && (
-        <Section title={t("codex-config.plugins.tab.installed", { n: installed.length })} actions={refresh}>
+        <Section tabs={tabs} actions={refresh}>
           {installed.length === 0 && <EmptyState>{t("codex-config.plugins.none")}</EmptyState>}
           <PluginList rows={installed} open={open} setOpen={setOpen} onToggle={toggle} onChanged={reload} onNotice={setNotice} showMarketplace />
         </Section>
       )}
 
       {list && tab === "browse" && (
-        <>
-          {rows.length === 0 && <p className="mb-3 text-xs text-subtle">{t("codex-config.plugins.empty")}</p>}
-          {rows.length > 0 && browse.length === 0 && <p className="mb-3 text-xs text-subtle">{t("codex-config.plugins.noMatch")}</p>}
-          {browse.map((g, i) => (
-            <Section key={g.marketplace} title={g.display} hint={g.display !== g.marketplace ? g.marketplace : undefined} actions={i === 0 ? refresh : undefined}>
+        // One card; each marketplace is a row group in it.
+        <Section tabs={tabs} actions={<><div role="search" className="contents"><TextInput value={query} onChange={setQuery} placeholder={t("codex-config.plugins.search")} width="w-56" /></div>{refresh}</>}>
+          {rows.length === 0 && <EmptyState>{t("codex-config.plugins.empty")}</EmptyState>}
+          {rows.length > 0 && browse.length === 0 && <EmptyState>{t("codex-config.plugins.noMatch")}</EmptyState>}
+          {browse.map((g) => (
+            <RowGroup key={g.marketplace} title={g.display} hint={g.display !== g.marketplace ? g.marketplace : undefined}>
               <PluginList rows={g.rows} open={open} setOpen={setOpen} onChanged={reload} onNotice={setNotice} />
-            </Section>
+            </RowGroup>
           ))}
-        </>
+        </Section>
       )}
 
       {list && tab === "marketplaces" && (
         <>
           <Section
-            title={t("codex-config.plugins.tab.marketplaces", { n: markets.length })}
+            tabs={tabs}
             actions={
               <>
                 <SettingsGroup agents="next" source="codex"><Button disabled={busy || !markets.some((m) => m.canUpgrade)} onClick={() => upgrade(null)}>

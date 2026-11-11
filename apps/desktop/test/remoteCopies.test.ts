@@ -287,4 +287,40 @@ describe('owned remote copies', () => {
     expect((await download(m, pinned)).row.status).toBe('complete')
     expect(seen).toEqual([pinned, pinned])
   })
+  // Owner 2026-11-10: what the owner saves to this computer (an artifact) is never deleted automatically.
+  it('keeps an artifact save forever: kept, no expiry, untouched by clean-up passes and restarts; un-keeping is refused', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    let now = Date.parse('2026-10-28T00:00:00Z')
+    const r = await root()
+    const t = transport(new Uint8Array([4, 5]))
+    const saved: CopySource = { ...source, path: 'af-keep', artifact: { id: 'af-keep', version: 2 } }
+    let m = manager({ root: r, now: () => now, transport: t.factory })
+    const art = await download(m, saved), remote = await download(m)
+    expect(art.row).toMatchObject({ status: 'complete', kept: true, expiresAt: null })
+    expect(remote.row).toMatchObject({ status: 'complete', kept: false, expiresAt: '2026-11-04T00:00:00.000Z' })
+    await expect(m.keep(art.id, false)).rejects.toThrow('always kept')
+    now += 400 * 86400000
+    await vi.advanceTimersByTimeAsync(3600000)
+    await m.cleanup()
+    let rows = (await m.list()).copies
+    expect(rows.find(c => c.id === art.id)).toMatchObject({ status: 'complete', kept: true, expiresAt: null })
+    expect(rows.find(c => c.id === remote.id)!.status).toBe('expired')
+    expect(await fs.readFile(await m.file(art.id))).toEqual(Buffer.from([4, 5]))
+    // A save written before this rule (kept false, an expiry in the past) is kept at the next start.
+    await m.dispose()
+    const index = path.join(r, 'index.json'), state = JSON.parse(await fs.readFile(index, 'utf8'))
+    Object.assign(state.copies.find((c: { id: string }) => c.id === art.id), { kept: false, expiresAt: '2000-01-01T00:00:00.000Z' })
+    await fs.writeFile(index, JSON.stringify(state))
+    m = manager({ root: r, now: () => now, transport: t.factory })
+    rows = (await m.list()).copies
+    expect(rows.find(c => c.id === art.id)).toMatchObject({ status: 'complete', kept: true, expiresAt: null })
+  })
+  it('a re-downloaded artifact save stays kept with no expiry', async () => {
+    const t = transport(new Uint8Array([6]))
+    const saved: CopySource = { ...source, path: 'af-again', artifact: { id: 'af-again', version: 1 } }
+    const m = manager({ root: await root(), transport: t.factory })
+    const first = await download(m, saved)
+    const meta = await m.inspect(saved), id = await m.start(saved, { revision: meta.revision, size: meta.size }, first.id)
+    expect(await settled(m, id)).toMatchObject({ status: 'complete', kept: true, expiresAt: null })
+  })
 })

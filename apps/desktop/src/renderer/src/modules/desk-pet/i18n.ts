@@ -18,6 +18,7 @@ export const zhCN = {
   "desk-pet.idleBlink": "空闲时眨眼",
   "desk-pet.size": "大小",
   "desk-pet.character": "角色",
+  "desk-pet.notOnTop": "这个桌面不让应用把窗口一直放在最上面：点别的窗口后，桌宠会被挡住。KDE Plasma 可以；GNOME 等暂时没有办法。",
   "desk-pet.limitedPlacement": "这个 Linux 会话用 Wayland：窗口位置由系统决定，所以重启后不记位置，透明部分也可能挡住鼠标。",
   "desk-pet.noShape": "系统拒绝了窗口形状：透明部分也会挡住鼠标。",
   "desk-pet.showCount": "在桌宠下面显示今天的 token 数",

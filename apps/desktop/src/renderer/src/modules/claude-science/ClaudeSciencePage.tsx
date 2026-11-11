@@ -111,7 +111,7 @@ export function ClaudeSciencePage() {
           {accounts.map((a) => {
             const s = a.service;
             const running = s.health === "reachable" || s.health === "starting";
-            const detail = [t("claude-science.port", { port: s.port }), a.home ?? t("claude-science.homeUnknown"), a.shareSsh ? t("claude-science.sshShared") : null].filter(Boolean).join(" · ");
+            const detail = [t("claude-science.port", { port: s.port ?? "—" }), a.home ?? t("claude-science.homeUnknown"), a.shareSsh ? t("claude-science.sshShared") : null].filter(Boolean).join(" · ");
             return (
               <ListRow
                 key={s.slug}

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, createElement as h } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, expect, it, vi } from "vitest";
 import { InteractionDock } from "../src/renderer/src/components/InteractionDock";
 import { answerFailureOf, questionTrim, questionOptionsV1, toInteraction, type PendingRequest } from "../src/renderer/src/lib/interactions";
 import { questionAnswer, questionAnswers, questionDraftKey, questionSchemaIdentity, readQuestionDraft, writeQuestionDraft } from "../src/renderer/src/lib/questionDrafts";
@@ -9,6 +9,12 @@ vi.mock("../src/renderer/src/i18n", () => ({ translate: (key: string) => key, us
 vi.mock("../src/renderer/src/components/ApprovalSource", () => ({ ApprovalSource: () => null }));
 const api = vi.hoisted(() => ({ respond: vi.fn(), bootstrap: vi.fn() }));
 vi.mock("../src/renderer/src/bridge", () => ({ api, onEvent: () => () => {} }));
+// Loading the real store transforms the full module graph. Keep that fixture
+// setup outside the answer-restoration test's normal five-second deadline.
+beforeAll(async () => {
+  await import("../src/renderer/src/store");
+  await import("../src/renderer/src/lib/timeline");
+}, 60_000);
 const scope = { hostId: "eva", sessionId: "agent", runtimeGeneration: 7 };
 const rich = { version: 1 as const, question: "Clean question", multiSelect: true, options: [
   { label: "A", description: "Alpha", preview: '<img src="https://example.com" onerror="alert(1)"><script>alert(2)</script>' },

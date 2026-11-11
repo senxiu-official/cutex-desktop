@@ -1,8 +1,9 @@
+import { ImageCacheSettings } from "./ImageCacheSettings";
 import { CleanupSection } from "./CleanupSection";
 import { useState } from "react";
 import { ChevronDown, ChevronRight, RefreshCw } from "lucide-react";
 import type { StorageItem, StorageStore } from "../../../../shared/storage";
-import { Button, ErrorNote, Loading, Section } from "../../components/settings/Form";
+import { Button, EmptyState, ErrorNote, Loading, Section } from "../../components/settings/Form";
 import { useI18n, type MessageKey } from "../../i18n";
 import { useClock } from "../../lib/time";
 import { useStorage } from "./hooks";
@@ -41,21 +42,23 @@ export function StoragePage() {
   const now = useClock();
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
   const tr = (key: string, vars?: Record<string, string | number>) => t(key as MessageKey, vars);
-  if (!storage.supported || storage.unsupported) return <Section><p role="status" className="text-sm text-muted">{t("storage.unsupported")}</p></Section>;
-  if (!storage.connected && !storage.view) return <Section><p role="status" className="text-sm text-muted">{t("storage.offline")}</p></Section>;
+  if (!storage.supported || storage.unsupported) return <><ImageCacheSettings /><Section><div role="status"><EmptyState>{t("storage.unsupported")}</EmptyState></div></Section></>;
+  if (!storage.connected && !storage.view) return <><ImageCacheSettings /><Section><div role="status"><EmptyState>{t("storage.offline")}</EmptyState></div></Section></>;
   const view = storage.view;
   const running = view?.walk.state === "running" || storage.refreshing;
-  return <div className="space-y-4">
+  return <>
+    <ImageCacheSettings />
     <Section title={t("storage.inventory")} actions={<Button disabled={!storage.connected || running} onClick={() => { void storage.controller.refresh(); }}><span className="inline-flex items-center gap-1.5"><RefreshCw size={13} className={running ? "animate-spin" : ""} />{t(running ? "storage.running" : "storage.refresh")}</span></Button>}>
       {storage.error && <ErrorNote>{storage.error}<button type="button" className="ml-2 underline" onClick={() => { void storage.controller.load(true); }}>{t("storage.retry")}</button></ErrorNote>}
       {!view && storage.loading && <Loading rows={3} />}
-      {view && <div className="space-y-2 py-1"><p className="text-sm font-medium tabular-nums">{t("storage.total", { bytes: formatBytes(view.totals.bytes, locale), files: view.totals.files })}</p>{view.volume && <p className="text-xs text-muted">{t("storage.volume", { free: formatBytes(view.volume.freeBytes, locale), total: formatBytes(view.volume.totalBytes, locale) })}</p>}<p className="text-xs text-subtle">{measuredAgo(view.walk.finishedAt, now, tr)}</p>{view.walk.stale && <p className="text-xs text-warn-text">{t("storage.stale")}</p>}{running && <p role="status" className="text-xs text-accent">{t("storage.running")}{view.walk.progress?.entries != null && ` · ${t("storage.progress", { n: view.walk.progress.entries })}`}</p>}{view.walk.error && <ErrorNote>{view.walk.error}</ErrorNote>}</div>}
+      {view && <div className="space-y-1 py-3"><p className="text-sm font-medium tabular-nums">{t("storage.total", { bytes: formatBytes(view.totals.bytes, locale), files: view.totals.files })}</p>{view.volume && <p className="text-xs text-muted">{t("storage.volume", { free: formatBytes(view.volume.freeBytes, locale), total: formatBytes(view.volume.totalBytes, locale) })}</p>}<p className="text-xs text-subtle">{measuredAgo(view.walk.finishedAt, now, tr)}</p>{view.walk.stale && <p className="text-xs text-warn-text">{t("storage.stale")}</p>}{running && <p role="status" className="text-xs text-accent">{t("storage.running")}{view.walk.progress?.entries != null && ` · ${t("storage.progress", { n: view.walk.progress.entries })}`}</p>}{view.walk.error && <ErrorNote>{view.walk.error}</ErrorNote>}</div>}
     </Section>
     <CleanupSection key={storage.hostId} />
-    {view?.groups.map((group) => { const closed = collapsed.has(group.id); const Chevron = closed ? ChevronRight : ChevronDown; return <Section key={`${storage.hostId}:${group.id}`}>
-      <button type="button" aria-expanded={!closed} className="flex w-full items-center gap-2 rounded py-1 text-left focus-visible:outline-2 focus-visible:outline-accent" onClick={() => setCollapsed((before) => { const next = new Set(before); if (next.has(group.id)) next.delete(group.id); else next.add(group.id); return next; })}><Chevron size={14} className="text-subtle" /><span className="min-w-0 flex-1 text-sm font-medium">{knownLabel("group", group.id, group.label, t)}</span><span className="text-xs tabular-nums text-muted">{formatBytes(group.bytes, locale)}</span></button>
-      <div aria-hidden className="my-2 h-1 overflow-hidden rounded-full bg-surface-2"><div className="h-full rounded-full bg-accent/60" style={{ width: `${view.totals.bytes > 0 ? Math.min(100, 100 * group.bytes / view.totals.bytes) : 0}%` }} /></div>
-      {!closed && view.stores.filter((store) => store.group === group.id).map((store) => <StoreRow key={store.id} store={store} storage={storage} now={now} />)}
+    {/* Each group is a titled card: its name folds it (the card hides), its size and share sit in the header. */}
+    {view?.groups.map((group) => { const closed = collapsed.has(group.id); const Chevron = closed ? ChevronRight : ChevronDown; const share = view.totals.bytes > 0 ? Math.min(100, 100 * group.bytes / view.totals.bytes) : 0; return <Section key={`${storage.hostId}:${group.id}`} collapsed={closed}
+      title={<button type="button" aria-expanded={!closed} className="-ml-1 inline-flex items-center gap-1.5 rounded px-1 text-left focus-visible:outline-2 focus-visible:outline-accent" onClick={() => setCollapsed((before) => { const next = new Set(before); if (next.has(group.id)) next.delete(group.id); else next.add(group.id); return next; })}><Chevron size={14} className="text-subtle" />{knownLabel("group", group.id, group.label, t)}</button>}
+      actions={<span className="inline-flex items-center gap-2 text-xs tabular-nums text-muted"><span aria-hidden className="h-1 w-24 overflow-hidden rounded-full bg-surface-2"><span className="block h-full rounded-full bg-accent/60" style={{ width: `${share}%` }} /></span>{formatBytes(group.bytes, locale)}</span>}>
+      {view.stores.filter((store) => store.group === group.id).map((store) => <StoreRow key={store.id} store={store} storage={storage} now={now} />)}
     </Section>; })}
-  </div>;
+  </>;
 }

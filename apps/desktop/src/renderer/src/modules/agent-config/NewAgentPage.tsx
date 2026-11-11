@@ -1045,7 +1045,7 @@ function NewAgentForm({ params, target, presetHost, restored }: { params: PagePa
           </>}
           textarea={{
             ref: textareaRef, autoFocus: true, value: task, readOnly: locked,
-            "aria-label": t("agent-config.newAgent.task"), placeholder: missing ?? t("agent-config.newAgent.taskPlaceholder"),
+            "aria-label": t("agent-config.newAgent.task"), placeholder: t("agent-config.newAgent.taskPlaceholder"),
             onFocus: () => setPanel(null), onChange: (e) => setTask(e.target.value),
             onPaste: (e) => { const files = [...e.clipboardData.files]; if (files.some((file) => file.type.startsWith("image/"))) { e.preventDefault(); void addImages(files); } },
             onKeyDown: (e) => {

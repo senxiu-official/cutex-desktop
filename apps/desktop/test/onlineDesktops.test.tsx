@@ -15,6 +15,7 @@ vi.mock("../src/renderer/src/bridge", () => ({ apiFor: () => ({ users: async () 
 vi.mock("../src/renderer/src/components/settings/Form", () => ({
   Section: ({ title, children }: { title: ReactNode; children: ReactNode }) => h("section", null, h("h3", null, title), children),
   SettingsGroup: ({ children }: { children: ReactNode }) => h("div", null, children),
+  Notice: ({ children }: { children: ReactNode }) => h("p", null, children),
   ListRow: ({ title, detail, actions }: { title: ReactNode; detail: ReactNode; actions: ReactNode }) => h("div", null, title, detail, actions),
   Button: ({ children, onClick, disabled }: { children: ReactNode; onClick(): void; disabled: boolean }) => h("button", { disabled, onClick }, children),
   ErrorNote: ({ children }: { children: ReactNode }) => h("p", { role: "alert" }, children),

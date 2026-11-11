@@ -297,6 +297,12 @@ function ExternalGrantsSection({ security, patch, saving, host }: { security: Ag
 
 /** 规则审计's full list is a `settings.section` of the approvals module, placed on its sub-page. */
 const AUDIT_SECTIONS = ["approvals.rules.auditAll"];
+const RULES_SECTIONS = ["approvals.rules.all"];
+/** 协作 → 全部规则. */
+export function CollabRulesSubPage() {
+  useScrollToSettingsAnchor();
+  return <SettingsSections page="collab" only={RULES_SECTIONS} />;
+}
 
 export function CollabAuditSubPage() {
   useScrollToSettingsAnchor();
@@ -309,7 +315,7 @@ export function CollabPage() {
     <>
       <BoundarySections />
       <MessageTemplatesSection />
-      <SettingsSections page="collab" except={AUDIT_SECTIONS} />
+      <SettingsSections page="collab" except={[...AUDIT_SECTIONS, ...RULES_SECTIONS]} />
     </>
   );
 }

@@ -15,6 +15,7 @@ export function createBrowserCache() {
   return {
     subscribe(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener); }; },
     get(hostId: string, tabKey: string) { return views.get(browserCacheKey(hostId, tabKey)); },
+    all(): Iterable<Readonly<BrowserTabView>> { return views.values(); },
     update(view: BrowserTabView): boolean {
       const key = browserCacheKey(view.hostId, view.tabKey);
       const previous = views.get(key);
@@ -37,6 +38,8 @@ export function createBrowserCache() {
         control: view.control ? Object.freeze({ grantee: view.control.grantee, state: view.control.state, operating: view.control.operating }) : undefined,
         carrier: view.carrier === "background" ? "background" : undefined,
         handover: view.handover === true ? true : undefined,
+        media: view.media && (view.media.playing || view.media.audible || view.media.muted)
+          ? Object.freeze({ playing: view.media.playing === true, audible: view.media.audible === true, muted: view.media.muted === true }) : undefined,
         loginOrigin: view.pool === "agent" ? browserLoginOrigin(view.url, view.loginOrigin) : null,
       }));
       notify();

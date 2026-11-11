@@ -201,6 +201,22 @@ class Player implements ScenePlayer {
     this.chain(["opening"], () => this.play("reading"));
   }
 
+  /**
+   * The next book while work goes on: `switchOut` (the book in hand goes) → `switchIn` (the next one comes, rising off
+   * the pile) → `reading`, never looking up. Art without them closes and opens. If there is nothing to read once the old
+   * book is gone (the pool ran out, or the next book has not landed yet), she closes and rests instead.
+   */
+  private switchBook(): void {
+    if (!this.scene.clips.switchOut || !this.scene.clips.switchIn) return this.chain(["closing"], () => this.open());
+    this.play("switchOut", () => {
+      const book = this.input.books.active;
+      if (!book || !this.wantsBook(this.clock()) || this.notLanded(book.id)) return this.chain(["closing"], () => ((this.shown = null), this.rest()));
+      if (book.id !== this.shown?.id) this.transfer = { book, from: this.input.books.pile.length, at: this.clock() };
+      this.shown = book;
+      this.play("switchIn", () => this.play("reading"));
+    });
+  }
+
   private rest(): void {
     this.idleSince = this.clock();
     this.play(this.input.attention && this.scene.clips.attention ? "attention" : "idle");
@@ -214,7 +230,7 @@ class Player implements ScenePlayer {
       if (!this.wantsBook(now)) return this.chain(["closing"], () => ((this.shown = null), this.rest()));
       // Another book: finish the page, put this one away, take the next.
       // A book still landing is taken at the end of a later round: reading goes on meanwhile.
-      if (clipEnded && this.input.books.active!.id !== this.shown?.id && !this.notLanded(this.input.books.active!.id)) return this.chain(["closing"], () => this.open());
+      if (clipEnded && this.input.books.active!.id !== this.shown?.id && !this.notLanded(this.input.books.active!.id)) return this.switchBook();
       return;
     }
     if (mode === "idle" || mode === "attention") {

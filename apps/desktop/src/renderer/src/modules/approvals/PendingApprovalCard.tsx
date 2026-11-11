@@ -164,10 +164,11 @@ export function PendingCard({ record, origin, variant = "page" }: { record: Appr
   };
   return (
     <section data-approval-card={variant} className={variant === "inline" ? `pr-5 ${origin.stale ? "opacity-60" : ""}` : `mb-3 rounded-xl border border-border bg-surface px-4 py-3 ${origin.stale ? "opacity-60" : ""}`}>
-      <div className="flex items-start gap-2">
+      {/* Wraps in a narrow Shelf: the title keeps 10rem, the chips go to the next line (no one-letter column). */}
+      <div className="flex flex-wrap items-start gap-2">
         {origin.mark && origin.look && <HostMark host={origin.look} className="mt-0.5 shrink-0" />}
         <KindChip kind={record.kind} />
-        <h3 className="min-w-0 flex-1 text-sm font-medium break-words">{record.summary}</h3>
+        <h3 className="min-w-0 flex-1 basis-40 text-sm font-medium break-words">{record.summary}</h3>
         <ApprovalSource source="cutex" />
         <When iso={record.createdAt} />
       </div>

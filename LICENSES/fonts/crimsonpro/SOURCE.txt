@@ -1,0 +1,3 @@
+https://github.com/google/fonts
+Revision: 5bb28733cec313b63fbd415b574b5ae35c8aa8b8
+License: https://raw.githubusercontent.com/google/fonts/5bb28733cec313b63fbd415b574b5ae35c8aa8b8/ofl/crimsonpro/OFL.txt

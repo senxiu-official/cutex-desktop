@@ -82,6 +82,8 @@ const ALLOWED: Record<string, string> = {
   "onboarding.preset.default": "wording preset name",
   "onboarding.preset.daili": "wording preset name",
   "onboarding.preset.english": "wording preset name",
+  // 代理 is the network proxy (Settings → 网络代理) the font pack download went through.
+  "appearance.fontPack.error.proxyAuth": "network proxy",
 };
 /** Whole key families that use a banned word in another sense. */
 const ALLOWED_PREFIXES: Record<string, string> = {

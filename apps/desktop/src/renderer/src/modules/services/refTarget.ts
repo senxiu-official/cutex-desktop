@@ -5,6 +5,7 @@
 // the 服务 page does.
 import { Server } from "lucide-react";
 import { openInApp, openServiceExternal } from "../../lib/services";
+import { isWorkerOn, showWorker } from "../../lib/serviceWorker";
 import { sideShowsHost } from "../../lib/sideServices";
 import type { CutexRef, RefLinkView, RefOpenResult } from "../slots";
 import { revealPath } from "./reveal";
@@ -28,6 +29,8 @@ export async function openServiceRef(ref: CutexRef, how: "auto" | "peek" | "page
   void how; // a web page: every way opens the browser tab on the right
   const target = parseServiceRefKey(ref.key);
   if (!target) return { status: "unavailable", reason: "bad-ref" };
+  // A background service (no page): shown on the 服务 page, where it is controlled.
+  if (isWorkerOn(ref.hostId, target.slug)) { showWorker(target.slug); return { status: "opened", where: "page" }; }
   if (!sideShowsHost(ref.hostId)) return { status: "unavailable", reason: "host-offline" };
   if (openInApp(target.slug, ref.hostId, target.path)) return { status: "opened", where: "card" };
   try {

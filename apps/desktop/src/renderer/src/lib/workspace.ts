@@ -88,6 +88,36 @@ export function escapeFileHref(href: string): string | null {
   return resolveFileHref(href, null) ? FILE_HREF_ESCAPE + encodeURIComponent(href) : null;
 }
 
+/** A Windows absolute path as written: `C:\…` or a UNC `\\server\…`. */
+const WINDOWS_ABSOLUTE = /^(?:[a-zA-Z]:\\|\\\\[^\\])/;
+/** CommonMark's backslash escapes: a backslash before ASCII punctuation stands for that character. */
+const MARKDOWN_ESCAPE = /\\([!-/:-@[-`{-~])/g;
+/** The destination of a link / image source (`[text](dest "title")`, `![alt](<dest>)`), at its end. */
+const LINK_DESTINATION = /\]\(\s*(<[^<>\n]*>|[^\s<>]+?)(?:\s+(?:"[^"\n]*"|'[^'\n]*'|\([^()\n]*\)))?\s*\)$/;
+
+/**
+ * The Windows path a markdown link / image was written with, when CommonMark's backslash escapes changed it:
+ * `C:\Users\me\.cutex\a.png` parses as `C:\Users\me.cutex\a.png` (`\.` is an escaped `.`), a path that does not
+ * exist. Agents write host paths verbatim, so a Windows path keeps its backslashes. `source` is the markdown of
+ * the link / image node; `parsed` the destination the parser made of it (null: nothing to restore).
+ */
+export function writtenWindowsPath(source: string, parsed: string): string | null {
+  const m = LINK_DESTINATION.exec(source);
+  if (!m) return null;
+  const written = m[1]!.startsWith("<") ? m[1]!.slice(1, -1) : m[1]!;
+  if (!WINDOWS_ABSOLUTE.test(written)) return null;
+  const unescaped = written.replace(MARKDOWN_ESCAPE, "$1");
+  if (unescaped === written) return null;
+  // Only the destination the parser read from this very source (it may come back percent-encoded).
+  let decoded = parsed;
+  try {
+    decoded = decodeURI(parsed);
+  } catch {
+    /* not percent-encoded */
+  }
+  return parsed === unescaped || decoded === unescaped ? written : null;
+}
+
 export function unescapeFileHref(href: string): string {
   if (!href.startsWith(FILE_HREF_ESCAPE)) return href;
   try {

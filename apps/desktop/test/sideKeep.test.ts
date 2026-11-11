@@ -9,7 +9,7 @@ vi.mock("../src/renderer/src/store", () => ({ useApp: { getState: () => app } })
 vi.mock("../src/renderer/src/lib/prefs", () => ({ getUiPrefs: () => prefs }));
 
 const keep = await import("../src/renderer/src/lib/sideKeep");
-const { applyHold, clampSetting, holdKey, mountPlan, pruneHolds, setHeldState, setSideHold, clearHeldDirty, useSideKeep, resetSideHolds, keepMountedLimit, KEEP_MOUNTED_RANGE } = keep;
+const { applyHold, admitHold, clampSetting, holdKey, mountPlan, pruneHolds, setHeldState, setSideHold, clearHeldDirty, useSideKeep, resetSideHolds, keepMountedLimit, KEEP_MOUNTED_RANGE, markUncappedHold } = keep;
 
 const inst = (kind = "probe.tab", hostId = "local", state: SideInstance["state"] = null): SideInstance =>
   ({ kind, binding: { kind: "host", hostId }, state, v: 1, pinned: false, lastActiveAt: 1 }) as unknown as SideInstance;
@@ -40,6 +40,21 @@ describe("applyHold", () => {
     expect(full.holds).toBe(holds);
     holds = applyHold(holds, req("i1"), false, 2).holds;
     expect(applyHold(holds, req("i3"), true, 2).held).toBe(true);
+  });
+  it("an uncapped hold is taken past the limit and does not count; it can turn capped (and back) while held", () => {
+    let holds = applyHold({}, req("i1"), true, 1).holds;
+    expect(applyHold(holds, req("i2"), true, 1).held).toBe(false);
+    const free = applyHold(holds, { ...req("i2"), uncapped: true }, true, 1);
+    expect(free.held).toBe(true);
+    expect(free.holds[holdKey("host:local", "i2")]!.uncapped).toBe(true);
+    holds = applyHold(free.holds, req("i1"), false, 1).holds;
+    // Only capped holds count: with i2 uncapped, a capped one still fits.
+    expect(applyHold(holds, req("i3"), true, 1).held).toBe(true);
+    expect(admitHold(holds, "host:local", null, "hidden", 1)).toBe("ok");
+    // i2 turns capped (its other reason stays): kept, flag cleared even over the limit (a live hold is never dropped).
+    const capped = applyHold(applyHold(holds, req("i3"), true, 1).holds, req("i2"), true, 1);
+    expect(capped.held).toBe(true);
+    expect(capped.holds[holdKey("host:local", "i2")]!.uncapped).toBeUndefined();
   });
   it("keys holds by scope: the same instance id in two scopes are two holds", () => {
     const a = applyHold({}, req("i1"), true, 4).holds;
@@ -132,6 +147,22 @@ describe("store wiring", () => {
     expect(setSideHold(null, "i4", inst(), "hidden", true)).toBe(false);
     expect(setSideHold("host:local", "i1", inst(), "hidden", false)).toBe(false);
     expect(setSideHold("host:local", "i3", inst(), "hidden", true)).toBe(true);
+  });
+  it("markUncappedHold: a marked instance is held past sideKeepMounted, and the mark follows on the next keepMounted", () => {
+    expect(setSideHold("host:local", "i1", inst(), "hidden", true)).toBe(true);
+    expect(setSideHold("host:local", "i2", inst(), "hidden", true)).toBe(true);
+    expect(setSideHold("host:local", "i3", inst(), "hidden", true)).toBe(false);
+    markUncappedHold("i3", true);
+    expect(setSideHold("host:local", "i3", inst(), "hidden", true)).toBe(true);
+    markUncappedHold("i1", true);
+    setSideHold("host:local", "i1", inst(), "hidden", true);
+    expect(useSideKeep.getState().holds[holdKey("host:local", "i1")]!.uncapped).toBe(true);
+    // Two capped places again (i1 and i3 do not count).
+    expect(setSideHold("host:local", "i4", inst(), "hidden", true)).toBe(true);
+    markUncappedHold("i1", false);
+    setSideHold("host:local", "i1", inst(), "hidden", true);
+    expect(useSideKeep.getState().holds[holdKey("host:local", "i1")]!.uncapped).toBeUndefined();
+    markUncappedHold("i3", false);
   });
   it("limit settings are clamped", () => {
     prefs.sideKeepMounted = 99;

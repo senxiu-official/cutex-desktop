@@ -4,6 +4,7 @@ import type { SideTabInfo, SideTabProps } from "../slots";
 import { browserCache } from "./browserCache";
 import type { BrowserState } from "./browserState";
 import { browserActivation } from "./activation";
+import { bridge } from "../../bridge";
 
 export function useBrowserEnabled(): boolean {
   return useSyncExternalStore(browserActivation.subscribe, browserActivation.get, browserActivation.get);
@@ -19,5 +20,9 @@ export function useBrowserTab({ instance, hostId }: SideTabProps<BrowserState>):
   const { t } = useI18n();
   const view = useBrowserView(hostId, instance.state.tabKey);
   // Main owns the operation's linger window. No renderer timer, attach or polling here.
-  return { title: view?.title || instance.state.title || t("browser.title"), tooltip: view?.url ?? instance.state.url, busy: view?.loading || view?.control?.operating || undefined, ...(view?.favicon ? { favicon: view.favicon } : {}) };
+  const media = view?.media;
+  // The tab's speaker while its page plays or sounds (or stays muted): a click mutes / unmutes it in main.
+  const audio = media && (media.playing || media.audible) && hostId
+    ? { muted: media.muted, toggleMute: () => void bridge.browser?.forHost(hostId).setMuted(instance.state.tabKey, !media.muted).catch(() => {}) } : undefined;
+  return { title: view?.title || instance.state.title || t("browser.title"), tooltip: view?.url ?? instance.state.url, busy: view?.loading || view?.control?.operating || undefined, ...(view?.favicon ? { favicon: view.favicon } : {}), ...(audio ? { audio } : {}) };
 }

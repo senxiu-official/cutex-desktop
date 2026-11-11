@@ -4,7 +4,7 @@ import { directorZh } from "./directorI18n";
 export const zhCN = {
   ...directorZh,
   "project-view.title": "项目视图",
-  "project-view.description": "一种窗格：一个项目里每个{{agent}}在做什么、谁委托了谁、作业和最近的动态。在{{shelf}}里打开，也可以从 ⌘K 和项目菜单打开",
+  "project-view.description": "查看项目内{{agent}}的工作、委托、作业和最近动态，可从{{shelf}}、快速切换或项目菜单打开",
   "project-view.tabTitle": "项目 · {name}",
   "project-view.pick": "选择项目",
   "project-view.follow": "跟随当前对话",

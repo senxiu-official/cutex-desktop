@@ -38,6 +38,7 @@ interface Allowed {
 // Truly global uses. Keep the reasons concrete; components drawn in a desk never belong here.
 const OS_PREFERENCE = "an OS-level preference (prefers-reduced-motion / prefers-color-scheme): the same in every window";
 export const OWNER_WINDOW_ALLOW: Record<string, Allowed> = {
+  "lib/appearance.ts": { reason: "a pane edge drag's live width goes on its readers in the main document, where the appearance variables live (a desk's sidebar edge sets its own [data-desk] root)", uses: { query: 1 } },
   "lib/appWindowSet.ts": { reason: "enumerates the app windows: this window (the main one) first, then the desks", uses: { query: 2 } },
   // P3: 「在看」 follows the active window (lib/appFocus, lib/windowScope); store.ts / ownerNotifyStore have no direct focus check left.
   "store.ts": { reason: "activity previews batch on the renderer's frame clock (the main window, kept unthrottled while a desk shows)", uses: { raf: 1 } },

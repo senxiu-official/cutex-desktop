@@ -20,7 +20,7 @@ import { SettingsSections } from "../../modules/Outlet";
 import { HostPicker } from "../HostPicker";
 import { SettingsHostFrame } from "../SettingsHostFrame";
 import { Diagnostics, HostConnectionSection, ownerName } from "./ConnectionSettings";
-import { EmptyState, PartSource, Section, SubPageRow } from "./Form";
+import { Banner, EmptyState, PartSource, Section, SubPageRow } from "./Form";
 import { HostInfoSection, HostRightsSection } from "./HostSections";
 import { MeHereSection, OwnDevicesSection } from "./MeOnHost";
 import { OwnerDevicesBanner } from "./OwnerDevices";
@@ -85,7 +85,7 @@ export function AccessPage() {
         <OwnerDevicesBanner hostId={hostId} />
         {access.isOwner ? (
           <>
-            {o.ownerRightsOnly && <div className="mb-6 rounded-xl border border-border bg-surface-2/50 px-4 py-3 text-sm text-muted">{t("shell.users.notOwner", { host, owner: ownerName(o.owner, t("host.own.ownerFallback")) })}</div>}
+            {o.ownerRightsOnly && <Banner tone="info" className="mb-6">{t("shell.users.notOwner", { host, owner: ownerName(o.owner, t("host.own.ownerFallback")) })}</Banner>}
             <SettingsSections page="access" except={NOT_ON_THE_PAGE} />
           </>
         ) : (

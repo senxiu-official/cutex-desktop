@@ -102,7 +102,11 @@ export const zhCN = {
   "artifacts.binary": "无法预览这种文件（{type}，{size}）。",
   "artifacts.json.record": "整理",
   "artifacts.json.raw": "原文",
-  "artifacts.imageTooLarge": "图片太大，无法预览（{size}）。",
+  "artifacts.image.large": "图片有 {size}，预览会占用大约同样多的内存。",
+  "artifacts.image.openAnyway": "仍然打开",
+  "artifacts.image.openSystem": "用系统应用打开",
+  "artifacts.image.loading": "正在读取图片 {done} / {total}",
+  "artifacts.image.loadingLabel": "读取进度",
   "artifacts.src.producer": "产出者",
   "artifacts.src.runtime": "运行时",
   "artifacts.src.turn": "回合",
@@ -184,6 +188,9 @@ export const zhCN = {
   "artifacts.link.forbidden": "无权限",
   "artifacts.link.archived": "已归档",
   "artifacts.link.tooltip": "{name} · v{n} · {kind}",
+  // 保存到这台电脑 (the 下载 page shows progress, errors and where it went)
+  "artifacts.save.toComputer": "保存到这台电脑",
+  "artifacts.save.hint": "把 v{n} 保存到下载文件夹；进度和保存位置在「下载」页",
 } as const;
 
 // Adds these keys to MessageKey (modules/i18nCatalog.ts collects the dictionary itself).

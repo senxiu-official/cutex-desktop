@@ -210,8 +210,8 @@ function NewProjectForm({ target }: { target: CreateHost }) {
         <SettingRow agents="none" source="host" label={t("projects.badge")} info={t(features.has("project-badge-wide") ? "projects.badgeHintWide" : "projects.badgeHint")}>
           <BadgeTextInput value={badge} onChange={setBadge} maxWidth={projectBadgeWidth(features)} onCompositionChange={setBadgeComposing} aria-label={t("projects.badge")} placeholder={autoBadge(name, projectBadgeWidth(features))} className="w-20 rounded border border-border bg-background px-2 py-1 text-sm outline-none focus:border-accent" />
         </SettingRow>
-        <SettingRow agents="none" source="host" label={t("projects.color")}>
-          <ProjectColorPicker value={color} onChange={setColor} />
+        <SettingRow agents="none" source="host" label={t("projects.color")} info={t("projects.colorHint")}>
+          <ProjectColorPicker value={color} onChange={setColor} preview={{ badge: badgeText || "?", icon }} />
         </SettingRow>
         <SettingRow agents="next" source="host" label={t("projects.directory")} hint={t(createRoot ? "projects.directoryCreateHint" : "projects.directoryNewHint")}>
           <div className="flex w-full min-w-0 max-w-xl flex-wrap items-center gap-1.5" data-project-directory-field="">
@@ -314,7 +314,8 @@ function ProjectDetail({ project, tab, rotate, pick }: { project: ProjectSummary
   const waiting = team.online.filter((r) => r.status === "needsInput");
   const [mcp, setMcp] = useState<{ servers: Record<string, unknown> } | null | undefined>(undefined);
   const id = project.project_id;
-  const remark = useUiPrefs().projectRemarks[hostKey(hostId, id)] ?? "";
+  const { projectRemarks, projectIcons } = useUiPrefs();
+  const remark = projectRemarks[hostKey(hostId, id)] ?? "";
   const editRemark = () => void editProjectRemark(id, hostId, project.presentation.display_name, t);
 
   // A new saved presentation (保存, a picker colour, another device) replaces only the fields the
@@ -761,6 +762,10 @@ function ProjectDetail({ project, tab, rotate, pick }: { project: ProjectSummary
         </SettingRow>
         <SettingRow agents="none" source="host" label={t("projects.badge")} info={t(features.has("project-badge-wide") ? "projects.badgeHintWide" : "projects.badgeHint")}>
           <BadgeTextInput key={`${hostId}:${id}`} value={badge} onChange={setBadge} maxWidth={projectBadgeWidth(features)} onCompositionChange={setBadgeComposing} aria-label={t("projects.badge")} className="w-20 rounded border border-border bg-background px-2 py-1 text-sm outline-none focus:border-accent" />
+        </SettingRow>
+        {/* Saved at once, like the colour in the icon picker (the 保存 above is for the name and the badge). */}
+        <SettingRow agents="none" source="host" label={t("projects.color")} info={t("projects.colorHint")}>
+          <ProjectColorPicker value={color} onChange={applyColor} disabled={colorSaving} preview={{ badge: badge.trim() || name.trim().slice(0, 1) || project.presentation.display_name.slice(0, 1), icon: projectIcon(projectIcons, hostId, id) }} />
         </SettingRow>
         <SettingRow agents="next" source="host" label={t("projects.directory")} info={t("projects.directoryHint")}>
           <ProjectRootEditor

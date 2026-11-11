@@ -32,6 +32,9 @@ import { ServiceOwnerFlyout } from "../../components/ServiceOwnerFlyout";
 import { ServiceClaimStrip } from "../../components/ServiceClaimStrip";
 import { ProjectBadge } from "../../components/ProjectBadge";
 import { serviceScope, type ServiceScope } from "../../lib/projectServices";
+import { isSupervised, isWorker, serviceHealthKey } from "../../lib/serviceWorker";
+import { WorkerBadge } from "../../components/WorkerBadge";
+import type { PageParams } from "../slots";
 
 type HealthScope = "all" | "running" | "down";
 type Visibility = "active" | "hidden" | "archived";
@@ -44,8 +47,10 @@ const inHealth = (s: ServiceView, scope: HealthScope) => scope === "all" || (sco
 const inScope = (s: ServiceView, filter: ScopeFilter) => filter === "all" || serviceScope(s) === filter;
 const inVisibility = (s: ServiceView, visibility: Visibility) => (visibility === "archived" ? !!s.archived : visibility === "hidden" ? !!s.hidden && !s.archived : !s.hidden && !s.archived);
 
-export function ServicesPage() {
-  return <PageBody><ServicesTable /></PageBody>;
+/** `params.q`: start searched (a background service opened from elsewhere is shown here, lib/serviceWorker). */
+export function ServicesPage({ params }: { params?: PageParams } = {}) {
+  const q = typeof params?.q === "string" ? params.q : undefined;
+  return <PageBody><ServicesTable initialQuery={q} key={q ?? ""} /></PageBody>;
 }
 
 export function ProjectServicesTab({ hostId, projectId }: { hostId: string; projectId: string }) {
@@ -115,12 +120,12 @@ function ServiceOrganizer({ row, hostName, done, error }: { row: Row; hostName: 
   );
 }
 
-function ServicesTable({ project }: { project?: { hostId: string; projectId: string } }) {
+function ServicesTable({ project, initialQuery }: { project?: { hostId: string; projectId: string }; initialQuery?: string }) {
   const { t } = useI18n();
   const hosts = useProjectHosts(project, useListHosts());
   const projectId = project?.projectId;
   const refresh = useApp((s) => s.refreshServices);
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(initialQuery ?? "");
   const [scope, setScope] = useState<HealthScope>("all");
   const [visibility, setVisibility] = useState<Visibility>("active");
   const [view, setView] = useState<ViewMode>(() => (project ? "details" : localStorage.getItem(VIEW_KEY) === "details" ? "details" : "cards"));
@@ -146,7 +151,7 @@ function ServicesTable({ project }: { project?: { hostId: string; projectId: str
 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return all.filter((r) => inVisibility(r.item, supportsOrganize ? visibility : "active")).filter((r) => inHealth(r.item, scope)).filter((r) => inScope(r.item, supportsScope ? scopeFilter : "all")).filter((r) => !q || `${r.item.displayName} ${r.item.slug} ${r.item.port} ${r.item.url} ${r.item.groupName ?? ""} ${r.item.note ?? ""}`.toLowerCase().includes(q));
+    return all.filter((r) => inVisibility(r.item, supportsOrganize ? visibility : "active")).filter((r) => inHealth(r.item, scope)).filter((r) => inScope(r.item, supportsScope ? scopeFilter : "all")).filter((r) => !q || `${r.item.displayName} ${r.item.slug} ${r.item.port ?? ""} ${r.item.url ?? ""} ${isWorker(r.item) ? t("services.worker.badge") : ""} ${r.item.groupName ?? ""} ${r.item.note ?? ""}`.toLowerCase().includes(q));
   }, [all, query, scope, visibility, supportsOrganize, supportsScope, scopeFilter]);
 
   const purpose = useMemo(() => purposeGroups(rows, t), [rows, t]);
@@ -207,13 +212,13 @@ function ServicesTable({ project }: { project?: { hostId: string; projectId: str
 
   const columns: Column<Row>[] = [
     ...(supportsOrganize ? [{ key: "select", header: "", width: "2rem", cell: (r: Row) => organizable(r) ? <input type="checkbox" checked={selected.has(r.key)} onChange={() => toggleSet(setSelected, selected, r.key)} aria-label={r.item.displayName || r.item.slug} /> : null }] : []),
-    { key: "status", header: t("table.status"), width: hosts.marks ? "7.5rem" : "6.5rem", cell: (r) => <span className={`flex min-w-0 items-center gap-1.5 ${stale(r) ? "opacity-50" : ""}`}><RowHost host={hosts.look(r.hostId)} show={hosts.marks} /><StatusCell kind={serviceStatus(r.item)} label={t(`services.health.${r.item.health}` as MessageKey)} /></span> },
-    { key: "name", header: t("table.service"), cell: (r) => <button disabled={stale(r) || r.item.archived} onClick={() => void openService(r.item, r.hostId).catch((e: unknown) => setError(String(e)))} title={r.item.url} className="flex max-w-full items-center gap-1 truncate text-left enabled:hover:underline disabled:text-subtle">{r.item.starred && <Star size={12} className="fill-current text-warn-text" />}<span className="truncate">{r.item.displayName || r.item.slug}</span></button> },
+    { key: "status", header: t("table.status"), width: hosts.marks ? "7.5rem" : "6.5rem", cell: (r) => <span className={`flex min-w-0 items-center gap-1.5 ${stale(r) ? "opacity-50" : ""}`}><RowHost host={hosts.look(r.hostId)} show={hosts.marks} /><StatusCell kind={serviceStatus(r.item)} label={t(serviceHealthKey(r.item))} /></span> },
+    { key: "name", header: t("table.service"), cell: (r) => <button disabled={stale(r) || r.item.archived} onClick={() => isWorker(r.item) ? toggleLogs(r.key) : void openService(r.item, r.hostId).catch((e: unknown) => setError(String(e)))} title={isWorker(r.item) ? t("services.worker.nameHint") : (r.item.url ?? undefined)} className="flex max-w-full items-center gap-1 truncate text-left enabled:hover:underline disabled:text-subtle">{r.item.starred && <Star size={12} className="fill-current text-warn-text" />}<span className="truncate">{r.item.displayName || r.item.slug}</span>{isWorker(r.item) && <WorkerBadge />}</button> },
     { key: "retention", header: t("services.retention"), width: "7rem", cell: (r) => <span className="text-xs text-muted">{r.item.lifetime === "persistent" ? t(`services.purpose.${serviceSection(r.item)}` as MessageKey) : !ttlEnabled(r) ? "—" : r.item.effectiveIdleTtlMinutes == null ? t("services.idleTtl.0") : `${r.item.effectiveIdleTtlMinutes}m`}</span> },
-    { key: "owner", header: t("table.owner"), width: "10rem", cell: (r) => { const p = projectOf(r); if (p) return <span data-service-scope="project" title={scopeTitle(r)} className="flex min-w-0 items-center gap-1 text-xs text-muted"><ProjectBadge badge={p.badge || p.name.slice(0, 1)} color={p.color} size="sm" /><span className="truncate">{t("services.ownerScope.project", { project: p.name })}</span></span>; const owner = ownerOf(r); return owner ? <button onClick={() => openHostAgent(r.hostId, owner.row.cutexSessionId)} className="flex min-w-0 items-center gap-1 text-xs text-muted hover:text-foreground"><Avatar name={owner.row.displayName} avatar={owner.row.avatar} seed={owner.row.cutexSessionId} size={16} /><span className="truncate">{owner.row.displayName}</span></button> : <span className="text-xs text-subtle">—</span>; } },
-    { key: "url", header: t("services.url"), width: "13rem", cell: (r) => <span className="block truncate font-mono text-caption/[inherit] text-subtle" title={r.item.url}>{r.item.url}</span> },
+    { key: "owner", header: t("table.owner"), width: "10rem", cell: (r) => { const p = projectOf(r); if (p) return <span data-service-scope="project" title={scopeTitle(r)} className="flex min-w-0 items-center gap-1 text-xs text-muted"><ProjectBadge badge={p.badge || p.name.slice(0, 1)} color={p.color} size="sm" /><span className="truncate">{t("services.ownerScope.project", { project: p.name })}</span></span>; const owner = ownerOf(r); return owner ? <button onClick={() => openHostAgent(r.hostId, owner.row.cutexSessionId)} title={owner.retired ? t("services.owner.retiredHint") : undefined} data-service-owner-retired={owner.retired || undefined} className="flex min-w-0 items-center gap-1 text-xs text-muted hover:text-foreground"><Avatar name={owner.row.displayName} avatar={owner.row.avatar} seed={owner.row.cutexSessionId} size={16} /><span className="truncate">{owner.retired ? t("services.owner.retired", { name: owner.row.displayName }) : owner.row.displayName}</span></button> : <span className="text-xs text-subtle">—</span>; } },
+    { key: "url", header: t("services.url"), width: "13rem", cell: (r) => isWorker(r.item) ? <span className="block truncate text-caption/[inherit] text-subtle">{t("services.worker.noPage", { tag: t("services.worker.badge") })}</span> : <span className="block truncate font-mono text-caption/[inherit] text-subtle" title={r.item.url ?? undefined}>{r.item.url ?? "—"}</span> },
     { key: "port", header: t("table.port"), width: "4rem", align: "right", cell: (r) => <span className="font-mono text-caption/[inherit] text-subtle">{r.item.port ? `:${r.item.port}` : "—"}</span> },
-    ...(served.some((host) => host.features.has(SERVICES_IDLE_PRESETS_FEATURE)) ? [{ key: "idleStop", header: t("services.idleStop"), width: "11rem", cell: (r: Row) => idleEnabled(r) && r.item.runtime === "managed" && r.item.lifetime === "persistent" ? <span title={t("services.idleStop.hint")} className="text-xs text-muted"><span>{t(`services.idleStop.${r.item.idleStopPreset ?? "forever"}`)}</span>{(r.item.stoppedIdleAt ?? r.item.idleStopAt) && <span className="block text-caption text-subtle">{new Date((r.item.stoppedIdleAt ?? r.item.idleStopAt)!).toLocaleString()}</span>}{r.item.idleWakeFailedAt && <span className="block text-caption text-warn-text">{t("services.idleWakeFailed")}</span>}</span> : <span>—</span> }] : []),
+    ...(served.some((host) => host.features.has(SERVICES_IDLE_PRESETS_FEATURE)) ? [{ key: "idleStop", header: t("services.idleStop"), width: "11rem", cell: (r: Row) => idleEnabled(r) && isSupervised(r.item) && r.item.lifetime === "persistent" ? <span title={t("services.idleStop.hint")} className="text-xs text-muted"><span>{t(`services.idleStop.${r.item.idleStopPreset ?? "forever"}`)}</span>{(r.item.stoppedIdleAt ?? r.item.idleStopAt) && <span className="block text-caption text-subtle">{new Date((r.item.stoppedIdleAt ?? r.item.idleStopAt)!).toLocaleString()}</span>}{r.item.idleWakeFailedAt && <span className="block text-caption text-warn-text">{t("services.idleWakeFailed")}</span>}</span> : <span>—</span> }] : []),
     { key: "traffic", header: t("services.lastTraffic"), width: "8rem", cell: (r) => <span className="text-caption/[inherit] text-subtle">{r.item.lastTrafficAt ? new Date(r.item.lastTrafficAt).toLocaleString() : "—"}</span> },
     { key: "menu", header: "", width: "2rem", cell: (r) => <button disabled={stale(r)} onClick={(e) => openMenuFrom(e.currentTarget, menu(r))} className="rounded p-0.5 text-subtle opacity-0 group-hover:opacity-100 hover:bg-surface-2 hover:text-foreground"><MoreHorizontal size={14} /></button> },
   ];
@@ -236,7 +241,7 @@ function ServicesTable({ project }: { project?: { hostId: string; projectId: str
       {supported && !loaded && <p className="text-sm text-subtle">…</p>}
       {loaded && all.length === 0 && <p className="text-sm text-subtle">{t(projectId === undefined ? "services.none" : "services.projectNone")}</p>}
       {all.length > 0 && groups.length === 0 && <p className="text-sm text-subtle">{t("services.noMatch")}</p>}
-      {rows.length > 0 && view === "cards" && !project && <ServiceCards rows={rows as ServiceCardRow[]} hostName={(row) => hosts.look(row.hostId)?.label ?? row.hostId} ownerName={(row) => { const p = projectOf(row); return p ? t("services.ownerScope.project", { project: p.name }) : ownerOf(row)?.row.displayName ?? t("services.reveal.someAgent"); }} ownerTitle={scopeTitle} stale={stale} tileEnabled={tileEnabled} organizable={organizable} menu={menu} refresh={refresh} error={setError} />}
+      {rows.length > 0 && view === "cards" && !project && <ServiceCards rows={rows as ServiceCardRow[]} hostName={(row) => hosts.look(row.hostId)?.label ?? row.hostId} ownerName={(row) => { const p = projectOf(row); if (p) return t("services.ownerScope.project", { project: p.name }); const owner = ownerOf(row); return !owner ? t("services.reveal.someAgent") : owner.retired ? t("services.owner.retired", { name: owner.row.displayName }) : owner.row.displayName; }} ownerTitle={(row) => scopeTitle(row) ?? (ownerOf(row)?.retired ? t("services.owner.retiredHint") : undefined)} stale={stale} tileEnabled={tileEnabled} organizable={organizable} menu={menu} logs={(row) => logs.has(row.key) ? <ServiceLogs slug={row.item.slug} hostId={row.hostId} /> : null} refresh={refresh} error={setError} />}
       {groups.length > 0 && (view === "details" || !!project) && <DataTable columns={columns} groups={groups} rowKey={(r) => r.key} foldPrefix="services" onRowContextMenu={(e, r) => !stale(r) && contextMenu(() => menu(r))(e)} after={(r) => editing.has(r.key) ? <tr className="border-b border-border/60"><td colSpan={columns.length} className="px-2 py-2"><ServiceOrganizer row={r} hostName={hosts.look(r.hostId)?.label ?? r.hostId} done={() => toggleEditing(r.key)} error={setError} /></td></tr> : logs.has(r.key) ? <tr className="border-b border-border/60"><td colSpan={columns.length} className="px-2 py-2"><ServiceLogs slug={r.item.slug} hostId={r.hostId} /></td></tr> : null} />}
     </>
   );

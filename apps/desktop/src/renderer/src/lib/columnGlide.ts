@@ -102,6 +102,11 @@ export function keyResize(preview: () => void, commit: () => void): void {
   keyTimer = setTimeout(endKeyResize, KEY_RESIZE_MS);
 }
 
+/** Whether a width drag is going on now (what onResizeDrag reports; not the settling time after its release). */
+export function resizeDragActive(): boolean {
+  return dragging;
+}
+
 /** Whether a width drag is going on (or has just been released). */
 export function resizing(): boolean {
   return dragging || now() < settleUntil;

@@ -69,25 +69,24 @@ export function WindowsSandboxSection({ supported }: { supported: boolean }) {
         <Notice>{t("winSandbox.unsupported")}</Notice>
       ) : (
         <>
+          {/* The status reads under the label (a long one wrapped into a narrow column beside the buttons). */}
           <SettingRow agents="next" source="host"
             label={t("winSandbox.status")}
-            hint={
-              readiness === "updateRequired" ? t("winSandbox.steps.elevated") : phase.kind !== "idle" && phase.kind !== "running" ? <PhaseText phase={phase} startedKey="winSandbox.hostSetupPending" doneKey="winSandbox.hostSetupDone" /> : undefined
-            }
-          >
-            <span className="flex items-center gap-2">
-              <span data-testid="win-sandbox-status" className={`text-xs ${readiness === "ready" ? "text-ok-text" : readiness ? "text-warn" : "text-subtle"}`}>
+            hint={<>
+              <span data-testid="win-sandbox-status" className={`block ${readiness === "ready" ? "text-ok-text" : readiness ? "text-warn" : "text-subtle"}`}>
                 {t(statusKey)}
               </span>
-              {windowsSandboxCanSetUp(readiness ?? null) && (
-                <Button primary disabled={phase.kind === "running"} onClick={() => void setup()}>
-                  {phase.kind === "running" ? t("winSandbox.settingUp") : t("winSandbox.setup")}
-                </Button>
-              )}
-              <Button disabled={readiness === undefined || phase.kind === "running"} onClick={load}>
-                {t("winSandbox.recheck")}
+              {readiness === "updateRequired" ? t("winSandbox.steps.elevated") : phase.kind !== "idle" && phase.kind !== "running" ? <PhaseText phase={phase} startedKey="winSandbox.hostSetupPending" doneKey="winSandbox.hostSetupDone" /> : undefined}
+            </>}
+          >
+            {windowsSandboxCanSetUp(readiness ?? null) && (
+              <Button primary disabled={phase.kind === "running"} onClick={() => void setup()}>
+                {phase.kind === "running" ? t("winSandbox.settingUp") : t("winSandbox.setup")}
               </Button>
-            </span>
+            )}
+            <Button disabled={readiness === undefined || phase.kind === "running"} onClick={load}>
+              {t("winSandbox.recheck")}
+            </Button>
           </SettingRow>
         </>
       )}

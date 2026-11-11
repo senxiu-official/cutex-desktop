@@ -1,6 +1,6 @@
 export const zhCN = {
   "diff.title": "差异",
-  "diff.description": "{{shelf}}里的 diff 窗格：工作区的 git 改动与某一轮对文件的改动共用一个查看器",
+  "diff.description": "在{{shelf}}中查看工作区的 Git 改动和单个回合的文件改动",
   "diff.view": "差异",
   "diff.turnTab": "本轮 · {name}",
   "diff.turnBadge": "本轮变更",

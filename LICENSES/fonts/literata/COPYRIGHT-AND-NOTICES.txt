@@ -1,0 +1,9 @@
+copyright: Copyright 2017 The Literata Project Authors (https://github.com/googlefonts/literata)
+
+trademark: Literata is a trademark of Google Inc.
+
+designer: Latin by Veronika Burian and Jose Scaglione. Greek by Irene Vlachou. Cyrillic by Vera Evstafieva.
+
+manufacturer: TypeTogether
+
+designer: Latin by Veronika Burian and Jose Scaglione. Greek by Irene Vlachou. Cyrillic by Vera Evstafieva

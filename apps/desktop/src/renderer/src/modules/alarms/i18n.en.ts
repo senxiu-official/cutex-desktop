@@ -4,7 +4,7 @@ import type { zhCN } from "./i18n";
 
 export const en: Record<keyof typeof zhCN, string> = {
   "alarms.title": "Alarms",
-  "alarms.description": "Reminders {{agents}} set: time, who to whom, text, with cancel; shown in the status row and capsule",
+  "alarms.description": "View and cancel reminders set by {{agents}}",
   "alarms.statusTitle": "Alarms",
   "alarms.pending": "{n} pending",
   "alarms.next": "next {t}",

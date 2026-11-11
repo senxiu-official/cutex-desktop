@@ -3,6 +3,7 @@
 // (their children's margins stop collapsing while skipped), and a jump into a far row draws it first.
 import { describe, expect, it, vi } from "vitest";
 import { drawRow, FAR_ATTR, farGaps, watchFarRowsScroll } from "../src/renderer/src/lib/farRows";
+import { resetColumnGlide, resizeDrag } from "../src/renderer/src/lib/columnGlide";
 
 const rect = (el: Element, top: number, bottom: number) => (el.getBoundingClientRect = () => ({ top, bottom, left: 0, right: 100, width: 100, height: bottom - top, x: 0, y: top, toJSON() {} }) as DOMRect);
 
@@ -70,6 +71,26 @@ describe("far rows", () => {
     } finally {
       watch.stop();
       vi.useRealTimers();
+    }
+  });
+
+  it("a width drag's scrolls (Conversation keeping the history at the bottom) draw nothing; a wheel still does", () => {
+    // perf/shelf-divider-drag: each such scroll drew every far row again — the whole timeline restyled and laid out,
+    // and kept drawn for the rest of the drag.
+    document.body.innerHTML = `<div id="scroller"><div id="list"><div data-tl-row ${FAR_ATTR}><p>older history</p></div></div></div>`;
+    const root = document.getElementById("scroller")!;
+    const list = document.getElementById("list")!;
+    const watch = watchFarRowsScroll(root, list, vi.fn());
+    try {
+      resizeDrag(true);
+      root.dispatchEvent(new Event("scroll"));
+      expect(list.querySelector(`[${FAR_ATTR}]`)).not.toBeNull();
+      expect(watch.active()).toBe(false);
+      root.dispatchEvent(new WheelEvent("wheel", { deltaY: -400 }));
+      expect(list.querySelector(`[${FAR_ATTR}]`)).toBeNull();
+    } finally {
+      watch.stop();
+      resetColumnGlide();
     }
   });
 });

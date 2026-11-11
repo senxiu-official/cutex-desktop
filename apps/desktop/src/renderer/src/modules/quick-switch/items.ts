@@ -89,18 +89,20 @@ export function serviceItems(hosts: readonly ServiceSource[], t: T): QsItem[] {
   for (const h of hosts) {
     for (const s of h.services) {
       const name = s.displayName?.trim() || s.slug;
-      const stopped = s.health === "stopped" || s.health === "unreachable";
+      const stopped = s.health === "stopped" || s.health === "unreachable" || s.health === "crashLooped";
       out.push({
         id: `service:${h.hostId}:${s.slug}`,
         kind: "service",
         title: name,
-        subtitle: t("quick-switch.sub.service", { slug: s.slug }),
+        subtitle: t(s.runtime === "worker" ? "quick-switch.sub.worker" : "quick-switch.sub.service", { slug: s.slug }),
         terms: [s.slug],
         hostId: h.hostId,
         rank: 0,
         ...(h.state === "offline" ? { disabled: true, badge: { text: t("quick-switch.status.hostOffline"), tone: "muted" as const } } : stopped ? { badge: { text: t("quick-switch.status.stopped"), tone: "muted" as const } } : {}),
         lead: { kind: "icon", icon: Server, tone: "service" },
-        target: { kind: "service", hostId: h.hostId, slug: s.slug },
+        // A background service (cutex `worker`) has no page for a browser tab: the 服务 page, searched to it
+        // (lib/serviceWorker showWorker; "services.page" is that page's nav item).
+        target: s.runtime === "worker" ? { kind: "page", page: "services.page", params: { q: s.slug } } : { kind: "service", hostId: h.hostId, slug: s.slug },
       });
     }
   }

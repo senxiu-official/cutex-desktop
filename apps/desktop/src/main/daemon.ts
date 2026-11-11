@@ -1,3 +1,4 @@
+import { currentImageCache } from "./imageCache";
 import { daemonFetch } from "./daemonFetch";
 import { collectOwnerPages, ownerPageQuery } from "./ownerStorePages";
 import { NOTIFICATION_PAGES_FEATURE, type ApprovalPage, type OwnerStorePageQuery } from "../shared/notificationPaging";
@@ -28,7 +29,7 @@ import type { ApprovalRuleAuditPage, ApprovalRuleDraft, ApprovalRuleMutation, Ap
 import { directorScopeCandidates, directorReviewContent, projectDirector, directorHandovers, directorStartReviews, decideDirectorItem, approveDirectorScope, type DirectorFence, type DirectorScope } from "@cutex-desktop/cutex-client";
 import { appWindows } from "./appWindows";
 import { downloadFilename, downloadFilters } from "../shared/downloadFilename";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { promoteDoneOf, QUICK_CHAT_PROMOTE_FEATURE, QUICK_CHAT_PROMOTE_FLAG, validPromoteRequest, validPromoteTarget, type PromoteRequest, type PromoteResult } from "../shared/quickChatPromote";
 import { FORMAL_RENAME_FEATURE, FORMAL_RENAME_FLAG, holderIds, restoreNameWire, nameHistoryPath, validRenameRequest, validRenameTarget, type FormalRenameRequest, type FormalRenameResult, type NameHistoryEvent, type NameHistoryPage } from "../shared/agentRename";
 import type { HostProxyPatch } from "../shared/proxy";
@@ -42,6 +43,8 @@ import { RecentFeedTraffic, submitHttpTraceBuffer } from "./sendDiagnostics";
 import { notesApi, sideApi } from "./notesSideApi";
 import type { ExportReply, ImportReply } from "./profileTransfer";
 import { remoteJobsApi } from "./remoteJobsApi";
+import { followPanEvents, panApi } from "./panApi";
+import { BAIDU_PAN_FEATURE, type PanAppInput, type PanDownloadAction, type PanDownloadRequest } from "../shared/baiduPan";
 import type { InboundMailInput, MarkExternalInput, NciVerificationInput } from "../shared/remoteJobs";
 import type { NoteCreate, NotesQuery, NoteUpdate } from "../shared/notes";
 import type { SideMessageInput, SideOpenInput, SideReply } from "../shared/sideChat";
@@ -119,6 +122,7 @@ import { directorRotationBody, ROTATION_ID } from "../shared/directorRotation";
 import { ccSwitchImportBody, type CcSwitchImportItem, type CcSwitchImportList, type CcSwitchImportResult } from "../shared/ccSwitchImport";
 import { artifactContentQuery, artifactDiffQuery, artifactId, artifactListQuery, artifactPatchBody, artifactPublishBody, artifactResolveBody, artifactVersionSel, type ArtifactContent, type ArtifactDeleteResult, type ArtifactDetail, type ArtifactDiff, type ArtifactList, type ArtifactListQuery, type ArtifactPatch, type ArtifactPatchResult, type ArtifactPublished, type ArtifactPublishRequest, type ArtifactPublishResult, type ArtifactResolveItem, type ArtifactSummary, type ArtifactUsage } from "../shared/artifactStore";
 import { ALARM_ID, type AlarmCancelResult, type AlarmList, type AlarmView } from "../shared/alarms";
+import { asOwnerPin, OWNER_PIN_ID, type OwnerPinChange, type OwnerPinList, type OwnerPinUpdateResult } from "../shared/ownerPins";
 import { USAGE_SOURCE_ID, USAGE_SOURCE_KINDS, type UsageSource, type UsageSourceCreate, type UsageSourceDeleteResult, type UsageSourcePatch, type UsageSourceResult, type UsageSourcesView } from "../shared/usageSources";
 import { SKILL_ARCHIVE_ID, type SkillArchiveList, type SkillArchiveRecord, type SkillArchiveResult } from "../shared/skillsArchive";
 import { WORKFLOW_RUN_ID, type WorkflowRunAction, type WorkflowRunList, type WorkflowRunView } from "../shared/workflows";
@@ -138,7 +142,7 @@ import { approvePairing, type PairingConfirm } from "./pairingInvites";
 import { windowsSandboxReadinessOf } from "../shared/windowsSandbox";
 import { localDaemonSetup, readHostOwner, type HostOwner } from "../shared/hosts";
 import { isValidTokenId } from "../shared/hosts";
-import { servicesSettingsPatch } from "../shared/servicesSettings";
+import { SERVICES_WORKERS_FEATURE, SERVICES_WORKERS_FLAG, servicesSettingsPatch } from "../shared/servicesSettings";
 import type { ClaudeRepinDone, ClaudeRepinResult, ClaudeRuntimeView } from "../shared/claudeRepin";
 import type { AgentSecurityPatch, ApprovalDecision, ApprovalDecisionOrigin, ApprovalDecisionResult, ApprovalRecord, CutexRefusal, RuntimePackageRun, RuntimePackageRunResult, RuntimePackagesView, MutationResult, ProfileCreateBody, ProfilePreset, NotificationLevel, ProfileAccountView, ServiceView, ServicesList, ServicesSettings, ServicesSettingsPatch, ProfileLogin, TerminalSummary, ProjectMemoryView, ProjectMutationOperation, BackgroundTerminal, CapabilitiesView, CatalogModelPatch, GlobalSettings, ProfileDetail, ProfileItem, ProfileModelsView, ProfilePatch, UserInstructions, AgentHarnessPreview, ClaudeCodeSources, ClaudePermissionRules, ClaudeSkillsImportList, ClaudeSkillsImportResult, SessionSandboxExtras, SessionSandboxExtrasPatch, FsDir, FsFile, GitStatus, UsageDimension, UsagePrices, UsageReport, UsageSourceFilter, WorkspaceScope, DaemonState, DesktopApi, DaemonEvents, ModelOption, QuotaConfigView, QuotaGauge, ServerRequestReply, SidebarSnapshot, DirectorRotation, DirectorRotationResult, DirectorRotationStart, StuckBusDiscardRequest, StuckBusDiscardResult, StuckBusView } from "../shared/ipc";
 
@@ -240,6 +244,8 @@ export type DaemonEmit = <K extends keyof DaemonEvents>(event: K, payload: Daemo
 
 /** Largest file uploaded as a session attachment (cutex `session-attachments` caps at 8 MiB). */
 const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
+/** An artifact image is put together in main memory before it is cached; larger ones keep their windowed reads. */
+const ARTIFACT_CACHE_MAX_BYTES = 64 * 1024 * 1024;
 /** Read-only connection probes must not strand a host in `connecting` forever. */
 const CONNECTION_READ_TIMEOUT_MS = 15_000;
 /** Workspace watch: no message or keepalive (cutex: every 15 s) for this long = reconnect. */
@@ -323,6 +329,8 @@ export class DaemonService implements DaemonApi {
   private watches = new Map<string, StreamHandle>();
   /** Project 「动态」 live watches (watchProjectEvents); closed with the connection. */
   private projectWatches = new Map<string, ProjectEventFollower>();
+  /** 百度网盘 event feeds (watchPan), one per open page; closed with the connection. */
+  private panWatches = new Map<string, { stop(): void }>();
   /** Attached terminal output streams, by terminal id (the PTYs themselves live in cutex). */
   private terminals = new Map<string, StreamHandle>();
   /** Bumped whenever the app moves to another daemon; stale replies are dropped (main/index.ts). */
@@ -473,6 +481,8 @@ export class DaemonService implements DaemonApi {
     this.fullTextKeys.clear();
     for (const w of this.projectWatches.values()) w.stop();
     this.projectWatches.clear();
+    for (const w of this.panWatches.values()) w.stop();
+    this.panWatches.clear();
   }
 
   private setState(state: DaemonState): void {
@@ -1118,17 +1128,26 @@ export class DaemonService implements DaemonApi {
   /** An image of a `media=ref` history (`cutex-media:<session>/<sha256>`); null when the host no longer has it. */
   async historyMedia(sessionId: string, sha256: string, expected?: HistoryMediaExpected): Promise<HistoryMediaPayload | null> {
     const ref = mediaReadRequest(sessionId, sha256, expected), client = this.requireClient(), generation = this.gen;
-    const media: unknown = await client.historyMedia(ref.sessionId, ref.sha256, { transport: "bytes", ...(ref.expected ? { expected: ref.expected } : {}) });
-    this.assertInputScope(client, generation);
-    return this.mediaPayload(media, ref.expected);
+    return this.cachedMedia(client, generation, "media", ref.sessionId, ref.sha256, ref.expected, () => client.historyMedia(ref.sessionId, ref.sha256, { transport: "bytes", ...(ref.expected ? { expected: ref.expected } : {}) }));
   }
 
   async eventBlob(sessionId: string, sha256: string, expected?: HistoryMediaExpected): Promise<HistoryMediaPayload | null> {
     const ref = mediaReadRequest(sessionId, sha256, expected), client = this.requireClient(), generation = this.gen;
-    const media = await client.eventBlob(ref.sessionId, ref.sha256, ref.expected);
-    this.assertInputScope(client, generation);
-    const payload = this.mediaPayload(media, ref.expected);
+    const payload = await this.cachedMedia(client, generation, "blob", ref.sessionId, ref.sha256, ref.expected, () => client.eventBlob(ref.sessionId, ref.sha256, ref.expected));
     return payload && "bytes" in payload && payload.bytes.length <= MAX_EVENT_MEDIA_BYTES ? payload : null;
+  }
+
+  private async cachedMedia(client: CutexClient, generation: number, kind: string, sessionId: string, sha: string, expected: HistoryMediaExpected | undefined, read: () => Promise<unknown>): Promise<HistoryMediaPayload | null> {
+    const cache = currentImageCache();
+    if (!cache) { const payload = await read(); this.assertInputScope(client, generation); return this.mediaPayload(payload, expected); }
+    let legacy: HistoryMediaPayload | null = null;
+    const image = await cache.read([this.imageCacheScope(client), kind, sessionId, sha, expected ?? null], async () => {
+      const payload = this.mediaPayload(await read(), expected); this.assertInputScope(client, generation);
+      if (!payload || !("bytes" in payload)) { legacy = payload; return null; }
+      return { bytes: payload.bytes instanceof Uint8Array ? payload.bytes : new Uint8Array(payload.bytes), mime: payload.mime };
+    }, kind === "blob" ? sha : undefined);
+    this.assertInputScope(client, generation);
+    return image ? this.mediaPayload({ ...image, size: image.bytes.length }, expected) : legacy;
   }
 
   private mediaPayload(media: unknown, expected?: HistoryMediaExpected): HistoryMediaPayload | null {
@@ -1488,6 +1507,11 @@ export class DaemonService implements DaemonApi {
       caps = { ...caps, featureList: [...(caps.featureList ?? []), FORMAL_RENAME_FEATURE] };
     if (caps?.features?.[QUICK_CHAT_PROMOTE_FLAG] === true && !caps.featureList?.includes(QUICK_CHAT_PROMOTE_FEATURE))
       caps = { ...caps, featureList: [...(caps.featureList ?? []), QUICK_CHAT_PROMOTE_FEATURE] };
+    if (caps?.features?.[SERVICES_WORKERS_FLAG] === true && !caps.featureList?.includes(SERVICES_WORKERS_FEATURE))
+      caps = { ...caps, featureList: [...(caps.featureList ?? []), SERVICES_WORKERS_FEATURE] };
+    // 百度网盘 contract v1 names the capability `baiduPan` in features; the desktop gates on the kebab name.
+    if (caps?.features?.baiduPan === true && !caps.featureList?.includes(BAIDU_PAN_FEATURE))
+      caps = { ...caps, featureList: [...(caps.featureList ?? []), BAIDU_PAN_FEATURE] };
     if (this.client === client && access === this.accessRevision) {
       this.liveDeltasClient = caps === null ? null : client;
       this.liveDeltasSupported = caps?.featureList?.includes(LIVE_DELTAS_FEATURE) === true;
@@ -1602,12 +1626,39 @@ export class DaemonService implements DaemonApi {
   }
 
   fsFile(scope: WorkspaceScope, path: string, maxBytes?: number): Promise<FsFile> {
-    return this.requireClient().request<FsFile>("GET", `${this.scopePath(scope)}/fs/file`, { query: { path, maxBytes } });
+    return this.cachedImageFile(`${this.scopePath(scope)}/fs/file`, path, maxBytes);
   }
 
   /** Owner-only host file read (cutex fs-file-read): previews a file outside every workspace root. */
   hostFile(path: string, maxBytes?: number): Promise<FsFile> {
-    return this.requireClient().request<FsFile>("GET", "/v2/fs/file", { query: { path, maxBytes } });
+    return this.cachedImageFile("/v2/fs/file", path, maxBytes);
+  }
+
+  /** Pinned artifact versions (scope, id, version) that are not images, or too big to assemble for the cache. */
+  private uncachedArtifacts = new Set<string>();
+
+  private imageCacheScope(client: CutexClient): string {
+    const state = this.state;
+    return createHash("sha256").update(JSON.stringify([state.kind === "connected" ? [state.hostId, state.instanceId] : client.endpoint.baseUrl, client.endpoint.token])).digest("hex");
+  }
+
+  private async cachedImageFile(route: string, path: string, maxBytes?: number): Promise<FsFile> {
+    const client = this.requireClient(), generation = this.gen, cache = currentImageCache();
+    const read = (limit = maxBytes) => client.request<FsFile>("GET", route, { query: { path, maxBytes: limit } });
+    if (!cache || !/\.(png|jpe?g|gif|webp|bmp|avif|ico|svg)$/i.test(path) || maxBytes === 1) return read();
+    // The existing one-byte preview returns size/mtime and enforces the same scope/permission
+    // as a full read. Missing/inaccessible files throw before looking up any cached bytes.
+    const meta = await read(1); this.assertInputScope(client, generation);
+    if (meta.size > (maxBytes ?? 1048576) || !meta.mime.startsWith("image/")) return read();
+    let original: FsFile | undefined;
+    const image = await cache.read([this.imageCacheScope(client), route, path, meta.size, meta.modifiedAt], async () => {
+      original = await read(); this.assertInputScope(client, generation);
+      if (original.truncated || original.size !== meta.size || original.modifiedAt !== meta.modifiedAt) return null;
+      const bytes = new Uint8Array(Buffer.from(original.content, original.encoding === "base64" ? "base64" : "utf8"));
+      return bytes.length === original.size ? { bytes, mime: original.mime } : null;
+    });
+    this.assertInputScope(client, generation);
+    return image ? { ...meta, content: Buffer.from(image.bytes).toString("base64"), encoding: "base64", truncated: false, mime: image.mime } : original ?? await read();
   }
 
   /** Main-only byte transport; never exposed through DaemonApi or the renderer. */
@@ -1615,8 +1666,8 @@ export class DaemonService implements DaemonApi {
     const client = this.requireClient(), generation = this.generation;
     const caps = await this.capabilities();
     check();
-    if (!caps?.featureList?.includes("fs-file-transfer-v1")) throw new Error("file transfer is unavailable on this host");
-    if (source.artifact && !caps.featureList.includes("artifacts")) throw new Error("artifact reads are unavailable on this host");
+    // A pinned artifact version is read through the artifact store; only a plain file needs the file transfer.
+    if (source.artifact ? !caps?.featureList?.includes("artifacts") : !caps?.featureList?.includes("fs-file-transfer-v1")) throw new Error(source.artifact ? "artifact reads are unavailable on this host" : "file transfer is unavailable on this host");
     return remoteCopyTransport(client, source, () => {
       check();
       if (this.client !== client || this.generation !== generation) throw new Error("source connection changed");
@@ -3102,6 +3153,32 @@ export class DaemonService implements DaemonApi {
   deleteNciVerification() { return remoteJobsApi(this.requireClient()).deleteNciVerification(); }
   generateNciKey(replace: boolean) { return remoteJobsApi(this.requireClient()).generateNciKey(replace); }
   nciHelper() { return remoteJobsApi(this.requireClient()).nciHelper(); }
+  // 百度网盘 (`/v2/pan/*`, main/panApi.ts): the account and downloads live in this host's daemon.
+  panConnection() { return panApi(this.requireClient()).panConnection(); }
+  panConfigure(input: PanAppInput) { return panApi(this.requireClient()).panConfigure(input); }
+  panDisconnect() { return panApi(this.requireClient()).panDisconnect(); }
+  panAuthStart() { return panApi(this.requireClient()).panAuthStart(); }
+  panAuthPoll(authId: string) { return panApi(this.requireClient()).panAuthPoll(authId); }
+  panAuthCode(code: string, redirectUri: string) { return panApi(this.requireClient()).panAuthCode(code, redirectUri); }
+  panFiles(dir: string, start?: number, limit?: number) { return panApi(this.requireClient()).panFiles(dir, start, limit); }
+  panSearch(key: string, dir: string) { return panApi(this.requireClient()).panSearch(key, dir); }
+  panMeta(path: string) { return panApi(this.requireClient()).panMeta(path); }
+  panDownloads(limit?: number) { return panApi(this.requireClient()).panDownloads(limit); }
+  panStartDownload(req: PanDownloadRequest) { return panApi(this.requireClient()).panStartDownload(req); }
+  panDownloadAction(downloadId: string, action: PanDownloadAction) { return panApi(this.requireClient()).panDownloadAction(downloadId, action); }
+  async watchPan(): Promise<string> {
+    const watchId = randomUUID();
+    const feed = followPanEvents(this.requireClient(), {
+      download: (download) => this.emit("panEvents", { watchId, kind: "download", download }),
+      status: (status) => this.emit("panEvents", { watchId, kind: "status", status }),
+    });
+    this.panWatches.set(watchId, feed);
+    return watchId;
+  }
+  async unwatchPan(watchId: string): Promise<void> {
+    this.panWatches.get(watchId)?.stop();
+    this.panWatches.delete(watchId);
+  }
   saveNciHelper() { return remoteJobsApi(this.requireClient()).saveNciHelper(); }
 
   async artifact(artifactId: string): Promise<ArtifactView | null> {
@@ -3134,8 +3211,62 @@ export class DaemonService implements DaemonApi {
     return this.artifactRead<ArtifactDetail>(`/v2/artifact-store/${artifactId(id)}`);
   }
 
-  artifactStoreContent(id: string, version: number | "latest", opts?: { offset?: number; maxBytes?: number }): Promise<ArtifactContent | null> {
-    return this.artifactRead<ArtifactContent>(`/v2/artifact-store/${artifactId(id)}/versions/${artifactVersionSel(version)}/content`, { query: artifactContentQuery(opts) });
+  artifactStoreContent(id: string, version: number | "latest", opts?: { offset?: number; maxBytes?: number; imagePreview?: boolean }): Promise<ArtifactContent | null> {
+    return this.cachedArtifactImage(id, version, opts);
+  }
+
+  private async cachedArtifactImage(id: string, version: number | "latest", opts?: { offset?: number; maxBytes?: number; imagePreview?: boolean }): Promise<ArtifactContent | null> {
+    const route = `/v2/artifact-store/${artifactId(id)}/versions/${artifactVersionSel(version)}/content`;
+    const query = artifactContentQuery(opts), cache = currentImageCache(), client = this.requireClient(), generation = this.gen;
+    const raw = async (offset?: number, maxBytes?: number) => {
+      this.assertInputScope(client, generation);
+      const page = await this.artifactRead<ArtifactContent>(route, { query: artifactContentQuery({ offset, maxBytes }) });
+      this.assertInputScope(client, generation); return page;
+    };
+    if (!cache || version === "latest") return this.artifactRead<ArtifactContent>(route, { query });
+    // A pinned version never changes: once its detail says it is no cacheable image, skip the cache for it.
+    const pinned = JSON.stringify([this.imageCacheScope(client), id, version]);
+    if (this.uncachedArtifacts.has(pinned)) return this.artifactRead<ArtifactContent>(route, { query });
+    const window = { offset: query.offset ?? 0, maxBytes: query.maxBytes ?? 262144 };
+    let externalImage: import("./imageCache").CachedImage | null = null;
+    let sha: string | null = null;
+    const image = await cache.read([this.imageCacheScope(client), "artifact", id, version], async () => {
+      this.assertInputScope(client, generation);
+      const detail = await this.artifactStoreGet(id); this.assertInputScope(client, generation);
+      const v = detail?.versions.find(v => v.version === version);
+      if (v && (!v.mediaType.startsWith("image/") || v.bytes > ARTIFACT_CACHE_MAX_BYTES)) { if (this.uncachedArtifacts.size >= 4096) this.uncachedArtifacts.clear(); this.uncachedArtifacts.add(pinned); }
+      if (!v || !v.mediaType.startsWith("image/") || v.bytes > ARTIFACT_CACHE_MAX_BYTES || (!opts?.imagePreview && v.bytes > (opts?.maxBytes ?? 262144))) return null;
+      const assemble = async () => {
+        const parts: Buffer[] = []; let offset = 0;
+        do {
+          const page = await raw(offset, 4 * 1024 * 1024); this.assertInputScope(client, generation);
+          if (!page || page.externalChanged || page.offset !== offset || page.totalBytes !== v.bytes) throw Error("artifact content unavailable");
+          const bytes = Buffer.from(page.content, page.encoding === "base64" ? "base64" : "utf8");
+          if (!bytes.length || offset + bytes.length > v.bytes) throw Error("invalid artifact image window");
+          parts.push(bytes); offset += bytes.length;
+          if (!page.truncated && offset !== v.bytes) throw Error("partial artifact image");
+        } while (offset < v.bytes);
+        const bytes = Buffer.concat(parts);
+        if (v.sha256 && createHash("sha256").update(bytes).digest("hex") !== v.sha256) throw Error("image sha256 mismatch");
+        sha = v.sha256;
+        return { bytes: new Uint8Array(bytes), mime: v.mediaType };
+      };
+      if (v.storage === "external") {
+        // The artifact content route checks its registered source size/mtime/hash. Never serve
+        // an external version without asking that route whether its source is still present.
+        const probe = await raw(0, 1); this.assertInputScope(client, generation);
+        if (!probe || probe.externalChanged) return null;
+        externalImage = await cache.read([this.imageCacheScope(client), "external-artifact", id, version, probe.sha256, probe.totalBytes], assemble, v.sha256 ?? undefined, window);
+        return null; // do not put moving external sources under the immutable key
+      }
+      return assemble();
+    }, undefined, window);
+    this.assertInputScope(client, generation);
+    const shown = image ?? externalImage;
+    if (!shown) return this.artifactRead<ArtifactContent>(route, { query });
+    const offset = typeof query.offset === "number" ? query.offset : 0;
+    const bytes = shown.bytes, total = shown.size ?? bytes.length;
+    return { version, encoding: "base64", content: Buffer.from(bytes).toString("base64"), offset, totalBytes: total, truncated: offset + bytes.length < total, mediaType: shown.mime, sha256: sha ?? shown.digest ?? null, externalChanged: null };
   }
 
   artifactStoreDiff(id: string, from: number, to: number): Promise<ArtifactDiff | null> {
@@ -3194,6 +3325,38 @@ export class DaemonService implements DaemonApi {
     if (sessionId !== undefined && (typeof sessionId !== "string" || !/^[A-Za-z0-9._:-]{1,200}$/.test(sessionId))) throw new Error("bad session id");
     const limit = typeof query?.limit === "number" ? query.limit : undefined;
     return this.requireClient().alarms<AlarmList>({ ...(sessionId ? { sessionId } : {}), state: query?.state === "all" ? "all" : "pending", ...(limit !== undefined ? { limit } : {}) });
+  }
+
+  // 备忘 · 要处理 (cutex owner-pins): what agents pinned for the owner, and the owner's done / set aside / reopen / remove.
+  async ownerPins(query: { state?: "open" | "all"; agentId?: string; limit?: number }): Promise<OwnerPinList | null> {
+    const agentId = query?.agentId;
+    if (agentId !== undefined && (typeof agentId !== "string" || !/^[A-Za-z0-9._:-]{1,200}$/.test(agentId))) throw new Error("bad agent id");
+    const limit = typeof query?.limit === "number" && Number.isFinite(query.limit) ? Math.max(1, Math.min(500, Math.floor(query.limit))) : undefined;
+    try {
+      return await this.requireClient().request<OwnerPinList>("GET", "/v2/owner-pins", { query: { state: query?.state === "all" ? "all" : "open", ...(agentId ? { agentId } : {}), ...(limit !== undefined ? { limit } : {}) } });
+    } catch (error) {
+      if (error instanceof CutexApiError && (error.status === 404 || error.status === 405)) return null;
+      throw error;
+    }
+  }
+
+  async ownerPinUpdate(pinId: string, change: OwnerPinChange): Promise<OwnerPinUpdateResult> {
+    if (typeof pinId !== "string" || !OWNER_PIN_ID.test(pinId)) throw new Error("bad pin id");
+    const remove = !!change && "delete" in change && change.delete === true;
+    const state = !remove && change && "state" in change ? change.state : null;
+    if (!remove && state !== "open" && state !== "done" && state !== "dropped") throw new Error("bad pin change");
+    try {
+      if (remove) {
+        await this.requireClient().request("DELETE", `/v2/owner-pins/${pinId}`);
+        return { ok: true, pin: null };
+      }
+      const r = await this.requireClient().request<{ pin: unknown }>("PATCH", `/v2/owner-pins/${pinId}`, { body: { state } });
+      return { ok: true, pin: asOwnerPin(r?.pin) };
+    } catch (error) {
+      const refusal = refusalOf(error);
+      if (refusal) return { ok: false, error: refusal };
+      throw error;
+    }
   }
 
   async cancelAlarm(alarmId: string): Promise<AlarmCancelResult> {
@@ -4038,12 +4201,14 @@ export class DaemonService implements DaemonApi {
     const method = decision === "grant" ? SAFETY_CHECK_GRANT : decision === "dismiss" ? SAFETY_CHECK_DISMISS : null;
     if (!method) throw new Error("bad safety check decision");
     try {
-      const r = await this.requireClient().cutex<{ notification?: unknown; submitError?: { code?: unknown; message?: unknown } }>(agentId, method, { blockId });
+      const r = await this.requireClient().cutex<{ notification?: unknown; submitError?: { code?: unknown; message?: unknown }; notice?: { inputId?: unknown; messageId?: unknown } }>(agentId, method, { blockId });
       const notification = asRecord(r?.notification);
       if (!notification) throw new Error(`${method} returned no notification`);
       const failed = r?.submitError;
       const submitError = failed && typeof failed.code === "string" ? { code: failed.code, message: typeof failed.message === "string" ? failed.message : "" } : null;
-      return { ok: true, notification, submitError };
+      const n = r?.notice;
+      const notice = n && typeof n.inputId === "string" && typeof n.messageId === "string" ? { notice: { inputId: n.inputId, messageId: n.messageId } } : {};
+      return { ok: true, notification, submitError, ...notice };
     } catch (error) {
       const refusal = refusalOf(error);
       if (!refusal) throw error;

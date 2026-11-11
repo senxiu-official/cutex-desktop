@@ -7,6 +7,7 @@
 //   plainly; SSH hosts switch between connecting as member and as owner; 管理用户 opens 用户.
 // Owner and permissions are kept apart on purpose: full control does not make you the owner.
 import { useState } from "react";
+import { isTokenImportHost } from "../../lib/hostTokenImport";
 import { ShieldCheck } from "lucide-react";
 import type { SshErrorView } from "../../../../shared/hosts";
 import { api } from "../../bridge";
@@ -98,6 +99,7 @@ export function HostRightsSection({ hostId }: { hostId: string }) {
   const full = o.role === "owner" || o.role === "older";
   const via = o.connection === "local" ? t("host.rights.via.local") : o.connection === "ssh" ? t("host.rights.via.ssh", { target: o.sshTarget ?? label }) : o.connection === "dev" ? t("host.own.how.dev") : t("host.rights.via.token");
   const paired = look?.view.kind !== "ssh" || !!look.view.paired;
+  const tokenHost = isTokenImportHost(look?.view);
   const switchTo = async () => {
     const next = o.connectAs === "owner" ? "member" : "owner";
     setBusy(true);
@@ -127,7 +129,7 @@ export function HostRightsSection({ hostId }: { hostId: string }) {
     <Section id={settingsAnchorId("hostRights")} title={t("host.rights.title")} hint={t("host.rights.hint")} >
       <SettingRow readOnly={!(o.connection === "ssh" && paired)} agents="access" source="local" label={narrowed ? scopeLabel(t, scope!, full) : role ? t(role as MessageKey) : t("host.rights.unknown")} hint={hint}>
         <span className="flex flex-wrap justify-end gap-1.5">
-          {o.connection === "ssh" && paired && (
+          {o.connection === "ssh" && paired && !tokenHost && (
             <Button disabled={busy} onClick={() => void switchTo()}>
               {busy ? t("host.own.switching") : t(o.connectAs === "owner" ? "host.own.toMember" : "host.own.toOwner")}
             </Button>
@@ -136,7 +138,7 @@ export function HostRightsSection({ hostId }: { hostId: string }) {
         </span>
       </SettingRow>
       {o.ownerRightsOnly && <p className="py-2 text-xs text-subtle">{t("host.rights.notOwner", { owner: ownerName(o.owner, t("host.own.someone")) })}</p>}
-      {o.connection === "ssh" && o.connectAs === "member" && <p className="py-2 text-xs text-subtle">{t("host.own.memberNote")}</p>}
+      {o.connection === "ssh" && o.connectAs === "member" && !tokenHost && <p className="py-2 text-xs text-subtle">{t("host.own.memberNote")}</p>}
       {error && <ProblemText error={error} />}
     </Section>
   );

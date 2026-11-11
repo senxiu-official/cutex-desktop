@@ -1,4 +1,44 @@
+// 备忘 (owner 2026-11-10). "bookmarks.memo.title" is the panel's name, written only there (it may change again);
+// other strings take it as {board}. Never the word 钉板.
+export const memoZhCN = {
+  "bookmarks.memo.title": "备忘",
+  "bookmarks.memo.tab.pins": "要处理",
+  "bookmarks.memo.tab.bookmarks": "书签",
+  "bookmarks.memo.widgetHint": "所有{{agent}}留给你、还没处理的事",
+  "bookmarks.memo.kind.decide": "要你定",
+  "bookmarks.memo.kind.todo": "要你做",
+  "bookmarks.memo.kind.note": "记一下",
+  "bookmarks.memo.empty": "没有要处理的事",
+  "bookmarks.memo.emptyHint": "{{agent}}有事要你做、要你定，或觉得值得留着时，会放进{board}，不用再翻旧消息。",
+  "bookmarks.memo.agentEmpty": "这个{{agent}}没有留给你的事",
+  "bookmarks.memo.done": "完成",
+  "bookmarks.memo.drop": "不用了",
+  "bookmarks.memo.reopen": "重新放回",
+  "bookmarks.memo.remove": "删除",
+  "bookmarks.memo.removeArmed": "再左键点击一次删除",
+  "bookmarks.memo.jump": "回到原处",
+  "bookmarks.memo.resolved": "已处理 · {n}",
+  "bookmarks.memo.state.done": "已完成",
+  "bookmarks.memo.state.dropped": "不用了",
+  "bookmarks.memo.by.agent": "{{agent}}撤下",
+  "bookmarks.memo.filter.all": "全部",
+  "bookmarks.memo.filter.agent": "当前{{agent}}",
+  "bookmarks.memo.more": "还有 {n} 条",
+  "bookmarks.memo.maxRows": "最多显示几条",
+  "bookmarks.memo.otherHost": "{host} 上",
+  "bookmarks.memo.tray": "{board}：{n} 件要你做或定",
+  "bookmarks.memo.trayNotes": "{board}：{n} 条",
+  "bookmarks.memo.tool.pinned": "放进{board}",
+  "bookmarks.memo.tool.updated": "更新{board}",
+  "bookmarks.memo.tool.resolved": "从{board}撤下",
+  "bookmarks.memo.tool.pinning": "正在记下…",
+  "bookmarks.memo.tool.failed": "没能放进{board}",
+  "bookmarks.memo.tool.activity": "记下要你处理的事",
+  "bookmarks.memo.failed": "{board}没能更新：{error}",
+} as const;
+
 export const zhCN = {
+  ...memoZhCN,
   "bookmarks.home": "本会话书签", "bookmarks.homeEmpty": "本会话还没有 · 共 {n} 条", "bookmarks.browseAll": "查看全部","bookmarks.back": "返回本会话", "bookmarks.close": "收起书签列表",
   "bookmarks.projectPin": "在本项目的会话首页显示", "bookmarks.projectHint": "自动关联项目不会让其他会话看见；只有勾选后才加入项目导航",
   "bookmarks.title": "书签", "bookmarks.description": "收藏引用，临时查看内容或聚焦已有工具；保存在此设备", "bookmarks.list": "全部书签", "bookmarks.add": "加书签", "bookmarks.active": "已收藏（左键点击取消）",
@@ -13,3 +53,4 @@ export const zhCN = {
 } as const;
 declare module "../i18nCatalog" { interface ModuleMessages extends Messages {} }
 type Messages = typeof zhCN;
+declare module "../i18nCatalog" { interface ModuleZhHantMessages extends Record<keyof typeof memoZhCN, string> {} }

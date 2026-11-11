@@ -410,6 +410,14 @@ describe("items", () => {
     expect(items[1]!.target).toEqual({ kind: "service", hostId: "local", slug: "a" });
   });
 
+  it("services: a background service (worker) opens the 服务 page searched to it, never a browser tab", () => {
+    const w = { slug: "collector", displayName: "Collector", health: "crashLooped", runtime: "worker" } as ServiceView;
+    const [item] = serviceItems([{ hostId: "local", services: [w], state: "live" }], t);
+    expect(item!.target).toEqual({ kind: "page", page: "services.page", params: { q: "collector" } });
+    expect(item!.subtitle).toBe("quick-switch.sub.worker(slug=collector)");
+    expect(item!.badge?.text).toBe("quick-switch.status.stopped");
+  });
+
   it("artifacts: newest first, archived dropped, latest version ref", () => {
     const a = (id: string, updatedAt: string, archivedAt: string | null = null) => ({ artifactId: id, name: `N-${id}`, kind: "report", latestVersion: 3, updatedAt, archivedAt }) as ArtifactSummary;
     const items = artifactItems([{ hostId: "local", project: "P", items: [a("x", "2026-10-01"), a("y", "2026-10-20"), a("z", "2026-10-21", "2026-10-21")] }], t);

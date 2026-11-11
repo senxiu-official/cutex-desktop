@@ -9,6 +9,9 @@
 // v1.10: `services.side.open(kind, params, { hold: true })` creates (or reuses) an instance and takes
 // its first hold in the same call, so a background card nobody sees is mounted (hidden) from its first
 // render; the caller gets a `SideHoldLocator` that can only drop that pre-hold (releaseHold).
+// Uncapped holds (app-internal, not in the module contract): an instance the app marks with markUncappedHold is held
+// past `sideKeepMounted` and does not take one of its places (owner 2026-11-10: a browser tab playing sound stays
+// alive in the background, 「完全不用限制」). Its keepMounted calls are the same; the mark is read on each one.
 import { create } from "zustand";
 import { hostEpoch } from "../../../shared/hosts";
 import { useApp } from "../store";
@@ -40,6 +43,8 @@ export interface SideHold {
   dirty: boolean;
   /** v1.10: taken by services.side.open({ hold: true }); only that open's locator may drop it (and discard a card it created). */
   ticket?: HoldTicket;
+  /** Not counted against `sideKeepMounted` (markUncappedHold). */
+  uncapped?: true;
 }
 
 export interface HoldTicket {
@@ -54,7 +59,10 @@ export const holdKey = (scope: string, id: string): string => `${scope}\u0000${i
 
 // ── Pure rules ──────────────────────────────────────────────────────────────────────────────────
 
-export type HoldRequest = { scope: string; id: string; inst: SideInstance; keepAlive: "unmount" | "hidden" | undefined; epoch: string | null };
+export type HoldRequest = { scope: string; id: string; inst: SideInstance; keepAlive: "unmount" | "hidden" | undefined; epoch: string | null; uncapped?: boolean };
+
+/** Holds that take one of the window's `sideKeepMounted` places. */
+const cappedCount = (holds: SideHolds): number => Object.values(holds).filter((h) => !h.uncapped).length;
 
 /** Applies keepMounted(hold) and returns the new holds and whether the instance is held afterwards. `ticket`: a new hold taken by open({ hold }). */
 export function applyHold(holds: SideHolds, req: HoldRequest, hold: boolean, limit: number, ticket?: HoldTicket): { holds: SideHolds; held: boolean } {
@@ -65,10 +73,18 @@ export function applyHold(holds: SideHolds, req: HoldRequest, hold: boolean, lim
     delete next[key];
     return { holds: next, held: false };
   }
-  if (holds[key]) return { holds, held: true };
-  // Only components that already live hidden off screen; never more than the window's limit.
-  if (req.keepAlive !== "hidden" || Object.keys(holds).length >= limit) return { holds, held: false };
-  const h: SideHold = { scope: req.scope, id: req.id, inst: req.inst, epoch: req.epoch, dirty: false, ...(ticket ? { ticket } : {}) };
+  const had = holds[key];
+  if (had) {
+    // Held already: only the uncapped mark may change (a live hold is never dropped for the limit).
+    if (!!had.uncapped === !!req.uncapped) return { holds, held: true };
+    const next: SideHold = { ...had };
+    if (req.uncapped) next.uncapped = true;
+    else delete next.uncapped;
+    return { holds: { ...holds, [key]: next }, held: true };
+  }
+  // Only components that already live hidden off screen; never more than the window's limit (uncapped: no limit).
+  if (req.keepAlive !== "hidden" || (!req.uncapped && cappedCount(holds) >= limit)) return { holds, held: false };
+  const h: SideHold = { scope: req.scope, id: req.id, inst: req.inst, epoch: req.epoch, dirty: false, ...(ticket ? { ticket } : {}), ...(req.uncapped ? { uncapped: true as const } : {}) };
   return { holds: { ...holds, [key]: h }, held: true };
 }
 
@@ -110,7 +126,7 @@ export type HoldAdmission = "ok" | "not-holdable" | "hold-limit";
 export function admitHold(holds: SideHolds, scope: string, id: string | null, keepAlive: "unmount" | "hidden" | undefined, limit: number): HoldAdmission {
   if (keepAlive !== "hidden") return "not-holdable";
   if (id !== null && holds[holdKey(scope, id)]) return "ok";
-  return Object.keys(holds).length >= limit ? "hold-limit" : "ok";
+  return cappedCount(holds) >= limit ? "hold-limit" : "ok";
 }
 
 /**
@@ -204,9 +220,18 @@ export const keepMountedLimit = (): number => clampSetting(getUiPrefs().sideKeep
 export function setSideHold(scope: string | null, id: string, inst: SideInstance, keepAlive: "unmount" | "hidden" | undefined, hold: boolean): boolean {
   if (!scope) return false;
   const holds = useSideKeep.getState().holds;
-  const r = applyHold(holds, { scope, id, inst, keepAlive, epoch: hostEpoch(useApp.getState().hosts, inst.binding.hostId) }, hold, keepMountedLimit());
+  const r = applyHold(holds, { scope, id, inst, keepAlive, epoch: hostEpoch(useApp.getState().hosts, inst.binding.hostId), uncapped: uncappedIds.has(id) }, hold, keepMountedLimit());
   if (r.holds !== holds) useSideKeep.setState({ holds: r.holds });
   return r.held;
+}
+
+/** Instance ids whose holds are uncapped (see the header); read by setSideHold, so mark before keepMounted. */
+const uncappedIds = new Set<string>();
+
+/** App-internal: instance `id`'s holds are not counted against `sideKeepMounted` (on) / are again (off). */
+export function markUncappedHold(id: string, on: boolean): void {
+  if (on) uncappedIds.add(id);
+  else uncappedIds.delete(id);
 }
 
 /**

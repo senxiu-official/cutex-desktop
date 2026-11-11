@@ -45,7 +45,6 @@ export function WritableRootsEditor({ roots, onChange, disabled }: { roots: stri
   const warning = t("launch.rootExposesCutex");
   return (
     <div className={`flex max-w-72 min-w-0 flex-col items-end gap-1 ${disabled ? "opacity-50" : ""}`}>
-      {roots.length === 0 && <span className="text-xs text-subtle">{t("launch.noRoots")}</span>}
       {roots.map((root) => (
         <div key={root} className="flex max-w-full items-center gap-1 rounded-md bg-surface-2 py-0.5 pr-0.5 pl-2">
           {exposes(root) && (
@@ -74,10 +73,14 @@ export function WritableRootsEditor({ roots, onChange, disabled }: { roots: stri
           </span>
         </div>
       )}
-      <Button disabled={disabled || pickBlocked} title={pickBlocked ? t("remote.noDirBrowse") : undefined} onClick={() => void add()}>
-        <FolderPlus size={13} className="mr-1 inline" />
-        {t("launch.addRoot")}
-      </Button>
+      {/* 「无」 sits on the add button's line, so an empty list keeps the row one control tall. */}
+      <span className="flex items-center gap-2">
+        {roots.length === 0 && <span className="text-xs text-subtle">{t("launch.noRoots")}</span>}
+        <Button disabled={disabled || pickBlocked} title={pickBlocked ? t("remote.noDirBrowse") : undefined} onClick={() => void add()}>
+          <FolderPlus size={13} className="mr-1 inline" />
+          {t("launch.addRoot")}
+        </Button>
+      </span>
     </div>
   );
 }

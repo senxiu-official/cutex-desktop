@@ -4,11 +4,12 @@
 // The Profile → account select is core (components/settings/KimiAccountSelect.tsx, lib/kimiAccounts.ts). Hidden
 // without the capability.
 import { KIMI_ACCOUNTS_FEATURE } from "../../../../shared/kimiAccounts";
-import { KIMI_ACCOUNTS_SECTION } from "../../lib/kimiAccounts";
+import { KIMI_ACCOUNTS_ALL_SECTION, KIMI_ACCOUNTS_SECTION } from "../../lib/kimiAccounts";
 import { defineModule } from "../slots";
 import { lazyPage } from "../../lib/lazyPage";
 
 const KimiAccountsSection = lazyPage(() => import("./KimiAccountsSection").then((m) => m.KimiAccountsSection));
+const KimiAccountsAll = lazyPage(() => import("./KimiAccountsSection").then((m) => m.KimiAccountsAll));
 
 export default defineModule({
   id: "kimi-accounts",
@@ -24,6 +25,14 @@ export default defineModule({
         titleKey: "kimi-accounts.section",
         keywords: ["kimi-accounts.add", "kimi-accounts.login", "kimi-accounts.logout", "kimi-accounts.state.loggedIn"],
         Section: KimiAccountsSection,
+      },
+      {
+        // Every account, with a filter: Profile → 全部 N 个账户 (the Profile page's sub-page `kimi`).
+        id: KIMI_ACCOUNTS_ALL_SECTION,
+        page: "profiles",
+        order: 111,
+        titleKey: "kimi-accounts.section",
+        Section: KimiAccountsAll,
       },
     ],
   },

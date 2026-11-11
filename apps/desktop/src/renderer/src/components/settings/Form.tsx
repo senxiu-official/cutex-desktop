@@ -371,7 +371,7 @@ export function SettingsEffectCard({ children }: { children: ReactElement<{ chil
  * storage scope only repeats when it differs from the page. Timing defaults describe the rows;
  * the page summarizes their metadata, with row icons only when the page is mixed.
  */
-export function Section({ title, hint, children, actions, id, tag, picker, tools, sub, collapsed }: { title?: ReactNode; collapsed?: boolean; hint?: ReactNode; children: ReactNode; actions?: ReactNode; id?: string; /** A muted label after the title, e.g. 旧版 for a card that will be redone (title = tooltip). */ tag?: { label: string; title?: string }; /** A host card's host picker before its (then short) source chip (components/SettingsHostFrame SettingsHostSection). */ picker?: ReactNode; /** The agents' MCP tools this card is about: an [MCP工具] tag naming them. */ tools?: readonly CardTool[]; /** A child card under a heading of its own (a smaller title). */ sub?: boolean }) {
+export function Section({ title, tabs, hint, children, actions, id, tag, picker, tools, sub, collapsed }: { title?: ReactNode; /** A card whose views switch (e.g. 插件's 已安装 / 浏览 / 市场): the tab bar in the title's place. */ tabs?: ReactNode; collapsed?: boolean; hint?: ReactNode; /** None: a titled note (title + hint) with no card under it — a card holds settings, never just a sentence. */ children?: ReactNode; actions?: ReactNode; id?: string; /** A muted label after the title, e.g. 旧版 for a card that will be redone (title = tooltip). */ tag?: { label: string; title?: string }; /** A host card's host picker before its (then short) source chip (components/SettingsHostFrame SettingsHostSection). */ picker?: ReactNode; /** The agents' MCP tools this card is about: an [MCP工具] tag naming them. */ tools?: readonly CardTool[]; /** A child card under a heading of its own (a smaller title). */ sub?: boolean }) {
   const { t } = useI18n();
   // 「只看你修改过的设置」 (owner 2026-10-18): per card, offered only while a row in it is modified.
   const [modified, setModified] = useState<ReadonlySet<string>>(() => new Set());
@@ -392,8 +392,8 @@ export function Section({ title, hint, children, actions, id, tag, picker, tools
         <Toggle label={t("settings.onlyModified", { n: modified.size })} checked={only} onChange={setOnly} />
       </label>
     ) : null;
-  const { scope, timing, placement, reports } = useCardEffects(!!title);
-  const inheritedDecoration = useSettingsRowDecoration(!!title);
+  const { scope, timing, placement, reports } = useCardEffects(!!(title || tabs));
+  const inheritedDecoration = useSettingsRowDecoration(!!(title || tabs));
   const partPicker = useContext(PartPickerContext);
   picker = scope?.startsWith("host:") || scope?.startsWith("codex:") ? picker ?? partPicker : undefined;
   const compact = useContext(CompactContext);
@@ -401,7 +401,7 @@ export function Section({ title, hint, children, actions, id, tag, picker, tools
     // Compact (a 在主界面调整 panel): the settings page may be mounted too, so the anchor is not an id there.
     <EffectPlacementContext value={placement}><CardMetadataReportContext value={reports}>
     <section className={compact ? "mb-3" : "mb-6"} id={compact ? undefined : id} data-settings-anchor={compact ? id : undefined}>
-      {(title || actions || filter || picker || tools?.length) && (
+      {(title || tabs || actions || filter || picker || tools?.length) && (
         <div className={compact ? "mb-1" : "mb-2"}>
           {/* The title never truncates (owner 2026-10-25: 事件分级 showed as 「事...」 once the revamp's markers, the
               「只看你修改过的设置」 switch and a preset switch shared its row). Two groups that wrap: the title with its
@@ -411,8 +411,9 @@ export function Section({ title, hint, children, actions, id, tag, picker, tools
           <div className={`mb-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 ${compact ? "min-h-7" : "min-h-8"}`} data-settings-card-head="">
             <div className="flex max-w-full min-w-0 shrink-0 flex-wrap items-center gap-x-2 gap-y-1" data-settings-card-title="">
               {title && <h3 className={`min-w-0 break-words ${sub ? "text-ui/[inherit] font-medium" : `font-semibold ${compact ? "text-ui/[inherit]" : "text-sm"}`}`}>{title}</h3>}
+              {tabs && <div className="min-w-0" data-settings-card-tabs="">{tabs}</div>}
               {inheritedDecoration?.marker}
-              {title && (scope || timing || tools?.length) && <span className="inline-flex flex-wrap items-center gap-1.5" data-effect-card-summary="">
+              {(title || tabs) && (scope || timing || tools?.length) && <span className="inline-flex flex-wrap items-center gap-1.5" data-effect-card-summary="">
                 {scope && <EffectScope scope={scope} picker={picker} />}
                 {timing && <AgentsChip agents={timing} />}
                 {tools?.length ? <ToolsChip tools={tools} /> : null}
@@ -433,12 +434,12 @@ export function Section({ title, hint, children, actions, id, tag, picker, tools
           {hint && <p className="text-xs text-subtle">{hint}</p>}
         </div>
       )}
-      <ModifiedContext value={{ only, report }}>
+      {children != null && children !== false && <ModifiedContext value={{ only, report }}>
           <Card hidden={collapsed}>
             {children}
             {only && modified.size === 0 && <p className="py-3 text-xs text-subtle">{t("settings.noneModified")}</p>}
           </Card>
-      </ModifiedContext>
+      </ModifiedContext>}
     </section>
     </CardMetadataReportContext></EffectPlacementContext>
   );
@@ -697,6 +698,41 @@ function RestoreDefault({ onClick, title }: { onClick(): void; title?: string })
   );
 }
 
+/**
+ * Several rows under one name inside a card (留白里常驻: one switch per list): the name and its hint as a row of
+ * their own, the rows under it indented. Never a bold line or a bare paragraph in the card.
+ */
+export function RowGroup({ title, hint, children }: { title: ReactNode; hint?: ReactNode; children: ReactNode }) {
+  return (
+    <div role="group" data-settings-row-group="" className="border-b border-border/60 pt-3 last:border-b-0">
+      <div className="text-sm">{title}</div>
+      {hint && <div className="text-xs text-subtle">{hint}</div>}
+      <div className="pl-3">{children}</div>
+    </div>
+  );
+}
+
+/**
+ * One choice among a few where each needs a line of explanation (a device's rights at pairing): radios with a hint each,
+ * stacked. Short choices without explanations are a Segmented.
+ */
+export function RadioList<T extends string>({ name, value, options, onChange, label }: { name: string; value: T; options: readonly { value: T; label: ReactNode; hint?: ReactNode; extra?: ReactNode }[]; onChange(v: T): void; label: string }) {
+  return (
+    <div role="radiogroup" aria-label={label} data-settings-radio-list="" className="py-1.5">
+      {options.map((o) => (
+        <label key={o.value} className="flex cursor-pointer items-start gap-2 py-1 text-sm">
+          <input type="radio" name={name} checked={value === o.value} onChange={() => onChange(o.value)} className="mt-1 accent-[var(--color-accent)]" />
+          <span className="min-w-0">
+            {o.label}
+            {o.extra}
+            {o.hint && <span className="block text-xs text-subtle">{o.hint}</span>}
+          </span>
+        </label>
+      ))}
+    </div>
+  );
+}
+
 /** A link-styled text button with a trailing →, e.g. a page header's related page. */
 export function TextLink({ children, onClick }: { children: ReactNode; onClick(): void }) {
   return (
@@ -705,6 +741,26 @@ export function TextLink({ children, onClick }: { children: ReactNode; onClick()
       <ArrowRight size={12} className="shrink-0" aria-hidden />
     </button>
   );
+}
+
+/**
+ * A long page's parts (会话: 消息 / 输入 / 布局…): a small jump bar at the top and a heading per part. The part
+ * heading is a quiet label on a rule, a level above the cards' titles without competing with the page title.
+ */
+export function PartNav({ label, parts, onJump }: { label: string; parts: readonly { anchor: string; label: string }[]; onJump(anchor: string): void }) {
+  return (
+    <nav aria-label={label} data-settings-part-nav="" className="mb-5 flex flex-wrap gap-1.5">
+      {parts.map((p) => (
+        <button key={p.anchor} type="button" onClick={() => onJump(p.anchor)} className={`rounded-full bg-surface-2 px-2.5 py-0.5 text-xs text-muted hover:bg-hover hover:text-foreground ${FOCUS}`}>
+          {p.label}
+        </button>
+      ))}
+    </nav>
+  );
+}
+
+export function PartHeading({ children }: { children: ReactNode }) {
+  return <h2 data-settings-part-heading="" className="mb-3 flex items-center gap-3 pt-2 text-xs font-medium text-muted after:h-px after:flex-1 after:bg-border/70">{children}</h2>;
 }
 
 /** The entry to a sub-page: its name, what is there (or how many), and ›. The whole row opens it. */
@@ -883,6 +939,20 @@ export function ErrorNote({ children }: { children: ReactNode }) {
     <p role="alert" className="py-2 text-xs text-danger">
       {children}
     </p>
+  );
+}
+
+/**
+ * A note about the whole page, above its cards (a new owner device, the host offline, devices waiting): one shape for
+ * all of them — icon, text, actions on the right (under the text when there is no room). Inside a card use Notice.
+ */
+export function Banner({ tone = "warn", icon, children, actions, className = "", attrs }: { tone?: "warn" | "info"; icon?: ReactNode; children: ReactNode; actions?: ReactNode; className?: string; /** role, data-testid, data-* of the caller. */ attrs?: Record<string, string | undefined> }) {
+  return (
+    <div {...attrs} data-settings-banner={tone} className={`flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border px-4 py-2.5 text-sm ${tone === "warn" ? "border-warn/40 bg-warn/10" : "border-border bg-surface-2/50 text-muted"} ${className}`}>
+      {icon && <span className={`shrink-0 ${tone === "warn" ? "text-warn-text" : "text-subtle"}`}>{icon}</span>}
+      <div className="min-w-[12rem] flex-1">{children}</div>
+      {actions && <div className="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-2">{actions}</div>}
+    </div>
   );
 }
 

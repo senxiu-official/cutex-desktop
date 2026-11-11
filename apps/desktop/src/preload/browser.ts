@@ -1,4 +1,5 @@
 import type { BrowserCursorPreferences } from "../shared/browserCursor";
+import type { BrowserCarrierPreferences } from "../shared/browserCarrier";
 import { BROWSER_CHANNEL, type BrowserBridge, type BrowserEvent, type BrowserRequest, type BrowserTabMount, type BrowserTabView, type BrowserTurnShot, type BrowserImage, type BrowserToolItem, type BrowserAgentView, type BrowserHostSettings, type BrowserIdempotencyClearResult, type BrowserClaimPolicyView, type BrowserClaimAllowView, type BrowserClaimAuditView, type BrowserExternalPagesView, type BrowserSitePermissionView, type BrowserProfileTools } from "../shared/browser";
 import type { HostBinding } from "../shared/hosts";
 
@@ -14,6 +15,7 @@ export function browserBridge(options: BrowserPreloadOptions): BrowserBridge {
     resetOrigins: () => options.invoke(BROWSER_CHANNEL, { op: "resetOrigins" }, null) as Promise<void>,
     externalPages: enabled => options.invoke(BROWSER_CHANNEL, enabled === undefined ? { op: "externalPages" } : { op: "externalPages", enabled }, null) as Promise<BrowserExternalPagesView>,
     cursorColor: color => options.invoke(BROWSER_CHANNEL, color === undefined ? { op: "cursorColor" } : { op: "cursorColor", color }, null) as Promise<BrowserCursorPreferences>,
+    carrierFrameRate: frameRate => options.invoke(BROWSER_CHANNEL, frameRate === undefined ? { op: "carrierFrameRate" } : { op: "carrierFrameRate", frameRate }, null) as Promise<BrowserCarrierPreferences>,
     sitePermissions: forget => options.invoke(BROWSER_CHANNEL, forget === undefined ? { op: "sitePermissions" } : { op: "sitePermissions", forget }, null) as Promise<BrowserSitePermissionView[]>,
     forHost(hostId) {
       const call = (request: BrowserRequest) => {
@@ -52,6 +54,8 @@ export function browserBridge(options: BrowserPreloadOptions): BrowserBridge {
         navigate: (tabKey, url, options) => call({ op: "navigate", tabKey, url, ...(options?.desktopLoopback ? { desktopLoopback: options.desktopLoopback } : {}) }) as Promise<void>,
         ownerInput: (tabKey, kind) => call({ op: "ownerInput", tabKey, kind }) as Promise<void>,
         setZoom: (tabKey, action) => call({ op: "setZoom", tabKey, action }) as Promise<void>,
+        setMuted: (tabKey, muted) => call({ op: "setMuted", tabKey, muted }) as Promise<void>,
+        pauseMedia: tabKey => call({ op: "pauseMedia", tabKey }) as Promise<void>,
         back: tabKey => call({ op: "back", tabKey }) as Promise<void>,
         forward: tabKey => call({ op: "forward", tabKey }) as Promise<void>,
         reload: tabKey => call({ op: "reload", tabKey }) as Promise<void>,

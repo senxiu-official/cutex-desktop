@@ -11,12 +11,13 @@ import { artifactRef, parseArtifactRef, type ArtifactContent, type ArtifactDetai
 import { ARTIFACT_PAGE_MAX_BYTES, ARTIFACT_PAGE_PROMPT_BYTES } from "../../../../shared/frames";
 import { DocumentPreview } from "../../components/DocumentPreview";
 import { Markdown } from "../../components/Markdown";
-import { SideImage } from "../../components/SideImage";
 import { UnifiedDiff } from "../../components/UnifiedDiff";
 import { useI18n, type MessageKey } from "../../i18n";
 import { contextMenu } from "../../lib/contextMenu";
 import { docKindOf, loadWindowedDoc } from "../../lib/docPreview";
-import { extensionOf, thumbnailSrc } from "../../lib/fileKinds";
+import { extensionOf } from "../../lib/fileKinds";
+import { IMAGE_PREVIEW_PROMPT_BYTES } from "../../lib/windowedImage";
+import { ArtifactImage } from "./ArtifactImage";
 import { copyText } from "../../lib/menus";
 import { DIFF_COMPONENT } from "../../lib/sideKinds";
 import { useModelName } from "../../lib/modelDisplay";
@@ -36,7 +37,6 @@ import { artifactRenderIdentity, largeRenderChoices } from "../../lib/largeRende
 const CSV_ROWS = 300;
 const TEXT_BYTES = 256 * 1024;
 const TABLE_BYTES = 1024 * 1024;
-const IMAGE_BYTES = 4 * 1024 * 1024;
 const seconds = (iso: string) => (Date.parse(iso) || 0) / 1000;
 
 function Note({ tone = "muted", children }: { tone?: "muted" | "warn" | "danger"; children: ReactNode }) {
@@ -115,7 +115,7 @@ function Preview({ hostId, name, version, code = false }: { hostId: string; name
   const { t } = useI18n();
   const typed = typePath(name, version.sourcePath) || version.sourcePath;
   const kind = previewKind(version.mediaType, name, version.sourcePath);
-  const maxBytes = kind === "image" ? IMAGE_BYTES : kind === "csv" || kind === "tsv" ? TABLE_BYTES : TEXT_BYTES;
+  const maxBytes = kind === "csv" || kind === "tsv" ? TABLE_BYTES : TEXT_BYTES;
   const [content, setContent] = useState<{ key: string; value: ArtifactContent | null; error?: string } | null>(null);
   const key = `${version.artifactId}@${version.version}`;
   // A page main could not prepare (or no desktop bridge: the browser preview without frames) shows its source.
@@ -130,7 +130,8 @@ function Preview({ hostId, name, version, code = false }: { hostId: string; name
   const asPage = kind === "html" && !code && !pageProblem;
   const askLarge = asPage && version.bytes > ARTIFACT_PAGE_PROMPT_BYTES && (version.bytes > ARTIFACT_PAGE_MAX_BYTES || decision.key !== decisionKey || !decision.page);
   useEffect(() => {
-    if (kind === "binary" || (asPage && !askLarge)) return;
+    // An image reads its own windows (ArtifactImage); a document its own (DocumentPreview).
+    if (kind === "binary" || kind === "image" || (asPage && !askLarge)) return;
     let live = true;
     loadContent(hostId, version.artifactId, version.version, maxBytes).then(
       (value) => live && setContent({ key, value }),
@@ -155,13 +156,14 @@ function Preview({ hostId, name, version, code = false }: { hostId: string; name
               const c = await services.daemonFor(hostId).artifactStoreContent(version.artifactId, version.version, { offset, maxBytes });
               if (c && externalGone(c)) throw new Error(t("artifacts.externalGone"));
               return c;
-            })
+            }, IMAGE_PREVIEW_PROMPT_BYTES)
           }
         />
       </div>
     );
   if (asPage && !askLarge)
     return <PageFrame hostId={hostId} artifactId={version.artifactId} version={version.version} title={name} large={version.bytes > ARTIFACT_PAGE_PROMPT_BYTES} onProblem={(p) => setProblem({ key, problem: p })} />;
+  if (kind === "image") return <ArtifactImage hostId={hostId} name={name} typed={typed} version={version} />;
   if (kind === "binary") return <Note>{t("artifacts.binary", { type: version.mediaType || "?", size })}</Note>;
   if (!content || content.key !== key) return <p className="p-3 text-xs text-subtle">{t("artifacts.loading")}</p>;
   if (content.error) return <Note tone="danger">{t("artifacts.loadFailed", { error: content.error })}</Note>;
@@ -184,18 +186,9 @@ function Preview({ hostId, name, version, code = false }: { hostId: string; name
       )}
       {pageProblem && pageProblem !== "navigated" && <Note tone={pageProblem === "unavailable" ? "muted" : "warn"}>{t(PAGE_PROBLEM_KEY[pageProblem], { max: formatBytes(ARTIFACT_PAGE_MAX_BYTES) })}</Note>}
       {c.externalChanged && <Note tone="warn">{t("artifacts.externalChanged")}</Note>}
-      {c.truncated && kind !== "image" && <Note>{t("artifacts.truncated", { size: formatBytes(c.content.length) })}</Note>}
+      {c.truncated && <Note>{t("artifacts.truncated", { size: formatBytes(c.content.length) })}</Note>}
     </>
   );
-  if (kind === "image") {
-    const src = thumbnailSrc({ mime: c.mediaType || version.mediaType, encoding: c.encoding, content: c.content, size: c.totalBytes, truncated: c.truncated }, typed);
-    return (
-      <>
-        {warnings}
-        {src ? <SideImage key={src} src={src} alt={name} hostId={hostId} className="mx-2 my-2" center imgClassName="block h-auto max-w-full rounded-md border border-border bg-surface-2 object-contain" /> : <Note>{t("artifacts.imageTooLarge", { size })}</Note>}
-      </>
-    );
-  }
   if (c.encoding === "base64") return <Note>{t("artifacts.binary", { type: version.mediaType || "?", size })}</Note>;
   if ((kind === "csv" || kind === "tsv") && !code) {
     const { rows, more } = parseDelimited(c.content, kind === "csv" ? "," : "\t", CSV_ROWS + 1);

@@ -19,10 +19,14 @@ import { clampSetting, KEEP_HIDDEN_DEFAULT, KEEP_HIDDEN_RANGE, KEEP_MOUNTED_DEFA
 import { settingsAnchorId } from "../../lib/settingsNav";
 import { AppearanceNumberRow } from "./AppearanceRows";
 import { FIELD_W } from "../../lib/fieldWidths";
-import { Button, NumberField, ResetButton, Section, Segmented, Select, SettingRow, Toggle, SettingsGroup } from "./Form";
+import { Button, HintAction, ListFilter, NumberField, ResetButton, RowGroup, Section, Segmented, Select, SettingRow, SubPageRow, Toggle, SettingsGroup } from "./Form";
+import { matchesFilter } from "../../lib/listFilter";
+import { useScrollToSettingsAnchor } from "../../lib/settingsFocus";
+import { useApp } from "../../store";
 import { ShelfPlacementSection } from "../WorkSurfaceSettings";
 
-function DefaultsTable() {
+/** 组件默认位置: `all` = the sub-page (every component, with a filter); else only the ones you changed + the way there. */
+function DefaultsTable({ all = false }: { all?: boolean }) {
   const { t } = useI18n();
   // A component's default page group by name (`shell.sides.defaults.home.<group>`); a group without
   // a name in the catalog (a new module's) shows its id.
@@ -38,11 +42,11 @@ function DefaultsTable() {
   if (!rows.length) return <p className="py-2 text-xs text-subtle">{t("shell.sides.defaults.none")}</p>;
   // The page groups the available components declare (workspace, reference, artifacts, …).
   const homes = [...new Set(["workspace", ...rows.map(({ item }) => item.placement.home)])];
-  // Only the components you changed (another default group, or moved) until 全部显示 (owner 2026-10-18:
-  // twenty rows of selects made the page mostly this table).
-  const [all, setAll] = useState(false);
+  // The page: only the components you changed (another default group, or moved); all of them are on the
+  // sub-page (owner 2026-10-18: twenty rows of selects made the page mostly this table).
+  const [filter, setFilter] = useState("");
   const changed = rows.filter(({ item }) => sideHomes[item.id] !== undefined || layout.overrides[item.id]);
-  const shown = all ? rows : changed;
+  const shown = all ? rows.filter(({ item }) => matchesFilter(filter, t(item.titleKey), homeLabel(sideHomes[item.id] ?? item.placement.home))) : changed;
   // A new default group re-places the open ones too (their moved-to page, if any, is forgotten).
   const setHome = (kind: ItemId, home: string, declared: string) => {
     const next = { ...sideHomes };
@@ -52,8 +56,9 @@ function DefaultsTable() {
     restoreKindDefaultNow(kind);
   };
   return (
-    <div className="divide-y divide-border">
-      {!all && changed.length === 0 && <p className="py-2 text-xs text-subtle">{t("shell.sides.defaults.allDefault")}</p>}
+    <div>
+      {all && <div role="search" className="contents"><ListFilter count={rows.length} value={filter} onChange={setFilter} /></div>}
+      {!all && changed.length === 0 && <p className="border-b border-border/60 py-2 text-xs text-subtle">{t("shell.sides.defaults.allDefault")}</p>}
       {shown.map(({ item }) => {
         const Icon = item.icon;
         const override = layout.overrides[item.id];
@@ -61,17 +66,10 @@ function DefaultsTable() {
         const declared = item.placement.home;
         const home = sideHomes[item.id] ?? declared;
         return (
-          <SettingsGroup agents="none" source="local" key={item.id}><div key={item.id} className="flex min-h-9 flex-wrap items-center gap-x-2 gap-y-1 py-1.5 text-ui/[inherit]">
-            <Icon size={14} className="shrink-0 text-subtle" />
-            <span className="min-w-0 flex-1 truncate">{t(item.titleKey)}</span>
-            {override && (
-              <span className="shrink-0 truncate text-xs text-accent">
-                {t("shell.sides.defaults.moved", { page: page ? pageLabel(page) : t("shell.sides.defaults.gonePage") })}
-                <button onClick={() => restoreKindDefaultNow(item.id)} className="ml-1 rounded px-1.5 py-0.5 text-xs text-accent hover:bg-hover">
-                  {t("side.restoreDefault")}
-                </button>
-              </span>
-            )}
+          <SettingRow agents="none" source="local" key={item.id}
+            label={<span className="inline-flex min-w-0 items-center gap-2"><Icon size={14} className="shrink-0 text-subtle" />{t(item.titleKey)}</span>}
+            hint={override ? <>{t("shell.sides.defaults.moved", { page: page ? pageLabel(page) : t("shell.sides.defaults.gonePage") })}<HintAction onClick={() => restoreKindDefaultNow(item.id)}>{t("side.restoreDefault")}</HintAction></> : undefined}
+          >
             <Select
               width="w-36"
               label={t(item.titleKey)}
@@ -79,14 +77,10 @@ function DefaultsTable() {
               options={homes.map((h) => ({ value: h, label: homeLabel(h) }))}
               onChange={(v) => setHome(item.id, v, declared)}
             />
-          </div></SettingsGroup>
+          </SettingRow>
         );
       })}
-      <div className="py-1.5">
-        <SettingsGroup agents="none" source="local"><button type="button" onClick={() => setAll(!all)} className="rounded text-xs text-accent hover:underline focus-visible:ring-2 focus-visible:ring-accent/60 focus-visible:outline-none">
-          {all ? t("shell.sides.defaults.onlyChanged") : t("shell.sides.defaults.showAll", { n: rows.length })}
-        </button></SettingsGroup>
-      </div>
+      {!all && <SubPageRow title={t("shell.sides.defaults.showAll", { n: rows.length })} onOpen={() => useApp.getState().openSettings("sides", { sub: "defaults" })} />}
     </div>
   );
 }
@@ -96,7 +90,7 @@ function DockRows() {
   const { t } = useI18n();
   const { gutterDocked } = useUiPrefs();
   const items = useSlot("conversation.gutter").filter((e) => e.mode === "show" && e.item.Body && e.item.dockMinWidth);
-  if (!items.length) return <p className="py-1 text-xs text-subtle">{t("shell.sides.gutterDocked.none")}</p>;
+  if (!items.length) return <p className="py-2 text-xs text-subtle">{t("shell.sides.gutterDocked.none")}</p>;
   return (
     <>
       {items.map(({ item }) => (
@@ -109,6 +103,12 @@ function DockRows() {
       ))}
     </>
   );
+}
+
+/** {{shelf}} → 组件默认位置: every component's default page group. */
+export function SidesDefaultsSubPage() {
+  useScrollToSettingsAnchor();
+  return <Section id={settingsAnchorId("defaults-all")}><DefaultsTable all /></Section>;
 }
 
 export function SidesPage() {
@@ -163,11 +163,9 @@ export function SidesPage() {
         <SettingRow agents="none" source="local" label={t("shell.sides.peekTarget")} hint={t("shell.sides.peekTargetHint")}>
           <Segmented value={ui.peekTarget} options={(["auto", "right", "left"] as const).map(v => ({ value: v, label: t(`shell.sides.peekTarget.${v}` as MessageKey) }))} onChange={v => setUiPref("peekTarget", v)} />
         </SettingRow>
-        <div className="pt-3">
-          <div className="text-ui/[inherit] font-medium">{t("shell.sides.defaults")}</div>
-          <div className="mb-1 text-xs text-subtle">{t("shell.sides.defaultsHint")}</div>
+        <RowGroup title={t("shell.sides.defaults")} hint={t("shell.sides.defaultsHint")}>
           <DefaultsTable />
-        </div>
+        </RowGroup>
       </Section>
       {/* 智能体发布成果时 (module artifacts; from 对话, owner 2026-10-18): it opens on the right side. */}
       <SettingsSections page="sides" except={["artifacts.pageData"]} />
@@ -186,11 +184,9 @@ export function GutterSection() {
   return (
     <>
       <Section id={settingsAnchorId("gutter")} title={t("shell.sides.gutter")} hint={t("shell.sides.gutterHint")}>
-        <div>
-          <div className="text-ui/[inherit] font-medium">{t("shell.sides.gutterDocked")}</div>
-          <div className="mb-1 text-xs text-subtle">{t("shell.sides.gutterDockedHint")}</div>
+        <RowGroup title={t("shell.sides.gutterDocked")} hint={t("shell.sides.gutterDockedHint")}>
           <DockRows />
-        </div>
+        </RowGroup>
         <SettingRow agents="none" source="local" label={t("shell.sides.gutterDockWidth")} info={t("shell.sides.gutterDockWidthHint")} reset={<ResetButton disabled={clampDockPref(ui.gutterDockWidth) === DOCK_WIDTH_DEFAULT} onClick={() => setUiPref("gutterDockWidth", DOCK_WIDTH_DEFAULT)} />}>
           <NumberField slider value={clampDockPref(ui.gutterDockWidth)} range={DOCK_WIDTH_RANGE} step={4} unit="px" onCommit={(v) => v !== null && setUiPref("gutterDockWidth", clampDockPref(v))} />
         </SettingRow>

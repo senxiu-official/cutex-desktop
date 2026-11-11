@@ -14,8 +14,7 @@ export function HomeDesktopSettings() {
   const host = useApp((s) => s.hosts?.hosts.find((h) => h.id === home.hostId)?.label) ?? home.hostId ?? "—";
   return (
     <TargetHostContext.Provider value={home.hostId}>
-    <Section title={t("home.settings.title")} >
-      <p className="py-2 text-xs text-muted">{t(home.entry?.source === "host" ? "settings.ia.homeScope" : home.entry?.source === "local" ? "settings.ia.homeLocal" : "settings.loading", { host })}</p>
+    <Section title={t("home.settings.title")} hint={t(home.entry?.source === "host" ? "settings.ia.homeScope" : home.entry?.source === "local" ? "settings.ia.homeLocal" : "settings.loading", { host })}>
       <SettingRow navigation agents="none" source={home.entry?.source ?? "host"} label={t("home.edit")} hint={t("home.settings.hint")}>
         <Button
           onClick={() => {

@@ -1,8 +1,9 @@
 export const zhCN = {
   "archive.title": "归档",
-  "archive.description": "归档设置页：归档的{{agent}}和归档行为",
+  "archive.description": "查看和恢复已归档的{{agent}}，设置归档方式",
   // ---- settings (moved from the base catalog, 2026-10-09) ----
   "archive.list": "已归档的{{agent}}",
+  "archive.all": "全部 {n} 个",
   "archive.page": "归档",
   "archive.archiveEmpty": "没有已归档的{{agent}}",
   "archive.archiveHint": "已归档的{{agent}}一定离线；可以查看历史（只读）或恢复",

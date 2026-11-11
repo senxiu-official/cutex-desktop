@@ -20,7 +20,8 @@ export interface MobileUsageReport {
 }
 export interface MobileService {
   slug: string; displayName?: string; health: string; runtime: string; stopped?: boolean; archived?: boolean;
-  url?: string; localUrl?: string; projectId?: string | null;
+  /** null for a background service (cutex `worker`: no port, no page) and static files. */
+  url?: string | null; localUrl?: string | null; projectId?: string | null;
 }
 export interface HumanSessionCreate {
   requestId: string; start: boolean; displayName?: string; profile?: string; cwd?: string;

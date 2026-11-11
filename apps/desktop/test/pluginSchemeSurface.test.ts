@@ -21,11 +21,23 @@ it("cutex-plugin: is registered without Fetch API support", () => {
 it("cutex-module: is registered without Fetch API support or CSP bypass, and the CSP adds it only for scripts and styles", () => {
   const main = read("src/main/index.ts");
   const registered = main.split("\n").filter((text) => /\{ scheme: [A-Z_]+, privileges/.test(text));
-  expect(registered).toHaveLength(2);
+  expect(registered).toHaveLength(3);
   const line = registered.find((text) => text.includes("MODULE_PACK_SCHEME"))!;
   expect(line).toContain("standard: true, secure: true, corsEnabled: true");
   expect(line).not.toContain("supportFetchAPI");
   expect(line).not.toContain("bypassCSP");
   const csp = /content="([^"]+)"/.exec(read("src/renderer/index.html"))![1]!.split(";").map((part) => part.trim());
   expect(csp.filter((part) => part.includes("cutex-module:"))).toEqual(["script-src 'self' cutex-module:", "style-src 'self' 'unsafe-inline' cutex-module:"]);
+});
+
+// 中文字体包 (main/fontPack.ts): fonts only — CORS for the font loads, never fetch or a CSP bypass, CSP font-src only.
+it("cutex-font: is registered without Fetch API support or CSP bypass, and the CSP adds it only for fonts", () => {
+  const line = read("src/main/index.ts").split("\n").find((text) => text.includes("{ scheme: FONT_SCHEME"))!;
+  expect(line).toContain("standard: true, secure: true, corsEnabled: true");
+  expect(line).not.toContain("supportFetchAPI");
+  expect(line).not.toContain("bypassCSP");
+  for (const page of ["src/renderer/index.html", "src/renderer/owner-alert.html"]) {
+    const csp = /content="([^"]+)"/.exec(read(page))![1]!.split(";").map((part) => part.trim());
+    expect(csp.filter((part) => part.includes("cutex-font:"))).toEqual(["font-src 'self' cutex-font:"]);
+  }
 });

@@ -102,8 +102,8 @@ function MessageRow({ message, busy, label, cancel, ranSince, hostId }: { messag
   );
 }
 
-/** `runtime`: the agent's runtime (lib/agentFeatures); Claude agents always wait for the turn end. */
-function LegacyPendingMessagesSection({ sessionId, messages: all, busy, runtime = "codex", readSince = null }: { sessionId: string; messages: AgentMessageRecord[]; busy: boolean; runtime?: AgentRuntime; readSince?: number | null }) {
+/** `runtime` / `features`: the agent's runtime and adapter feature map (lib/agentFeatures; lib/wakeCountdown readsEarly). */
+function LegacyPendingMessagesSection({ sessionId, messages: all, busy, runtime = "codex", features = null, readSince = null }: { sessionId: string; messages: AgentMessageRecord[]; busy: boolean; runtime?: AgentRuntime; features?: Readonly<Record<string, unknown>> | null; readSince?: number | null }) {
   const { t } = useI18n();
   const [waking, setWaking] = useState(false);
   const conv = useConvScope();
@@ -113,7 +113,7 @@ function LegacyPendingMessagesSection({ sessionId, messages: all, busy, runtime 
   const messages = visibleRows(all, (m) => hiddenKey("note", hostId, m.messageId), hidden);
   const cancel = useCancelableSends(hostId, sessionId, all.length > 0);
   const busyWait = useWakeBusyWait(messages.some((m) => m.kind === "wake"));
-  const label = pendingWakeLabel(busyWait.supported, runtime, busyWait.wait);
+  const label = pendingWakeLabel(busyWait.supported, runtime, busyWait.wait, features);
   const notes = wakeableNotes(messages);
   const wake = async () => {
     setWaking(true);

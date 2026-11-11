@@ -62,8 +62,12 @@ export function pageOf<T>(list: readonly T[], pageSize: number, page: number): {
   return { rows: Number.isFinite(pageSize) ? list.slice(p * pageSize, (p + 1) * pageSize) : list, page: p, pages };
 }
 
-/** Where it is reached, after the health word: 「:24301」; a static service with no port 「静态」; nothing else is shown. */
-export function serviceWhere(s: Pick<ServiceView, "port" | "runtime">, staticWord: string): string | null {
+/**
+ * Where it is reached, after the health word: 「:24301」; a static service with no port 「静态」; a background
+ * service (cutex `worker`, no port or page) 「后台应用」; nothing else is shown.
+ */
+export function serviceWhere(s: Pick<ServiceView, "port" | "runtime">, staticWord: string, workerWord = staticWord): string | null {
+  if (s.runtime === "worker") return workerWord;
   if (typeof s.port === "number" && s.port > 0) return `:${s.port}`;
   return s.runtime === "static" ? staticWord : null;
 }

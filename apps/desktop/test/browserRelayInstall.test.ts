@@ -38,11 +38,16 @@ const mocks = vi.hoisted(() => ({
   device: vi.fn(() => "device-fixture"),
   // Background carriers (carrier.ts) as created by main; the real module is guard-tested in browserCarrier.test.ts.
   createCarrier: vi.fn(),
-  carriers: [] as { options: any; guest: any; destroy: Mock }[],
+  carriers: [] as { options: any; guest: any; destroy: Mock; setFrameRate: Mock }[],
   startProxy: vi.fn(),
 }));
 vi.mock("../src/main/browser/carrier", async importOriginal => ({ ...await importOriginal<typeof import("../src/main/browser/carrier")>(),
   createBrowserCarrier: (options: unknown) => mocks.createCarrier(options) }));
+// 「后台网页帧率」 in memory: never a file under the fake userData path.
+vi.mock("../src/main/browser/carrierPreferences", async importOriginal => {
+  const { BrowserCarrierPreferencesStore } = await importOriginal<typeof import("../src/main/browser/carrierPreferences")>();
+  return { BrowserCarrierPreferencesStore: class extends BrowserCarrierPreferencesStore { constructor() { super(null); } } };
+});
 vi.mock("../src/main/browser/egressProxy", () => ({ startBrowserEgressProxy: mocks.startProxy }));
 vi.mock("../src/main/browser/externalPages", async importOriginal => {
   const actual = await importOriginal<typeof import("../src/main/browser/externalPages")>();
@@ -146,6 +151,8 @@ class ContentsMock extends EventEmitter {
   getType() { return "webview"; }
   getURL() { return this.url; }
   getTitle() { return "Fixture page"; }
+  isAudioMuted() { return false; }
+  setBackgroundThrottling = vi.fn();
   isLoading() { return false; }
   async loadURL(url: string) { this.loads.push(url); this.url = url; this.emit("did-navigate", {}, url); }
   close() { if (!this.dead) { this.dead = true; this.emit("destroyed"); } }
@@ -252,10 +259,10 @@ beforeEach(() => {
   mocks.createCarrier.mockReset().mockImplementation((options: any) => {
     const guest = new ContentsMock(mocks.sessions.get(`persist:browser-agent-${options.hostId}`) as SessionMock);
     guest.getType = () => "window";
-    const destroy = vi.fn(() => guest.close());
+    const destroy = vi.fn(() => guest.close()), setFrameRate = vi.fn();
     options.guard(guest);
-    mocks.carriers.push({ options, guest, destroy });
-    return { guest, destroy };
+    mocks.carriers.push({ options, guest, destroy, setFrameRate });
+    return { guest, destroy, setFrameRate };
   });
   mocks.startProxy.mockReset().mockImplementation(async () => ({ port: 26391, credentials: { username: "test-only", password: "not-a-real-credential", realm: "test-realm" },
     isPublicBrowserUrl: (url: string) => /^https:\/\/example\.test\//.test(url), close: vi.fn(async () => {}) }));
@@ -584,6 +591,45 @@ describe("installed I3 owner two-phase grants and IPC identity", () => {
     await expect(f.ipc({ op: "open", tabKey: "new-owner", url: "http://localhost/", identity: { agentOpened: true } })).rejects.toMatchObject({ code: "permission_denied" });
     await expect(f.ipc({ op: "open", tabKey: "new-owner", url: "http://localhost/", identity: { pendingOpen: "forged" } })).rejects.toMatchObject({ code: "stale_request" });
     expect(f.peer().grantLease).not.toHaveBeenCalled(); expect(mocks.storageWrites).toEqual([]);
+  });
+  // Owner 2026-11-10 (「修吧」): a card tab an agent holds a lease on keeps running at full speed off screen.
+  it("a leased card tab is unthrottled from grant until release; owner tabs without a lease are untouched", async () => {
+    const f = fixture(); await f.enable(); const { guest } = await f.mount(), other = (await f.mount("owner-two", "http://localhost:26181/")).guest;
+    expect(guest.setBackgroundThrottling).not.toHaveBeenCalled();
+    const pending = await pendingOwnerGrant(f);
+    expect(guest.setBackgroundThrottling.mock.calls).toEqual([[false]]);
+    await f.ipc({ op: "holdReady", tabKey: "owner-one", leaseId: pending.leaseId, held: true }); await pending.grant;
+    expect(guest.setBackgroundThrottling.mock.calls).toEqual([[false]]);
+    guest.emit("did-navigate-in-page", {}, "http://localhost:26180/#two"); await flush();
+    expect(guest.setBackgroundThrottling.mock.calls).toEqual([[false]]);
+    guest.emit("did-navigate", {}, "http://localhost:26180/two"); await flush();
+    expect(guest.setBackgroundThrottling.mock.calls).toEqual([[false], [false]]);
+    await f.ipc({ op: "releaseLease", tabKey: "owner-one", leaseId: pending.leaseId });
+    expect(guest.setBackgroundThrottling.mock.calls).toEqual([[false], [false], [true]]);
+    guest.emit("did-navigate", {}, "http://localhost:26180/three"); await flush();
+    expect(guest.setBackgroundThrottling.mock.calls).toEqual([[false], [false], [true]]);
+    expect(other.setBackgroundThrottling).not.toHaveBeenCalled();
+  });
+  it("a leased card tab is throttled again when the agent releases it or its host disconnects", async () => {
+    const f = fixture(); await f.enable(); const { guest, reserved } = await f.mount(), peer = f.peer();
+    let pending = await pendingOwnerGrant(f);
+    await f.ipc({ op: "holdReady", tabKey: "owner-one", leaseId: pending.leaseId, held: true }); await pending.grant;
+    const request = command(peer, { kind: "tab.release" }, { leaseId: pending.leaseId, target: { hostId: "local", deviceId: peer.options.deviceId, guestId: reserved.guestId } });
+    await expect(peer.options.execute(request, context().value)).resolves.toEqual({ kind: "tab.release" });
+    expect((await f.list())[0]?.lease).toBeUndefined();
+    expect(guest.setBackgroundThrottling.mock.calls).toEqual([[false], [true]]);
+    pending = await pendingOwnerGrant(f);
+    expect(guest.setBackgroundThrottling.mock.calls).toEqual([[false], [true], [false]]);
+    peer.options.revokeLocal(pending.leaseId, "stale_connection"); await flush();
+    expect(guest.setBackgroundThrottling.mock.calls).toEqual([[false], [true], [false], [true]]);
+  });
+  it("closing a leased card tab ends its lease without touching the destroyed guest", async () => {
+    const f = fixture(); await f.enable(); const { guest } = await f.mount();
+    const pending = await pendingOwnerGrant(f);
+    expect(guest.setBackgroundThrottling.mock.calls).toEqual([[false]]);
+    guest.close(); await flush(); await expect(pending.grant).rejects.toBeTruthy();
+    expect((await f.list()).some(row => row.lease)).toBe(false);
+    expect(guest.setBackgroundThrottling.mock.calls).toEqual([[false]]);
   });
   it("late activation cannot resurrect a released lease or attached debugger", async () => {
     const f = fixture(); await f.enable(); const { guest } = await f.mount(), pending = await pendingOwnerGrant(f), peer = f.peer();
@@ -1048,6 +1094,7 @@ describe("background carrier for agent tabs", () => {
     expect(guest.session).toBe(mocks.sessions.get("persist:browser-agent-local"));
     expect(guest.setWindowOpenHandler).toHaveBeenCalledOnce(); expect(guest.setWebRTCIPHandlingPolicy).toHaveBeenCalledWith("disable_non_proxied_udp");
     expect(guest.loads).toEqual([PAGE]);
+    expect(guest.setBackgroundThrottling).not.toHaveBeenCalled(); // created unthrottled; the lease sync leaves it alone
     // The same partition session hooks attribute (and only admit) the carrier by its webContents id.
     const agentSession = mocks.sessions.get("persist:browser-agent-local") as SessionMock;
     const before = agentSession.webRequest.onBeforeRequest.mock.calls[0]![1] as (details: unknown, done: (value: { cancel?: boolean }) => void) => void;
@@ -1060,6 +1107,16 @@ describe("background carrier for agent tabs", () => {
     // The card's re-render gets the same carrier back, never a second one.
     await expect(f.ipc({ op: "open", tabKey: mount.tabKey, url: "http://localhost:26180/page", identity: { agentOpened: true, carrier: "background" } })).resolves.toMatchObject({ carrier: "background", guestId: mount.guestId });
     expect(mocks.createCarrier).toHaveBeenCalledOnce();
+  });
+  it("「后台网页帧率」: new carriers start at the stored rate, a change reaches the open ones at once through main", async () => {
+    const f = fixture(); await f.enable();
+    const { carrier } = await backgroundAgentTab(f);
+    expect(carrier.options.frameRate).toBe(15);
+    await expect(f.ipc({ op: "carrierFrameRate" })).resolves.toEqual({ frameRate: 15 });
+    await expect(f.ipc({ op: "carrierFrameRate", frameRate: 30 })).resolves.toEqual({ frameRate: 30 });
+    expect(carrier.setFrameRate).toHaveBeenCalledExactlyOnceWith(30);
+    await expect(f.ipc({ op: "carrierFrameRate", frameRate: 15 })).resolves.toEqual({ frameRate: 15 });
+    expect(carrier.setFrameRate).toHaveBeenLastCalledWith(15);
   });
   it("the agent acts while the app window is hidden; the visibility probe never runs and app focus is untouched", async () => {
     const f = fixture(); await f.enable();

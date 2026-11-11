@@ -51,6 +51,7 @@ import type { AppSlotEntry } from "../modules/slots";
 import { ItemBoundary } from "../modules/Outlet";
 import { useSlot } from "../modules/react";
 import { agentHost, useApp } from "../store";
+import { hostIndicator } from "../lib/hosts";
 import { setTrayBandWidth } from "../lib/workspaces";
 import { useInWindow, useWindowKey } from "../lib/windowScope";
 // After the side stores (lib/deskBrightness reads them): keeps their import order.
@@ -254,6 +255,7 @@ type RoomModeSource = { kind: "band" } | { kind: "room" | "wide"; centre: boolea
  */
 function useRoomGeometry(frame: React.RefObject<HTMLDivElement | null>, room: React.RefObject<HTMLDivElement | null>, active: boolean, desktopOn: boolean, dock: number): RoomMode {
   const [mode, setMode] = useState<RoomMode>(() => ({ kind: "room", centre: false }));
+  const modeNow = useRef(mode);
   const panes = usePanes((s) => s.layout);
   const side = useSide((s) => s.layout);
   const strips = useStrips((s) => s.strips);
@@ -289,7 +291,10 @@ function useRoomGeometry(frame: React.RefObject<HTMLDivElement | null>, room: Re
   }, [room, dock]);
   const changeMode = useCallback((geometry: RoomModeSource) => {
     const centre = geometry.kind !== "band" && geometry.centre;
-    setMode((previous) => previous.kind === geometry.kind && previous.centre === centre ? previous : { kind: geometry.kind, centre });
+    // Compared here, not in an updater: one returning the same state still rendered (and committed) on every step of a
+    // column / Shelf edge drag (perf/shelf-divider-drag).
+    const previous = modeNow.current;
+    if (previous.kind !== geometry.kind || previous.centre !== centre) setMode((modeNow.current = { kind: geometry.kind, centre }));
   }, []);
   useLayoutEffect(() => apply(last.current), [mode, apply]);
   useLayoutEffect(() => {
@@ -454,19 +459,21 @@ const ChipTray = memo(function ChipTray({ placement, edge, entry, dockCount, ext
   const twoRows = useTrayPrefs((s) => s.twoRows);
   const more = useRef<HTMLButtonElement>(null);
   const [folded, setFolded] = useState<readonly number[]>(NO_FOLD);
+  const foldedNow = useRef(folded);
   const [overflowOpen, setOverflowOpen] = useState(false);
   const trayRoom = useTrayRoom.of(useWindowKey());
   useLayoutEffect(() => {
     const el = dock.current;
     if (!foldOn || !el) {
-      setFolded(NO_FOLD);
+      setFolded((foldedNow.current = NO_FOLD));
       trayRoom.setState({ rows: 1 });
       return;
     }
     let raf = 0;
     const fit = () => {
       const r = fitTray(el, more.current, { twoRows });
-      setFolded((f) => (sameIndices(f, r.folded) ? f : r.folded));
+      // (Compared before setting, as changeMode: this runs in a flushSync on every step of a drag.)
+      if (!sameIndices(foldedNow.current, r.folded)) setFolded((foldedNow.current = r.folded));
       if (trayRoom.getState().rows !== r.rows) trayRoom.setState({ rows: r.rows });
     };
     const schedule = () => {
@@ -494,11 +501,12 @@ const ChipTray = memo(function ChipTray({ placement, edge, entry, dockCount, ext
   useEffect(() => {
     if (!n) setOverflowOpen(false);
   }, [n]);
+  // Before the early return: the handle placement and the open tray must call the same hooks.
+  const moduleEntries = useSlot("tray.entry");
 
   if (placement === "handle") return <TrayHandle label={t("pane.tray.reveal", { key: shortcut })} menu={frameMenu} />;
 
   const Dock = entry?.item.Dock;
-  const moduleEntries = useSlot("tray.entry");
   return (
     <div
       ref={dock}
@@ -637,6 +645,9 @@ function TrayOverflow({ anchor, folded, moduleId, Dock, onClose }: { anchor: HTM
 function TrayPinButton({ vertical, alone }: { vertical: boolean; alone: boolean }) {
   const { t } = useI18n();
   const keeper = useTrayPinKeeper();
+  // Pins live on the host: with the host not online there is nothing to pin, so neither ＋ nor how to pin.
+  const online = useApp((s) => hostIndicator(s.hosts, s.daemon).status === "online");
+  if (!online) return null;
   const hint = t("pane.tray.emptyHint");
   const wide = alone && !vertical;
   const picker = keeper?.pickerEntries;

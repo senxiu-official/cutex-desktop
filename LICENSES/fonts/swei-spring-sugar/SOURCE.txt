@@ -1,0 +1,3 @@
+https://github.com/max32002/swei-spring
+Revision: 365dde98b93b82fa809acb91587b63b0fbde1c0a
+License: https://raw.githubusercontent.com/max32002/swei-spring/365dde98b93b82fa809acb91587b63b0fbde1c0a/SIL_Open_Font_License_1.1.txt

@@ -4,7 +4,7 @@ import { act, createElement as h, type ComponentType } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const fx = vi.hoisted(() => ({ audit: [] as unknown[], next: null as number | null, open: vi.fn(), sites: [] as { pool: string; origin: string; permission: string; allow: boolean }[], forget: [] as unknown[] }));
+const fx = vi.hoisted(() => ({ rules: [] as unknown[], audit: [] as unknown[], next: null as number | null, open: vi.fn(), sites: [] as { pool: string; origin: string; permission: string; allow: boolean }[], forget: [] as unknown[] }));
 vi.mock("../src/renderer/src/bridge", () => ({ bridge: { browser: { sitePermissions: async (forget?: unknown) => { if (forget) fx.forget.push(forget); return fx.sites; } } } }));
 vi.mock("../src/renderer/src/modules/browser/BrowserCursorSettings", () => ({ BrowserCursorSettings: () => null }));
 vi.mock("../src/renderer/src/modules/browser/BrowserHostSettings", () => ({ BrowserHostSettings: () => null }));
@@ -19,30 +19,68 @@ vi.mock("../src/renderer/src/lib/settingsFocus", () => ({ useScrollToSettingsAnc
 vi.mock("../src/renderer/src/i18n", () => ({ useI18n: () => ({ locale: "en", t: (key: string, vars?: Record<string, unknown>) => vars?.n !== undefined ? `${key}:${vars.n}` : key }) }));
 vi.mock("../src/renderer/src/store", () => ({ useApp: { getState: () => ({ openSettings: fx.open }) } }));
 vi.mock("../src/renderer/src/lib/targetHost", () => {
-  const api = { approvalRules: async () => ({ revision: 1, rules: [] }), approvalRuleAudit: async () => ({ audit: fx.audit, nextCursor: fx.next }) };
+  const api = { approvalRules: async () => ({ revision: 1, rules: fx.rules }), approvalRuleAudit: async () => ({ audit: fx.audit, nextCursor: fx.next }) };
   return { useTargetApi: () => api, useTargetSidebar: () => null };
 });
 vi.mock("../src/renderer/src/components/settings/Form", async () => {
   const { createElement: e } = await import("react");
   return {
-    Section: ({ title, actions, children }: any) => e("section", { "aria-label": title }, actions, children), SettingsGroup: ({ children }: any) => children, ErrorNote: ({ children }: any) => e("p", {}, children),
+    Section: ({ title, actions, children }: any) => e("section", { "aria-label": title }, actions, children), SettingsGroup: ({ children }: any) => typeof children === "function" ? children({ attributes: {} }) : children, ErrorNote: ({ children }: any) => e("p", {}, children),
     ListFilter: ({ count, value, onChange }: any) => count > 8 ? e("input", { "aria-label": "filter", value, onChange: (ev: any) => onChange(ev.target.value) }) : null,
     SubPageRow: ({ title, onOpen }: any) => e("button", { type: "button", "data-settings-subpage": "", onClick: onOpen }, title),
+    ListRow: ({ title, detail, actions }: any) => e("div", {}, e("span", { className: "font-medium" }, title), detail, actions),
+    Button: ({ children, onClick, disabled }: any) => e("button", { type: "button", onClick, disabled }, children),
+    RowGroup: ({ title, children }: any) => e("div", { "data-row-group": title }, children),
+    Loading: () => null, EmptyState: ({ children }: any) => e("p", {}, children),
   };
 });
 vi.mock("../src/renderer/src/components/Button", () => ({ Button: () => null }));
 vi.mock("../src/renderer/src/components/TypedRuleConfirmation", () => ({ TypedRuleConfirmation: () => null }));
 
-import { ApprovalRuleAuditAll, ApprovalRulesSettings } from "../src/renderer/src/modules/approvals/ApprovalRules";
+import { ApprovalRuleAuditAll, ApprovalRulesAll, ApprovalRulesSettings } from "../src/renderer/src/modules/approvals/ApprovalRules";
 import { BrowserSitePermissionSettings, BrowserSitesSubPage } from "../src/renderer/src/modules/browser/BrowserSettings";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let root: Root, box: HTMLDivElement;
-beforeEach(() => { fx.next = null; fx.open.mockReset(); box = document.createElement("div"); document.body.append(box); root = createRoot(box); });
+beforeEach(() => { fx.next = null; fx.rules = []; fx.audit = []; fx.open.mockReset(); box = document.createElement("div"); document.body.append(box); root = createRoot(box); });
 afterEach(() => { act(() => root.unmount()); box.remove(); });
 const draw = async (Page: ComponentType) => { await act(async () => root.render(h(Page))); };
 const entry = () => box.querySelector<HTMLButtonElement>("[data-settings-subpage]");
 const audit = (n: number) => Array.from({ length: n }, (_, i) => ({ auditId: `a${i}`, at: "2026-11-08T00:00:00Z", action: "matched", result: `result-${i}`, ruleId: `rule-${i}`, details: {} }));
+
+const rule = (i: number, director = false) => ({ ruleId: `r${i}`, revision: 1, grantedBy: director ? "role:director" : "owner", enabled: true, expired: false, subject: { cutexSessionId: `s${i}`, displayName: `Agent ${i}` }, projectId: null, kinds: ["browser_open"], constraints: {}, expiry: { mode: "revoked" }, highRiskKindsExplicit: [] });
+const ruleRows = () => box.querySelectorAll("[data-approval-rule]");
+
+describe("自动审批规则", () => {
+  it("the page shows five rules per group and leads to all of them", async () => {
+    fx.rules = [...Array.from({ length: 7 }, (_, i) => rule(i)), rule(100, true)];
+    await draw(ApprovalRulesSettings);
+    expect(ruleRows()).toHaveLength(6);
+    expect(box.textContent).toContain("Agent 4");
+    expect(box.textContent).not.toContain("Agent 5");
+    expect(box.querySelectorAll("[data-row-group]")).toHaveLength(2);
+    expect(entry()!.textContent).toBe("approvals.rules.all:8");
+    act(() => entry()!.click());
+    expect(fx.open).toHaveBeenCalledWith("collab", { sub: "rules" });
+  });
+  it("no entry when every group fits", async () => {
+    fx.rules = Array.from({ length: 5 }, (_, i) => rule(i));
+    await draw(ApprovalRulesSettings);
+    expect(ruleRows()).toHaveLength(5);
+    expect(entry()).toBeNull();
+  });
+  it("the sub-page lists every rule and filters them", async () => {
+    fx.rules = Array.from({ length: 12 }, (_, i) => rule(i));
+    await draw(ApprovalRulesAll);
+    expect(ruleRows()).toHaveLength(12);
+    const input = box.querySelector<HTMLInputElement>("input")!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "Agent 11");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    expect(ruleRows()).toHaveLength(1);
+  });
+});
 
 describe("规则审计", () => {
   it("the page shows the newest five and leads to all of them", async () => {

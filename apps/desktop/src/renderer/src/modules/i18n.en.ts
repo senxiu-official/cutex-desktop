@@ -25,6 +25,8 @@ export const en: Record<keyof typeof zhCN, string> = {
   "modules.needsCapability": "Needs cutex capability: {list}",
   "modules.pageOff": "The module of this page is off or unavailable on this host.",
   "modules.openModules": "Open Modules",
+  "modules.section.sources": "Installation and sources",
+  "modules.section.all": "All modules",
   "modules.component.job-service.name": "Job Service",
   "modules.component.job-service.what": "Lets {{agents}} run long background jobs on the host (builds, tests, training) that keep going through disconnects.",
   "modules.component.claude-runtime.name": "Claude runtime",

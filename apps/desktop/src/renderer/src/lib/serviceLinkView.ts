@@ -11,7 +11,7 @@ import { liveConversation, useConvShelfVersion, useSide } from "./sideLayoutStor
 
 /** A host's service records (the focus host's own list, else its slice). */
 export function useHostServices(hostId: string | null): ServiceView[] | null {
-  return useApp((s) => (!hostId ? null : hostId === (s.hosts?.active ?? "local") ? s.services : (s.byHost[hostId]?.services ?? null)));
+  return useApp((s) => (!hostId ? null : hostId === (s.hosts?.active ?? "local") ? s.services : (s.byHost?.[hostId]?.services ?? null)));
 }
 
 /** The session whose Shelf is the live one (it re-renders when that changes). */
@@ -33,8 +33,8 @@ export function useInShelf(hostId: string, sessionId: string): (slug: string) =>
 /** The ⋯ overflow's rows for the agent's services (a narrow column folded the 「N 个服务」 entry). */
 export function agentServiceMenu(t: ReturnType<typeof useI18n>["t"], paneId: string, hostId: string, sessionId: string, list: readonly ServiceView[], inShelf: (slug: string) => boolean): MenuEntry[] {
   return list.map((s) => ({
-    label: [`${s.health === "reachable" ? "●" : "○"} ${s.displayName || s.slug}`, serviceWhere(s, t("svcLink.static"))].filter(Boolean).join("  "),
-    hint: t(inShelf(s.slug) ? "svcLink.locate" : "svcLink.open"),
+    label: [`${s.health === "reachable" ? "●" : "○"} ${s.displayName || s.slug}`, serviceWhere(s, t("svcLink.static"), t("services.worker.badge"))].filter(Boolean).join("  "),
+    hint: t(s.runtime === "worker" ? "services.worker.manage" : inShelf(s.slug) ? "svcLink.locate" : "svcLink.open"),
     onSelect: () => void openFromHeader(paneId, hostId, sessionId, s),
   }));
 }

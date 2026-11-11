@@ -7,7 +7,7 @@ export const en: Record<keyof typeof zhCN, string> = {
   "profile-import.summary.error": "Read failed; expand to retry",
   "profile-import.summary.count": "{total} providers · {available} importable",
   "profile-import.title": "Import from CC Switch",
-  "profile-import.description": "Settings → Profiles → Import from CC Switch: turn the Claude Code / Codex providers set up in CC Switch on the host into profiles; CC Switch is only read",
+  "profile-import.description": "Import Claude Code and Codex provider configurations from CC Switch on the host as profiles, keeping the original configurations",
   "profile-import.section": "Import from CC Switch",
   "profile-import.sectionHint": "Turn the Claude Code and Codex providers set up in CC Switch on this host into profiles.",
   "profile-import.notFound": "CC Switch was not found on this host",

@@ -32,6 +32,7 @@ import { activityTimesFor, activityTimesOf } from "../lib/sessionsMeta";
 import { useNameOrderKey } from "../lib/rosterOrder";
 import { foldRows, layoutSidebar, nextRosterChange, type GroupLayout, type LayoutContext } from "../lib/sidebarLayout";
 import { holdLayout, placementOf, useRosterPresence } from "../lib/rosterFreeze";
+import { useRovingList } from "../lib/rovingList";
 import { openProjectViewPane, useProjectViewAvailable } from "../lib/sidebarProjectView";
 import { computeFresh, markAgentOpened, publishFresh, useFreshAgents } from "../lib/freshAgents";
 import { NEUTRAL_GROUP, projectBlockLook } from "../lib/projectSeparation";
@@ -968,6 +969,8 @@ export function Sidebar() {
   // the pointer / keyboard focus comes in, everything settles when it leaves.
   // What the owner does here (star, drag, a setting, a folder, searching) takes effect at once.
   const presence = useRosterPresence();
+  // One Tab stop for the list; ↑ / ↓, ← / → inside it (lib/rovingList, owner 2026-11-10).
+  const roving = useRovingList();
   const ownerKey = JSON.stringify([[...starredKeys], projectOrder, sections, prefs.projectGrouping, prefs.noOnlineProjects, prefs.runningAgents, prefs.olderProjectsAfter, nameKey]);
   const holding = presence.inside && !searching;
   const snapshot = () => ({ key: ownerKey, main: placementOf(freshLayout), sections: new Map(freshSections.map((x) => [x.section.id, placementOf(x.layout)])) });
@@ -1099,7 +1102,7 @@ export function Sidebar() {
         <ProjectDragContext.Provider value={projectDrag}>
         {/* The list's empty area: a menu with only 调整左侧栏… (rows and headers have their own menus). */}
         {/* IM-style rows (消息预览 on): a wider avatar column, shared by every row variant so names line up. */}
-        <nav data-sidebar-roster={nowAll ? "all" : "roster"} data-system-rows={prefs.systemRows} data-separation={prefs.projectSeparation} data-roster-held={hold ? "" : undefined} {...presence.bind} className="flex-1 overflow-y-auto px-1.5 pt-1 pb-2" style={prefs.rowPreview === "off" && !nowAll ? undefined : ({ "--avatar-col": nowAll ? "20px" : "32px" } as CSSProperties)} onContextMenu={contextMenu(() => [...hostStopIdleEntries(t, <Power size={14} />), ...sidebarMenuTail(t)])}>
+        <nav ref={roving} data-sidebar-roster={nowAll ? "all" : "roster"} data-system-rows={prefs.systemRows} data-separation={prefs.projectSeparation} data-roster-held={hold ? "" : undefined} {...presence.bind} className="flex-1 overflow-y-auto px-1.5 pt-1 pb-2" style={prefs.rowPreview === "off" && !nowAll ? undefined : ({ "--avatar-col": nowAll ? "20px" : "32px" } as CSSProperties)} onContextMenu={contextMenu(() => [...hostStopIdleEntries(t, <Power size={14} />), ...sidebarMenuTail(t)])}>
           <SidebarLoadProgress />
           {groups.length === 0 && chats.length === 0 && hostOnly.length === 0 ? (
             <p className="px-2 py-6 text-center text-sm text-subtle">{focusAccess.pending ? t("users.access.pendingEmpty") : t("sidebar.empty")}</p>
@@ -1172,6 +1175,7 @@ export function Sidebar() {
         // A rounded card like the conversation / Shelf cards (styles.css .sidebar-card), 8 px from the window
         // edge and from the next card; min-width lives in the width (max()).
         className="sidebar-card relative flex h-full max-w-[calc(100%-360px)] w-[max(180px,var(--sidebar-w,16rem))] shrink-0 flex-col outline-none"
+        data-live-width="sidebarWidth"
       >
         <PaneResizer field="sidebarWidth" edge="right" />
         {full}

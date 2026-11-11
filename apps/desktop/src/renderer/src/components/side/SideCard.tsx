@@ -7,7 +7,7 @@
 // title of a single-instance pane = that one instance. Double-click on the header = maximise / restore (a folded pane:
 // open it, as its ▾).
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
-import { ChevronDown, Expand, Maximize2, Minimize2, Minus, MoreHorizontal, Plus, Shrink, X } from "lucide-react";
+import { ChevronDown, Expand, Maximize2, Minimize2, Minus, MoreHorizontal, Plus, Shrink, Volume2, VolumeX, X } from "lucide-react";
 import { fitTabs, headerCompact, TAB_ACTIVE_MAX, TAB_ACTIVE_MIN, TAB_MAX, TAB_MIN } from "../../lib/tabFit";
 import { PaneHeaderCompact } from "../../lib/paneHeader";
 import { sharedResizeObserver } from "../../lib/resizeHub";
@@ -53,7 +53,7 @@ function ActionsWith({ entry, id, inst, card, page }: { entry: SideComponentEntr
   );
 }
 
-type TabLook = { busy?: boolean; unread?: boolean; attention?: number; tooltip?: string; favicon?: string };
+type TabLook = { busy?: boolean; unread?: boolean; attention?: number; tooltip?: string; favicon?: string; audio?: { muted: boolean; toggleMute(): void } };
 
 /** A tab's hover text: its whole title, and what it shows when that says more (a web page's address). */
 /** A tab's image: only an inline `data:image/` URL (the renderer never fetches one). */
@@ -95,6 +95,19 @@ function Tab({ id, active, title, transient, info }: { id: string; active: boole
       className={`group/tab flex h-6 items-center gap-1 overflow-hidden rounded-md pr-0.5 pl-1.5 text-xs ${armed ? "bg-danger/15 text-danger ring-1 ring-danger/70" : active ? "bg-surface-2 text-foreground" : "text-muted hover:bg-hover hover:text-foreground"} ${dragged ? "opacity-45" : ""}`}
     >
       {tabFavicon(info) && <img src={tabFavicon(info)!} alt="" width={12} height={12} referrerPolicy="no-referrer" className="size-3 shrink-0 rounded-sm" />}
+      {info?.audio && (
+        <button
+          type="button"
+          data-side-nodrag
+          data-side-tab-audio={info.audio.muted ? "muted" : "playing"}
+          onClick={() => info.audio!.toggleMute()}
+          aria-label={t(info.audio.muted ? "side.tabUnmute" : "side.tabMute")}
+          title={t(info.audio.muted ? "side.tabUnmute" : "side.tabMute")}
+          className="shrink-0 rounded p-0.5 text-subtle hover:bg-surface hover:text-foreground"
+        >
+          {info.audio.muted ? <VolumeX size={11} /> : <Volume2 size={11} />}
+        </button>
+      )}
       <button
         onClick={() => updateLayout((l) => activateTab(l, id, Date.now()))}
         onDoubleClick={() => transient && updateLayout((l) => pinInstance(l, id))}

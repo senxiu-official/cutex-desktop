@@ -149,7 +149,7 @@ function RefThumbnail({ entry, cref, alt, fallback }: { entry: TargetEntry; cref
       if (!img) throw new Error("no image");
       return img;
     });
-  const { ref, state } = useThumbnail(`${cref.hostId}|ref|${cref.kind}/${cref.key}`, read);
+  const { ref, state } = useThumbnail(`${cref.hostId}|ref|${cref.kind}/${cref.key}`, read, { revalidate: true });
   if (state.status === "failed") return <>{fallback}</>;
   return (
     <span ref={ref} className="my-1.5 block">

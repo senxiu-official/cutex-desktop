@@ -82,9 +82,11 @@ export function TreeList(props: TreeListProps) {
     const el = listRef.current;
     if (!el) return;
     el.scrollTop = props.initialScroll;
-    setHeight(el.clientHeight || 400);
+    // Rounded up to whole rows: a resize (a divider drag) renders the list only when another row fits.
+    const fit = () => setHeight(Math.ceil((el.clientHeight || 400) / ROW_H) * ROW_H);
+    fit();
     if (typeof ResizeObserver === "undefined") return;
-    const ro = new win.ResizeObserver(() => setHeight(el.clientHeight || 400));
+    const ro = new win.ResizeObserver(fit);
     ro.observe(el);
     return () => ro.disconnect();
     // eslint-disable-next-line react-hooks/exhaustive-deps

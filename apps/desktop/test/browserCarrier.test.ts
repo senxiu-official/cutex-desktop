@@ -25,7 +25,7 @@ vi.mock("electron", async () => {
   }
   return { BrowserWindow };
 });
-import { browserCarrierPreferences, BROWSER_CARRIER_FRAME_RATE, BROWSER_THUMBNAIL_INTERVAL_MS, BROWSER_THUMBNAIL_QUALITY, createBrowserCarrier } from "../src/main/browser/carrier";
+import { browserCarrierPreferences, BROWSER_THUMBNAIL_INTERVAL_MS, BROWSER_THUMBNAIL_QUALITY, createBrowserCarrier } from "../src/main/browser/carrier";
 import { MAX_BROWSER_THUMBNAIL_BYTES } from "../src/shared/browser";
 
 afterEach(() => { electron.windows.length = 0; vi.useRealTimers(); });
@@ -67,9 +67,16 @@ describe("createBrowserCarrier", () => {
     expect(window.options.webPreferences).toEqual(browserCarrierPreferences("local"));
     expect(guard).toHaveBeenCalledExactlyOnceWith(carrier.guest);
     expect(carrier.guest.loadURL).not.toHaveBeenCalled();
-    expect(carrier.guest.setFrameRate).toHaveBeenCalledWith(BROWSER_CARRIER_FRAME_RATE);
+    expect(carrier.guest.setFrameRate).toHaveBeenCalledWith(15);
     window.emit("show");
     expect(window.hide).toHaveBeenCalledOnce();
+  });
+  it("paints at the chosen 「后台网页帧率」 and changes it live; never after destroy", () => {
+    const carrier = createBrowserCarrier({ hostId: "local", viewport: { width: 800, height: 600 }, frameRate: 30, guard: () => {} });
+    expect(carrier.guest.setFrameRate).toHaveBeenLastCalledWith(30);
+    carrier.setFrameRate(15); expect(carrier.guest.setFrameRate).toHaveBeenLastCalledWith(15);
+    carrier.destroy(); carrier.setFrameRate(30);
+    expect(carrier.guest.setFrameRate).toHaveBeenCalledTimes(2);
   });
   it("a failing guard destroys the window at once", () => {
     expect(() => createBrowserCarrier({ hostId: "local", viewport: { width: 800, height: 600 }, guard: () => { throw new Error("guard failed"); } })).toThrow("guard failed");

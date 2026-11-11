@@ -22,6 +22,12 @@ vi.mock("../src/renderer/src/modules/artifacts/store", async (importOriginal) =>
   loadContent: async (): Promise<ArtifactContent> => ({ version: 1, encoding: "base64", content: B64, offset: 0, totalBytes: 68, truncated: false, mediaType: "image/png", sha256: null, externalChanged: null }),
   loadDiff: () => new Promise(() => {}),
 }));
+// An artifact image reads its own content windows (modules/artifacts/ArtifactImage) and shows an object URL.
+vi.mock("../src/renderer/src/modules/app", async (importOriginal) => {
+  const real = await importOriginal<{ services: object }>();
+  const window = async (): Promise<ArtifactContent> => ({ version: 1, encoding: "base64", content: B64, offset: 0, totalBytes: 68, truncated: false, mediaType: "image/png", sha256: null, externalChanged: null });
+  return { ...real, services: new Proxy(real.services, { get: (t, k) => (k === "daemonFor" ? () => ({ artifactStoreContent: window }) : (t as Record<string | symbol, unknown>)[k]) }) };
+});
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const { ViewBody } = await import("../src/renderer/src/modules/artifacts/View");
@@ -57,7 +63,7 @@ describe("side-pane image previews", () => {
     await render();
     await vi.waitFor(() => expect(host.querySelector("[data-side-image] img")).not.toBeNull());
     const img = host.querySelector<HTMLImageElement>("[data-side-image] img")!;
-    expect(img.getAttribute("src")).toBe(`data:image/png;base64,${B64}`);
+    expect(img.getAttribute("src")).toMatch(/^blob:/);
     expect(host.querySelector("[data-side-image-toolbar] [data-side-image-copy]")).not.toBeNull();
     act(() => img.click());
     expect(zoom()).not.toBeNull();

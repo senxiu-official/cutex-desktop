@@ -8,7 +8,7 @@
 // Opening goes through the widget's `actions` (guide rule 4), with two home-only exceptions the actions do not
 // cover: 名片 opens the home module's own 个人页 pane (openProfile) and a tile opens its pin, which may be an
 // artifact, a link or a page pin (openPin). A widget of another module has neither: it uses `actions` only.
-import { useMemo } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Activity, Bell, Clock3, LayoutGrid, UserRound } from "lucide-react";
 import type { HomePin, HomeTileSize } from "../../../../shared/home";
 import { useI18n, type MessageKey } from "../../i18n";
@@ -115,7 +115,17 @@ function NeedsWidget({ height, arranging, actions }: DesktopWidgetProps) {
     if (c.signal === "needsYou" && n?.reasons.length === 1 && n.reasons[0] === "approval") actions.openPage("approvals.page");
     else void actions.openAgent(host, c.id);
   };
-  const fits = Math.max(1, Math.floor((height - 44) / 46));
+  // As many whole rows as the box holds, measured (two lines + padding; the text size follows the appearance); when
+  // some don't fit, the last place says how many more instead of a row cut in half.
+  const first = useRef<HTMLButtonElement>(null);
+  const [rowPx, setRowPx] = useState(52);
+  useLayoutEffect(() => {
+    const h = first.current?.offsetHeight;
+    if (h && h !== rowPx) setRowPx(h);
+  });
+  const room = Math.max(1, Math.floor((height - 48) / rowPx));
+  const fits = chips.length > room ? Math.max(1, room - 1) : room;
+  const more = chips.length - fits;
   return (
     <section className="h-full overflow-hidden px-3.5 py-3" data-home-block="needs">
       <h4 className="mb-1 flex items-center gap-2 text-ui/[inherit] font-semibold">
@@ -123,10 +133,10 @@ function NeedsWidget({ height, arranging, actions }: DesktopWidgetProps) {
         {chips.length > 0 && <CountBadge count={chips.length} className="ml-auto" />}
       </h4>
       {chips.length === 0 && <p className="py-1.5 text-xs home-sub">{t("home.needsNone")}</p>}
-      {chips.slice(0, fits).map((c) => {
+      {chips.slice(0, fits).map((c, i) => {
         const row = byKey.get(hostKey(c.hostId ?? focus, c.id));
         return (
-          <button key={c.key} onClick={() => open(c)} className="flex w-full items-start gap-2.5 rounded-ctl px-1 py-2 text-left text-ui/[inherit] hover:bg-[rgba(127,127,140,0.12)]" data-home-need={c.signal}>
+          <button key={c.key} ref={i === 0 ? first : undefined} onClick={() => open(c)} className="flex w-full items-start gap-2.5 rounded-ctl px-1 py-2 text-left text-ui/[inherit] hover:bg-[rgba(127,127,140,0.12)]" data-home-need={c.signal}>
             {row ? <StatusAvatar name={row.name} initial={row.initial} color={row.color} avatar={row.session.avatar} seed={row.session.cutexSessionId} size={20} signal="idle" /> : <span className="size-[22px]" />}
             <span className="min-w-0">
               <span className="block truncate">{c.name}</span>
@@ -135,6 +145,7 @@ function NeedsWidget({ height, arranging, actions }: DesktopWidgetProps) {
           </button>
         );
       })}
+      {more > 0 && <p className="px-1 pt-1 text-xs home-sub" data-home-needs-more="">{t("needsYou.more", { n: more })}</p>}
     </section>
   );
 }

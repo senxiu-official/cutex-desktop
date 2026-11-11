@@ -57,7 +57,7 @@ function CardGauge({ gauge: g, view }: { gauge: QuotaGauge; view: QuotaView }) {
         <>
           <GaugeBar ratio={fill} view={view} className="h-1.5 min-w-10 flex-1" />
           <span className="min-w-9 shrink-0 text-right text-foreground">{t(quotaTextKey(view), { percent: Math.round(fill * 100) })}</span>
-          <span className="hidden w-10 shrink-0 text-subtle group-data-[lg]/profile:inline">{reset}</span>
+          <span className="hidden w-[6.5ch] shrink-0 whitespace-nowrap text-subtle group-data-[lg]/profile:inline">{reset}</span>
         </>
       )}
       {g.error && <span className="text-danger">!</span>}

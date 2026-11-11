@@ -30,10 +30,6 @@ export function DesktopPage() {
 export function ShelfOnlySection() {
   const { t } = useI18n();
   return (
-    <Section id={settingsAnchorId("shelf-only")} title={t("settings.panel.shelfOnly")}>
-      <p data-shelf-only-note="" className="px-1 py-1 text-xs leading-relaxed text-muted">
-        {t("settings.panel.shelfOnlyHint")}
-      </p>
-    </Section>
+    <Section id={settingsAnchorId("shelf-only")} title={t("settings.panel.shelfOnly")} hint={<span data-shelf-only-note="">{t("settings.panel.shelfOnlyHint")}</span>} />
   );
 }

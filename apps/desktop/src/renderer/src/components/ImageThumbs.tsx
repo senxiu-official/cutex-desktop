@@ -123,7 +123,7 @@ function useImageSrc(image: MessageImage, hostId: string | null | undefined, ret
   // r259+ desktops upload them as), not the 5 MB of a Markdown file thumbnail: a 5–8 MB screenshot read
   // with that cap came back truncated and stayed a file chip once its optimistic preview was gone.
   const read = usable && media && hostId ? () => readHistoryMedia(hostId, media, expected) : key ? () => hostApi(hostId!).hostFile(path!, MAX_IMAGE_BYTES) : null;
-  const { ref, state } = useThumbnail(key, read, { hostId: hostId ?? undefined, isCurrent: hostId ? captureMediaAuthority(hostId) : undefined, maxBytes: MAX_IMAGE_BYTES });
+  const { ref, state } = useThumbnail(key, read, { revalidate: !media, hostId: hostId ?? undefined, isCurrent: hostId ? captureMediaAuthority(hostId) : undefined, maxBytes: MAX_IMAGE_BYTES });
   if (image.kind === "url" && !media && !/^cutex-(media|blob):/.test(image.url)) return { ref, src: image.url, loading: false, key: image.url };
   return { ref, src: state.status === "ok" ? state.src : null, loading: !!key && (state.status === "idle" || state.status === "loading"), key };
 }

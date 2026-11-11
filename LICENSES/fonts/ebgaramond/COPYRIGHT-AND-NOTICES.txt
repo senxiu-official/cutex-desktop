@@ -1,0 +1,5 @@
+copyright: Copyright 2017 The EB Garamond Project Authors (https://github.com/octaviopardo/EBGaramond12)
+
+designer: Georg Duffner and Octavio Pardo
+
+manufacturer: Georg Duffner

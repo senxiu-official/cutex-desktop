@@ -27,7 +27,7 @@ export const zhCN = {
   "side-chat.modelSame": "跟主{{agent}}相同",
   "side-chat.modelHint": "留空跟随主{{agent}}；也可指定同一 Profile 能用的模型名",
   "side-chat.title": "侧边对话",
-  "side-chat.description": "继承背景的临时侧边对话，不写入主对话",
+  "side-chat.description": "使用当前背景进行临时侧边对话，内容不写入主会话",
   "side-chat.settingsHint": "从某一轮次开出的临时对话，不写入主对话。",
   "side-chat.open": "从这一轮开侧边对话",
   "side-chat.back": "返回主对话",

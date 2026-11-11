@@ -351,6 +351,10 @@ const pause = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve,
  * connection ends, so requests in flight finish on the route they were sent on.
  */
 export class SshTunnel {
+  forwardFailure(): SshErrorView | null {
+    return /administratively prohibited|port forwarding (?:is )?(?:disabled|not permitted)|forwarding disabled/i.test(this.stderr)
+      ? classifySshFailure(null, this.stderr, "tunnel") : null;
+  }
   private view: TunnelView = initialTunnel();
   private child: ChildProcess | null = null;
   private stopped = true;
@@ -716,7 +720,7 @@ export class SshTunnel {
  * A short-lived forward for one-off checks (test connection / revoke on a host that is not
  * active). Resolves once the port accepts; `close()` kills it.
  */
-export async function openTemporaryTunnel(target: SshTarget, remotePort: number, pids: TunnelPidFile, timeoutMs = 25_000, options?: SshRunOptions): Promise<{ port: number; close(): void }> {
+export async function openTemporaryTunnel(target: SshTarget, remotePort: number, pids: TunnelPidFile, timeoutMs = 25_000, options?: SshRunOptions): Promise<{ port: number; close(): void; failure?(): SshErrorView | null }> {
   const port = await freeLocalPort();
   const ask = options?.askpass ? await askpassSpawn(options) : null;
   let child: ChildProcess;
@@ -751,7 +755,7 @@ export async function openTemporaryTunnel(target: SshTarget, remotePort: number,
       const e = exited as { code: number | null; error: NodeJS.ErrnoException | null };
       throw new SshFailure(e.error?.code === "ENOENT" ? { code: "noSsh", detail: e.error.message } : classifySshFailure(e.code, stderr, "tunnel"));
     }
-    if (await portListening(port, 800)) return { port, close };
+    if (await portListening(port, 800)) return { port, close, failure: () => /administratively prohibited|port forwarding (?:is )?(?:disabled|not permitted)|forwarding disabled/i.test(stderr) ? classifySshFailure(null, stderr, "tunnel") : null };
     if (expired()) {
       close();
       throw new SshFailure({ code: "timeout", detail: classifySshFailure(null, stderr, "tunnel").detail || "timed out waiting for the port forward" });

@@ -197,4 +197,29 @@ describe("057 carried inputs", () => {
     if (features.includes("input-ledger-v1")) expect(host.textContent).toContain("standalone notice");
     await act(async () => root.unmount()); host.remove();
   });
+  it("owner 2026-11-10: a message whose turn was interrupted before its first item sits inline at that turn with a note and its send time, not at the bottom", async () => {
+    const { root, show, host } = setup();
+    fx.state.ledgerOutbox = {}; fx.state.ledgerOwnerDrafts = {};
+    const start = Date.parse("2026-11-10T15:10:00Z") / 1000;
+    const zaima = record("zaima", { state: "inContext", turnId: "t-int", preview: "在吗", createdAt: "2026-11-10T15:12:15.000Z", since: "2026-11-10T15:12:16.000Z" });
+    const queued = record("queued", { state: "waiting", reason: "hostBusy", preview: "still waiting", createdAt: "2026-11-10T15:13:00.000Z" });
+    fx.state.inputs = { [key]: ledger([zaima, queued]) };
+    const timeline = timelineFromThreadRead({ thread: { id: "thread-s1", turns: [
+      { id: "t-a", status: "completed", startedAt: start, items: [{ type: "userMessage", id: "u-a", content: [{ type: "text", text: "first" }] }, { type: "agentMessage", id: "a-a", text: "reply one" }] },
+      { id: "t-int", status: "interrupted", startedAt: start + 135, items: [] },
+      { id: "t-b", status: "completed", startedAt: start + 165, items: [{ type: "userMessage", id: "u-b", content: [{ type: "text", text: "你不需要继续之前的工作了，先idle" }] }, { type: "agentMessage", id: "a-b", text: "ok idle" }] },
+    ] } } as never);
+    await show(timeline);
+    const rows = [...host.querySelectorAll("[data-tl-row]")];
+    const at = (needle: string) => rows.findIndex(row => row.textContent?.includes(needle));
+    expect(at("在吗")).toBeGreaterThan(at("reply one"));
+    expect(at("在吗")).toBeLessThan(at("先idle"));
+    const note = host.querySelector('[data-missing-input="zaima"] [data-stranded-note]');
+    expect(note?.getAttribute("data-stranded-note")).toBe("inputLedger.stranded.interrupted");
+    expect(note?.textContent).toMatch(/[0-9]{2}:[0-9]{2}/);
+    expect(note?.getAttribute("title")).toMatch(/2026-11-1[01] [0-9]{2}:12:15/);
+    // A record still waiting stays at the bottom, after everything.
+    expect(at("still waiting")).toBe(rows.length - 1);
+    await act(async () => root.unmount());
+  });
 });

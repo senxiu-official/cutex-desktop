@@ -10,6 +10,7 @@ import archive from "./archive";
 import artifacts from "./artifacts";
 import notes from "./notes";
 import remoteCopies from "./remote-copies";
+import baiduPan from "./baidu-pan";
 import onboarding from "./onboarding";
 import bookmarks from "./bookmarks";
 import sideChat from "./side-chat";
@@ -86,6 +87,7 @@ export const MODULES: readonly AppModule[] = [
   artifacts,
   notes,
   remoteCopies,
+  baiduPan,
   bookmarks,
   // Contract 1.18: 桌面 — the desktop layer behind the panes, the 个人页 pane, 固定到主页 (cutex user-home).
   home,

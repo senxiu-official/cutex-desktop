@@ -2,6 +2,7 @@ import { BrowserWindow, type NativeImage, type WebContents, type WebPreferences 
 import { markBackgroundWindow } from "../appWindows";
 import { browserPartition } from "./attachPolicy";
 import { MAX_BROWSER_THUMBNAIL_BYTES } from "../../shared/browser";
+import { DEFAULT_BROWSER_CARRIER_FRAME_RATE, type BrowserCarrierFrameRate } from "../../shared/browserCarrier";
 
 /**
  * Background carrier for agent-opened tabs (2026-10-18, owner option C): an offscreen-rendered,
@@ -16,7 +17,6 @@ import { MAX_BROWSER_THUMBNAIL_BYTES } from "../../shared/browser";
  * that partition passes (installBrowserSessionPolicy / hardenBrowserGuest, attributed by
  * webContentsId through the registry).
  */
-export const BROWSER_CARRIER_FRAME_RATE = 15;
 /** Owner-facing live thumbnail: at most one frame per interval, the page's own frame (rendered at the
  * owner's display scale) as JPEG at this quality, so it reads as sharp as the page. */
 export const BROWSER_THUMBNAIL_INTERVAL_MS = 1000;
@@ -39,6 +39,8 @@ export function browserCarrierPreferences(hostId: string, scaleFactor?: number):
 }
 export interface BrowserCarrier {
   readonly guest: WebContents;
+  /** 「后台网页帧率」 changed: applies at once to the running page. */
+  setFrameRate(frameRate: BrowserCarrierFrameRate): void;
   /** Closes the page and its offscreen window. Idempotent. */
   destroy(): void;
 }
@@ -47,6 +49,8 @@ export interface BrowserCarrierOptions {
   viewport: { width: number; height: number };
   /** The owner's display scale (the app window's screen): the page and its thumbnail render at it. */
   scaleFactor?: number;
+  /** 「后台网页帧率」 (main/browser/carrierPreferences); default 15. */
+  frameRate?: BrowserCarrierFrameRate;
   /** Runs synchronously right after creation, before any URL is loaded: the popup guard etc. */
   guard(guest: WebContents): void;
   /** Throttled owner thumbnail (data:image/jpeg); asked only while wanted() is true. */
@@ -75,7 +79,8 @@ export function createBrowserCarrier(options: BrowserCarrierOptions): BrowserCar
   window.once("closed", destroy);
   try { options.guard(guest); }
   catch (error) { destroy(); throw error; }
-  guest.setFrameRate(BROWSER_CARRIER_FRAME_RATE);
+  guest.setFrameRate(options.frameRate ?? DEFAULT_BROWSER_CARRIER_FRAME_RATE);
+  const setFrameRate = (frameRate: BrowserCarrierFrameRate) => { if (!destroyed && !guest.isDestroyed()) guest.setFrameRate(frameRate); };
   const emit = () => {
     thumbTimer = undefined;
     const image = pending; pending = undefined;
@@ -98,7 +103,7 @@ export function createBrowserCarrier(options: BrowserCarrierOptions): BrowserCar
     thumbTimer = setTimeout(emit, Math.max(0, lastThumb + BROWSER_THUMBNAIL_INTERVAL_MS - now()));
     thumbTimer.unref?.();
   });
-  return { guest, destroy };
+  return { guest, destroy, setFrameRate };
 }
 
 /** The CDP surface the dialog guard needs (a WebContents' debugger). */

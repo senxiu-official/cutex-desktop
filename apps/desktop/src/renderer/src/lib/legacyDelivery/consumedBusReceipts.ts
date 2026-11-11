@@ -25,7 +25,13 @@ export function consumedBusReceiptIds(items: readonly AdmissionNextStep[], timel
 /** One projection for rows, header count, compact chips and empty-panel visibility. */
 export function useUnsettledBusReceipts(host: string, session: string, items: AdmissionNextStep[]): AdmissionNextStep[] {
   const timeline = useApp(s => s.sessions ? viewOf(s, host, session)?.timeline ?? null : null);
-  const version = useApp(s => s.sessions ? viewOf(s, host, session)?.version ?? 0 : 0);
+  // The timeline is mutated in place, so a revision stands in for it — without the bumps of streamed reply / reasoning
+  // text (`textVersion`, store.ts): consumption reads only received items and turn completion, never that text, so
+  // the tray does not re-render (and re-measure) per streamed frame.
+  const version = useApp(s => {
+    const view = s.sessions ? viewOf(s, host, session) : undefined;
+    return view ? view.version - (view.textVersion ?? 0) : 0;
+  });
   const hidden = useHiddenReceiptIds(host, session);
   const restored = useRestoredReceiptIds(host, session);
   const writes = useSettlementWrites(s => s.entries);

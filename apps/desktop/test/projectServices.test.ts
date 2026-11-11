@@ -27,7 +27,7 @@ function staticSubmenu(entries: MenuAction["submenu"]): MenuEntry[] {
 import { useApp } from "../src/renderer/src/store";
 
 const svc = (slug: string, over: Partial<ServiceView> = {}): ServiceView =>
-  ({ slug, displayName: slug, host: "h", port: 1, path: null, ownerCutexSessionId: null, projectId: null, runtime: "managed", createdAt: "", lastSeenAt: null, health: "reachable", url: "", localUrl: "", ...over }) as ServiceView;
+  ({ slug, displayName: slug, host: "h", port: 1, path: null, ownerCutexSessionId: null, projectId: null, runtime: "managed", createdAt: "", lastSeenAt: null, health: "reachable", url: "http://h:1/", localUrl: "http://127.0.0.1:1/", ...over }) as ServiceView;
 
 const session = (id: string, name = id) => ({ cutexSessionId: id, displayName: name }) as unknown as SidebarSnapshot["active"][number];
 const project = (id: string, director: string | null, name = id) =>

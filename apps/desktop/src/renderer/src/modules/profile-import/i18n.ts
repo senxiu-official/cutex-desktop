@@ -3,7 +3,7 @@ export const zhCN = {
   "profile-import.summary.error": "读取失败，展开后可重试",
   "profile-import.summary.count": "{total} 个服务商 · {available} 个可导入",
   "profile-import.title": "从 CC Switch 导入",
-  "profile-import.description": "设置 → Profile → 从 CC Switch 导入：把主机上 CC Switch 配置的 Claude Code / Codex 供应商导入为 Profile；CC Switch 只读不改",
+  "profile-import.description": "将主机上 CC Switch 的 Claude Code 和 Codex 服务商配置导入为 Profile；保留原配置",
   "profile-import.section": "从 CC Switch 导入",
   "profile-import.sectionHint": "把这台主机上 CC Switch 里配置好的 Claude Code 和 Codex 供应商导入为 Profile。",
   "profile-import.notFound": "没有在这台主机上找到 CC Switch",

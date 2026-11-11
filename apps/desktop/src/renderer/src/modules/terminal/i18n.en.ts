@@ -4,7 +4,7 @@ import type { zhCN } from "./i18n";
 
 export const en: Record<keyof typeof zhCN, string> = {
   "terminal.moduleTitle": "Terminal",
-  "terminal.description": "The {{shelf}}'s terminal pane: cutex terminals in the {{agent}}'s workspace (they run in cutex)",
+  "terminal.description": "Open a terminal for the {{agent}} workspace in the {{shelf}}, run by cutex on the host",
   "terminal.title": "Terminal",
   "terminal.tab": "Terminal {n}",
   "terminal.tabEnded": "{title} (ended)",

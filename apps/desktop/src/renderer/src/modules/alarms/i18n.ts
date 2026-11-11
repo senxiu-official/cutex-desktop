@@ -1,6 +1,6 @@
 export const zhCN = {
   "alarms.title": "闹钟",
-  "alarms.description": "{{agent}}设的提醒：时间、谁给谁、内容，可取消；显示在状态行和胶囊里",
+  "alarms.description": "查看和取消{{agent}}设置的提醒",
   "alarms.statusTitle": "闹钟",
   "alarms.pending": "{n} 个待响",
   "alarms.next": "下次 {t}",

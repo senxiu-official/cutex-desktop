@@ -1,0 +1,3 @@
+https://github.com/TrionesType/zhuque
+Revision: v0.212
+License: https://raw.githubusercontent.com/TrionesType/zhuque/v0.212/LICENSE.txt

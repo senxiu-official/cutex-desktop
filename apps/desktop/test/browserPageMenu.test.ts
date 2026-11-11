@@ -6,7 +6,7 @@ import type { MenuAction, MenuEntry } from "../src/renderer/src/lib/contextMenu"
 
 const t = (key: string) => key;
 const base: BrowserPageMenuInput = { url: "https://example.org/a", narrow: false, canGoForward: true, ready: true, working: false, toBackground: null, zoom: undefined };
-const actions = () => ({ forward: vi.fn(), copy: vi.fn(), openExternal: vi.fn(), toBackground: vi.fn(), resetZoom: vi.fn() });
+const actions = () => ({ forward: vi.fn(), copy: vi.fn(), copyText: vi.fn(), openExternal: vi.fn(), toBackground: vi.fn(), resetZoom: vi.fn() });
 const rows = (entries: MenuEntry[]) => entries.filter((e): e is MenuAction => !!e && e !== "separator");
 
 describe("browser page menu", () => {
@@ -37,5 +37,16 @@ describe("browser page menu", () => {
     expect(narrow[0]!.disabled).toBe(true);
     expect(narrow[4]!.hint).toBe("125%");
     expect(rows(browserPageMenu({ ...base, toBackground: { busy: true } }, act, t)).find(i => i.label === "browser.background.send")!.disabled).toBe(true);
+  });
+  it("a service tab copies the service's own address (with the page path) and port, then its cutex link", () => {
+    const act = actions();
+    const items = rows(browserPageMenu({ ...base, url: "cutex:service/photos/album?x=1", service: { address: "http://127.0.0.1:24421/album?x=1", port: 24421, remoteHost: null } }, act, t));
+    expect(items.map(i => i.label)).toEqual(["services.copyUrl", "services.copyPort", "browser.copyServiceLink", "browser.external"]);
+    expect(items[0]!.hint).toBe("127.0.0.1:24421/album?x=1");
+    void items[0]!.onSelect();
+    void items[1]!.onSelect();
+    expect(act.copyText.mock.calls).toEqual([["http://127.0.0.1:24421/album?x=1"], ["24421"]]);
+    void items[2]!.onSelect();
+    expect(act.copy).toHaveBeenCalledOnce();
   });
 });

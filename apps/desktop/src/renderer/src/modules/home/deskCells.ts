@@ -260,3 +260,71 @@ export function clampSize(w: number, h: number, limits: { min: readonly [number,
 }
 
 export type { BandKey };
+
+/**
+ * The columns nothing covers (owner 2026-11-10): the grid of `cols` sits centred in `width` px and `cover.left` /
+ * `cover.right` px of the width are under a Shelf. `from` is the first free column, `count` how many there are.
+ */
+export function visibleCols(width: number, cols: number, cover: { left: number; right: number }): { from: number; count: number } {
+  const gridLeft = Math.max(0, Math.floor((width - spanPx(cols)) / 2));
+  const from = clamp(Math.ceil((cover.left - gridLeft) / PITCH), 0, cols);
+  const to = clamp(Math.floor((width - cover.right - gridLeft + GAP) / PITCH), from, cols);
+  return { from, count: to - from };
+}
+
+/**
+ * The saved layout `full` seen through the columns [`from`, `from + count`) while a Shelf covers the rest (owner
+ * 2026-11-10): a view only — computed from the saved boxes on every draw and never stored, so when the room comes
+ * back the desktop is exactly as it was. Boxes wholly inside keep their place; the others keep the reading order:
+ * each takes the first free place inside at or below the row of the widget before it (filling the free columns).
+ * One wider than the free columns is hidden (never shrunk).
+ */
+export function reflowCells(full: CellLayout, from: number, count: number): { at: Record<string, Cells>; hidden: string[] } {
+  const inside = (r: Cells) => r.x >= from && r.x + r.w <= from + count;
+  const local: Record<string, Cells> = {};
+  for (const [id, r] of Object.entries(full)) if (inside(r)) local[id] = { ...r, x: r.x - from };
+  const hidden: string[] = [];
+  const order = Object.keys(full).sort((a, b) => full[a]!.y - full[b]!.y || full[a]!.x - full[b]!.x);
+  let row = 0;
+  for (const id of order) {
+    const r = full[id]!;
+    if (local[id]) {
+      row = local[id]!.y;
+      continue;
+    }
+    if (r.w > count) {
+      hidden.push(id);
+      continue;
+    }
+    local[id] = freeFrom(local, r.w, r.h, count, row);
+    row = local[id]!.y;
+  }
+  return { at: Object.fromEntries(Object.entries(local).map(([id, r]) => [id, { ...r, x: r.x + from }])), hidden };
+}
+
+/** The first free place at or below row `y0`, row by row from the left. */
+function freeFrom(at: CellLayout, w: number, h: number, cols: number, y0: number): Cells {
+  const bottom = Math.max(bottomOf(at), y0);
+  for (let y = y0; y <= bottom; y++) for (let x = 0; x + w <= cols; x++) if (isFree(at, { x, y, w, h }, cols)) return { x, y, w, h };
+  return { x: 0, y: bottom, w, h };
+}
+
+// ── A Shelf over the desktop (modules/home/deskCover measures it) ──
+
+export interface DeskCover {
+  left: number;
+  right: number;
+}
+/** The px of `area` under `covers` from each side (with a gap so a widget never touches a Shelf's edge). Pure. */
+export function coverOf(area: { left: number; right: number; top: number; bottom: number }, covers: readonly { left: number; right: number; top: number; bottom: number }[]): DeskCover {
+  let left = 0;
+  let right = 0;
+  const mid = (area.left + area.right) / 2;
+  for (const b of covers) {
+    if (b.right <= b.left || b.bottom <= area.top || b.top >= area.bottom || b.right <= area.left || b.left >= area.right) continue;
+    if ((b.left + b.right) / 2 >= mid) right = Math.max(right, area.right - b.left + GAP);
+    else left = Math.max(left, b.right - area.left + GAP);
+  }
+  const width = area.right - area.left;
+  return { left: Math.min(width, Math.round(left)), right: Math.min(width, Math.round(right)) };
+}

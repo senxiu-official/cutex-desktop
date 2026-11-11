@@ -1,0 +1,7 @@
+copyright: Copyright 2011 The Bitter Project Authors (https://github.com/solmatas/BitterPro)
+
+trademark: Bitter is a trademark of Sol Matas (www.solmatas.com).
+
+designer: Sol Matas, and Bitter project Authors
+
+manufacturer: Sol Matas

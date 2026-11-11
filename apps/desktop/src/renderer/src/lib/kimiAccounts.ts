@@ -7,6 +7,8 @@ import { useTargetApi, useTargetHostId } from "./targetHost";
 
 /** The kimi-accounts module's `settings.section` id on page `profiles` (also its settings anchor). */
 export const KIMI_ACCOUNTS_SECTION = "kimi-accounts.accounts";
+/** Its sub-page's card (Profile → 全部 N 个账户). */
+export const KIMI_ACCOUNTS_ALL_SECTION = "kimi-accounts.all";
 
 /** The host's Kimi accounts, read when shown and again on demand (`load`). null: not read / no route. */
 export function useKimiAccountList(enabled = true) {

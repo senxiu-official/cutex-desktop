@@ -83,7 +83,8 @@ export function SidebarAgentRowsCard() {
   const tip = useTip();
   const ui = useUiPrefs();
   return (
-    <Section id={settingsAnchorId("agentRows")} title={t("appearance.sidebar.agentRows")}>
+    // A link to another page sits in the card's header, never loose under its last row.
+    <Section id={settingsAnchorId("agentRows")} title={t("appearance.sidebar.agentRows")} actions={<TextLink onClick={() => useApp.getState().openSettings("appearance", { anchor: "avatars" })}>{t("settings.ia.avatarLink")}</TextLink>}>
       {/* 侧栏布局 (design 040 §4, step 14): 花名册 (default) or 现在 / 全部 (components/SidebarNowAll). */}
       <SettingRow agents="none" source="local" label={t("appearance.sidebarLayout")} hint={t("appearance.sidebarLayoutHint")} reset={prefReset(ui, "sidebarLayout")}>
         <Segmented value={ui.sidebarLayout} options={SIDEBAR_LAYOUTS.map((v) => ({ value: v, label: t(`appearance.sidebarLayout.${v}` as MessageKey) }))} onChange={(v) => setUiPref("sidebarLayout", v)} />
@@ -109,7 +110,6 @@ export function SidebarAgentRowsCard() {
           onChange={(v) => setUiPref("rowPreview", v)}
         />
       </SettingRow>
-      <TextLink onClick={() => useApp.getState().openSettings("appearance", { anchor: "avatars" })}>{t("settings.ia.avatarLink")}</TextLink>
     </Section>
   );
 }

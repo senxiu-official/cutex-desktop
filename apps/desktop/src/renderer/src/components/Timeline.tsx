@@ -4,7 +4,7 @@ import { viewKey } from "../lib/viewKey";
 import type { InputRecord } from "@cutex-desktop/protocol";
 import { usesInputLedger, usesOwnerCarries } from "../lib/deliveryMode";
 import { showStandaloneDelivery } from "../lib/inputLedger/deliveryPresentation";
-import { missingTimelineRecords, timelineRecordIndex, ownerRecordFor, ownerTimelineEntry, ownerOutboxTimelineEntry, predictedOwnerSurface, type LedgerOwnerOutbox } from "../lib/inputLedger/owner";
+import { missingTimelineRecords, placeMissingRecords, strandedNote, timelineRecordIndex, ownerRecordFor, ownerTimelineEntry, ownerOutboxTimelineEntry, predictedOwnerSurface, type LedgerOwnerOutbox } from "../lib/inputLedger/owner";
 import { carriedInputs, carriedReceivedRow } from "../lib/inputLedger/carries";
 import { CarriedInputRows } from "./CarriedInputRows";
 import { InputStatus } from "./InputStatus";
@@ -32,7 +32,7 @@ import { ReplyActions, UserActions } from "./MessageActions";
 import { TurnSummary } from "./TurnSummary";
 import { fileChangesByTurn, type TurnChanges } from "../lib/turnSummary";
 import { useUiPrefs } from "../lib/prefs";
-import { formatAbsolute, formatWhen, useClock, useNow } from "../lib/time";
+import { formatAbsolute, formatAt, formatWhen, useClock, useNow } from "../lib/time";
 import { orderedEntries, type TimelineEntry, type TimelineState, type TurnView } from "../lib/timeline";
 import { segmentEntries } from "../lib/workGroups";
 import { pairSentCalls } from "../lib/sentToolPairs";
@@ -273,7 +273,7 @@ function LedgerSenderName({ record }: { record: InputRecord }) {
 function SentMessage({ entry, name, onContextMenu }: { entry: Extract<TimelineEntry, { kind: "sent" }>; name: string; onContextMenu: React.MouseEventHandler }) {
   const record = useAgentMessage(entry.messageId ?? null);
   const recipient = useAgentFeatures(entry.to);
-  return <BusMessage direction="out" name={name} mode={entry.deliveryMode} text={entry.text} preview={entry.preview ?? null} kind={record?.kind ?? entry.deliveryKind ?? null} downgraded={!!record?.downgraded} messageId={entry.messageId ?? null} recipientId={entry.to || null} recipientRuntime={recipient.runtime} onContextMenu={onContextMenu} />;
+  return <BusMessage direction="out" name={name} mode={entry.deliveryMode} text={entry.text} preview={entry.preview ?? null} kind={record?.kind ?? entry.deliveryKind ?? null} downgraded={!!record?.downgraded} messageId={entry.messageId ?? null} recipientId={entry.to || null} recipientRuntime={recipient.runtime} recipientFeatures={recipient.map} onContextMenu={onContextMenu} />;
 }
 
 /**
@@ -305,6 +305,14 @@ function sameFields<T extends object>(a: T | undefined, b: T | undefined): boole
 
 // Entries are replaced (never mutated) when they change, so a finished entry keeps its identity and
 // is skipped on re-render: long histories no longer re-reconcile on every event / clock tick.
+/** Under a message whose turn ended before it reached the history: why, and when it was really sent. */
+function StrandedNote({ noteKey, sentAt }: { noteKey: "inputLedger.stranded.interrupted" | "inputLedger.stranded.failed" | "inputLedger.stranded.missing"; sentAt: number }) {
+  const { t } = useI18n();
+  return <div className="-mt-1 mb-2 flex justify-end text-caption text-subtle" data-stranded-note={noteKey} title={formatAbsolute(sentAt)}>
+    {t(noteKey)} · {formatAt(sentAt, Date.now())}
+  </div>;
+}
+
 const MemoEntry = memo(Entry, (a, b) => a.entry === b.entry && a.pending === b.pending && a.nameOf === b.nameOf && a.sessionId === b.sessionId && a.readOnly === b.readOnly && a.actionable === b.actionable && a.dropped === b.dropped && a.foldRole === b.foldRole && sameFields(a.bar, b.bar) && a.changes?.signature === b.changes?.signature && a.reply === b.reply);
 
 /**
@@ -427,7 +435,7 @@ function Entry({ entry: initial, ledgerRecord, ledgerRecords, ledgerPending, pen
     // renders by its view schema (lib/receivedRows); whatever no branch claims is a bus message.
     case "received":
       return <><ReceivedOutlet message={entry.message} sessionId={sessionId} readOnly={readOnly}
-        fallback={<BusMessage direction="in" name={entry.message.senderName} senderId={entry.message.senderId} sourceKind={entry.message.sourceKind} mode={entry.message.deliveryMode} text={entry.message.text} kind={entry.message.envelope?.kind ?? null} envelope={entry.message.envelope ?? null} recipientRuntime={agent.runtime} onContextMenu={menu("received", entry.message.text)} />} />{(ledgerRecords ?? (ledgerRecord ? [ledgerRecord] : [])).map(record => <span key={record.inputId} title={record.preview ?? record.inputId}><InputStatus record={record} sessionId={sessionId} hostId={hostId} readOnly={readOnly} timeline /></span>)}</>;
+        fallback={<BusMessage direction="in" name={entry.message.senderName} senderId={entry.message.senderId} sourceKind={entry.message.sourceKind} mode={entry.message.deliveryMode} text={entry.message.text} kind={entry.message.envelope?.kind ?? null} envelope={entry.message.envelope ?? null} recipientRuntime={agent.runtime} recipientFeatures={agent.map} onContextMenu={menu("received", entry.message.text)} />} />{(ledgerRecords ?? (ledgerRecord ? [ledgerRecord] : [])).map(record => <span key={record.inputId} title={record.preview ?? record.inputId}><InputStatus record={record} sessionId={sessionId} hostId={hostId} readOnly={readOnly} timeline /></span>)}</>;
     case "sent":
       return <SentMessage entry={entry} name={nameOf(entry.to)} onContextMenu={menu("sent", entry.text)} />;
     case "tool":
@@ -683,6 +691,16 @@ export function TimelineBody({ timeline, entries: suppliedEntries, version, sess
     const byOwner = new Map([...joined.byOwner].filter(([id]) => visibleOwners.has(id)));
     return { byOwner, inputIds: new Set([...byOwner.values()].flatMap(rows => rows.map(r => r.inputId))) };
   }, [ledger?.records, features, ledgerRows, segments, ledgerIndex, folded]);
+  // Records without their native item (owner 2026-11-10): only those still on their way stay at the bottom; the
+  // rest go inline at their turn (or send time), never below the divider for good.
+  const missingPlaced = useMemo(() => {
+    const visibleIds = new Set(visibleTurns.map(turn => turn.id));
+    const firstShown = visibleTurns[0]?.startedAt;
+    const hidden = (record: InputRecord) => record.turnId && loadedTurns.has(record.turnId) ? !visibleIds.has(record.turnId)
+      : olderHistory && firstShown != null && Date.parse(record.createdAt) < firstShown * 1000;
+    return placeMissingRecords(ledgerRows.filter(record => !carries.inputIds.has(record.inputId)), segments.map(segTurn), visibleTurns, hidden);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ledgerRows, carries, segments, visibleTurns, loadedTurns, olderHistory, turnCount]);
   const receivedEntries = useMemo(() => {
     const native = new Map(ledgerEntries.filter(entry => carriedReceivedRow(entry, ledgerIndex, carries.inputIds)).map(entry => [entry.id, entry]));
     const claimed = new Set<string>();
@@ -703,6 +721,16 @@ export function TimelineBody({ timeline, entries: suppliedEntries, version, sess
     <div className="text-xs text-subtle"><LedgerSenderName record={record} /></div><div className="whitespace-pre-wrap text-sm">{record.preview}</div>
     <InputStatus record={record} sessionId={sessionId} hostId={view.hostId} readOnly={readOnly} timeline />
   </div>;
+  // A record without its native item, inline or at the bottom: same key as the native row that may replace it.
+  const missingRow = (record: InputRecord) => {
+    const note = strandedNote(record, visibleTurns);
+    return <Fragment key={sendRowKey(record.inputId)}><div data-turn-id={undefined} data-tl-row="" data-missing-input={record.inputId}>
+      {false}{undefined}
+      {record.kind === "owner" ? <MemoEntry entry={ownerTimelineEntry(record, ownerDrafts?.[record.inputId])} ledgerRecord={record} nameOf={nameOf} sessionId={sessionId} readOnly={readOnly} actionable={false} bar={undefined} dropped={0} foldRole="user" /> : ledgerInputRow(record)}
+      {note && <StrandedNote noteKey={note.key} sentAt={note.sentAt} />}
+      {record.kind === "owner" && carriedRows(record.inputId)}
+    </div></Fragment>;
+  };
   const carriedRows = (ownerId: string | undefined) => ownerId && carries.byOwner.has(ownerId)
     ? <CarriedInputRows records={carries.byOwner.get(ownerId)!} received={receivedEntries.get(ownerId)!} renderRecord={ledgerInputRow} renderReceived={(entry, records) => <>
       <MemoEntry entry={entry} nameOf={nameOf} sessionId={sessionId} readOnly={readOnly} actionable={false} bar={undefined} dropped={0} foldRole={foldRoleOf(entry)} />
@@ -753,7 +781,7 @@ export function TimelineBody({ timeline, entries: suppliedEntries, version, sess
       {ownerNotify && <OwnerNotificationHistory hostId={view.hostId} agentId={sessionId} />}
       {revealedSafetyId && <OwnerNotifyCard notificationId={revealedSafetyId} sessionId={sessionId} hostId={view.hostId} />}
       {noteCards(placed.head)}
-      {[...segments.map((seg, i) => {
+      {[...segments.flatMap((seg, i) => [...(missingPlaced.before.get(i)?.map(missingRow) ?? []), (() => {
         const after = placed.after.get(i);
         if (seg.kind === "work") {
           let header: TurnView | undefined;
@@ -801,17 +829,14 @@ export function TimelineBody({ timeline, entries: suppliedEntries, version, sess
             {noteCards(after)}
           </Fragment>
         );
-      }),
+      })()]),
+      ...missingPlaced.end.map(missingRow),
       ...pendingLedgerRows.map(entry => <Fragment key={sendRowKey(entry.inputId)}><div data-turn-id={undefined} data-tl-row="">
         {false}{undefined}
         <MemoEntry entry={ownerOutboxTimelineEntry(entry)} ledgerPending={entry} nameOf={nameOf} sessionId={sessionId} readOnly={readOnly} actionable={false} bar={undefined} dropped={0} foldRole="user" />
         {undefined}
       </div></Fragment>),
-      ...ledgerRows.filter(record => !carries.inputIds.has(record.inputId)).map(record => <Fragment key={sendRowKey(record.inputId)}><div data-turn-id={undefined} data-tl-row="">
-        {false}{undefined}
-        {record.kind === "owner" ? <MemoEntry entry={ownerTimelineEntry(record, ownerDrafts?.[record.inputId])} ledgerRecord={record} nameOf={nameOf} sessionId={sessionId} readOnly={readOnly} actionable={false} bar={undefined} dropped={0} foldRole="user" /> : ledgerInputRow(record)}
-        {record.kind === "owner" && carriedRows(record.inputId)}
-      </div></Fragment>),
+      ...missingPlaced.trailing.map(missingRow),
       ...timelineTail(ledgerEnabled ? ledger?.delivery?.turn?.turnId ?? null : timeline.activeTurnId, headed).flatMap((slot) => {
         if (slot === "pending")
           return pendingRows.flatMap((p) => {
