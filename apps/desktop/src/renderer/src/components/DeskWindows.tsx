@@ -151,7 +151,7 @@ function DeskProbe({ desk }: { desk: DeskRecord }) {
     <div className="flex flex-col gap-3 p-4">
       <div data-probe-card="" className="shell-card rounded-lg border border-border p-4">
         <div className="text-lg font-semibold">Desk probe {desk.deskId}</div>
-        <div data-probe-counts="" className="font-mono text-xs text-muted-foreground">
+        <div data-probe-counts="" className="font-mono text-xs text-muted">
           mainRaf {counts.current.mainRaf} · deskRaf {counts.current.deskRaf} · timer {counts.current.timer}
         </div>
       </div>

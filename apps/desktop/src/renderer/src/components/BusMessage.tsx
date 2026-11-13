@@ -10,8 +10,8 @@ import { useApp } from "../store";
 import { convFeaturesOf, useConvScope } from "../lib/conversationScope";
 import { useUiPrefs } from "../lib/prefs";
 import { AGENT_MESSAGES_V2, deliveryKindOf, stripLegacyPrefix, type AgentEnvelope, type DeliveryKind } from "../lib/legacyDelivery/agentMessages";
-import { senderLabel } from "../lib/systemSenders";
-import { useSenderName } from "../lib/viewHost";
+import { senderLabel, systemSender } from "../lib/systemSenders";
+import { useSenderName, viewRow } from "../lib/viewHost";
 import { SenderAvatar } from "./SystemAvatar";
 import { useWakeHint } from "../lib/wakeBusyWaitView";
 import { EnvelopeBadges, KindTag, SentStatus } from "./AgentMessageParts";
@@ -40,6 +40,11 @@ export function BusMessage({ direction, name: rawName, mode, text: raw, preview 
   const id = incoming ? senderId : recipientId;
   const sender = useSenderName(incoming ? id : null, rawName);
   const name = incoming ? senderLabel(t, id, sourceKind, sender.name) : rawName;
+  // The other agent opens from its name (an agent reference, components/Parties): only one this host's sidebar holds.
+  const convHost = useConvHost();
+  const linkHost = useApp((s) => (id && !systemSender(id, incoming ? sourceKind : null) && viewRow(s, convHost, id) ? convHost : null));
+  const openAgent = useApp((s) => s.openAgent);
+  const openOther = () => void (id && linkHost && openAgent(id, linkHost));
   const Arrow = incoming ? ArrowDownLeft : ArrowUpRight;
   const shownKind = kind ?? deliveryKindOf(null, mode);
   const wakeHint = useWakeHint(v2 && shownKind === "wake", recipientRuntime, recipientFeatures);
@@ -49,7 +54,8 @@ export function BusMessage({ direction, name: rawName, mode, text: raw, preview 
         <Arrow size={13} className="shrink-0 text-subtle" />
         <span className="shrink-0">{t(incoming ? "conversation.from" : "conversation.to")}</span>
         <SenderAvatar id={id} sourceKind={incoming ? sourceKind : null} name={name} size={20} agent />
-        <span data-testid="bus-message-name" className="min-w-0 max-w-[16em] shrink-0 truncate whitespace-nowrap font-medium text-foreground" title={sender.real ?? name}>{name}</span>
+        <span data-testid="bus-message-name" className={`min-w-0 max-w-[16em] shrink-0 truncate whitespace-nowrap font-medium text-foreground${linkHost ? " cursor-pointer hover:underline" : ""}`} title={[sender.real ?? name, linkHost ? id : null].filter(Boolean).join("\n")}
+          {...(linkHost ? { role: "link", tabIndex: 0, onClick: (e: React.MouseEvent) => (e.stopPropagation(), openOther()), onKeyDown: (e: React.KeyboardEvent) => { if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); openOther(); } } } : {})}>{name}</span>
         {v2 ? <KindTag kind={shownKind} downgraded={downgraded || !!envelope?.downgraded} wakeHint={wakeHint} /> : <DeliveryTag mode={mode} />}
         {v2 && envelope && <EnvelopeBadges envelope={envelope} reveal={open ? "" : "hidden group-hover/msg:inline group-focus-within/msg:inline"} />}
         {v2 && !incoming && messageId && <SentStatus messageId={messageId} />}

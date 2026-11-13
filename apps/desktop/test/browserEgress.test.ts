@@ -18,6 +18,14 @@ function fixture() {
   return { session, target: session as unknown as Session, proxy, factory, load, control, info, owner };
 }
 describe("N2 lifecycle and credential boundary", () => {
+  it("passes main's current numeric control-endpoint policy into the proxy", async () => {
+    const f = fixture();
+    const protectedAddress = vi.fn(() => true);
+    const control = createBrowserEgress({ isEnabled: () => true, load: f.load as any, protectedAddress });
+    await control.enableSession(f.target);
+    expect(f.factory).toHaveBeenCalledWith(expect.objectContaining({ protectedAddress }));
+    control.stop();
+  });
   it.each([["off", () => false], ["throwing", () => { throw new Error("store broken"); }]])("never imports the proxy while the owner switch is %s", async (_label, isEnabled) => {
     const f = fixture(), control = createBrowserEgress({ isEnabled: isEnabled as () => boolean, load: f.load as any });
     await control.enableSession(f.target); control.revokeSession(f.target); control.stop();

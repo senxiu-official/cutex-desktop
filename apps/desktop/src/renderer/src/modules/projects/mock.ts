@@ -10,9 +10,10 @@
 //   fail      the seat move is refused → failed (the successor stays a member)
 //   wait      the note never comes; the deadline is the chosen one (stays 等待交接)
 //   running   kks starts with a rotation waiting for its note (banner, 查看 opens the progress)
-import type { DirectorRotation, DirectorRotationResult, DirectorRotationStart, DirectorRotationState } from "../../../../shared/ipc";
+import type { DesktopApi, DirectorRotation, DirectorRotationResult, DirectorRotationStart, DirectorRotationState, ProjectMemoryMutation, ProjectMemoryView } from "../../../../shared/ipc";
 import { isTerminalRotation, nextSuccessorName, ROTATION_UPDATED_METHOD, rotationCancellable, rotationWaiting } from "../../../../shared/directorRotation";
 import type { MockCore, ModuleMock } from "../../dev/mockTypes";
+import { indexLineReferences, MEMORY_INDEX_FILE, memoryDraftProblems, memoryFileProblem, nextMemoryIndex, parseMemory } from "../../../../shared/projectMemory";
 import { OPERATOR_ACTION_SCHEMA, type OperatorActionReceipt, type OperatorActionRequest, type OperatorGrant, type OperatorProjectMember, type OperatorProjectWorkspace } from "@cutex-desktop/cutex-client";
 
 interface OperatorState {
@@ -86,14 +87,17 @@ function seedOperator(core: MockCore): void {
 function readOperatorProject(core: MockCore, id: string): OperatorProjectWorkspace {
   syncOperators(core);
   const snapshot = core.projectRecords(), p = projectRecord(core, id), state = operatorState(core);
-  const active = snapshot.active.filter(s => snapshot.hostRows[s.cutexSessionId]?.projectId === id).map(operatorMember);
+  const members = snapshot.active.filter(s => snapshot.hostRows[s.cutexSessionId]?.projectId === id).map(operatorMember);
+  // Like the daemon: a member holding this project's Operator grant is listed under agent_operators only.
+  const grants = core.legacy ? new Map<string, OperatorGrant>() : state.grants.get(id) ?? new Map<string, OperatorGrant>();
+  const active = members.filter(m => !grants.has(m.agent.cutex_session_id));
   const retired = snapshot.retired.filter(s => snapshot.hostRows[s.cutexSessionId]?.projectId === id).map(operatorMember);
-  const director = p.director_cutex_session_id ? { cutex_session_id: p.director_cutex_session_id, member: active.find(m => m.agent.cutex_session_id === p.director_cutex_session_id) } : undefined;
+  const director = p.director_cutex_session_id ? { cutex_session_id: p.director_cutex_session_id, member: members.find(m => m.agent.cutex_session_id === p.director_cutex_session_id) } : undefined;
   return structuredClone({ project_id: id, authority_epoch: p.authority_epoch, project_revision: p.project_revision ?? 0,
     lifecycle: p.lifecycle, access_role: "human_management", director, presentation: p.presentation,
     active_agents: active, retired_agents: retired, archived_agents: [], workspace_root: p.workspace_root,
     ...(core.legacy ? {} : { operator_grant_revision: state.revisions.get(id) ?? 0,
-      agent_operators: [...(state.grants.get(id)?.values() ?? [])].map(grant => ({ grant, member: active.find(m => m.agent.cutex_session_id === grant.operator_cutex_session_id)! })) }),
+      agent_operators: [...grants.values()].map(grant => ({ grant, member: members.find(m => m.agent.cutex_session_id === grant.operator_cutex_session_id)! })) }),
   });
 }
 async function actOperator(core: MockCore, request: OperatorActionRequest): Promise<OperatorActionReceipt> {
@@ -114,8 +118,8 @@ async function actOperator(core: MockCore, request: OperatorActionRequest): Prom
   const id = request.operator_cutex_session_id;
   if (workspace.director.cutex_session_id === id) throw Error("conflict: primary_director_cannot_be_operator");
   const grants = state.grants.get(request.project_id) ?? new Map<string, OperatorGrant>();
-  if (request.operation === "grant" && !workspace.active_agents.some(m => m.agent.cutex_session_id === id)) throw Error("conflict: operator_must_be_active_managed_agent");
   if (request.operation === "grant" && grants.has(id)) throw Error("conflict: operator_already_granted");
+  if (request.operation === "grant" && !workspace.active_agents.some(m => m.agent.cutex_session_id === id)) throw Error("conflict: operator_must_be_active_managed_agent");
   if (request.operation === "revoke" && !grants.has(id)) throw Error("conflict: operator_not_granted");
   const revision = previous + 1, at = new Date().toISOString();
   const grant: OperatorGrant | undefined = request.operation === "grant" ? { project_id: request.project_id, operator_cutex_session_id: id,
@@ -282,15 +286,18 @@ async function start(core: MockCore, request: DirectorRotationStart): Promise<Di
 }
 
 export const mock: ModuleMock = {
-  features: { new: ["project-optional-director", "owner-rotation", "project-create-workspace-root"] },
+  // project-icon: the presentation stores the 项目图标 (seeded on waveline / notes in dev/mockBridge.ts).
+  // project-memory: the 记忆 tab's 新建 / 编辑 / 删除 (memoryApi below; `?legacy` keeps the list read-only).
+  features: { new: ["project-optional-director", "owner-rotation", "project-create-workspace-root", "project-icon", "project-memory"] },
   api(core) {
     seedOperator(core);
     return {
+      ...memoryApi(),
       async projectRead(projectId) { return readOperatorProject(core, projectId); },
       async operatorAction(request) { return actOperator(core, request); },
       async operatorRuntimeNotice(projectId, sessionId) {
         const workspace = readOperatorProject(core, projectId);
-        if (core.legacy || !workspace.active_agents.some(m => m.agent.cutex_session_id === sessionId)) throw Error("operator_unavailable");
+        if (core.legacy || ![...workspace.active_agents, ...(workspace.agent_operators ?? []).map(o => o.member)].some(m => m.agent.cutex_session_id === sessionId)) throw Error("operator_unavailable");
         const session = core.projectRecords().active.find(s => s.cutexSessionId === sessionId)!;
         const state = operatorState(core);
         if (session.runtime.status !== "online") { state.required.delete(sessionId); syncOperators(core); return { state: "offline" }; }
@@ -353,3 +360,110 @@ export const mock: ModuleMock = {
     }, 0);
   },
 };
+// ---------- project memory ----------
+// Browser-preview project memory (cutex `project-memory`): GET / PUT / DELETE /v2/projects/{id}/memory[/{file}] on an
+// in-memory store with content revisions and cutex's refusals (invalid file / content, revision_conflict with the
+// current revision, memory_not_found). `?memoryconflict`: the first save of an existing entry finds it changed by
+// "an agent" (its body gets a line), so the conflict notice can be seen.
+
+type Doc = { content: string; updatedAt: string };
+type Store = { dir: string; files: Map<string, Doc> };
+
+function revisionOf(content: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < content.length; i++) h = Math.imul(h ^ content.charCodeAt(i), 0x01000193) >>> 0;
+  return `sha256:mock${h.toString(16).padStart(8, "0")}${content.length.toString(16)}`;
+}
+
+const entry = (name: string, description: string, type: string, body: string) => `---\nname: ${name}\ndescription: ${description}\nmetadata:\n  type: ${type}\n---\n\n${body}\n`;
+
+function seed(projectId: string): Store {
+  const dir = `C:\\Users\\sam\\.cutex\\projects\\${projectId}\\memory`;
+  const files = new Map<string, Doc>();
+  if (projectId === "desktop") {
+    files.set("decisions.md", { content: entry("decisions", "architecture choices the team agreed on", "project", "# Decisions\n\n- cutex is the daemon; desktop is a client.\n- One agent = one session = one native thread.\n- Tokens stay in the main process.\n\n**Why:** a remote host must work the same as the local one.\n**How to apply:** new desktop features go through daemon APIs."), updatedAt: "2026-10-06T09:40:00Z" });
+    files.set("windows-acl.md", { content: entry("windows-acl", "why dev homes live under the user profile", "reference", "# Windows ACL\n\ncutex requires owner-private ACLs, so dev homes must live under `%USERPROFILE%`."), updatedAt: "2026-10-05T22:03:00Z" });
+    files.set("feedback-plain-words.md", { content: entry("feedback-plain-words", "owner wants plain words in reports, no jargon", "feedback", "Write reports in plain words.\n\n**Why:** the owner reads them on a phone between meetings.\n**How to apply:** short sentences, name the decision first."), updatedAt: "2026-11-02T08:15:00Z" });
+    files.set(MEMORY_INDEX_FILE, {
+      content: "- [Plain words](feedback-plain-words.md) — owner wants plain words in reports, no jargon\n- [Decisions](decisions.md) — architecture choices the team agreed on\n- [Windows ACL](windows-acl.md) — why dev homes live under the user profile\n",
+      updatedAt: "2026-11-02T08:15:00Z",
+    });
+  }
+  return { dir, files };
+}
+
+/** The memory part of the projects module's mock api (one store per project, kept for the page's lifetime). */
+export function memoryApi(): Pick<DesktopApi, "projectMemory" | "projectMemoryFile" | "projectMemoryWrite" | "projectMemoryDelete"> {
+  const stores = new Map<string, Store>();
+  const store = (projectId: string) => stores.get(projectId) ?? (stores.set(projectId, seed(projectId)), stores.get(projectId)!);
+  let conflictOnce = new URLSearchParams(location.search).has("memoryconflict");
+  const view = (projectId: string): ProjectMemoryView => {
+    const s = store(projectId);
+    const index = s.files.get(MEMORY_INDEX_FILE);
+    return {
+      contractVersion: 2,
+      projectId,
+      dir: s.dir,
+      index: index?.content ?? null,
+      indexRevision: index ? revisionOf(index.content) : null,
+      entries: [...s.files.entries()]
+        .filter(([f]) => f !== MEMORY_INDEX_FILE)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([file, d]) => {
+          const fm = parseMemory(d.content);
+          return { file, name: fm.name || file, description: fm.description || null, type: fm.type || null, bytes: new TextEncoder().encode(d.content).length, updatedAt: d.updatedAt, revision: revisionOf(d.content) };
+        }),
+    };
+  };
+  const refuse = (code: "invalid_memory_file" | "invalid_memory_content" | "memory_not_found" | "other", message: string): ProjectMemoryMutation => ({ ok: false, code, message });
+  return {
+    async projectMemory(projectId) {
+      return view(projectId);
+    },
+    async projectMemoryFile(projectId, file) {
+      const d = store(projectId).files.get(file);
+      if (!d) throw new Error("memory_not_found: memory file not found");
+      return { file, content: d.content, bytes: d.content.length, updatedAt: d.updatedAt, revision: revisionOf(d.content) };
+    },
+    async projectMemoryWrite(projectId, file, content, expectedRevision, updateIndex) {
+      const s = store(projectId);
+      if (file !== MEMORY_INDEX_FILE) {
+        if (memoryFileProblem(file)) return refuse("invalid_memory_file", "memory file names must match [a-z0-9][a-z0-9._-]*.md");
+        const fm = parseMemory(content);
+        if (!fm.frontmatter || memoryDraftProblems(fm).length) return refuse("invalid_memory_content", "frontmatter needs a kebab-case name, a one-line description and metadata.type");
+      }
+      const existing = s.files.get(file);
+      if (conflictOnce && existing && file !== MEMORY_INDEX_FILE && expectedRevision) {
+        conflictOnce = false;
+        existing.content = `${existing.content.replace(/\n?$/, "\n")}\n(An agent added this line meanwhile.)\n`;
+        existing.updatedAt = new Date().toISOString();
+      }
+      const current = existing ? revisionOf(existing.content) : null;
+      if (expectedRevision !== current) return { ok: false, code: "revision_conflict", currentRevision: current, message: "revision_conflict: memory file revision does not match expectedRevision" };
+      s.files.set(file, { content, updatedAt: new Date().toISOString() });
+      let indexUpdated = false;
+      if (updateIndex && file !== MEMORY_INDEX_FILE) {
+        const fm = parseMemory(content);
+        const next = nextMemoryIndex(s.files.get(MEMORY_INDEX_FILE)?.content, file, null, fm);
+        if (next !== null) (s.files.set(MEMORY_INDEX_FILE, { content: next, updatedAt: new Date().toISOString() }), (indexUpdated = true));
+      }
+      return { ok: true, file, revision: revisionOf(content), indexUpdated };
+    },
+    async projectMemoryDelete(projectId, file, expectedRevision) {
+      const s = store(projectId);
+      if (file === MEMORY_INDEX_FILE) return refuse("invalid_memory_content", "MEMORY.md cannot be deleted");
+      const existing = s.files.get(file);
+      if (!existing) return refuse("memory_not_found", "memory file not found");
+      const current = revisionOf(existing.content);
+      if (expectedRevision !== current) return { ok: false, code: "revision_conflict", currentRevision: current, message: "revision_conflict" };
+      s.files.delete(file);
+      const index = s.files.get(MEMORY_INDEX_FILE);
+      let indexUpdated = false;
+      if (index) {
+        const kept = index.content.split("\n").filter((l) => !indexLineReferences(l, file));
+        if (kept.length !== index.content.split("\n").length) (s.files.set(MEMORY_INDEX_FILE, { content: kept.join("\n"), updatedAt: new Date().toISOString() }), (indexUpdated = true));
+      }
+      return { ok: true, file, revision: null, indexUpdated };
+    },
+  };
+}

@@ -1,8 +1,9 @@
 // The project icon picker (ChatGPT-style, opened from the badge left of the project name in
 // 项目设置): a popover with 表情符号 / 图标 / 自定义 tabs, a search box and the colour swatches
 // (shared project presets and a custom RGB field). The emoji / icon / custom text choice
-// is written straight to the device-local pref (lib/projectIcons); the colour is applied through
-// `onColor` — cutex presentation.color, so it follows the project across devices.
+// goes to the host's project presentation on a cutex with `project-icon` (lib/projectIconSync), else to
+// the device-local pref (lib/projectIcons); the colour is applied through `onColor` — cutex
+// presentation.color, so it follows the project across devices.
 // Controlled (`onIcon`): the 新建项目 form, before the project exists — the choice stays in the form
 // and is written to the pref once the project is created.
 import { useEffect, useRef, useState } from "react";
@@ -11,7 +12,8 @@ import { createPortal } from "react-dom";
 import { useI18n } from "../i18n";
 import { parseCustomIcon, projectIcon, searchProjectEmoji, searchProjectIcons, type ProjectIconChoice } from "../lib/projectIcons";
 import { ProjectColorPicker } from "./ProjectColorPicker";
-import { setProjectIcon, useUiPrefs } from "../lib/prefs";
+import { setProjectIconOn, useProjectIcons } from "../lib/projectIconSync";
+import { useApp } from "../store";
 import { useTrackOverlay } from "../lib/openOverlays";
 import { ProjectBadge } from "./ProjectBadge";
 import { btn } from "./Button";
@@ -21,7 +23,7 @@ const WIDTH = 288;
 const GRID_H = 200;
 
 type IconTarget =
-  /** An existing project: the choice is its device-local pref. */
+  /** An existing project: the choice goes to its host (`project-icon`) or its device-local pref. */
   | { hostId: string; projectId: string; value?: undefined; onIcon?: undefined }
   /** Controlled (a project still being created): `value` is shown, `onIcon` receives the choice (null: reset). */
   | { hostId?: undefined; projectId?: undefined; value: ProjectIconChoice | null; onIcon(icon: ProjectIconChoice | null): void };
@@ -29,9 +31,9 @@ type IconTarget =
 /** The badge button (the current icon) + its popover. */
 export function ProjectIconPicker({ badge, color, onColor, disabled, ...target }: IconTarget & { badge: string; color: string; onColor(c: string): void; disabled?: boolean }) {
   const { t } = useI18n();
-  const icons = useUiPrefs().projectIcons;
+  const icons = useProjectIcons();
   const current = target.onIcon ? target.value : projectIcon(icons, target.hostId, target.projectId);
-  const choose = (icon: ProjectIconChoice | null) => (target.onIcon ? target.onIcon(icon) : setProjectIcon(target.hostId, target.projectId, icon));
+  const choose = (icon: ProjectIconChoice | null) => (target.onIcon ? target.onIcon(icon) : void setProjectIconOn(target.hostId, target.projectId, icon, () => useApp.getState().notify(t("projects.icon.saveFailed"), "error")));
   const [open, setOpen] = useState(false);
   const anchor = useRef<HTMLButtonElement>(null);
   useTrackOverlay(open);

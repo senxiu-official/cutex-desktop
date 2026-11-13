@@ -1,9 +1,9 @@
 // 项目图标: a per-project emoji, lucide icon or short custom text (ChatGPT-style picker,
-// components/ProjectIconPicker). cutex's project presentation has no icon field yet — only
-// display_name / badge_label / colour (docs/research/project-icons-20261012.md) — so the choice is
-// a device-local pref keyed by hostKey(hostId, projectId) and every surface falls back to the
-// daemon's letter badge. The colour stays in cutex (presentation.color accepts #RRGGBB), so it is
-// consistent across devices.
+// components/ProjectIconPicker). A cutex with `project-icon` stores it in the project presentation
+// (lib/projectIconSync: surfaces read it through useProjectIcons, the picker writes the host, local
+// choices are uploaded once). On an older cutex the choice is a device-local pref keyed by
+// hostKey(hostId, projectId) (docs/research/project-icons-20261012.md). Every surface falls back to
+// the daemon's letter badge. The colour stays in cutex (presentation.color accepts #RRGGBB).
 import type { LucideIcon } from "lucide-react";
 import {
   Book,

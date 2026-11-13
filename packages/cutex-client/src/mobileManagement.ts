@@ -2,6 +2,8 @@
 export interface MobileProfile {
   id: string; name: string; cliKind: string; provider: string | null; model: string | null;
   appearance?: { effectiveProviderCategory?: string | null };
+  /** cutex `profile-avatar`: ETag of the host-stored picture (null = none). Absent on a cutex without it. */
+  avatarEtag?: string | null;
 }
 export interface ProfileQuotaGauge {
   id: string; label: string; displayLabel?: string | null; kind: "window" | "balance";

@@ -4,7 +4,7 @@ import { mockNotificationPage, mockNotificationRows, registerMockOwnerNotes } fr
 import { createMockInputLedger, inputLedgerMockEnabled, LEDGER_SCENES, type LedgerScene } from "./mockInputLedger";
 import { mockDebug } from "./mockDebug";
 import { mockImageCache } from "./mockImageCache";
-import { IMAGE_HEAVY, IMAGE_HEAVY_SESSION, prepareImageHeavy, imageHeavyThread, imageHeavyResponse, imageHeavyMedia, imageHeavyFile } from "./devImageHeavy";
+import { IMAGE_HEAVY, IMAGE_HEAVY_SESSION, prepareImageHeavy, imageHeavyThread, imageHeavyResponse, imageHeavyMedia, imageHeavyFile, imageHeavyDelay } from "./devImageHeavy";
 import { OVERLOAD_RETRY_SCENE, OVERLOAD_RETRY_SESSION, overloadRetryResource, overloadRetryThread, overloadRetryAdmission } from "./mockOverloadRetry";
 import { TURN_ERROR_SCENE, TURN_ERROR_SESSIONS, turnErrorResource, turnErrorThread } from "./mockTurnError";
 import { installSteerPreflightMock } from "./mockSteerPreflight";
@@ -36,6 +36,7 @@ import type { ProfileTransferWarning } from "../../../shared/profileTransfer";
 import { classifySshPrompt, type SshPromptAnswer, type SshPromptView } from "../../../shared/sshPrompt";
 import { MOCK_BASE_FEATURES, MOCK_NEW_FEATURES, mockScenarioFeatures } from "./mockFeatures";
 import { mockNameHistory, mockRename, mockRestoreRefusal, seedMockNames } from "./mockAgentRename";
+import { mockCreatorPathsRefusal, mockReapprovePaths } from "./mockCreatorPaths";
 import { mockPromote } from "./mockQuickChatPromote";
 import { mockProjectColor } from "./mockProjectColor";
 import { bindNewSession, variantApi, variantCreate, variantFields, variantPatch, VARIANTS_SCENE } from "./mockProfileVariants";
@@ -955,7 +956,8 @@ let snapshot: SidebarSnapshot = {
         project_id: "waveline",
         authority_epoch: 1,
         director_cutex_session_id: "wave",
-        presentation: { display_name: "waveline", badge_label: "W", color: "magenta" },
+        // cutex `project-icon` (modules/projects/mock.ts): the host stores this icon; `?legacy` has none.
+        presentation: { display_name: "waveline", badge_label: "W", color: "magenta", ...(LEGACY ? {} : { icon: { kind: "emoji" as const, value: "🌊" } }) },
         active_member_count: 1,
         lifecycle: "active",
       },
@@ -1169,9 +1171,9 @@ snapshot = {
     projects: [
       ...snapshot.projects!.projects,
       { project_id: "demo", workspace_root: "D:\\Research\\demo", authority_epoch: 1, director_cutex_session_id: "demo-dir", presentation: { display_name: "demo-study", badge_label: MARK_LABEL ?? "S", color: MARK_LABEL ? "red" : "green" }, active_member_count: 17, lifecycle: "active" },
-      { project_id: "ifm-ema", workspace_root: "D:\\Research\\ifm-ema", authority_epoch: 1, director_cutex_session_id: "ifm-dir", presentation: { display_name: "ifm-ema", badge_label: "IE", color: "yellow" }, active_member_count: 4, lifecycle: "active" },
+      { project_id: "ifm-ema", workspace_root: "D:\\Research\\ifm-ema", authority_epoch: 1, director_cutex_session_id: "ifm-dir", presentation: { display_name: "ifm-ema", badge_label: "IE", color: "yellow", ...(LEGACY ? {} : { icon: { kind: "icon" as const, value: "flask" } }) }, active_member_count: 4, lifecycle: "active" },
       { project_id: "kks", workspace_root: "D:\\Apps\\kks", authority_epoch: 1, director_cutex_session_id: "kks-dir", presentation: { display_name: "kks", badge_label: "K", color: "red" }, active_member_count: 3, lifecycle: "active" },
-      { project_id: "notes", authority_epoch: 1, director_cutex_session_id: null, presentation: { display_name: "notes", badge_label: "N", color: "blue" }, active_member_count: 1, lifecycle: "active" },
+      { project_id: "notes", authority_epoch: 1, director_cutex_session_id: null, presentation: { display_name: "notes", badge_label: "N", color: "blue", ...(LEGACY ? {} : { icon: { kind: "icon" as const, value: "notebook" } }) }, active_member_count: 1, lifecycle: "active" },
       { project_id: "demo2026", authority_epoch: 1, director_cutex_session_id: null, presentation: { display_name: "DEMO2026", badge_label: "DE", color: "red" }, active_member_count: 1, lifecycle: "active" },
       { project_id: "reader", authority_epoch: 1, director_cutex_session_id: null, presentation: { display_name: "Reader", badge_label: "RE", color: "cyan" }, active_member_count: 1, lifecycle: "active" },
       { project_id: "chores", authority_epoch: 1, director_cutex_session_id: null, presentation: { display_name: "Chores", badge_label: "CH", color: "cyan" }, active_member_count: 1, lifecycle: "active" },
@@ -1434,6 +1436,8 @@ const threadRead = {
           { type: "commandExecution", id: "c32", command: "sed -n 3830,3890p src/management/v2/server.rs", status: "completed", exitCode: 0, durationMs: 120, aggregatedOutput: "fn dispatch_queue_flush(\n    ..." },
           { type: "commandExecution", id: "c33", command: "cargo test --lib management::v2::user_input", status: "failed", exitCode: 101, durationMs: 41000, aggregatedOutput: "test user_input::flush_respects_revision ... FAILED\n\nfailures:\n    assertion `left == right` failed: revision 4 != 5" },
           { type: "reasoning", id: "r32", summary: ["**确认失败原因**\n\n失败在 revision 校验：并发 flush 会重复投递，需要在 dispatch 时做一次 CAS。"], content: [] },
+          {type: "webSearch",id: "w31",query: "tokio compare_and_swap queue revision",action: {type: "search",query: "tokio compare_and_swap queue revision",queries: null}},
+          {type: "webSearch",id: "w32",query: "",action: {type: "openPage",url: "https://docs.rs/tokio/latest/tokio/sync/struct.Mutex.html"}},
           { type: "agentMessage", id: "a31", text: "测试有一个失败：flush 时没校验队列 revision，两个 flush 并发会重复投递。我加一个 CAS 检查。" },
           { type: "fileChange", id: "f31", status: "completed", changes: [{ path: "src/management/v2/user_input.rs" }, { path: "src/management/v2/server.rs" }] },
           { type: "commandExecution", id: "c34", command: "cargo test --lib management::v2::user_input", status: "completed", exitCode: 0, durationMs: 38000, aggregatedOutput: "test result: ok. 41 passed; 0 failed" },
@@ -1505,7 +1509,8 @@ const soraRead = {
           { type: "reasoning", id: "sr1", summary: ["先读文档，再找 timeline 的工具行。"], content: [] },
           { type: "dynamicToolCall", id: "sd1", namespace: "claude", tool: "WebFetch", arguments: { url: "https://example.invalid/DESKTOP_PARITY.md" }, status: "completed", contentItems: [{ type: "inputText", text: "# Claude agents in cutex-desktop: interface parity\n…" }], success: true, durationMs: 1340 },
           { type: "commandExecution", id: "sc1", command: "rg -n dynamicToolCall src", status: "completed", exitCode: 0, durationMs: 210, aggregatedOutput: "src/renderer/src/components/WorkGroup.tsx:35:      return { key: \"tool.other\", detail: item.type };" },
-          { type: "fileChange", id: "sf1", status: "completed", changes: [{ path: "src/renderer/src/components/WorkGroup.tsx", kind: { type: "update", move_path: null }, diff: "@@ -35 +35 @@\n-      return { key: \"tool.other\", detail: item.type };\n+      return { key: \"tool.mcp\", detail: ns + \".\" + tool };" }] },
+          {"type":"dynamicToolCall","id":"sd2","namespace":"claude","tool":"WebSearch","arguments":{"query":"claude agent sdk dynamic tool namespace","allowed_domains":["docs.claude.com"]},"status":"completed","contentItems":[{"type":"inputText","text":"1. Agent SDK reference — Tools\n2. Custom tools and MCP servers"}],"success":true,"durationMs":2210},
+          {"type":"fileChange","id":"sf1","status":"completed","changes":[{"path":"src/renderer/src/components/WorkGroup.tsx","kind":{"type":"update","move_path":null},"diff":"@@ -30,8 +30,11 @@ function toolLabel(item: RawItem) {\n   switch (item.type) {\n     case \"mcpToolCall\":\n       return { key: \"tool.mcp\", detail: `${item.server}.${item.tool}` };\n-    case \"dynamicToolCall\":\n-      return { key: \"tool.other\", detail: item.type };\n+    case \"dynamicToolCall\": {\n+      // Claude agents report their other tools this way: `claude.WebFetch`.\n+      const ns = typeof item.namespace === \"string\" ? item.namespace : null;\n+      return { key: \"tool.mcp\", detail: ns ? `${ns}.${item.tool}` : String(item.tool) };\n+    }\n     case \"webSearch\":\n       return { key: \"tool.web\", detail: String(item.query ?? \"\") };\n     default:\n"},{"path":"src/renderer/src/lib/toolNames.ts","kind":{"type":"add"},"diff":"// Display names of runtime tool namespaces.\nexport const NAMESPACES = { claude: \"Claude\", cutex: \"cutex\" } as const;\n"}]},
           { type: "agentMessage", id: "sa1", text: "改好了：dynamicToolCall 现在显示成 `claude.WebFetch`，展开能看到返回的文本。" },
           // A Claude foreground subagent (Agent tool): its card and the 子 agent status row open the
           // transcript (adapter subagentTranscripts; modules/subagents/mock.ts). `?legacy`: status only.
@@ -1723,7 +1728,9 @@ if (INLINE_CHIPS_SCENE) {
 
 if (BADGE_ROW_SCENE) {
   snapshot.active.push(...badgeRowSessions());
-  const project = (id: string, label: string, color: string) => ({ project_id: id, authority_epoch: 1, director_cutex_session_id: `${id}-dir`, presentation: { display_name: id, badge_label: label, color }, active_member_count: 1, lifecycle: "active" }) as never;
+  // &badgeicons: two of them with a host project icon (WvLn an emoji, ROVE a lucide glyph), to show icons on the mark.
+  const icons: Record<string, { kind: "emoji" | "icon"; value: string }> = new URLSearchParams(location.search).has("badgeicons") ? { wvln: { kind: "emoji", value: "🌊" }, rove: { kind: "icon", value: "globe" } } : {};
+  const project = (id: string, label: string, color: string) => ({ project_id: id, authority_epoch: 1, director_cutex_session_id: `${id}-dir`, presentation: { display_name: id, badge_label: label, color, ...(icons[id] ? { icon: icons[id] } : {}) }, active_member_count: 1, lifecycle: "active" }) as never;
   snapshot.projects!.projects.push(project("wvln", "WvLn", "magenta"), project("ctxh", "ctxH", "cyan"), project("ctxe", "ctxE", "#3fa7a3"), project("rove", "ROVE", "#a89f8a"), project("bnotes", "笔记", "yellow"));
   for (const [id, p] of BADGE_ROW_AGENTS) snapshot.hostRows[id] = hostRow(id, p);
 }
@@ -4211,7 +4218,7 @@ export function installMockBridge(): void {
           if (path === IMAGE_PATH_STEER_UNAVAILABLE) throw new Error("404 path_not_found: image no longer available");
           if (path === IMAGE_PATH_STEER_READABLE) return (await mockImageFile(path))!;
         }
-        const heavyFile = imageHeavyFile(path); if (heavyFile) return heavyFile;
+        const heavyFile = imageHeavyFile(path, maxBytes); if (heavyFile) { await imageHeavyDelay(); return heavyFile; }
         // cutex fs-file-read: any absolute path on the active host (owner-only).
         await new Promise((r) => setTimeout(r, 120));
         if (/missing/i.test(path)) throw new Error("path_not_found: the path does not exist");
@@ -4652,6 +4659,8 @@ export function installMockBridge(): void {
           // Starting a runtime takes a moment; `…fail…` agents refuse (bulk start shows 失败).
           await new Promise((r) => setTimeout(r, 700 + Math.random() * 1300));
           if (id.includes("fail")) throw new Error("runtime start failed: profile omega has no credentials on this host (mock)");
+          const pathsChanged = s.runtime.status !== "online" ? mockCreatorPathsRefusal(id) : null;
+          if (pathsChanged) throw new Error(pathsChanged);
           // A new runtime occurrence: cutex advances runtimeGeneration on every launch.
           if (s.runtime.status !== "online") s.runtime = { ...s.runtime, status: "online" as typeof s.runtime.status, runtimeGeneration: s.runtime.runtimeGeneration + 1 };
         } else if (method === "cutex/runtime/offline") {
@@ -4666,6 +4675,14 @@ export function installMockBridge(): void {
         s.revision += 1;
         snapshot = { ...snapshot };
         return method === "cutex/session/metadata/update" ? { revision: s.revision, avatar: s.avatar ?? null, avatarMode: s.avatarMode ?? null } : {};
+      },
+      async reapproveSessionPaths(id) {
+        const s = [...snapshot.active, ...snapshot.retired].find((x) => x.cutexSessionId === id);
+        if (!s) throw new Error("session_not_found: unknown session");
+        const r = await mockReapprovePaths(id, s.revision);
+        s.revision = r.revision;
+        snapshot = { ...snapshot };
+        return r;
       },
       async revertHistory(sessionId, beforeTurnId, _expectedRevision, options) {
         // Claude, and DSH in the ?dshAgent scene (r265: threadRevert; its activity projection keeps the removed reply, as cutex's does).
@@ -4784,28 +4801,11 @@ export function installMockBridge(): void {
       async projectPresentation(projectId, _expected, presentation) {
         const color = mockProjectColor(presentation.color, LEGACY);
         const p = snapshot.projects?.projects.find((x) => x.project_id === projectId);
-        if (p) p.presentation = { ...p.presentation, ...presentation, color, revision: (p.presentation.revision ?? 0) + 1 };
+        // cutex `project-icon`: an omitted icon keeps it, null clears it; an older cutex (?legacy) has no icon field.
+        const { icon, ...rest } = presentation;
+        if (p) p.presentation = { ...p.presentation, ...rest, ...(icon !== undefined && !LEGACY ? { icon } : {}), color, revision: (p.presentation.revision ?? 0) + 1 };
         snapshot = { ...snapshot };
         return {};
-      },
-      async projectMemory(projectId) {
-        return projectId === "desktop"
-          ? {
-              dir: "C:\\Users\\sam\\.cutex\\projects\\desktop\\memory",
-              index: "- [Decisions](decisions.md) — architecture choices the team agreed on\n- [Windows ACL](windows-acl.md) — why dev homes live under the user profile\n",
-              entries: [
-                { file: "decisions.md", name: "decisions", description: "architecture choices the team agreed on", type: "project", bytes: 8100, updatedAt: "2026-10-06T09:40:00Z" },
-                { file: "windows-acl.md", name: "windows-acl", description: "why dev homes live under the user profile", type: "reference", bytes: 1300, updatedAt: "2026-10-05T22:03:00Z" },
-              ],
-            }
-          : { dir: "C:\\Users\\sam\\.cutex\\projects\\waveline\\memory", index: null, entries: [] };
-      },
-      async projectMemoryFile(_projectId, file) {
-        const content =
-          file === "decisions.md"
-            ? "# Decisions\n\n- cutex is the daemon; desktop is a client.\n- One agent = one session = one native thread.\n- Tokens stay in the main process."
-            : "# Windows ACL\n\ncutex requires owner-private ACLs, so dev homes must live under `%USERPROFILE%`.";
-        return { file, content, bytes: content.length, updatedAt: "2026-10-06T09:40:00Z" };
       },
       async projectMcp(projectId) {
         return { servers: projectId === "desktop" ? { playwright: { command: "npx", args: ["-y", "@playwright/mcp"] } } : {}, revision: 1, updatedAt: null };

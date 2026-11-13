@@ -4,6 +4,7 @@ export const zhCN = {
   // ---- settings (moved from the base catalog, 2026-10-09) ----
   "owner-notify.settings.ownerNotify.title": "{{owner}}通知",
   "owner-notify.hint": "{{agent}}给你发消息时怎么提醒你；{{agent}}只决定级别，看不到你在哪儿、怎么收到。",
+  "owner-notify.levels": "每种消息的通知等级",
   "owner-notify.toolDesc": "{{agent}}用它主动给你发消息，并为消息定一个通知等级。",
   "owner-notify.delivery": "送达方式",
   "owner-notify.deliveryHint": "每个级别发到哪里；消息本身总会出现在{{agent}}的对话里",

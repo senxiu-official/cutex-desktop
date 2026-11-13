@@ -108,6 +108,7 @@ const CORE_NEW_FEATURES: readonly string[] = [
   "agent-create-abandon",
   "profile-auto-pick",
   "session-created-by",
+  "session-path-reapproval",
   "guides.preferences",
 ];
 

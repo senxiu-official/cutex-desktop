@@ -40,6 +40,7 @@ const fake = vi.hoisted(() => ({
     method: string;
     params: unknown;
   }[],
+  requests: [] as { method: string; path: string; body: unknown }[],
   afterReply: null as null | ((method: unknown) => void),
   reply: null as null | Promise<unknown>,
   handshake: null as null | Promise<HostsState>
@@ -133,6 +134,10 @@ vi.mock("@cutex-desktop/cutex-client", () => ({
         params
       });
       return fake.reply ?? Promise.resolve({});
+    }
+    request(method: string, path: string, options?: { body?: unknown }) {
+      fake.requests.push({ method, path, body: options?.body });
+      return Promise.resolve({ cutexSessionId: "same-session", ownerApproved: true, revision: 8, creatorPathSnapshot: { cwd: "D:/w", writable_roots: [], owner_approved: true } });
     }
   },
   CutexApiError: class extends Error {},
@@ -301,6 +306,7 @@ async function boot() {
   vi.resetModules();
   fake.handlers.clear();
   fake.calls.length = 0;
+  fake.requests.length = 0;
   fake.reply = null;
   fake.handshake = null;
   fake.afterReply = null;
@@ -558,6 +564,31 @@ describe("route-scoped actual menu/store/preload/main actions", () => {
     expect(store.getState().sessions[viewKey("local", "same-session")]?.startError).toContain("object DACL is not service-private");
     expect(alert).toHaveBeenCalledWith(expect.stringContaining("object DACL is not service-private"));
     expect(menus.runtimeItem(agent, key => key)?.label).toBe("menu.start");
+  });
+  it("creator_paths_changed: main passes a fixed wire, the menu notices instead of alerting, 重新批准文件夹 posts reapprove-paths then starts", async () => {
+    const agent = resource("LOCAL OLD AGENT", 7);
+    agent.runtime.status = "offline";
+    store.setState({ sessions: { [viewKey("local", "same-session")]: { startError: null, queue: [], version: 0 } as never } });
+    const alert = vi.fn();
+    vi.stubGlobal("window", { cutex: fake.bridge, alert });
+    let fail!: (error: Error) => void;
+    fake.reply = new Promise((_resolve, reject) => { fail = reject; });
+    const run = overlays.runAction(menus.runtimeItem(agent, key => key)!);
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    fail(Object.assign(new Error("creator_paths_changed: D:/secret/moved is not the created folder"), { code: "creator_paths_changed", details: { cutexSessionId: "same-session", moved: "D:/secret/moved" } }));
+    await run;
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    const { creatorPathsBlock } = await import("../src/shared/creatorPaths");
+    const saved = store.getState().sessions[viewKey("local", "same-session")]?.startError;
+    expect(creatorPathsBlock(saved)).toEqual({ cutexSessionId: "same-session" });
+    expect(saved).not.toContain("secret"); // no daemon text crosses IPC
+    expect(alert).not.toHaveBeenCalled();
+    expect(store.getState().notice?.tone).toBe("error");
+    fake.reply = Promise.resolve({ runtimeGeneration: 2, status: "online" });
+    await store.getState().reapprovePathsAndStart("same-session", "local");
+    expect(fake.requests).toEqual([{ method: "POST", path: "/v2/sessions/same-session/reapprove-paths", body: {} }]);
+    expect(fake.calls.at(-1)).toMatchObject({ session: "same-session", method: "cutex/runtime/online", params: { openVisibleTerminal: false, expectedRuntimeGeneration: 1 } });
+    expect(store.getState().sessions[viewKey("local", "same-session")]?.startError).toBeNull();
   });
   it("a runtime start answered with a non-online status counts as failed", async () => {
     const agent = resource("LOCAL OLD AGENT", 7);

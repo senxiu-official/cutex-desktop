@@ -87,3 +87,44 @@ it.each(["agent-activity-v1","agent-archive-kind-v1"])("missing advertised %s fi
  const {client}=fixture(["delegation-tree-stop-v1",capability],p=>p.endsWith("/delegations")?page:p.endsWith("/projects/project")?{active_agents:[{agent:{cutex_session_id:"member",spec:{name:"Member"}}}],retired_agents:[]}:{sessions:[{cutexSessionId:"member",hostId:"server-canonical",displayName:"Member"}]});
  await expect(readDelegationUpgrade(client,"project")).rejects.toThrow(capability==="agent-activity-v1"?"delegation_member_activity_missing":"delegation_member_lifecycle_missing");
 });
+
+// Agent Operators are listed by the daemon under agent_operators, not active_agents; they are still routing parties.
+const operatorRow=(id:string,project="project",extra:Record<string,unknown>={},grantee=id)=>({grant:{project_id:project,operator_cutex_session_id:grantee},member:{agent:{cutex_session_id:id,spec:{name:id.toUpperCase()},...extra}}});
+const routingRoute=(workspace:unknown,nodes:unknown[]=[])=>(p:string)=>p.endsWith("/projects/project")?workspace:p.endsWith("/delegations")?{...page,nodes,nextCursor:null,coverage:"complete"}:p.endsWith("delegation-policy")?policy:p.endsWith("delegation-grants")?{grants:[],allowedActions:{create:true}}:{routingApprovals:[approved]};
+const approved={...approval,delegationRef:{hostId:"server-canonical",id:"ask"},state:"approved",decidedBy:actor,decisionAuthority:"owner",decidedAt:"2026-10-27T00:00:01Z",allowedActions:{approve:false,deny:false}};
+it("operator member is a party; retired, other-project, mismatched and missing operators are not; duplicates collapse",async()=>{
+ const workspace={active_agents:[{agent:{cutex_session_id:"member",spec:{name:"Member"}}}],retired_agents:[],agent_operators:[operatorRow("op"),operatorRow("gone","project",{retired_at:"2026-10-27T00:00:00Z"}),operatorRow("elsewhere","other-project"),operatorRow("mismatch","project",{},"someone-else"),{...operatorRow("member"),member:{agent:{cutex_session_id:"member",spec:{name:"Member"}}}}]};
+ const {client}=fixture(["delegation-routing-v1"],routingRoute(workspace));
+ expect((await readDelegationUpgrade(client,"project")).parties).toEqual([{id:"member",hostId:"server-canonical",name:"Member"},{id:"op",hostId:"server-canonical",name:"OP"}]);
+ const {client:old}=fixture(["delegation-routing-v1"],routingRoute({active_agents:[{agent:{cutex_session_id:"member",spec:{name:"Member"}}}],retired_agents:[]}));
+ expect((await readDelegationUpgrade(old,"project")).parties).toEqual([{id:"member",hostId:"server-canonical",name:"Member"}]);
+});
+it("operator without a name fails closed like any party",async()=>{
+ const {client}=fixture(["delegation-routing-v1"],routingRoute({active_agents:[],retired_agents:[],agent_operators:[{grant:{project_id:"project",operator_cutex_session_id:"op"},member:{agent:{cutex_session_id:"op",spec:{}}}}]}));
+ await expect(readDelegationUpgrade(client,"project")).rejects.toThrow("delegation_party_name_missing");
+});
+
+// Owner lifecycle on an Operator: the daemon lists it only under agent_operators; its session allowedActions decide.
+const opWorkspace=(rows:unknown[])=>({active_agents:[{agent:{cutex_session_id:"member",spec:{name:"Member"}}}],retired_agents:[],director:null,agent_operators:rows});
+const opRow=(id:string,project="project",grantee=id,retired=false)=>({grant:{project_id:project,operator_cutex_session_id:grantee},member:{agent:{cutex_session_id:id,spec:{name:id.toUpperCase()},...(retired?{retired_at:"2026-10-27T00:00:00Z"}:{})}}});
+it("member roster lists a valid Operator with its own session lifecycle actions; invalid operator rows stay out",async()=>{
+ let lists=0;
+ const session=(id:string,actions:string[])=>({cutexSessionId:id,hostId:"server-canonical",displayName:id,archiveKind:"active",restorable:false,allowedActions:actions,restoreBlockers:[]});
+ const {client}=fixture(["agent-archive-kind-v1"],p=>p.endsWith("/projects/project")?opWorkspace([opRow("op"),opRow("other","other-project"),opRow("mismatch","project","someone-else"),opRow("gone","project","gone",true)]):{sessions:lists++?[]:["member","op","other","mismatch","gone"].map(id=>session(id,["archive","permanentRetire"]))});
+ const result=await readDelegationUpgrade(client,"project");
+ expect(result.members?.map(m=>m.id).sort()).toEqual(["member","op"]);
+ expect(result.members?.find(m=>m.id==="op")).toMatchObject({allowedActions:["archive","permanentRetire"]});
+});
+it.each(["offline","archive"] as const)("owner %s of an operator-only member reaches the daemon; a mismatched grant is member_scope_changed",async kind=>{
+ const method=kind==="offline"?"cutex/runtime/offline":"cutex/session/retire";
+ const payload=kind==="offline"?{runtimeGeneration:3,status:"offline",runtimeAgentId:null}:{cutexSessionId:"op",revision:8,lifecycle:"retired",runtimeGeneration:3,status:"offline",retiredAt:"2026-10-27T00:00:00Z"};
+ const run=async(rows:unknown[])=>{const {client,fetch}=fixture(kind==="offline"?["agent-activity-v1"]:["agent-archive-kind-v1"],(p,i)=>{
+  if(p.endsWith("/projects/project"))return opWorkspace(rows);
+  if(p.endsWith("/sessions/op"))return{revision:7,runtime:{runtimeGeneration:3},allowedActions:["archive"]};
+  if(i?.method==="POST")return{contractVersion:2,requestId:"stable",cutexSessionId:"op",cutex:{method,result:payload}};
+  throw Error("refresh unavailable");});
+  return {fetch,result:executeDelegationUpgrade(client,"project",{kind,actionId:"stable",memberId:"op"})}};
+ const ok=await run([opRow("op")]);expect((await ok.result).effectState).toBe("committed");
+ const bad=await run([opRow("op","project","someone-else")]);await expect(bad.result).rejects.toThrow("member_scope_changed");
+ expect(bad.fetch.mock.calls.some(([,i])=>i?.method==="POST")).toBe(false);
+});

@@ -24,6 +24,8 @@ export type BrowserRefusal = typeof BROWSER_REFUSALS[number] | "invalid_url";
 export type BrowserActor = "owner" | "agent" | "page";
 export interface BrowserRequestContext {
   actor: BrowserActor;
+  /** Main-verified native owner intent, scoped to this main-frame request and its redirects. Never a page/renderer flag. */
+  ownerNavigation?: true;
   /** Main-only evidence of the owner's explicit 「打开本机的这个地址」 click. */
   allowDesktopLoopback?: true;
   webContentsId?: number;
@@ -95,12 +97,15 @@ export function createBrowserUrlPolicy(options: BrowserUrlPolicyOptions): Browse
       // navigation (browser-initiated main frame). Cross-origin page requests into a service are
       // refused too: a public page must not drive the owner's authenticated service cookies.
       if (page && PRIVATE_PATH.test(decodedPath(url)) && (!mainFrame || context.initiatorOrigin !== undefined)) return "protected_endpoint";
-      if (page && !mainFrame && context.initiatorOrigin !== origin) return "private_address_blocked";
+      if (page && !(mainFrame && context.ownerNavigation === true) && context.initiatorOrigin !== origin && (!mainFrame || context.initiatorOrigin !== undefined)) return "private_address_blocked";
       return null;
     }
     const loopback = LOOPBACK.has(url.hostname);
     // Control planes first: even the owner's address bar gets the precise reason.
     if (options.protectedEndpoint?.(url) === true) return "protected_endpoint";
+    if (page && mainFrame && loopback && host.kind === "ssh"
+      && context.initiatorOrigin !== undefined && context.initiatorOrigin !== origin) return "remote_loopback";
+    if (page && mainFrame && loopback && context.ownerNavigation === true && context.resourceType === undefined) return null;
     // This callback exists only while the main-owned N2 proxy/session is ready. It is syntactic
     // admission, not DNS proof; the proxy revalidates every resolved address.
     const bare = url.hostname.startsWith("[") ? url.hostname.slice(1, -1) : url.hostname;
@@ -109,6 +114,7 @@ export function createBrowserUrlPolicy(options: BrowserUrlPolicyOptions): Browse
       const external = options.external?.(url.href) ?? "off";
       return external === "ready" ? null : external === "unavailable" ? "external_proxy_unavailable" : "external_pages_off";
     }
+    if (page && mainFrame && context.ownerNavigation === true && context.resourceType === undefined && parseLanBrowserUrl(url.href)) return null;
     if (!loopback) {
       // Link-local (incl. 169.254.169.254), other loopback spellings (127.0.0.2, app.localhost),
       // multicast, documentation and reserved ranges: never a browser target, whoever asks.
@@ -122,13 +128,14 @@ export function createBrowserUrlPolicy(options: BrowserUrlPolicyOptions): Browse
       if (!page) return null; // main attributes and admits its own navigation before loading it
     }
     // Loopback / LAN reached by a page: only an origin main admitted for THIS tab, and then only from
-    // a document of that origin (or a browser-initiated / admitted-origin top-level navigation).
+    // a document of that origin (or a browser-initiated top-level navigation).
     // A public page can no longer probe desktop loopback ports or the LAN.
     const id = context.webContentsId;
     if (typeof id !== "number" || options.admitted?.(id, origin) !== true) return "private_address_blocked";
+    if (mainFrame && context.ownerNavigation === true) return null;
     if (context.resourceType === undefined) return null; // navigation events; onBeforeRequest decides initiators
     const initiator = context.initiatorOrigin;
-    if (mainFrame) return initiator === undefined || initiator === origin || options.admitted(id, initiator) ? null : "private_address_blocked";
+    if (mainFrame) return initiator === undefined || initiator === origin ? null : "private_address_blocked";
     return initiator === origin ? null : "private_address_blocked";
   };
   return {
@@ -178,6 +185,10 @@ export interface BrowserSessionOptions {
   onResponse?: (webContentsId: number, details: { url: string; statusCode: number; headers: Record<string, string[]>; resourceType: string }) => void;
   /** A refused main-frame request of an admitted guest (reason enum only; never the URL). */
   onRefused?: (webContentsId: number, reason: BrowserRefusal) => void;
+  onNavigationRefused?: (webContentsId: number, url: string, reason: BrowserRefusal) => void;
+  /** Main's one-use native intent receipt; may prepare LAN proxy admission before the request proceeds. */
+  ownerNavigation?: (webContentsId: number, requestId: string, url: string) => boolean | Promise<boolean>;
+  onRequestEnd?: (webContentsId: number, requestId: string) => void;
   /** Observation only: a guest's own XHR / fetch that the gate let through, and its end. */
   onPageRequest?: (webContentsId: number, requestId: string, phase: "start" | "end") => void;
   /** Main's attribution of a download (owner / agent), or false to cancel it. Omitted = cancel
@@ -246,32 +257,45 @@ export function installBrowserSessionPolicy(session: Session, options: BrowserSe
     downloadGuarded.add(session);
   }
   session.webRequest.onBeforeRequest({ urls: ["<all_urls>"] }, (details, callback) => {
-    let allow = false;
-    try {
-      // The two-phase bind bootstraps an unbound guest on inert exact about:blank. It cannot
-      // fetch a resource until main has checked the app-frame receipt and registered its ID.
-      const inertBlank = details.url === "about:blank" && (details.resourceType === "mainFrame" || details.resourceType === "subFrame");
-      const id = details.webContentsId;
-      const known = typeof id === "number" && Number.isSafeInteger(id) && id > 0 && options.acceptWebContents(id);
-      // Attribution: the exact guest plus Electron's initiatorOrigin (absent = browser-started).
-      // Every guest request is a page actor; main's own navigations were admitted before loadURL.
-      const initiator = (details as { initiatorOrigin?: unknown }).initiatorOrigin;
-      const context: BrowserRequestContext = { actor: "page", resourceType: details.resourceType,
-        ...(known ? { webContentsId: id } : {}), ...(typeof initiator === "string" ? { initiatorOrigin: initiator } : {}) };
-      if (active && (inertBlank || known)) {
-        if (inertBlank) allow = options.policy.isRequestAllowed(details.url, details.resourceType, context);
-        else {
-          const reason = options.policy.refusal(details.url, context);
-          allow = reason === null;
-          if (reason && details.resourceType === "mainFrame") try { options.onRefused?.(id!, reason); } catch { /* Reporting only. */ }
-          if (allow && details.resourceType === "xhr") try { options.onPageRequest?.(id!, String(details.id), "start"); } catch { /* Observation only. */ }
+    const decide = (ownerNavigation = false) => {
+      let allow = false;
+      try {
+        const id = details.webContentsId;
+        const inertBlank = details.url === "about:blank" && (details.resourceType === "mainFrame" || details.resourceType === "subFrame");
+        const known = typeof id === "number" && Number.isSafeInteger(id) && id > 0 && options.acceptWebContents(id);
+        const initiator = (details as { initiatorOrigin?: unknown }).initiatorOrigin;
+        const context: BrowserRequestContext = { actor: "page", resourceType: details.resourceType,
+          ...(known ? { webContentsId: id } : {}), ...(typeof initiator === "string" ? { initiatorOrigin: initiator } : {}),
+          ...(ownerNavigation && details.resourceType === "mainFrame" ? { ownerNavigation: true as const } : {}) };
+        if (active && (inertBlank || known)) {
+          if (inertBlank) allow = options.policy.isRequestAllowed(details.url, details.resourceType, context);
+          else {
+            const reason = options.policy.refusal(details.url, context);
+            allow = reason === null;
+            if (reason && details.resourceType === "mainFrame") try {
+              if (options.onNavigationRefused) options.onNavigationRefused(id!, details.url, reason);
+              else options.onRefused?.(id!, reason);
+            } catch { /* Reporting only. */ }
+            if (allow && details.resourceType === "xhr") try { options.onPageRequest?.(id!, String(details.id), "start"); } catch { /* Observation only. */ }
+          }
         }
+      } catch { /* Host removal and malformed state deny. */ }
+      callback({ cancel: !allow });
+    };
+    try {
+      const id = details.webContentsId;
+      if (active && details.resourceType === "mainFrame" && typeof id === "number" && options.acceptWebContents(id) && options.ownerNavigation) {
+        const intended = options.ownerNavigation(id, String(details.id), details.url);
+        if (typeof intended === "boolean") return decide(intended);
+        void Promise.resolve(intended).then(value => decide(value === true), () => callback({ cancel: true }));
+        return;
       }
-    } catch { /* Host removal, malformed metadata, adapter errors all deny. */ }
-    callback({ cancel: !allow });
+    } catch { callback({ cancel: true }); return; }
+    decide();
   });
   // Observation only (no callback to hold): the end of a page request onBeforeRequest reported.
   const ended = (details: { id: number; webContentsId?: number; resourceType: string }) => {
+    try { if (typeof details.webContentsId === "number") options.onRequestEnd?.(details.webContentsId, String(details.id)); } catch { /* Observation only. */ }
     try { if (active && details.resourceType === "xhr" && typeof details.webContentsId === "number") options.onPageRequest?.(details.webContentsId, String(details.id), "end"); } catch { /* Observation only. */ }
   };
   session.webRequest.onCompleted({ urls: ["<all_urls>"] }, ended);
@@ -320,6 +344,7 @@ export interface BrowserGuestPolicyOptions {
   hostId: string;
   policy: BrowserUrlPolicy;
   onBlocked?: (kind: "navigation" | "redirect", url: string, mainFrame: boolean, reason: BrowserRefusal) => void;
+  ownerNavigation?: (url: string, kind: "navigation" | "redirect") => boolean;
 }
 export interface BrowserPopupPolicyOptions {
   hostId: string;
@@ -327,6 +352,11 @@ export interface BrowserPopupPolicyOptions {
   /** The opener guest and its current document origin: a page popup is a page actor. */
   webContentsId?: number;
   openerOrigin?: string;
+  /** Main's canonical owner-pool identity, never inferred from a renderer flag. */
+  ownerPool?: boolean;
+  /** Exact isolated-world popup-target receipt, corroborated with native owner input in main. */
+  consumeOwnerNavigation?: (url: string) => boolean;
+  onNavigationRefused?: (url: string, reason: BrowserRefusal) => void;
   /** A controlled app tab replaces the native window: same host and login pool as the opener.
    * post: a form's body (target=_blank POST), replayed once by main. agent: the opener's agent
    * caused it (its own dispatched click), not the owner. */
@@ -341,7 +371,7 @@ export interface BrowserPopupPolicyOptions {
   consumeAgentPopup?: () => boolean;
 }
 export interface BrowserPopupPost { data: Buffer; contentType: string }
-export interface BrowserPopupRequest { hostId: string; url: string; post?: BrowserPopupPost; agent?: true }
+export interface BrowserPopupRequest { hostId: string; url: string; post?: BrowserPopupPost; agent?: true; ownerNavigation?: true }
 export type BrowserPopupDiscardReason = "unavailable" | "invalid_url" | "post_body" | "policy_denied"
   | "no_owner_gesture" | "agent_rate_limited" | "no_forwarder" | "handler_error";
 /** Largest form body a popup may carry into its new tab (raw parts only, no file references). */
@@ -385,17 +415,29 @@ export function createBrowserWindowOpenHandler(getOptions: () => BrowserPopupPol
         else {
           const post = details.postBody ? browserPopupPost(details.postBody) : undefined;
           if (post === null) drop("post_body");
-          else if (!options.policy.isNavigationAllowed(details.url, { actor: "page", webContentsId: options.webContentsId, resourceType: "mainFrame",
-            ...(options.openerOrigin ? { initiatorOrigin: options.openerOrigin } : {}) })) drop("policy_denied");
-          else if (!options.onNewTab) drop("no_forwarder");
-          // The leased agent's own click: an app tab in the same pool, never the owner's gesture.
-          else if (options.agentActing?.() === true) {
-            if (options.consumeAgentPopup?.() !== true) drop("agent_rate_limited");
-            else options.onNewTab({ hostId: options.hostId, url: url.href, ...(post ? { post } : {}), agent: true });
+          else {
+            const agent = options.agentActing?.() === true;
+            const context: BrowserRequestContext = { actor: "page", webContentsId: options.webContentsId, resourceType: "mainFrame",
+              ...(options.openerOrigin ? { initiatorOrigin: options.openerOrigin } : {}) };
+            let allowed = options.policy.isNavigationAllowed(details.url, context), ownerGesture = false;
+            const ownerIntent = !agent && options.ownerPool === true && options.consumeOwnerNavigation?.(details.url) === true;
+            const refusal = allowed ? null : options.policy.refusal(details.url, context);
+            if (!allowed && !agent && options.ownerPool === true && (refusal === "private_address_blocked" || refusal === "remote_loopback")) {
+              ownerGesture = ownerIntent && options.consumeOwnerGesture?.() === true;
+              if (ownerGesture) allowed = options.policy.isNavigationAllowed(details.url, { ...context, resourceType: undefined, ownerNavigation: true });
+            }
+            if (!allowed) {
+              const reason = options.policy.refusal(details.url, context);
+              if (reason) options.onNavigationRefused?.(details.url, reason);
+              drop("policy_denied");
+            }
+            else if (!options.onNewTab) drop("no_forwarder");
+            else if (agent) {
+              if (options.consumeAgentPopup?.() !== true) drop("agent_rate_limited");
+              else options.onNewTab({ hostId: options.hostId, url: url.href, ...(post ? { post } : {}), agent: true });
+            } else if (!ownerGesture && options.consumeOwnerGesture?.() !== true) drop("no_owner_gesture");
+            else options.onNewTab({ hostId: options.hostId, url: url.href, ...(post ? { post } : {}), ...(ownerIntent ? { ownerNavigation: true as const } : {}) });
           }
-          // Invalid scheme/policy/POST attempts do not spend the one-use owner input token.
-          else if (options.consumeOwnerGesture?.() !== true) drop("no_owner_gesture");
-          else options.onNewTab({ hostId: options.hostId, url: url.href, ...(post ? { post } : {}) });
         }
       }
     } catch { drop("handler_error"); }
@@ -425,12 +467,15 @@ export function hardenBrowserGuest(guest: WebContents, options: BrowserGuestPoli
   denyBrowserClientCertificates(guest);
   guest.setWebRTCIPHandlingPolicy(BROWSER_WEBRTC_POLICY);
   let active = true;
-  const denyNavigation = (kind: "navigation" | "redirect") => (event: { url: string; isMainFrame?: boolean; preventDefault(): void }) => {
+  const denyNavigation = (kind: "navigation" | "redirect") => (event: { url: string; isMainFrame?: boolean; initiator?: { url: string } | null; preventDefault(): void }) => {
     let reason: BrowserRefusal | null = "invalid_url";
     // Page-initiated (or redirected) navigation of this guest. Private-class targets pass here only
     // for an origin admitted in this tab; onBeforeRequest then checks the real initiator.
     try {
-      const context: BrowserRequestContext = { actor: "page", webContentsId: guest.id };
+      const intended = active && event.isMainFrame !== false && options.ownerNavigation?.(event.url, kind) === true;
+      const origin = browserTargetOrigin(event.initiator?.url ?? guest.getURL?.() ?? "") ?? "null";
+      const context: BrowserRequestContext = { actor: "page", webContentsId: guest.id,
+        initiatorOrigin: origin, ...(intended ? { ownerNavigation: true as const } : { resourceType: event.isMainFrame === false ? "subFrame" : "mainFrame" }) };
       if (active) reason = options.policy.isNavigationAllowed(event.url, context) ? null : options.policy.refusal(event.url, context) ?? "invalid_url";
     } catch { reason = "invalid_url"; /* Fail closed. */ }
     if (reason) {

@@ -4,6 +4,7 @@ import { isImeComposing } from "../../lib/ime";
 import { useEffect, useMemo, useRef } from "react";
 import { ArrowUp, Loader2, StickyNote, Square } from "lucide-react";
 import { Streamdown } from "streamdown";
+import { BARE_STREAMDOWN_REHYPE } from "../../lib/markdownPathText";
 import { InteractionDock } from "../../components/InteractionDock";
 import { ModelName } from "../../components/ModelName";
 import { useI18n } from "../../i18n";
@@ -22,7 +23,7 @@ function SideEntry({ entry }: { entry: TimelineEntry }) {
   const { t } = useI18n();
   const translations = useStreamdownTranslations();
   if (entry.kind === "user") return <div className="selectable ml-auto max-w-[90%] rounded-2xl bg-surface-2 px-4 py-3 whitespace-pre-wrap break-words text-sm">{entry.text}</div>;
-  if (entry.kind === "agent" || entry.kind === "plan" || entry.kind === "review") return <div className="min-w-0 text-sm"><Streamdown mode="static" className="markdown" translations={translations}>{entry.text}</Streamdown></div>;
+  if (entry.kind === "agent" || entry.kind === "plan" || entry.kind === "review") return <div className="min-w-0 text-sm"><Streamdown mode="static" className="markdown" rehypePlugins={BARE_STREAMDOWN_REHYPE} translations={translations}>{entry.text}</Streamdown></div>;
   if (entry.kind === "tool" || entry.kind === "other") return <details className="min-w-0 rounded-lg border border-border px-3 py-2 text-xs text-muted"><summary className="cursor-pointer truncate">{toolDetail(entry.item) || entry.item.type}</summary><pre className="selectable mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words">{toolOutput(entry.item) ?? JSON.stringify(entry.item, null, 2)}</pre></details>;
   if (entry.kind === "reasoning") return <details className="text-xs text-subtle"><summary className="cursor-pointer">{t("side-chat.reasoning")}</summary><div className="selectable mt-2 whitespace-pre-wrap">{[...entry.summary, ...entry.content].join("\n")}</div></details>;
   return null;

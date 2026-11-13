@@ -56,7 +56,7 @@ function PinRowView({ row, compact }: { row: PinRow; compact?: boolean }) {
       </button>
       <span className="flex shrink-0 items-center gap-0.5">
         {open && (
-          <button type="button" className="rounded p-1 text-subtle hover:bg-surface-2 hover:text-success" aria-label={t("bookmarks.memo.done")} title={t("bookmarks.memo.done")} onClick={() => void changePin(hostId, pin.pinId, { state: "done" })} data-owner-pin-done="">
+          <button type="button" className="rounded p-1 text-subtle hover:bg-surface-2 hover:text-ok" aria-label={t("bookmarks.memo.done")} title={t("bookmarks.memo.done")} onClick={() => void changePin(hostId, pin.pinId, { state: "done" })} data-owner-pin-done="">
             <Check size={13} />
           </button>
         )}

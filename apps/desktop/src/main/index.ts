@@ -2,6 +2,7 @@ import { ImageCache, currentImageCache, installImageCache } from "./imageCache";
 import { DEBUG_CHANNEL, debugEntries, type DebugRequest } from "../shared/debug";
 import { DebugMode } from "./debugMode";
 import { guardStdio } from "./stdioGuard";
+import { devRendererUrl } from "./devRenderer";
 import { appWindows, markOwnerWindow, ownerWindow } from "./appWindows";
 import { localFileAction, localFileOpenInfo } from "./localFiles";
 import { createRemoteCopies } from "./remoteCopiesIpc";
@@ -437,6 +438,7 @@ const ALLOWED: ReadonlySet<InvokeMethod> = new Set<InvokeMethod>([
   "managedMcp",
   "switchProfile",
   "sessionAction",
+  "reapproveSessionPaths",
   "openExternal",
   "pickFolder",
   "revealPath",
@@ -452,6 +454,8 @@ const ALLOWED: ReadonlySet<InvokeMethod> = new Set<InvokeMethod>([
   "projectPresentation",
   "projectMemory",
   "projectMemoryFile",
+  "projectMemoryWrite",
+  "projectMemoryDelete",
   "projectMcp",
   "agentMcp",
   "setAgentMcpDisabled",
@@ -1065,7 +1069,7 @@ function isAppSender(event: IpcMainInvokeEvent): boolean {
 }
 
 function isAppUrl(url: string): boolean {
-  const devUrl = process.env.ELECTRON_RENDERER_URL;
+  const devUrl = devRendererUrl(app.isPackaged);
   return url.startsWith("file://") || (!!devUrl && url.startsWith(devUrl));
 }
 
@@ -1158,7 +1162,8 @@ function createWindow(): void {
     mainWindow = null;
   });
 
-  if (process.env.ELECTRON_RENDERER_URL) void mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL);
+  const devUrl = devRendererUrl(app.isPackaged);
+  if (devUrl) void mainWindow.loadURL(devUrl);
   else void mainWindow.loadFile(join(__dirname, "../renderer/index.html"));
 }
 
@@ -1228,7 +1233,7 @@ app.whenReady().then(async () => {
   pluginNetwork = createPluginNetworkLockdown({
     setProxy: config => session.defaultSession.setProxy(config),
     configureHostResolver: options => app.configureHostResolver(options),
-    devRendererUrl: process.env.ELECTRON_RENDERER_URL,
+    devRendererUrl: devRendererUrl(app.isPackaged),
   });
   const network = pluginNetwork;
   const pages = (pageStorage = createPageStorage({ root: join(app.getPath("userData"), "artifact-pages") }));

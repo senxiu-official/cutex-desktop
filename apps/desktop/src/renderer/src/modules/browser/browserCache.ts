@@ -3,6 +3,7 @@ import { browserCursorView } from "../../../../shared/browserCursor";
 import { BROWSER_ZOOM_BOUNDS, type BrowserTabView } from "../../../../shared/browser";
 import { browserError, browserTitle, MAX_BROWSER_INPUT, safeBrowserFavicon, safeBrowserUrl } from "./browserState";
 import { browserLoginOrigin } from "./loginHint";
+import { nextBlockedNavigation } from "./blockedNavigation";
 
 export function browserCacheKey(hostId: string, tabKey: string): string {
   return JSON.stringify([hostId, tabKey]);
@@ -41,6 +42,7 @@ export function createBrowserCache() {
         media: view.media && (view.media.playing || view.media.audible || view.media.muted)
           ? Object.freeze({ playing: view.media.playing === true, audible: view.media.audible === true, muted: view.media.muted === true }) : undefined,
         loginOrigin: view.pool === "agent" ? browserLoginOrigin(view.url, view.loginOrigin) : null,
+        blockedNavigation: nextBlockedNavigation(previous, view),
       }));
       notify();
       return true;

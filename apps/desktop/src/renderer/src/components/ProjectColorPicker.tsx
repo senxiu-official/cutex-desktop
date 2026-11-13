@@ -4,9 +4,10 @@
 import { PROJECT_PALETTE } from "../lib/projectCreate";
 import { projectColor } from "../lib/sidebar";
 import { customProjectColor, PROJECT_EXTRA_COLORS, projectHex, sameProjectColor } from "../lib/projectColors";
-import { MARK_RADIUS, markInk } from "../lib/projectMark";
+import { projectMarkText } from "../lib/projectMark";
+import { ProjectMarkChip } from "./ProjectMarkChip";
 import type { ProjectIconChoice } from "../lib/projectIcons";
-import { useState } from "react";
+import { useState, type CSSProperties } from "react";
 import { Palette } from "lucide-react";
 import { useI18n } from "../i18n";
 import { isImeComposing } from "../lib/ime";
@@ -72,10 +73,9 @@ function ColorPreview({ badge, icon, color }: { badge: string; icon: ProjectIcon
       <span className="text-caption text-subtle">{t("projects.color.preview")}</span>
       <ProjectBadge icon={icon} badge={badge} color={color} size="lg" />
       <ProjectBadge icon={icon} badge={badge} color={color} size="sm" />
-      <span className="flex h-3.5 min-w-3.5 items-center justify-center px-1 leading-none font-semibold whitespace-nowrap"
-        // Sized like the avatar's mark chip (Avatar ProjectMarkChip sets its font inline, from the avatar size).
-        style={{ background: hex, color: markInk(hex), borderRadius: MARK_RADIUS, fontSize: 9 }} aria-hidden data-project-color-mark>
-        {badge}
+      {/* The avatar's mark chip itself, as on a 44 px avatar, in the flow. */}
+      <span data-project-color-mark className="flex" style={{ "--avatar-cut": "var(--surface-2)" } as CSSProperties}>
+        <ProjectMarkChip inline size={44} mark={{ text: projectMarkText(icon, badge), color, icon: icon?.kind === "icon" ? icon : null }} />
       </span>
     </div>
   );

@@ -41,7 +41,7 @@ const NO_QUESTIONS: AskQuestion[] = [];
 const NO_COMMANDS = { stop: false, retry: false, accept: false, abandon: false } as const;
 /** The action row's buttons (the armed face keeps this shape). */
 const ACTION_SHAPE = "rounded-md px-2 py-0.5 text-xs";
-const ACTION_IDLE = "text-muted hover:bg-surface-2 hover:text-text";
+const ACTION_IDLE = "text-muted hover:bg-surface-2 hover:text-foreground";
 const ACTION_IDLE_DANGER = "text-muted hover:bg-surface-2 hover:text-danger";
 /** 「放弃这个委托？再左键点击一次确认」 / "Abandon this delegation? Click again to confirm" (no space after full-width marks). */
 const armedHint = (question: string, again: string) => `${question}${/[　-〿！-／：-？]$/.test(question) ? "" : " "}${again}`;

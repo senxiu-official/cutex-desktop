@@ -10,6 +10,7 @@ import { useWindowKey } from "../lib/windowScope";
 import { hostListKeys, setHostListKeys, toggleOfflineFoldOpen, toggleRestOpen, toggleProjectFolded, updateSections, useUiPrefs, type RunningAgents as RunningAgentsMode } from "../lib/prefs";
 import { groupRemark, searchGroups } from "../lib/projectRemarks";
 import { groupIcon } from "../lib/projectIcons";
+import { useProjectIcons } from "../lib/projectIconSync";
 import { assignSection, memberKey, sectionOf, setSectionCollapsed, splitBySection, summarizeSection, visibleInSection, type SidebarSection } from "../lib/sidebarSections";
 import { sectionMenu } from "../lib/sectionMenus";
 import { hostKey } from "../lib/hostKeys";
@@ -331,6 +332,7 @@ const Group = memo(function Group({ layout, dragKey, dragging: dragged, searchin
   const look = sidebarMark(hosts, group.hostId);
   const state = hosts?.stateOf(group.hostId) ?? "live";
   const prefs = useUiPrefs();
+  const projectIcons = useProjectIcons();
   const remark = groupRemark(prefs.projectRemarks, group, hosts?.focus ?? "local");
   const drag = useContext(ProjectDragContext);
   const dropLine = useDropAt(drag, dragKey);
@@ -378,7 +380,7 @@ const Group = memo(function Group({ layout, dragKey, dragging: dragged, searchin
             <StandaloneTitle icon={User} title={title} open={open} />
           ) : (
             <>
-              <ProjectIcon source={group.kind === "project" ? { color: group.color, badge: group.badge || title.slice(0, 1), icon: groupIcon(prefs.projectIcons, group, hosts?.focus ?? "local") } : { glyph: User }} toggle={open ? "open" : "closed"} />
+              <ProjectIcon source={group.kind === "project" ? { color: group.color, badge: group.badge || title.slice(0, 1), icon: groupIcon(projectIcons, group, hosts?.focus ?? "local") } : { glyph: User }} toggle={open ? "open" : "closed"} />
               <span className="truncate text-xs font-semibold text-muted"><ScriptText text={title} /></span>
             </>
           )}
@@ -642,6 +644,7 @@ function OneRowProject({ layout, dragKey = null, dragging = false }: { layout: G
   const look = sidebarMark(hosts, group.hostId);
   const root = group.kind === "project" ? rootFor(sidebar, { kind: "project", id: group.id }) : null;
   const prefs = useUiPrefs();
+  const projectIcons = useProjectIcons();
   const remark = groupRemark(prefs.projectRemarks, group, hosts?.focus ?? "local");
   const block = projectBlockLook(prefs.projectSeparation, group.kind === "project" ? group.color : NEUTRAL_GROUP);
   if (opened) return <Group layout={{ ...layout, mode: "full" }} dragKey={dragKey} dragging={dragging} searching={false} collapse={() => toggleOpenedProject(key)} />;
@@ -663,7 +666,7 @@ function OneRowProject({ layout, dragKey = null, dragging = false }: { layout: G
             <StandaloneTitle icon={User} title={title} open={false} />
           ) : (
             <>
-              <ProjectIcon source={group.kind === "project" ? { color: group.color, badge: group.badge || title.slice(0, 1), icon: groupIcon(prefs.projectIcons, group, hosts?.focus ?? "local") } : { glyph: User }} toggle="closed" />
+              <ProjectIcon source={group.kind === "project" ? { color: group.color, badge: group.badge || title.slice(0, 1), icon: groupIcon(projectIcons, group, hosts?.focus ?? "local") } : { glyph: User }} toggle="closed" />
               <span className="min-w-0 truncate text-xs font-semibold text-muted"><ScriptText text={title} /></span>
             </>
           )}

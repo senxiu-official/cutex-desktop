@@ -28,7 +28,7 @@ function guestMock() {
   let open: any;
   const webRTC = vi.fn();
   const setWindowOpenHandler = vi.fn((fn: any) => { open = fn; });
-  Object.assign(guest, { id: 7, setWebRTCIPHandlingPolicy: webRTC, setWindowOpenHandler });
+  Object.assign(guest, { id: 7, getURL: () => "http://localhost:26111/", setWebRTCIPHandlingPolicy: webRTC, setWindowOpenHandler });
   return { guest: guest as unknown as WebContents, emitter: guest, webRTC, setWindowOpenHandler,
     open: (url: string, extra = {}) => open({ url, frameName: "_blank", disposition: "new-window", features: "", ...extra }) };
 }
@@ -301,6 +301,23 @@ describe("browser guest navigation and popup denial", () => {
     host = undefined;
     expect(mock.open("http://docs.svc.localhost:26111/path")).toEqual({ action: "deny" });
     expect(onNewTab).toHaveBeenCalledOnce();
+  });
+  it("owner gesture popups cross private origins, while agent/script popups and control targets cannot", () => {
+    const forwarded = vi.fn(), refused = vi.fn(); let ownerGesture = true, agent = false, receipt = true;
+    const target = "http://docs.svc.localhost:26111/path";
+    const policy = createBrowserUrlPolicy({ getHost: () => ({ kind: "local", serviceProxy: true, connectionPort: 26111 }),
+      protectedEndpoint: url => url.hostname === "localhost" && url.port === "26111" });
+    const handler = createBrowserWindowOpenHandler(() => ({ hostId: "local", policy, ownerPool: true,
+      openerOrigin: "https://public.example", consumeOwnerGesture: () => ownerGesture, agentActing: () => agent,
+      consumeOwnerNavigation: () => receipt,
+      consumeAgentPopup: () => true, onNewTab: forwarded, onNavigationRefused: refused }));
+    const open = (url = target) => handler({ url, frameName: "_blank", disposition: "new-window", features: "" } as any);
+    open(); expect(forwarded).toHaveBeenCalledWith({ hostId: "local", url: target, ownerNavigation: true });
+    forwarded.mockClear(); ownerGesture = false; open(); expect(forwarded).not.toHaveBeenCalled(); expect(refused).toHaveBeenCalled();
+    ownerGesture = true; receipt = false; open(); expect(forwarded).not.toHaveBeenCalled(); // unrelated native input is not an exact popup receipt
+    receipt = true;
+    ownerGesture = true; agent = true; open(); expect(forwarded).not.toHaveBeenCalled();
+    agent = false; open("http://localhost:26111/v2/health"); expect(forwarded).not.toHaveBeenCalled();
   });
   it.each(["options", "policy", "gesture", "forwarder", "diagnostic"])("%s exceptions still return native-window denial", stage => {
     const mock = guestMock(), diagnostic = vi.fn(() => { if (stage === "diagnostic") throw new Error("ignore"); });

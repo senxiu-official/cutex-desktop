@@ -101,7 +101,7 @@ export function ToolSchemaHint({ hostId, sessionId, retryText }: { hostId: strin
           <div className="mt-0.5 text-muted">{t("toolSchemaHint.restartNote", { profile })}</div>
           {phase.kind === "failed" && <div role="alert" className="mt-1 break-words text-danger">{phase.message}</div>}
           <div className="mt-1.5 flex flex-wrap gap-1.5">
-            <button type="button" data-tool-schema-hint-action="enable" disabled={phase.kind === "working"} onClick={() => void enable()} className={`${button} border-accent bg-accent text-accent-foreground`}>
+            <button type="button" data-tool-schema-hint-action="enable" disabled={phase.kind === "working"} onClick={() => void enable()} className={`${button} border-accent bg-accent text-white`}>
               {phase.kind === "working" ? t("toolSchemaHint.working") : phase.kind === "pending" ? t("hostAction.retry") : t("toolSchemaHint.enable")}
             </button>
             <button type="button" data-tool-schema-hint-action="settings" onClick={() => useApp.getState().openSettings("profiles", { profile })} className={`${button} border-border bg-surface hover:bg-hover`}>

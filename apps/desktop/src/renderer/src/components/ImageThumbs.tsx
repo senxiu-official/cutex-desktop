@@ -11,7 +11,7 @@ import type { MessageImage } from "../../../shared/input";
 import { EVENT_MEDIA_BLOBS_FEATURE, parseCutexBlobRef, parseMediaBlob } from "../../../shared/mediaBlobs";
 import { useI18n } from "../i18n";
 import { MAX_IMAGE_BYTES, type ImageActionInput } from "../../../shared/ipc";
-import { useThumbnail } from "../lib/fileThumbnails";
+import { fileVersion, useThumbnail } from "../lib/fileThumbnails";
 import { captureMediaAuthority, mediaKey, parseMediaRef, readHistoryMedia, useMediaAuthority } from "../lib/historyMedia";
 import { HOST_FILE_READ_FEATURE } from "../lib/workspace";
 import { featuresOf, hostApi, useApp } from "../store";
@@ -123,7 +123,9 @@ function useImageSrc(image: MessageImage, hostId: string | null | undefined, ret
   // r259+ desktops upload them as), not the 5 MB of a Markdown file thumbnail: a 5–8 MB screenshot read
   // with that cap came back truncated and stayed a file chip once its optimistic preview was gone.
   const read = usable && media && hostId ? () => readHistoryMedia(hostId, media, expected) : key ? () => hostApi(hostId!).hostFile(path!, MAX_IMAGE_BYTES) : null;
-  const { ref, state } = useThumbnail(key, read, { revalidate: !media, hostId: hostId ?? undefined, isCurrent: hostId ? captureMediaAuthority(hostId) : undefined, maxBytes: MAX_IMAGE_BYTES });
+  // A host path may be rewritten: a copy in memory shows at once and is checked by size + mtime (no bytes) at most once a minute.
+  const version = !media && key ? () => hostApi(hostId!).hostFile(path!, 1).then(fileVersion) : undefined;
+  const { ref, state } = useThumbnail(key, read, { revalidate: !media, version, hostId: hostId ?? undefined, isCurrent: hostId ? captureMediaAuthority(hostId) : undefined, maxBytes: MAX_IMAGE_BYTES });
   if (image.kind === "url" && !media && !/^cutex-(media|blob):/.test(image.url)) return { ref, src: image.url, loading: false, key: image.url };
   return { ref, src: state.status === "ok" ? state.src : null, loading: !!key && (state.status === "idle" || state.status === "loading"), key };
 }

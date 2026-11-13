@@ -12,7 +12,7 @@ import { ArrowLeft, Check, Search, SlidersHorizontal, X } from "lucide-react";
 import { bridge } from "../bridge";
 import { useI18n, type MessageKey } from "../i18n";
 import { resetDragonSize } from "../lib/aboutDragon";
-import { settingsNavGroups, settingsNavPage, settingsTab, subPageOfAnchor } from "../lib/settingsNav";
+import { SETTINGS_NAV_UNTITLED, settingsNavGroups, settingsNavPage, settingsTab, subPageOfAnchor } from "../lib/settingsNav";
 import { firstResult, flattenResults, highlightParts, resultCount, searchSettings, type Ranges, type SettingsSearchHit } from "../lib/settingsSearch";
 import { requestSettingsReveal, useSettingsReveal, useSettingsSearchIndex } from "../lib/settingsSearchView";
 import { profileSearchAnchor } from "../lib/settingsProfileSearch";
@@ -147,7 +147,7 @@ export function SettingsNav({ params }: { params: PageParams }) {
           {settingsNavGroups(pages).map(({ group, entries }) => {
             return (
               <div key={group} className="mb-3">
-                <div className="px-2 pt-1 pb-1 text-sm text-subtle">{t(`settings.group.${group}` as MessageKey)}</div>
+                {!SETTINGS_NAV_UNTITLED.includes(group) && <div className="px-2 pt-1 pb-1 text-sm text-subtle">{t(`settings.group.${group}` as MessageKey)}</div>}
                 {entries.map((e) => (
                   <ItemBoundary key={e.item.id} moduleId={e.moduleId}>
                     <NavRow entry={e} current={settingsNavPage(pages, tab) === e.item.page} />
@@ -245,7 +245,7 @@ export function SettingsSearchResults({ query, input, current, onNavigate }: { q
       <div className="px-2 pb-1 text-xs text-subtle" aria-live="polite">
         {groups.length ? t("shell.settingsSearch.count", { n: resultCount(rows) }) : stopIdleHelp ? null : t("shell.settingsSearch.empty")}
       </div>
-      {stopIdleHelp && <div role="note" className="mb-3 rounded-md border border-edge px-2 py-2 text-xs text-muted">
+      {stopIdleHelp && <div role="note" className="mb-3 rounded-md border border-border px-2 py-2 text-xs text-muted">
         <p className="font-medium text-foreground">{t("settings.searchIa.stopIdle" as MessageKey)}</p>
         <p className="mt-1">{t("settings.searchIa.stopIdleHelp" as MessageKey)}</p>
       </div>}

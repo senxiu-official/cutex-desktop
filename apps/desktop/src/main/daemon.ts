@@ -10,7 +10,8 @@ import { retryableHostBusy, retryableSteerPreflight, withHostBusyRetry, withStee
 import { hostBusyActionWire } from "../shared/hostBusyAction";
 import { ownerJoinIntent } from "../shared/ownerJoin";
 import { fullTextReference, needsFullTextRepair, hydrateFullText } from "./liveFullText";
-import { OperatorRestartNotices, recordOperatorRuntimeNotice } from "./operatorRestart";
+import { OperatorRestartNotices, projectOperatorRuntimeNotice } from "./operatorRestart";
+import { projectOperatorMembers } from "../shared/projectOperatorMembers";
 import { AGENT_PAUSE_METHOD, AGENT_RESUME_METHOD, type AgentPauseResult } from "../shared/agentPause";
 import type { EventEnvelope, SessionResource } from "@cutex-desktop/protocol";
 import { readProjectOperators } from "./projectOperators";
@@ -25,12 +26,13 @@ import { storageApi } from "./storage";
 import { storageCleanupApi } from "./storageCleanup";
 import type { StorageCleanupPreviewRequest, StorageCleanupExecuteRequest } from "../shared/storageCleanup";
 import type { StorageItemQuery } from "../shared/storage";
-import type { ApprovalRuleAuditPage, ApprovalRuleDraft, ApprovalRuleMutation, ApprovalRulesView } from "../shared/ipc";
+import type { ApprovalRuleAuditPage, ApprovalRuleDraft, ApprovalRuleMutation, ApprovalRulesView, ProjectPresentationUpdate } from "../shared/ipc";
 import { directorScopeCandidates, directorReviewContent, projectDirector, directorHandovers, directorStartReviews, decideDirectorItem, approveDirectorScope, type DirectorFence, type DirectorScope } from "@cutex-desktop/cutex-client";
 import { appWindows } from "./appWindows";
 import { downloadFilename, downloadFilters } from "../shared/downloadFilename";
 import { createHash, randomUUID } from "node:crypto";
 import { promoteDoneOf, QUICK_CHAT_PROMOTE_FEATURE, QUICK_CHAT_PROMOTE_FLAG, validPromoteRequest, validPromoteTarget, type PromoteRequest, type PromoteResult } from "../shared/quickChatPromote";
+import { creatorPathsWire, reapproveFailureWire, validReapproveTarget, withoutCreatorPathsDetail, type ReapprovePathsResult } from "../shared/creatorPaths";
 import { FORMAL_RENAME_FEATURE, FORMAL_RENAME_FLAG, holderIds, restoreNameWire, nameHistoryPath, validRenameRequest, validRenameTarget, type FormalRenameRequest, type FormalRenameResult, type NameHistoryEvent, type NameHistoryPage } from "../shared/agentRename";
 import type { HostProxyPatch } from "../shared/proxy";
 import { traceSendStage } from "../shared/sendTrace";
@@ -144,7 +146,7 @@ import { localDaemonSetup, readHostOwner, type HostOwner } from "../shared/hosts
 import { isValidTokenId } from "../shared/hosts";
 import { SERVICES_WORKERS_FEATURE, SERVICES_WORKERS_FLAG, servicesSettingsPatch } from "../shared/servicesSettings";
 import type { ClaudeRepinDone, ClaudeRepinResult, ClaudeRuntimeView } from "../shared/claudeRepin";
-import type { AgentSecurityPatch, ApprovalDecision, ApprovalDecisionOrigin, ApprovalDecisionResult, ApprovalRecord, CutexRefusal, RuntimePackageRun, RuntimePackageRunResult, RuntimePackagesView, MutationResult, ProfileCreateBody, ProfilePreset, NotificationLevel, ProfileAccountView, ServiceView, ServicesList, ServicesSettings, ServicesSettingsPatch, ProfileLogin, TerminalSummary, ProjectMemoryView, ProjectMutationOperation, BackgroundTerminal, CapabilitiesView, CatalogModelPatch, GlobalSettings, ProfileDetail, ProfileItem, ProfileModelsView, ProfilePatch, UserInstructions, AgentHarnessPreview, ClaudeCodeSources, ClaudePermissionRules, ClaudeSkillsImportList, ClaudeSkillsImportResult, SessionSandboxExtras, SessionSandboxExtrasPatch, FsDir, FsFile, GitStatus, UsageDimension, UsagePrices, UsageReport, UsageSourceFilter, WorkspaceScope, DaemonState, DesktopApi, DaemonEvents, ModelOption, QuotaConfigView, QuotaGauge, ServerRequestReply, SidebarSnapshot, DirectorRotation, DirectorRotationResult, DirectorRotationStart, StuckBusDiscardRequest, StuckBusDiscardResult, StuckBusView } from "../shared/ipc";
+import type { AgentSecurityPatch, ApprovalDecision, ApprovalDecisionOrigin, ApprovalDecisionResult, ApprovalRecord, CutexRefusal, RuntimePackageRun, RuntimePackageRunResult, RuntimePackagesView, MutationResult, ProfileCreateBody, ProfilePreset, NotificationLevel, ProfileAccountView, ServiceView, ServicesList, ServicesSettings, ServicesSettingsPatch, ProfileLogin, TerminalSummary, ProjectMemoryMutation, ProjectMemoryView, ProjectMutationOperation, BackgroundTerminal, CapabilitiesView, CatalogModelPatch, GlobalSettings, ProfileDetail, ProfileItem, ProfileModelsView, ProfilePatch, UserInstructions, AgentHarnessPreview, ClaudeCodeSources, ClaudePermissionRules, ClaudeSkillsImportList, ClaudeSkillsImportResult, SessionSandboxExtras, SessionSandboxExtrasPatch, FsDir, FsFile, GitStatus, UsageDimension, UsagePrices, UsageReport, UsageSourceFilter, WorkspaceScope, DaemonState, DesktopApi, DaemonEvents, ModelOption, QuotaConfigView, QuotaGauge, ServerRequestReply, SidebarSnapshot, DirectorRotation, DirectorRotationResult, DirectorRotationStart, StuckBusDiscardRequest, StuckBusDiscardResult, StuckBusView } from "../shared/ipc";
 
 /** What a queue-steer refusal carries after its kind: the native refusal, or an unknown outcome's raw answer (详情). */
 function steerErrorDetail(kind: QueueSteerErrorKind, error: CutexApiError): string {
@@ -170,6 +172,22 @@ function logSteerFailure(method: string, sessionId: string, error: unknown, atte
 function changedAtOf(detail: unknown): string | null {
   const at = (detail as { changedAt?: unknown } | null | undefined)?.changedAt;
   return typeof at === "string" && at.length <= 64 ? at : null;
+}
+
+function memoryFilePath(projectId: string, file: string): string {
+  if (typeof projectId !== "string" || typeof file !== "string" || !projectId || !file) throw new Error("bad memory path");
+  return `/v2/projects/${encodeURIComponent(projectId)}/memory/${encodeURIComponent(file)}`;
+}
+
+/** A cutex memory refusal as data (`ProjectMemoryMutation`); transport and other failures still throw. */
+export function memoryRefusal(error: unknown): ProjectMemoryMutation {
+  if (!(error instanceof CutexApiError) || error.status >= 500 || error.status === 401 || error.status === 403) throw error;
+  if (error.code === "revision_conflict") {
+    const current = (error.details as { currentRevision?: unknown } | null | undefined)?.currentRevision;
+    return { ok: false, code: "revision_conflict", currentRevision: typeof current === "string" ? current : null, message: error.message };
+  }
+  const code = error.code === "invalid_memory_file" || error.code === "invalid_memory_content" || error.code === "memory_not_found" ? error.code : "other";
+  return { ok: false, code, message: error.message };
 }
 
 function refusalOf(error: unknown): CutexRefusal | null {
@@ -645,7 +663,7 @@ export class DaemonService implements DaemonApi {
     const feed = new EventFeed(
       client,
       {
-        event: (envelope) => { if (current()) { this.invalidateSidebarEvent(envelope); this.emit("hostEvent", withoutLiveImages(envelope)); this.resyncPartialMedia(envelope); } },
+        event: (envelope) => { if (current()) { this.invalidateSidebarEvent(envelope); this.emit("hostEvent", withoutLiveImages(withoutCreatorPathsDetail(envelope))); this.resyncPartialMedia(envelope); } },
         traffic: (sample) => { if (current()) this.hostTraffic.add(sample); },
         resync: (reason, detail) => {
           if (!current()) return;
@@ -1230,7 +1248,7 @@ export class DaemonService implements DaemonApi {
           if (envelope.sequence > replay.throughSequence) break;
           const id = (envelope.cutex?.params as { clientUserMessageId?: string } | undefined)?.clientUserMessageId;
           if (id && ids.has(id) && /^cutex\/userInput\/(held|submitted|queued|failed)$/.test(envelope.cutex?.method ?? ""))
-            this.emit("sessionEvent", { sessionId, envelope: withoutLiveImages(envelope) });
+            this.emit("sessionEvent", { sessionId, envelope: withoutLiveImages(withoutCreatorPathsDetail(envelope)) });
         }
         if (!page.hasMore || page.events.some(event => event.sequence >= replay.throughSequence)) break;
         if (!page.nextCursor || page.nextCursor === after) throw new Error("owner admission receipt recovery did not advance; reload to retry");
@@ -1251,7 +1269,7 @@ export class DaemonService implements DaemonApi {
           if (this.sessionFeeds.get(sessionId) !== feed) return;
           const generation = envelope.correlation?.runtimeGeneration;
           if (generation != null) latestGeneration = Math.max(latestGeneration, generation);
-          this.emit("sessionEvent", { sessionId, envelope: withoutLiveImages(envelope) });
+          this.emit("sessionEvent", { sessionId, envelope: withoutLiveImages(withoutCreatorPathsDetail(envelope)) });
           if (needsFullTextRepair(envelope, liveDeltas && generation != null && generation === liveGeneration && generation === latestGeneration)) this.repairFullText(envelope, sessionId, feed);
           else this.resyncPartialMedia(envelope, sessionId);
         },
@@ -1808,6 +1826,21 @@ export class DaemonService implements DaemonApi {
     return this.skillArchiveCall(`/v2/codex/skills/archive/${encodeURIComponent(archiveId)}/restore`, {});
   }
 
+  /** `POST /v2/sessions/{id}/reapprove-paths` (session-path-reapproval, owner full token): approves the agent's current folders; starts nothing. */
+  async reapproveSessionPaths(id: string): Promise<ReapprovePathsResult> {
+    if (!validReapproveTarget(id)) throw new Error("bad session id");
+    const client = this.requireClient();
+    try {
+      const r = await client.request<{ cutexSessionId: string; revision: number }>("POST", `/v2/sessions/${encodeURIComponent(id)}/reapprove-paths`, { body: {} });
+      return { cutexSessionId: r.cutexSessionId, revision: r.revision };
+    } catch (error) {
+      // Fixed codes only: the daemon's text names folders.
+      throw new Error(reapproveFailureWire(error));
+    } finally {
+      if (this.client === client) this.noteSidebarWrite(id);
+    }
+  }
+
   // ---------- 自己的名字 (formal-agent-name-rename-v1) ----------
 
   async renameFormalAgent(id: string, request: FormalRenameRequest): Promise<FormalRenameResult> {
@@ -2232,7 +2265,7 @@ export class DaemonService implements DaemonApi {
     const caps=await client.capabilities<{featureList:string[];user?:unknown}>();
     if (!caps?.featureList.includes("agent-archive-kind-v1") || !userAccessOf(caps).isOwner) throw new Error("retirement_review_unavailable");
     const workspace=await client.project(projectId);
-    if (![...workspace.active_agents,...workspace.retired_agents,...(workspace.archived_agents??[])].some(row=>row.agent.cutex_session_id===request.cutex_session_id)&&workspace.director?.cutex_session_id!==request.cutex_session_id) throw new Error("member_scope_changed");
+    if (![...workspace.active_agents,...projectOperatorMembers(workspace,projectId),...workspace.retired_agents,...(workspace.archived_agents??[])].some(row=>row.agent.cutex_session_id===request.cutex_session_id)&&workspace.director?.cutex_session_id!==request.cutex_session_id) throw new Error("member_scope_changed");
     return client.permanentRetirementReview(request);
   }
 
@@ -2830,6 +2863,9 @@ export class DaemonService implements DaemonApi {
       // Restore refused because its own name is someone else's now: the renderer offers 改名 (shared/agentRename).
       const nameBlocked = method === "cutex/session/restore" ? restoreNameWire(error) : null;
       if (nameBlocked) throw new Error(nameBlocked);
+      // A child agent whose folders changed since creation: the renderer offers 重新批准文件夹 (shared/creatorPaths).
+      const pathsChanged = creatorPathsWire(error);
+      if (pathsChanged) throw new Error(pathsChanged);
       if (["cutex/session/delete", "cutex/runtime/online", "cutex/session/retire"].includes(method)) {
         const wire = hostBusyActionWire(error);
         if (wire) {
@@ -2980,9 +3016,7 @@ export class DaemonService implements DaemonApi {
   async operatorRuntimeNotice(projectId: string, sessionId: string) {
     const client = this.requireClient(), generation = this.gen;
     const current = () => this.gen === generation;
-    const workspace = await client.project(projectId);
-    if (!current() || workspace.access_role !== "human_management" || !workspace.active_agents.some(member => member.agent.cutex_session_id === sessionId) || workspace.director?.cutex_session_id === sessionId) throw Error("operator_unavailable");
-    return recordOperatorRuntimeNotice({ read: () => client.session(sessionId), notices: this.operatorRestartNotices, current });
+    return projectOperatorRuntimeNotice({ projectId, sessionId, project: () => client.project(projectId), read: () => client.session(sessionId), notices: this.operatorRestartNotices, current });
   }
   projectRead(projectId: string) { return this.requireClient().project(projectId); }
   async operatorAction(request: import("@cutex-desktop/cutex-client").OperatorActionRequest) {
@@ -3006,7 +3040,7 @@ export class DaemonService implements DaemonApi {
     finally { if (this.client === client) { this.invalidateSidebarParts(); this.noteSidebarWrite(); } }
   }
 
-  async projectPresentation(projectId: string, expected: { authorityEpoch: number; presentationRevision: number }, presentation: { display_name: string; badge_label: string; color: string }) {
+  async projectPresentation(projectId: string, expected: { authorityEpoch: number; presentationRevision: number }, presentation: ProjectPresentationUpdate) {
     const client = this.requireClient();
     try { return await client.request<unknown>("POST", "/v2/agent-management/project-presentation", {
       body: {
@@ -3030,7 +3064,27 @@ export class DaemonService implements DaemonApi {
   }
 
   async projectMemoryFile(projectId: string, file: string) {
-    return this.requireClient().request<{ file: string; content: string; bytes: number; updatedAt: string | null }>("GET", `/v2/projects/${encodeURIComponent(projectId)}/memory/${encodeURIComponent(file)}`);
+    return this.requireClient().request<{ file: string; content: string; bytes: number; updatedAt: string | null; revision?: string }>("GET", `/v2/projects/${encodeURIComponent(projectId)}/memory/${encodeURIComponent(file)}`);
+  }
+
+  async projectMemoryWrite(projectId: string, file: string, content: string, expectedRevision: string | null, updateIndex: boolean): Promise<ProjectMemoryMutation> {
+    if (typeof content !== "string" || typeof updateIndex !== "boolean" || !(expectedRevision === null || (typeof expectedRevision === "string" && expectedRevision))) throw new Error("bad memory write");
+    try {
+      const r = await this.requireClient().request<{ file: string; revision: string; indexUpdated?: boolean }>("PUT", memoryFilePath(projectId, file), { body: { content, expectedRevision, updateIndex } });
+      return { ok: true, file: r.file, revision: r.revision, indexUpdated: !!r.indexUpdated };
+    } catch (error) {
+      return memoryRefusal(error);
+    }
+  }
+
+  async projectMemoryDelete(projectId: string, file: string, expectedRevision: string): Promise<ProjectMemoryMutation> {
+    if (typeof expectedRevision !== "string" || !expectedRevision) throw new Error("bad memory delete");
+    try {
+      const r = await this.requireClient().request<{ file: string; indexUpdated?: boolean }>("DELETE", memoryFilePath(projectId, file), { query: { expectedRevision } });
+      return { ok: true, file: r.file, revision: null, indexUpdated: !!r.indexUpdated };
+    } catch (error) {
+      return memoryRefusal(error);
+    }
   }
 
   async projectMcp(projectId: string) {

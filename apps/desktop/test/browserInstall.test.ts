@@ -1,5 +1,6 @@
 import { EventEmitter } from "node:events";
 import { basename, join } from "node:path";
+import { networkInterfaces } from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BrowserWindow, IpcMainInvokeEvent } from "electron";
 import type { HostManager } from "../src/main/hosts";
@@ -8,6 +9,7 @@ import { BROWSER_CHANNEL, DEFAULT_BROWSER_CONTROL_SETTINGS } from "../src/shared
 import { BROWSER_PAUSE_MEDIA_SCRIPT, browserAppZoom, browserDisplayUrl, installBrowser, navigationFailure, syncBrowserHosts } from "../src/main/browser/install";
 import { BrowserLeases } from "../src/main/browser/leases";
 import { InAppProvider } from "../src/main/browser/provider";
+import { BrowserLanTargets } from "../src/main/browser/lanTargets";
 
 // Exercise installBrowser's public IPC/event boundary, not private functions or an alternate adapter.
 const electron = vi.hoisted(() => ({
@@ -151,6 +153,12 @@ function deferred<T>() {
   const promise = new Promise<T>(yes => { resolve = yes; });
   return { promise, resolve };
 }
+function ownerReceipt(guest: ContentsMock, url: string, kind: "navigation" | "popup" = "navigation") {
+  guest.emit("before-mouse-event", {}, { type: "mouseUp" });
+  const call = guest.executeJavaScriptInIsolatedWorld.mock.calls.find((call: any[]) => call[0] === 1012) as any;
+  const prefix = JSON.parse(/prefix=("[^"]+")/.exec(call[1][0].code)![1]!);
+  guest.emit("console-message", { frame: guest.mainFrame, message: prefix + JSON.stringify({ url, kind }) });
+}
 async function flush() { for (let i = 0; i < 40; i++) await Promise.resolve(); }
 async function until(predicate: () => boolean) {
   for (let i = 0; i < 100 && !predicate(); i++) await Promise.resolve();
@@ -158,7 +166,7 @@ async function until(predicate: () => boolean) {
 }
 const cleanup: (() => void)[] = [];
 let nextContentsId = 1;
-function fixture(session = new SessionMock(), permissiveAppSender = false) {
+function fixture(session = new SessionMock(), permissiveAppSender = false, localKind: "local" | "ssh" = "local") {
   electron.sessions.set("persist:browser-local", session);
   const owner = new ContentsMock(nextContentsId++, session);
   const events: BrowserEvent[] = [];
@@ -172,7 +180,7 @@ function fixture(session = new SessionMock(), permissiveAppSender = false) {
     capabilities: vi.fn(async () => ({ featureList: ["services-proxy", "services-lifetime"] })) };
   const conns = new Map([["local", { routingEpoch: "epoch-a", daemon }]]);
   const hosts = { connection: (hostId: string) => conns.get(hostId), focus: () => "local",
-    state: () => ({ hosts: [...conns.keys()].map(id => ({ id, kind: id === "local" ? "local" : id.startsWith("ssh-") ? "ssh" : "dev-direct" })) }) };
+    state: () => ({ hosts: [...conns.keys()].map(id => ({ id, kind: id === "local" ? localKind : id.startsWith("ssh-") ? "ssh" : "dev-direct" })) }) };
   const windowState = { visible: true, focused: true, flashFrame: vi.fn() };
   installBrowser(Object.assign(new EventEmitter(), { webContents: owner, isDestroyed: () => owner.dead, isVisible: () => windowState.visible, isMinimized: () => false,
     isFocused: () => windowState.focused, flashFrame: windowState.flashFrame, isFullScreen: () => false, setFullScreen: vi.fn() }) as unknown as BrowserWindow,
@@ -1004,6 +1012,166 @@ describe("installed browser owner IPC / Electron boundary", () => {
     await expect(f.ipc({ op: "navigate", tabKey: "side-one", url: "http://169.254.169.254/" })).rejects.toThrow("reserved_address");
     expect(guest.loads).toEqual(["http://localhost:26180/"]);
   });
+  it("a verified owner click admits the exact private request, while scripts and fetch remain refused", async () => {
+    const f = fixture(); await f.ipc({ op: "setEnabled", enabled: true }); const { guest } = await f.mount();
+    const target = "http://localhost:26190/login";
+    const blocked = { url: target, isMainFrame: true, preventDefault: vi.fn() };
+    guest.emit("will-navigate", blocked); expect(blocked.preventDefault).toHaveBeenCalledOnce();
+    guest.emit("before-mouse-event", {}, { type: "mouseUp" });
+    const call = guest.executeJavaScriptInIsolatedWorld.mock.calls.find((call: any[]) => call[0] === 1012) as any;
+    const prefix = JSON.parse(/prefix=("[^"]+")/.exec(call[1][0].code)![1]!);
+    guest.emit("console-message", { frame: guest.mainFrame, message: prefix + JSON.stringify({ url: target, kind: "navigation" }) });
+    const clicked = { url: target, isMainFrame: true, preventDefault: vi.fn() };
+    guest.emit("will-frame-navigate", clicked); expect(clicked.preventDefault).not.toHaveBeenCalled();
+    expect(f.session.denied(guest.id, target, "mainFrame", "http://localhost:26180")).toBe(false);
+    expect(f.session.denied(guest.id, target, "xhr", "http://localhost:26180")).toBe(true);
+  });
+  it("a public-start 307 redirect cannot admit a new LAN target", async () => {
+    vi.stubEnv("CUTEX_DESKTOP_BROWSER_EGRESS", "n2");
+    const f = fixture(); await f.ipc({ op: "setEnabled", enabled: true }); const { guest } = await f.mount("side-one", "https://example.test/go");
+    const initial = vi.fn(); f.session.before!({ id: 71, webContentsId: guest.id, url: guest.url, resourceType: "mainFrame" }, initial);
+    expect(initial).toHaveBeenCalledWith({ cancel: false });
+    const url = "http://10.0.0.1/apply.cgi", event = { url, isMainFrame: true, statusCode: 307, preventDefault: vi.fn() };
+    guest.emit("will-redirect", event); expect(event.preventDefault).toHaveBeenCalledOnce();
+    const proxy = electron.startProxy.mock.calls[0]![0]; expect(proxy.lanAllowed("10.0.0.1", 80)).toBe(false);
+    expect(f.events.at(-1)).toMatchObject({ blockedNavigation: { url, canOpen: true } });
+    expect(guest.url).toBe("https://example.test/go");
+  });
+  it("a public-looking redirect resolving to LAN is refused BEFORE inserting its admission", async () => {
+    vi.stubEnv("CUTEX_DESKTOP_BROWSER_EGRESS", "n2");
+    const original = BrowserLanTargets.prototype.classify;
+    const spy = vi.spyOn(BrowserLanTargets.prototype, "classify").mockImplementation(function(this: BrowserLanTargets, raw) {
+      if (raw === "https://router.example/apply") return Promise.resolve({ key: "router.example:443", hostname: "router.example", port: 443, origin: "https://router.example" });
+      return original.call(this, raw);
+    });
+    try {
+      const f = fixture(); await f.ipc({ op: "setEnabled", enabled: true }); const { guest } = await f.mount("side-one", "https://example.test/go");
+      const first = vi.fn(); f.session.before!({ id: 81, webContentsId: guest.id, url: guest.url, resourceType: "mainFrame" }, first);
+      const url = "https://router.example/apply";
+      guest.emit("will-redirect", { url, isMainFrame: true, preventDefault: vi.fn() });
+      const reply = vi.fn(); f.session.before!({ id: 81, webContentsId: guest.id, url, resourceType: "mainFrame" }, reply); await flush();
+      expect(reply).toHaveBeenCalledWith({ cancel: true });
+      expect(electron.startProxy.mock.calls[0]![0].lanAllowed("router.example", 443)).toBe(false);
+      expect(f.events.at(-1)).toMatchObject({ blockedNavigation: { url, canOpen: true } });
+    } finally { spy.mockRestore(); }
+  });
+  it("SSH page gestures stay refused as remote loopback; the explicit local retry names 本机 in its view", async () => {
+    vi.stubEnv("CUTEX_DESKTOP_BROWSER_EGRESS", "n2");
+    const f = fixture(new SessionMock(), false, "ssh"); await f.ipc({ op: "setEnabled", enabled: true });
+    const { guest } = await f.mount("side-one", "https://example.test/start"), url = "http://localhost:26190/local";
+    ownerReceipt(guest, url);
+    const event = { url, isMainFrame: true, preventDefault: vi.fn() }; guest.emit("will-navigate", event);
+    expect(event.preventDefault).toHaveBeenCalledOnce();
+    const notice = f.events.at(-1)!.blockedNavigation!; expect(notice).toMatchObject({ url, desktopLoopback: true, canOpen: true });
+    await expect(f.ipc({ op: "navigate", tabKey: "side-one", url })).rejects.toMatchObject({ code: "remote_loopback" });
+    await f.ipc({ op: "openBlockedNavigation", tabKey: "side-one", id: notice.id }); expect(guest.url).toBe(url);
+  });
+  it("an admitted owner LAN page opens its own popup without a popup receipt or redirect authority", async () => {
+    vi.stubEnv("CUTEX_DESKTOP_BROWSER_EGRESS", "n2");
+    const f = fixture(); await f.ipc({ op: "setEnabled", enabled: true });
+    const { guest } = await f.mount("side-one", "http://100.64.0.27:8765/start");
+    guest.emit("before-mouse-event", {}, { type: "mouseUp" }); guest.popup("http://100.64.0.27:8765/popup");
+    const event = f.events.findLast(event => event.kind === "new-tab")!; expect(event).toBeDefined();
+    const next = await f.mount(event.newTabKey!, event.newTabUrl!);
+    expect(next.guest.url).toBe("http://100.64.0.27:8765/popup");
+    expect(f.session.denied(next.guest.id, "http://100.64.0.27:8765/data", "xhr", "http://100.64.0.27:8765")).toBe(false);
+    const redirect = { url: "http://100.64.0.28:8765/private", isMainFrame: true, preventDefault: vi.fn() };
+    next.guest.emit("will-redirect", redirect); expect(redirect.preventDefault).toHaveBeenCalledOnce();
+    expect(electron.startProxy.mock.calls[0]![0].lanAllowed("100.64.0.28", 8765)).toBe(false);
+  });
+  it("an admitted owner LAN page cannot lend its admission to a cross-origin popup", async () => {
+    vi.stubEnv("CUTEX_DESKTOP_BROWSER_EGRESS", "n2");
+    const f = fixture(); await f.ipc({ op: "setEnabled", enabled: true });
+    const { guest } = await f.mount("side-one", "http://100.64.0.27:8765/start");
+    guest.emit("before-mouse-event", {}, { type: "mouseUp" }); guest.popup("http://100.64.0.27:8766/other-port");
+    expect(f.events.some(event => event.kind === "new-tab")).toBe(false);
+    expect(electron.startProxy.mock.calls[0]![0].lanAllowed("100.64.0.27", 8766)).toBe(false);
+  });
+  it("an active owner service page opens its own service route without a popup receipt", async () => {
+    const f = fixture(); await f.ipc({ op: "setEnabled", enabled: true });
+    const { guest } = await f.mount("side-one", "cutex:service/docs/");
+    guest.emit("before-mouse-event", {}, { type: "mouseUp" }); guest.popup("http://docs.svc.localhost:26111/popup");
+    const event = f.events.findLast(event => event.kind === "new-tab")!; expect(event).toBeDefined();
+    const next = await f.mount(event.newTabKey!, event.newTabUrl!);
+    expect(next.guest.loads.at(-1)).toContain("http://docs.svc.localhost:26111/__cutex/auth?");
+    expect(f.events.filter(row => row.tabKey === event.newTabKey).some(row => row.blockedNavigation)).toBe(false);
+  });
+  it("an SSH owner popup inherits only loopback that was already explicitly admitted", async () => {
+    vi.stubEnv("CUTEX_DESKTOP_BROWSER_EGRESS", "n2");
+    const f = fixture(undefined, false, "ssh"); await f.ipc({ op: "setEnabled", enabled: true });
+    const { guest } = await f.mount("side-one", "https://example.test/start");
+    const url = "http://localhost:26190/start";
+    guest.emit("will-navigate", { url, isMainFrame: true, preventDefault: vi.fn() });
+    const notice = f.events.at(-1)!.blockedNavigation!;
+    await f.ipc({ op: "openBlockedNavigation", tabKey: "side-one", id: notice.id });
+    guest.emit("before-mouse-event", {}, { type: "mouseUp" }); guest.popup("http://localhost:26190/popup");
+    const event = f.events.findLast(event => event.kind === "new-tab")!; expect(event).toBeDefined();
+    const next = await f.mount(event.newTabKey!, event.newTabUrl!); expect(next.guest.url).toBe("http://localhost:26190/popup");
+    guest.emit("before-mouse-event", {}, { type: "mouseUp" }); guest.popup("http://localhost:26191/other");
+    expect(f.events.filter(event => event.kind === "new-tab")).toHaveLength(1);
+  });
+  it("recent unrelated input cannot open a private popup; its exact popup receipt can", async () => {
+    vi.stubEnv("CUTEX_DESKTOP_BROWSER_EGRESS", "n2");
+    const f = fixture(); await f.ipc({ op: "setEnabled", enabled: true }); const { guest } = await f.mount("side-one", "https://example.test/start");
+    const url = "http://100.64.0.27:8765/private";
+    guest.emit("before-mouse-event", {}, { type: "mouseUp" }); guest.popup(url);
+    expect(f.events.some(event => event.kind === "new-tab")).toBe(false);
+    expect(electron.startProxy.mock.calls[0]![0].lanAllowed("100.64.0.27", 8765)).toBe(false);
+    expect(f.events.at(-1)).toMatchObject({ blockedNavigation: { url, canOpen: true } });
+    ownerReceipt(guest, url + "/different", "popup"); guest.popup(url);
+    expect(f.events.some(event => event.kind === "new-tab")).toBe(false);
+    ownerReceipt(guest, url, "popup"); guest.popup(url);
+    const opened = f.events.findLast(event => event.kind === "new-tab")!; expect(opened).toBeDefined();
+    const next = await f.mount(opened.newTabKey!, opened.newTabUrl!); expect(next.guest.url).toBe(url);
+    expect(electron.startProxy.mock.calls[0]![0].lanAllowed("100.64.0.27", 8765)).toBe(true);
+  });
+  it("a public popup forwarded without a receipt gets no private redirect authority", async () => {
+    vi.stubEnv("CUTEX_DESKTOP_BROWSER_EGRESS", "n2");
+    const f = fixture(); await f.ipc({ op: "setEnabled", enabled: true }); const { guest } = await f.mount("side-one", "https://example.test/start");
+    guest.emit("before-mouse-event", {}, { type: "mouseUp" }); guest.popup("https://example.test/popup");
+    const opened = f.events.findLast(event => event.kind === "new-tab")!; const next = await f.mount(opened.newTabKey!, opened.newTabUrl!);
+    const first = vi.fn(); f.session.before!({ id: 91, webContentsId: next.guest.id, url: next.guest.url, resourceType: "mainFrame" }, first);
+    expect(first).toHaveBeenCalledWith({ cancel: false });
+    const event = { url: "http://10.0.0.1/apply.cgi", isMainFrame: true, preventDefault: vi.fn() };
+    next.guest.emit("will-redirect", event); expect(event.preventDefault).toHaveBeenCalledOnce();
+    expect(electron.startProxy.mock.calls[0]![0].lanAllowed("10.0.0.1", 80)).toBe(false);
+  });
+  it("a protected-endpoint failure clears an older recoverable navigation notice", async () => {
+    const f = fixture(); await f.ipc({ op: "setEnabled", enabled: true }); const { guest } = await f.mount();
+    guest.emit("will-navigate", { url: "http://localhost:26190/", isMainFrame: true, preventDefault: vi.fn() });
+    expect(f.events.at(-1)!.blockedNavigation).toBeTruthy();
+    guest.emit("will-navigate", { url: "http://127.0.0.1:26111/v2/health", isMainFrame: true, preventDefault: vi.fn() });
+    expect(f.events.at(-1)).toMatchObject({ error: "protected_endpoint", blockedNavigation: null });
+  });
+  it("still open redeems only the main-retained target once and preserves the original page on refusal", async () => {
+    const f = fixture(); await f.ipc({ op: "setEnabled", enabled: true }); const { guest } = await f.mount();
+    const previous = guest.url, url = "http://localhost:26190/login?token=fixture-secret";
+    guest.emit("will-navigate", { url, isMainFrame: true, preventDefault: vi.fn() });
+    const notice = f.events.at(-1)!.blockedNavigation!;
+    expect(notice.canOpen).toBe(true); expect(notice.url).not.toContain("fixture-secret"); expect(guest.url).toBe(previous);
+    await expect(f.ipc({ op: "openBlockedNavigation", tabKey: "side-one", id: notice.id, url: "http://localhost:26111/" })).rejects.toThrow();
+    await expect(f.ipc({ op: "openBlockedNavigation", tabKey: "side-one", id: "wrong" })).rejects.toThrow();
+    await f.ipc({ op: "openBlockedNavigation", tabKey: "side-one", id: notice.id });
+    expect(guest.url).toBe(url); expect(f.events.at(-1)!.blockedNavigation).toBeNull();
+    await expect(f.ipc({ op: "openBlockedNavigation", tabKey: "side-one", id: notice.id })).rejects.toThrow();
+  });
+  it("a refused cross-origin iframe does not replace the owner's current page with a tab error", async () => {
+    const f = fixture(); await f.ipc({ op: "setEnabled", enabled: true }); const { guest } = await f.mount();
+    const before = f.events.length;
+    const event = { url: "http://localhost:26190/private", isMainFrame: false, preventDefault: vi.fn() };
+    guest.emit("will-frame-navigate", event); expect(event.preventDefault).toHaveBeenCalledOnce();
+    expect(f.events.length).toBe(before); expect(guest.url).toBe("http://localhost:26180/");
+  });
+  it("the installed proxy's actual control policy rejects local LAN interfaces at the daemon port", async () => {
+    vi.stubEnv("CUTEX_DESKTOP_BROWSER_EGRESS", "n2");
+    const f = fixture(); await f.ipc({ op: "setEnabled", enabled: true }); await f.mount();
+    const policy = electron.startProxy.mock.calls[0]![0].protectedAddress as (address: string, port: number) => boolean;
+    const addresses = Object.values(networkInterfaces()).flatMap(items => items ?? []).filter(item => !item.internal);
+    expect(addresses.length).toBeGreaterThan(0);
+    for (const item of addresses) expect(policy(item.address, 26111)).toBe(true);
+    expect(policy("127.0.0.1", 26111)).toBe(true);
+    expect(policy("127.0.0.1", 26180)).toBe(false);
+  });
   it("0.1.3: pages reach only the loopback origins main admitted for their own tab, same-origin", async () => {
     const f = fixture(); await f.ipc({ op: "setEnabled", enabled: true });
     const first = await f.mount();
@@ -1015,12 +1183,11 @@ describe("installed browser owner IPC / Electron boundary", () => {
     expect(f.session.denied(first.guest.id, "http://localhost:26181/", "xhr", "http://localhost:26180")).toBe(true);
     expect(f.session.denied(first.guest.id, "http://localhost:26180/api", "xhr", "https://example.test")).toBe(true);
     expect(f.session.denied(first.guest.id, "http://127.0.0.1:26111/v2/sessions", "xhr", "http://127.0.0.1:26111")).toBe(true);
-    // A page-initiated top-level jump to an unadmitted loopback port reports why, without the URL.
+    // A page-initiated jump leaves the current document usable, with a main-bound retry target.
     const before = f.events.length;
     expect(f.session.denied(first.guest.id, "http://localhost:9222/json", "mainFrame", "http://localhost:26180")).toBe(true);
-    expect(f.events.slice(before).at(-1)).toMatchObject({ error: "private_address_blocked" });
-    // The refused URL's port form: random guest ids are hex and may hold the digits 9222 ("…bc9222b3").
-    expect(JSON.stringify(f.events.slice(before))).not.toContain(":9222");
+    expect(f.events.slice(before).at(-1)).toMatchObject({ blockedNavigation: { url: "http://localhost:9222/json", canOpen: true } });
+    expect(f.events.slice(before).at(-1)?.error).toBeUndefined();
     // Closing the tab drops its admission; a remount re-admits through main's own navigation.
     await f.ipc({ op: "close", tabKey: "side-two" });
     const again = await f.mount("side-two", "http://localhost:26190/");
@@ -1031,7 +1198,7 @@ describe("installed browser owner IPC / Electron boundary", () => {
     const { guest } = await f.mount();
     const event = { url: "http://localhost:5555/", isMainFrame: true, preventDefault: vi.fn() };
     guest.emit("will-navigate", event); expect(event.preventDefault).toHaveBeenCalledOnce();
-    expect(f.events.at(-1)).toMatchObject({ error: "private_address_blocked" });
+    expect(f.events.at(-1)).toMatchObject({ blockedNavigation: { url: "http://localhost:5555/", canOpen: true } });
     const same = { url: "http://localhost:26180/next", isMainFrame: true, preventDefault: vi.fn() };
     guest.emit("will-navigate", same); expect(same.preventDefault).not.toHaveBeenCalled();
   });
@@ -1096,7 +1263,7 @@ describe("installed controlled tabs, downloads and site permissions (0.1.3)", ()
   it("an owner-clicked POST popup becomes an owner tab that replays the exact URL and body once", async () => {
     const f = fixture(); await f.ipc({ op: "setEnabled", enabled: true });
     const { guest } = await f.mount("side-one", "http://localhost:26180/");
-    guest.emit("before-mouse-event", {}, { type: "mouseDown" });
+    ownerReceipt(guest, "http://localhost:26180/submit?token=secret", "popup");
     expect(guest.popup("http://localhost:26180/submit?token=secret", { postBody: { contentType: "application/x-www-form-urlencoded", data: [{ type: "rawData", bytes: Buffer.from("q=1") }] } }))
       .toEqual({ action: "deny" });
     const event = f.events.findLast(item => item.kind === "new-tab")!;

@@ -1,4 +1,5 @@
 import { isImeComposing } from "../lib/ime";
+import { EDITOR_PLACEHOLDER_CLASS } from "../lib/composerPlaceholder";
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState,
   type ClipboardEvent, type HTMLAttributes, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
@@ -28,6 +29,12 @@ export interface AgentMentionInputProps extends Omit<HTMLAttributes<HTMLDivEleme
   hostId?: string | null;
 }
 interface Snapshot extends MentionSelection { value: string }
+
+/** The placeholder shows only for an empty draft with no IME composition in progress: composing text is not committed
+ *  yet (the draft is still ""), but the owner already sees it, so the placeholder goes at compositionstart. */
+function showPlaceholder(root: HTMLElement, committed: string, composing = false) {
+  root.dataset.empty = String(!composing && committed.length === 0);
+}
 interface ChipPortal { host: HTMLElement; token: ComposerMentionToken }
 
 /** Used for drafts containing canonical agent links or explicit profile/model references. The parent keeps ordinary drafts in a textarea. */
@@ -75,7 +82,7 @@ export const AgentMentionInput = forwardRef<AgentMentionInputHandle, AgentMentio
       fragment.append(tail);
     }
     root.replaceChildren(fragment);
-    root.dataset.empty = String(text.length === 0);
+    showPlaceholder(root, text);
     setPortals(chips);
   }, []);
 
@@ -232,7 +239,7 @@ export const AgentMentionInput = forwardRef<AgentMentionInputHandle, AgentMentio
   }
   return <div {...attributes} ref={element} role={attributes.role ?? "textbox"} aria-multiline="true"
     contentEditable suppressContentEditableWarning data-agent-mention-editor="" data-placeholder={placeholder}
-    className={`outline-none data-[empty=true]:before:content-[attr(data-placeholder)] data-[empty=true]:before:text-muted-foreground data-[empty=true]:before:pointer-events-none ${className ?? ""}`}
+    className={`outline-none ${EDITOR_PLACEHOLDER_CLASS} ${className ?? ""}`}
     style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", ...style }}
     onKeyDown={handleKeyDown}
     onInput={() => {
@@ -241,13 +248,19 @@ export const AgentMentionInput = forwardRef<AgentMentionInputHandle, AgentMentio
       const next = readMentionSelection(element.current) ?? caret.current;
       if (text !== current.current) commit(text, next);
     }}
-    onCompositionStart={event => { remember(); composing.current = true; attributes.onCompositionStart?.(event); }}
+    onCompositionStart={event => {
+      remember(); composing.current = true;
+      if (element.current) showPlaceholder(element.current, current.current, true);
+      attributes.onCompositionStart?.(event);
+    }}
     onCompositionEnd={event => {
       composing.current = false;
       if (element.current) {
         const text = agentMentionEditorValue(element.current);
         const next = readMentionSelection(element.current) ?? caret.current;
         if (text !== current.current) commit(text, next);
+        // A cancelled composition (Esc, or deleted back to nothing) commits nothing: the placeholder comes back.
+        else showPlaceholder(element.current, current.current);
       }
       attributes.onCompositionEnd?.(event);
     }}

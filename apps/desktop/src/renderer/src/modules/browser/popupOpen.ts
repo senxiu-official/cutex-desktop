@@ -15,7 +15,9 @@ import { pressInstance } from "../../lib/shelfSource";
 import { opensElsewhere, sideOpenFrom } from "../../lib/shelfTarget";
 import { BROWSER_TAB, SERVICE_TAB, browserNavigationUrl, isBrowserKind, isBrowserTabKey } from "./browserState";
 
-type PopupEvent = Pick<BrowserEvent, "hostId" | "tabKey" | "pool" | "newTabUrl" | "newTabKey">;
+/** newTabOwner: main minted the new tab in the owner pool (仍然打开 on a private navigation an agent-pool tab could not
+ * make): it opens as the owner's tab; the opener's agent pool stays out of it. */
+type PopupEvent = Pick<BrowserEvent, "hostId" | "tabKey" | "pool" | "newTabUrl" | "newTabKey" | "newTabOwner">;
 
 /** The side instance of host `hostId`'s browser tab `tabKey`, in any live Shelf. `bound`: host- / agent-bound only. */
 export function browserTabInstance(hostId: string, tabKey: string, bound = false): string | null {
@@ -63,14 +65,16 @@ export function revealBrowserTab(event: Pick<BrowserEvent, "hostId" | "tabKey">,
 }
 
 /**
- * Opens a popup's new tab (null: not an http(s) URL / an agent-pool tab without its minted key). `open`: the
+ * Opens a popup's new tab (null: not an http(s) URL / an agent-pool or owner-minted tab without its minted key). `open`: the
  * module's services.side.open, used when the opener is in the focused Shelf (or gone).
  */
 export function openPopupTab(event: PopupEvent, open: SideOpen): SideOpenResult | null {
   const url = browserNavigationUrl(event.newTabUrl);
-  if (!url || !/^https?:/.test(url) || (event.pool === "agent" && !isBrowserTabKey(event.newTabKey))) return null;
-  // Main minted the new tab's key in the opener's pool (and holds the exact URL / form body for it).
-  const params: Record<string, string | boolean> = event.pool === "agent" ? { url, tabKey: event.newTabKey!, agentOpened: true }
+  const owner = event.newTabOwner === true;
+  if (!url || !/^https?:/.test(url) || ((owner || event.pool === "agent") && !isBrowserTabKey(event.newTabKey))) return null;
+  // Main minted the new tab's key in the opener's pool — or, with newTabOwner, in the owner's pool whatever the
+  // opener's — and holds the exact URL / form body for it.
+  const params: Record<string, string | boolean> = owner ? { url, tabKey: event.newTabKey!, ownerTab: true } : event.pool === "agent" ? { url, tabKey: event.newTabKey!, agentOpened: true }
     : isBrowserTabKey(event.newTabKey) ? { url, tabKey: event.newTabKey, ownerTab: true } : { url };
   const opener = event.tabKey ? browserTabInstance(event.hostId, event.tabKey) : null;
   const source = opener ? { instanceId: opener } : null;

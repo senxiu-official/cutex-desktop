@@ -10,7 +10,7 @@ import type { EventEnvelope } from "@cutex-desktop/protocol";
 
 const prefs = vi.hoisted(() => ({ agentMessages: "compact" }));
 vi.mock("../src/renderer/src/i18n", () => ({ useI18n: () => ({ t: (key: string) => key }) }));
-vi.mock("../src/renderer/src/store", () => ({ useApp: (selector: (state: Record<string, never>) => unknown) => selector({}) }));
+vi.mock("../src/renderer/src/store", () => ({ useApp: (selector: (state: Record<string, never>) => unknown) => selector({}), sidebarOf: () => null }));
 vi.mock("../src/renderer/src/lib/conversationScope", () => ({ useConvHost: () => "local", useConvScope: () => null, convFeaturesOf: () => ({ has: () => true }) }));
 vi.mock("../src/renderer/src/lib/prefs", () => ({ useUiPrefs: () => prefs }));
 vi.mock("../src/renderer/src/lib/userLayoutToggle", () => ({ useUserLayoutToggle: () => (action: () => void) => action() }));

@@ -159,12 +159,12 @@ describe("module registry", () => {
     // v1.7: the artifact publish card (order 150) needs cutex `artifacts` (a new feature).
     // claude-safety-grants (a new feature): the owner's decision under a declined tool row (order 400).
     // owner-approvals (a new feature): the approval line under a cutex call that answered approval_required (order 350).
-    expect(current.host.snapshot("timeline.tool").map((e) => e.item.id)).toEqual(["delegations.tool", "browser.tool", "artifacts.tool", "bookmarks.pinTool", "task-service.tool", "conversation.agentTools", "subagents.tool", "subagents.claudeAgent", "approvals.tool", "safety-grants.tool", "conversation.standardTools"]);
+    expect(current.host.snapshot("timeline.tool").map((e) => e.item.id)).toEqual(["delegations.tool", "browser.tool", "artifacts.tool", "bookmarks.pinTool", "task-service.tool", "conversation.agentTools", "subagents.tool", "subagents.claudeAgent", "approvals.tool", "safety-grants.tool", "conversation.standardTools", "conversation.webTools", "conversation.fileChange"]);
     for (const features of [[...MOCK_REMOTE, ...MOCK_BASE_FEATURES], null]) {
       const { host } = await gated(features);
       // Delegation ASK / results render by schema regardless of agent-asks (baseline, O6).
       expect(host.snapshot("timeline.received").map((e) => e.item.id)).toEqual(["task-service.received", "conversation.delegationAsk", "conversation.delegationResults"]);
-      expect(host.snapshot("timeline.tool").map((e) => e.item.id)).toEqual(["browser.tool", "task-service.tool", "conversation.agentTools", "subagents.tool", "subagents.claudeAgent", "conversation.standardTools"]);
+      expect(host.snapshot("timeline.tool").map((e) => e.item.id)).toEqual(["browser.tool", "task-service.tool", "conversation.agentTools", "subagents.tool", "subagents.claudeAgent", "conversation.standardTools", "conversation.webTools", "conversation.fileChange"]);
     }
     await current.host.setEnabled("delegations", false);
     await current.host.setEnabled("task-service", false);
@@ -176,7 +176,7 @@ describe("module registry", () => {
     expect(current.host.snapshot("timeline.received").map((e) => e.item.id)).toEqual(["conversation.delegationAsk", "conversation.delegationResults"]);
     // The core (required) cutex agent-tool line stays: the baseline formatted these rows unconditionally.
     await current.host.setEnabled("browser", false);
-    expect(current.host.snapshot("timeline.tool").map((e) => e.item.id)).toEqual(["conversation.agentTools", "conversation.standardTools"]);
+    expect(current.host.snapshot("timeline.tool").map((e) => e.item.id)).toEqual(["conversation.agentTools", "conversation.standardTools", "conversation.webTools", "conversation.fileChange"]);
     expect(SLOT_SPECS["timeline.received"].unavailable).toBe("hide");
     expect(SLOT_SPECS["timeline.tool"].unavailable).toBe("hide");
   });

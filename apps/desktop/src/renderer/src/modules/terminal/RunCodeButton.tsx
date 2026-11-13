@@ -35,7 +35,7 @@ export function RunCodeButton({ hostId, sessionId, code, incomplete }: CodeBlock
         disabled={incomplete || busy || lines === 0}
         title={armed ? undefined : tip}
         aria-label={armed ? t("terminal.runArmed", { n: lines }) : tip}
-        className={`${BTN} ${armed ? `${ARMED_COUNTDOWN} bg-danger-solid text-white` : "text-muted-foreground hover:text-foreground"}`}
+        className={`${BTN} ${armed ? `${ARMED_COUNTDOWN} bg-danger-solid text-white` : "text-muted hover:text-foreground"}`}
       >
         <Play aria-hidden size={14} />
       </button>

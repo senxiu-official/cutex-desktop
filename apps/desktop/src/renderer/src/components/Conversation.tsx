@@ -14,6 +14,8 @@ import { useAgentFeatures } from "../lib/agentFeaturesView";
 import { offlineAutoStartNote } from "../lib/runtimeWording";
 import { agentState, useApp } from "../store";
 import { useConvFeatures, useConvHost, useConvScope, useConvSession, useConvSidebar } from "../lib/conversationScope";
+import { creatorPathsBlock, REAPPROVE_PATHS_FEATURE } from "../../../shared/creatorPaths";
+import { CreatorPathsNote } from "./CreatorPathsNote";
 import { Composer } from "./Composer";
 import { InteractionDock } from "./InteractionDock";
 import { StatusBar } from "./StatusBar";
@@ -447,6 +449,8 @@ export function Conversation({ scope }: { scope: WorkspaceScope | null }) {
   const archived = isArchived(session);
   // The composer block (status row + 接下来 + input) shows: not archived, not read-only, no interaction waiting.
   const composerShown = !archived && !readOnly && !(view && view.timeline.pending.size > 0);
+  // A child agent refused for moved folders gets its own line with 重新批准文件夹 (components/CreatorPathsNote).
+  const pathsChanged = !archived && runtimeStatus !== "online" && !!view?.startError && creatorPathsBlock(view.startError) !== null;
   const runtimeNote = archived
     ? null
     : view?.startError
@@ -546,7 +550,9 @@ export function Conversation({ scope }: { scope: WorkspaceScope | null }) {
       {/* Kept mounted (draft survives) but hidden while an interaction blocks — ZCode pattern. */}
       {/* A flex column that may shrink (min-h-0): in a short pane 「接下来」 scrolls inside itself instead of being cut (QueuePanel). */}
       <div data-composer-block className={!composerShown ? "hidden" : "flex min-h-0 flex-col"}>
-        {runtimeNote && (
+        {pathsChanged ? (
+          <CreatorPathsNote key={`${hostId}/${selectedId}`} sessionId={selectedId} hostId={hostId} canReapprove={access.isOwner && features.has(REAPPROVE_PATHS_FEATURE)} />
+        ) : runtimeNote && (
           <p className={`side-col px-6 pb-1 text-xs ${runtimeNote.tone}`}>
             {runtimeNote.text}
             {access.isOwner && runtimeStatus && runtimeStatus !== "online" && runtimeStatus !== "starting" && startSince === null && (

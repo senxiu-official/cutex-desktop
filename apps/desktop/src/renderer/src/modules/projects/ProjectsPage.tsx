@@ -1,7 +1,7 @@
 // Projects page (DESIGN §4.18): project list + detail — presentation, directory, members /
 // Director, project-layer MCP, memory, tasks. Membership and Director changes live only here, on the
 // agent tab (the list + MemberPicker); 设置 only links to it.
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useArchivedAgents } from "../../lib/useArchivedAgents";
 import { displayWidth, isBadgeLabelError, projectBadgeWidth } from "../../lib/badgeWidth";
 import { BadgeTextInput } from "../../components/BadgeTextInput";
@@ -25,6 +25,7 @@ import { AgentRowButton } from "../../components/AgentRows";
 import { AgentList, type MemberControls } from "../../components/AgentList";
 import { DelegationList } from "../../components/DelegationList";
 import { ProjectMemoryList } from "../../components/ProjectMemory";
+import { PROJECT_MEMORY_FEATURE } from "../../../../shared/projectMemory";
 import { ServiceLine } from "../../components/ServiceLine";
 import { PageBody, SubNav, SUBNAV_ITEM, SUBNAV_OFF, SUBNAV_ON } from "../../components/Page";
 import { Button, FormFields, SettingRow, SettingsGroup, Section, Select, TextInput } from "../../components/settings/Form";
@@ -34,7 +35,7 @@ import { ProjectIconPicker } from "../../components/ProjectIconPicker";
 import { projectIcon } from "../../lib/projectIcons";
 import { autoBadge, CREATE_ROOT_FEATURE, createProject, independentAgents, OPTIONAL_DIRECTOR_FEATURE, ProjectDirectoryError, slugifyProjectId } from "../../lib/projectCreate";
 import type { ProjectIconChoice } from "../../lib/projectIcons";
-import { setProjectIcon } from "../../lib/prefs";
+import { setProjectIconOn, useProjectIcons } from "../../lib/projectIconSync";
 import { pickDirectory, useFolderPickBlocked } from "../../lib/remoteMode";
 import { workspaceRootErrorKey } from "../../lib/projectRoot";
 import { services } from "../app";
@@ -74,7 +75,7 @@ interface HostProject {
 /** `selected`: hostKey(host, id) of the shown project, or NEW. `mark`: a host's mark (null: none, scope.showHostMarks). */
 function ProjectList({ projects, selected, onSelect, mark }: { projects: HostProject[]; selected: string | null; onSelect(id: string, hostId: string): void; mark(hostId: string): HostLook | null }) {
   const { t } = useI18n();
-  const icons = useUiPrefs().projectIcons;
+  const icons = useProjectIcons();
   return (
     <SubNav>
       <button onClick={() => onSelect(NEW, "")} className={`mb-1 ${SUBNAV_ITEM} ${selected === NEW ? SUBNAV_ON : SUBNAV_OFF}`}>
@@ -153,7 +154,7 @@ function NewProjectForm({ target }: { target: CreateHost }) {
     try {
       const existing = director && director !== DIRECTOR_NEW ? director : null;
       await createProject(api, { id, presentation: { display_name: name.trim(), badge_label: badgeText, color }, workspaceRoot: dir.trim() || null, director: existing, createDirectory: createRoot }, optional);
-      if (icon) setProjectIcon(hostId, id, icon);
+      if (icon) void setProjectIconOn(hostId, id, icon);
       rememberCreateHost(hostId);
       // The new Director agent is created on the same host (its form opens preset to it).
       if (newDirector) services.ui.openPage("agent-config.newAgent", { project: id, director: "1", host: hostId });
@@ -164,7 +165,7 @@ function NewProjectForm({ target }: { target: CreateHost }) {
       }
     } catch (e) {
       if (e instanceof ProjectDirectoryError) {
-        if (icon) setProjectIcon(hostId, e.projectId, icon);
+        if (icon) void setProjectIconOn(hostId, e.projectId, icon);
         await refreshHostSidebar(hostId);
         setPartial(e.projectId);
       }
@@ -306,6 +307,15 @@ function ProjectDetail({ project, tab, rotate, pick }: { project: ProjectSummary
   const allServices = useHostData(hostId)?.services;
   const projectServices = useMemo(() => (allServices ?? []).filter((s) => s.projectId === project.project_id), [allServices, project.project_id]);
   const [memory, setMemory] = useState<ProjectMemoryView | null | undefined>(undefined);
+  // The latest read wins (a reload after an edit can overlap the one a new presentation started).
+  const memoryRead = useRef(0);
+  const reloadMemory = useCallback(() => {
+    const n = ++memoryRead.current;
+    api.projectMemory(project.project_id).then(
+      (m) => n === memoryRead.current && setMemory(m),
+      () => n === memoryRead.current && setMemory(null),
+    );
+  }, [api, project.project_id]);
   const model = useSidebarModel();
   const team = useMemo(() => {
     const group = model.groups.find((g) => g.kind === "project" && g.id === project.project_id);
@@ -314,7 +324,8 @@ function ProjectDetail({ project, tab, rotate, pick }: { project: ProjectSummary
   const waiting = team.online.filter((r) => r.status === "needsInput");
   const [mcp, setMcp] = useState<{ servers: Record<string, unknown> } | null | undefined>(undefined);
   const id = project.project_id;
-  const { projectRemarks, projectIcons } = useUiPrefs();
+  const { projectRemarks } = useUiPrefs();
+  const projectIcons = useProjectIcons();
   const remark = projectRemarks[hostKey(hostId, id)] ?? "";
   const editRemark = () => void editProjectRemark(id, hostId, project.presentation.display_name, t);
 
@@ -332,9 +343,9 @@ function ProjectDetail({ project, tab, rotate, pick }: { project: ProjectSummary
     setBadge((v) => (same && v !== prev.presentation.badge_label ? v : next.badge_label));
     setColor((v) => (same && v !== prev.presentation.color ? v : next.color));
     setError(null);
-    api.projectMemory(id).then(setMemory, () => setMemory(null));
+    reloadMemory();
     api.projectMcp(id).then(setMcp, () => setMcp(null));
-  }, [api, id, project.presentation]);
+  }, [api, id, project.presentation, reloadMemory]);
 
   const members = useMemo(() => {
     const all = [...(sidebar?.active ?? []), ...(sidebar?.retired ?? [])];
@@ -728,7 +739,7 @@ function ProjectDetail({ project, tab, rotate, pick }: { project: ProjectSummary
         <>
       <Section title={t("projects.memory")} hint={memory ? `${t("projects.memoryHint")} · ${shortenHome(memory.dir)}` : t("projects.memoryHint")}>
         <SettingsGroup agents="none" source="host">
-          <ProjectMemoryList hostId={hostId} projectId={id} memory={memory} />
+          <ProjectMemoryList hostId={hostId} projectId={id} memory={memory} editable={features.has(PROJECT_MEMORY_FEATURE)} onChanged={reloadMemory} />
         </SettingsGroup>
       </Section>
 

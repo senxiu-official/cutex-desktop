@@ -12,7 +12,8 @@ import { OWNER_NOTIFY_CHANNELS, OWNER_NOTIFY_LEVELS, type OwnerNotifyAgentOverri
 import type { GlobalSettings } from "../../../../shared/ipc";
 import { ownerNotifyPatch, toggleChannel, type OwnerNotifyDraft } from "../../../../shared/ownerNotify";
 import { useI18n, type MessageKey } from "../../i18n";
-import { Button, Checkbox, ErrorNote, IconButton, Loading, NumberField, ResetButton, Section, Select, SettingRow, Toggle, SettingsGroup } from "./Form";
+import { Button, Checkbox, ErrorNote, IconButton, Loading, NumberField, ResetButton, RowGroup, Section, Select, SettingRow, Toggle, SettingsGroup } from "./Form";
+import { useOwnerNotifyLevels } from "../../lib/ownerNotifyLevels";
 import { useTargetApi, useTargetFeatures, useTargetSidebar } from "../../lib/targetHost";
 import { LEGACY_PRESET, NOTIFICATION_LEVELS_FEATURE, NOTIFICATION_PRESETS_NO_LEGACY_FEATURE } from "../../../../shared/notificationLevels";
 import { useNotificationLevels } from "../../lib/notificationLevelsStore";
@@ -33,6 +34,8 @@ export function OwnerNotifySection({ settings, onSettings }: { settings: GlobalS
   const noLegacy = features.has(NOTIFICATION_PRESETS_NO_LEGACY_FEATURE);
   const { view } = useNotificationLevels();
   const legacy = !levelsSupported || (!noLegacy && view?.settings.methodPreset === LEGACY_PRESET);
+  // The four owner_notify levels (were a band of 事件分级; owner 2026-11-11: one 主人通知).
+  const levelRows = useOwnerNotifyLevels(!!on);
   const save = async (draft: OwnerNotifyDraft) => {
     if (!on) return;
     const patch = ownerNotifyPatch(on, draft);
@@ -81,6 +84,7 @@ export function OwnerNotifySection({ settings, onSettings }: { settings: GlobalS
           <SettingRow agents="now" source="host" label={t("owner-notify.urgentPerHour")} hint={t("owner-notify.urgentPerHourHint")}>
             <NumberField value={on.rateLimit.urgentPerHour} range={[0, 100]} unit={t("owner-notify.perHourUnit")} onCommit={(v) => v !== null && void save({ rateLimit: { urgentPerHour: v } })} />
           </SettingRow>
+          {levelRows && <RowGroup title={t("owner-notify.levels")} hint={t("notifications.eventGroup.ownerNotify.hint")}>{levelRows}</RowGroup>}
           {/* 单个智能体 (mute / force) waits for a sub-page with a searchable agent list (owner 2026-10-19); stored overrides still apply. */}
         </>
       )}

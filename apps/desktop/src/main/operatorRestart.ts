@@ -1,4 +1,6 @@
 import type { SessionResource } from "@cutex-desktop/protocol";
+import type { OperatorProjectWorkspace } from "@cutex-desktop/cutex-client";
+import { projectOperatorIds } from "../shared/projectOperatorMembers";
 
 /** UI-only notice: a role changed while this runtime still had its old launch-time tools. */
 export class OperatorRestartNotices {
@@ -28,4 +30,22 @@ export async function recordOperatorRuntimeNotice(options: {
   }
   options.notices.require(session);
   return { state: "required" };
+}
+
+/**
+ * Main-process handler body for operatorRuntimeNotice: a fresh project read must show the owner's management view
+ * and the agent as an active member or a valid Operator of this project (never the Director) before any record.
+ */
+export async function projectOperatorRuntimeNotice(options: {
+  projectId: string; sessionId: string;
+  project(): Promise<OperatorProjectWorkspace>;
+  read(): Promise<SessionResource>;
+  current(): boolean;
+  notices: OperatorRestartNotices;
+}): Promise<{ state: "required" | "offline" }> {
+  const { projectId, sessionId } = options;
+  const workspace = await options.project();
+  const member = workspace.active_agents.some(row => row.agent.cutex_session_id === sessionId) || projectOperatorIds(workspace, projectId).has(sessionId);
+  if (!options.current() || workspace.access_role !== "human_management" || !member || workspace.director?.cutex_session_id === sessionId) throw Error("operator_unavailable");
+  return recordOperatorRuntimeNotice({ read: options.read, notices: options.notices, current: options.current });
 }

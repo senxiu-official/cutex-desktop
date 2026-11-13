@@ -39,6 +39,10 @@ export function parseBrowserRequest(raw: unknown): BrowserRequest {
     return { op: "sitePermissions", forget: { pool: forget.pool, origin: forget.origin } };
   }
   const validId = (v: unknown): v is string => typeof v === "string" && /^[A-Za-z0-9._:-]{1,200}$/.test(v);
+  if (value.op === "openBlockedNavigation") {
+    if (Object.keys(value).sort().join() !== "id,op,tabKey" || !validId(value.tabKey) || !validId(value.id)) throw Error("invalid_browser_request");
+    return { op: "openBlockedNavigation", tabKey: value.tabKey, id: value.id };
+  }
   if (value.op === "desktopLoopbackChallenge") {
     if (Object.keys(value).some(k => !["op", "tabKey", "url"].includes(k)) || !validId(value.tabKey)
       || typeof value.url !== "string" || !value.url || value.url.length > 8000 || /[\x00-\x1f\x7f]/.test(value.url)) throw Error("invalid_browser_request");
@@ -202,7 +206,7 @@ export function createBrowserChannel<E, D extends { readonly generation: number 
       throw new Error("invalid_browser_binding");
     const cleanup = request.op === "close" || request.op === "stop" || request.op === "ownerInput" || request.op === "releaseLease" || request.op === "openRefused" || (request.op === "holdReady" && !request.held);
     // Owner page lifetimes follow the host connection, not its agent daemon's restart counter.
-    const ownerPage = ["reserveOwnerTab", "navigate", "reload", "back", "forward"].includes(request.op)
+    const ownerPage = ["reserveOwnerTab", "navigate", "reload", "back", "forward", "openBlockedNavigation"].includes(request.op)
       || request.op === "open" && !request.identity?.agentOpened && !request.identity?.pendingOpen;
     const fence = cleanup ? undefined : admitHostBinding(options.getHosts, binding, { daemonGeneration: !ownerPage });
     const result = await options.execute(request, binding.hostId, fence);

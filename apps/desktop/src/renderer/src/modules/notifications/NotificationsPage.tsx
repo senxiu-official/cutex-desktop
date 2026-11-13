@@ -16,6 +16,7 @@
 // shows the new value at once (optimistic, until the host answers), nothing else is disabled or dimmed, and the
 // writes go out one after another so answers land in order; unchanged event rows skip the re-render (EventRow memo).
 import { memo, useCallback, useRef, useState } from "react";
+import { OwnerNotifyLevelsContext } from "../../lib/ownerNotifyLevels";
 import { Check, Lock, Wrench } from "lucide-react";
 import { cellPatch, cellValue, fixedCell, groupedMethods, localText, LEGACY_PRESET, NOTIFICATION_LEVELS, NOTIFICATION_LEVELS_FEATURE, INDEPENDENT_PROJECT, isDeviceMethod, presetChoices, type EventView, type MethodGroup, type MethodSpec, type NotificationLevel, type NotificationLevelsPatch, type NotificationLevelsView } from "../../../../shared/notificationLevels";
 import { ErrorNote, ListRow, Loading, Notice, ResetButton, ScopeChip, Section, Segmented, Select, SettingRow, SettingsGroup, Toggle, Button, EmptyState } from "../../components/settings/Form";
@@ -24,6 +25,7 @@ import { useGlobalSettings } from "../../lib/globalSettings";
 import { setDeviceOff, useDeviceOff } from "../../lib/notifyDevice";
 import { settingsAnchorId } from "../../lib/settingsNav";
 import { projectIcon } from "../../lib/projectIcons";
+import { useProjectIcons } from "../../lib/projectIconSync";
 import { useUiPrefs } from "../../lib/prefs";
 import { resolveTerms, retermDaemonText, useTermOverrides, type TermLocale } from "../../lib/terms";
 import { ProjectBadge } from "../../components/ProjectBadge";
@@ -55,9 +57,11 @@ export type Pending = Readonly<Record<string, unknown>>;
  * shown above). Nothing else on the page is disabled while it runs (the old page-wide `busy` dimmed every
  * row for the round trip: the flash).
  */
-export function usePendingPatch(levels: TargetLevels): { send(key: string, value: unknown, patch: NotificationLevelsPatch): void; pending: Pending } {
+export function usePendingPatch(levels: TargetLevels, shared?: PatchQueue): { send(key: string, value: unknown, patch: NotificationLevelsPatch): void; pending: Pending } {
   const [pending, setPending] = useState<Pending>({});
-  const queue = useRef<Promise<unknown>>(Promise.resolve());
+  const own = usePatchQueue();
+  // One queue per page (`shared`): each answer is a whole view, so writes from two cards must not overlap.
+  const queue = shared ?? own;
   const latest = useRef(levels);
   latest.current = levels;
   const send = useCallback((key: string, value: unknown, patch: NotificationLevelsPatch) => {
@@ -75,6 +79,13 @@ export function usePendingPatch(levels: TargetLevels): { send(key: string, value
     );
   }, []);
   return { send, pending };
+}
+
+/** The order of a host's writes: every card of the page queues on the same one (a late answer would replace a newer view). */
+export type PatchQueue = { current: Promise<unknown> };
+
+export function usePatchQueue(): PatchQueue {
+  return useRef<Promise<unknown>>(Promise.resolve());
 }
 
 /** The shown value of control `key`: its pending one, else the host's. */
@@ -104,17 +115,24 @@ function HostSections() {
   const features = useTargetFeatures();
   const supported = features.has(NOTIFICATION_LEVELS_FEATURE);
   const levels = useHostNotificationLevels(hostId, focus, supported);
+  // The page's cards write one after another (主人通知's levels and 事件分级's preset included).
+  const queue = usePatchQueue();
+  // 主人通知's four levels go into the 主人通知 card (lib/ownerNotifyLevels) while it shows them.
+  const [ownerCard, setOwnerCard] = useState(false);
+  const ownerRows = supported ? <OwnerNotifyLevelRows levels={levels} queue={queue} /> : null;
   return (
     <>
       {supported && levels.error && <ErrorNote>{levels.error}</ErrorNote>}
-      {supported && <MatrixSection levels={levels} />}
+      {supported && <MatrixSection levels={levels} queue={queue} />}
       {!supported && features.size > 0 && (
         <Section id={settingsAnchorId("levels")} title={t("notifications.matrix.title")} >
           <Notice tone="info">{t("modules.needsUpgrade", { feature: NOTIFICATION_LEVELS_FEATURE })}</Notice>
         </Section>
       )}
-      <SettingsSections page="notifications" />
-      {supported && <EventsSection levels={levels} />}
+      <OwnerNotifyLevelsContext value={{ rows: ownerRows, onShown: setOwnerCard }}>
+        <SettingsSections page="notifications" />
+      </OwnerNotifyLevelsContext>
+      {supported && <EventsSection levels={levels} queue={queue} without={ownerCard ? "ownerNotify" : undefined} />}
     </>
   );
 }
@@ -135,10 +153,10 @@ interface Column {
   method: MethodSpec | null; // null = the greyed outbound placeholder
 }
 
-export function MatrixSection({ levels }: { levels: TargetLevels }) {
+export function MatrixSection({ levels, queue }: { levels: TargetLevels; queue?: PatchQueue }) {
   const { t, locale } = useI18n();
   const { view } = levels;
-  const { send, pending } = usePendingPatch(levels);
+  const { send, pending } = usePendingPatch(levels, queue);
   const off = useDeviceOff();
   const { settings } = useGlobalSettings();
   const phonePaired = settings?.ownerNotify?.phonePaired !== false;
@@ -309,10 +327,28 @@ function GroupBand({ group, first }: { group: EventGroup; first: boolean }) {
   );
 }
 
-export function EventsSection({ levels: target }: { levels: TargetLevels }) {
+/** The owner_notify levels as rows of the 主人通知 card (the band's rows, with their own pending writes). */
+export function OwnerNotifyLevelRows({ levels: target, queue }: { levels: TargetLevels; queue?: PatchQueue }) {
+  const { locale } = useI18n();
+  const { send, pending } = usePendingPatch(target, queue);
+  const levels = useLevelOptions();
+  const onLevel = useCallback((id: string, level: NotificationLevel | null) => send(`ev:${id}`, level, { events: { levels: { [id]: level } } }), [send]);
+  const events = (target.view?.events ?? []).filter((e) => eventGroup(e) === "ownerNotify");
+  if (!target.view) return <Loading rows={2} />;
+  return (
+    <>
+      {events.map((e) => (
+        <EventRow key={e.id} event={e} locale={locale} levels={levels} level={shown(pending, `ev:${e.id}`, e.level)} resetting={pending[`ev:${e.id}`] === null} onLevel={onLevel} />
+      ))}
+    </>
+  );
+}
+
+/** `without`: a group shown elsewhere (主人通知 in its own card). */
+export function EventsSection({ levels: target, without, queue }: { levels: TargetLevels; without?: EventGroup; queue?: PatchQueue }) {
   const { t, locale } = useI18n();
   const { view } = target;
-  const { send, pending } = usePendingPatch(target);
+  const { send, pending } = usePendingPatch(target, queue);
   const actualPreset = view?.effective.eventPreset ?? "default";
   const current = shown(pending, "events.preset", actualPreset);
   const choices = presetChoices(view?.eventPresets.map((p) => p.id) ?? [], actualPreset);
@@ -325,7 +361,7 @@ export function EventsSection({ levels: target }: { levels: TargetLevels }) {
   // One callback for every row (EventRow is memoised on it).
   const onLevel = useCallback((id: string, level: NotificationLevel | null) => send(`ev:${id}`, level, { events: { levels: { [id]: level } } }), [send]);
   const events = view?.events ?? [];
-  const groups = EVENT_GROUPS.filter((g) => events.some((e) => eventGroup(e) === g));
+  const groups = EVENT_GROUPS.filter((g) => g !== without && events.some((e) => eventGroup(e) === g));
   return (
     <Section
       id={settingsAnchorId("events")}
@@ -466,7 +502,7 @@ export function MuteSection({ levels }: { levels: TargetLevels }) {
   const { view } = levels;
   const hostId = useTargetHostId();
   const projects = useTargetSidebar()?.projects?.projects ?? [];
-  const icons = useUiPrefs().projectIcons;
+  const icons = useProjectIcons();
   const overrides = view?.settings.projectOverrides ?? {};
   const row = (id: string, title: string, leading: React.ReactNode) => (
     <SettingsGroup key={id} agents="none" source="host"><ListRow leading={leading} title={title} actions={<Toggle label={title} disabled={!view} checked={overrides[id] !== "mute"} onChange={() => void levels.patch(projectMutePatch(view, id)).catch(() => {})} />} /></SettingsGroup>

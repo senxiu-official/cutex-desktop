@@ -52,7 +52,8 @@ it("a local sender shows the label, with the formal name as its tooltip", () => 
   const host = render(h(BusMessage, { direction: "in", name: FORMAL, mode: null, text: "hi", senderId: SENDER, onContextMenu: () => {} }));
   const name = host.querySelector("[data-testid=bus-message-name]")!;
   expect(name.textContent).toBe(LABEL);
-  expect(name.getAttribute("title")).toBe(FORMAL);
+  // A clickable sender (a sidebar agent) adds its id on a second tooltip line.
+  expect(name.getAttribute("title")?.split("\n")).toEqual([FORMAL, SENDER]);
 });
 
 it("the legacy prefix still comes off by the name the host reported", () => {
@@ -72,7 +73,7 @@ it("a rename shows at once: the name is read from the row, never cached", () => 
   act(() => useApp.setState({ sidebar: snapshot(row({ displayName: "renamed", displayNameOverride: null, formalAgentName: "renamed" })) }));
   const name = host.querySelector("[data-testid=bus-message-name]")!;
   expect(name.textContent).toBe("renamed");
-  expect(name.getAttribute("title")).toBe("renamed");
+  expect(name.getAttribute("title")?.split("\n")[0]).toBe("renamed");
 });
 
 it("the sidebar line, the reverted line and the export use the same name", () => {

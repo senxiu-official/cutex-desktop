@@ -89,7 +89,7 @@ export function TrayButton({ label, children, text, onClick }: { label: string; 
 
 // Styled like streamdown's Copy / Download beside it (modules/terminal/RunCodeButton).
 export function CodeBlockButton({ label, children, onClick, disabled }: { label: string; children: ReactNode; onClick?(event: MouseEvent<HTMLButtonElement>): void; disabled?: boolean }) {
-  return <button type="button" title={label} aria-label={label} onClick={onClick} disabled={disabled} className="cursor-pointer rounded p-1 text-muted-foreground transition-all hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50">{children}</button>;
+  return <button type="button" title={label} aria-label={label} onClick={onClick} disabled={disabled} className="cursor-pointer rounded p-1 text-muted transition-all hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50">{children}</button>;
 }
 
 export function StatusIcon({ kind, size }: { kind: "blocked" | "review" | "active" | "closed" | "error" | "starting" | "running" | "stopped"; size?: number }) {

@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { NotificationLevelsPatch, NotificationLevelsView } from "../src/shared/notificationLevels";
 
 const { I18nProvider } = await import("../src/renderer/src/i18n");
-const { EventsSection, MatrixSection } = await import("../src/renderer/src/modules/notifications/NotificationsPage");
+const { EventsSection, MatrixSection, OwnerNotifyLevelRows, usePatchQueue } = await import("../src/renderer/src/modules/notifications/NotificationsPage");
 const { mock } = await import("../src/renderer/src/modules/notifications/mock");
 type TargetLevels = import("../src/renderer/src/modules/notifications/targetLevels").TargetLevels;
 
@@ -160,5 +160,49 @@ describe("等级 → 通知方式: a cell click touches only that cell", () => {
     await flush();
     expect(cell.getAttribute("aria-checked")).toBe(String(was !== "true"));
     expect(host.querySelectorAll('[role="checkbox"]:not([aria-disabled])')[0]).toBe(cell);
+  });
+});
+
+describe("主人通知's levels and 事件分级's preset share one write queue (review P2 on 4bbedfc52)", () => {
+  async function mountBoth() {
+    const view = await api.notificationLevels();
+    const fake = slowHost(view);
+    function Page() {
+      const queue = usePatchQueue();
+      const levels = fake.levels();
+      return h("div", null, h("div", { "data-owner": "" }, h(OwnerNotifyLevelRows, { levels, queue })), h("div", { "data-events": "" }, h(EventsSection, { levels, queue, without: "ownerNotify" })));
+    }
+    const draw = () => root.render(h(I18nProvider, null, h(Page)));
+    fake.bind(() => act(draw));
+    act(draw);
+    await flush();
+    return fake;
+  }
+
+  it("a level change then a quick preset switch: the preset PATCH waits for the level's answer; the last write wins", async () => {
+    const fake = await mountBoth();
+    const ownerRow = host.querySelector("[data-owner]")!.querySelector<HTMLElement>('[role="radiogroup"]')!;
+    const preset = host.querySelector("[data-events] section")!.querySelector<HTMLElement>('[role="radiogroup"]')!;
+    const offIn = (g: HTMLElement) => [...g.querySelectorAll<HTMLElement>('[role="radio"]')].find((x) => x.getAttribute("aria-checked") !== "true" && !x.hasAttribute("disabled"))!;
+    const level = offIn(ownerRow);
+    const nextPreset = offIn(preset);
+    act(() => level.click());
+    act(() => nextPreset.click());
+    await flush();
+    // Both shown at once, but only the first write is on its way: the second waits in the same queue.
+    expect(fake.calls).toHaveLength(1);
+    expect(fake.calls[0]).toHaveProperty("events.levels");
+    expect(level.getAttribute("aria-checked")).toBe("true");
+    expect(nextPreset.getAttribute("aria-checked")).toBe("true");
+    await act(() => fake.answer());
+    await flush();
+    expect(fake.calls).toHaveLength(2);
+    expect(fake.calls[1]).toHaveProperty("events.preset");
+    await act(() => fake.answer());
+    await flush();
+    // Final: the host's state after both writes in order, and the UI shows the newest preset.
+    const host2 = await api.notificationLevels();
+    expect(host2.effective.eventPreset).toBe(fake.calls[1]!.events!.preset);
+    expect(nextPreset.getAttribute("aria-checked")).toBe("true");
   });
 });

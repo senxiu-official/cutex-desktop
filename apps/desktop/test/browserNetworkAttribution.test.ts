@@ -48,7 +48,7 @@ describe("browser refusal reasons", () => {
     for (const url of ["http://localhost:3000/", "http://127.0.0.1:3000/", "http://[::1]:3000/"]) {
       expect(ssh.refusal(url, { actor: "owner", allowDesktopLoopback: true })).toBeNull();
       expect(ssh.refusal(url, { actor: "agent", allowDesktopLoopback: true })).toBe("remote_loopback");
-      expect(ssh.refusal(url, page({ resourceType: "mainFrame", initiatorOrigin: "https://evil.example" }))).toBe("private_address_blocked");
+      expect(ssh.refusal(url, page({ resourceType: "mainFrame", initiatorOrigin: "https://evil.example" }))).toBe("remote_loopback");
     }
     expect(ssh.refusal("http://127.0.0.1:41000/", { actor: "owner", allowDesktopLoopback: true })).toBe("protected_endpoint");
   });
@@ -58,7 +58,7 @@ describe("browser refusal reasons", () => {
     const remembered = policy({ host, desktopLoopback: true });
     expect(remembered.refusal(url, { actor: "owner" })).toBeNull();
     expect(remembered.refusal(url, { actor: "agent" })).toBe("remote_loopback");
-    expect(remembered.refusal(url, page({ resourceType: "mainFrame", initiatorOrigin: "https://evil.example" }))).toBe("private_address_blocked");
+    expect(remembered.refusal(url, page({ resourceType: "mainFrame", initiatorOrigin: "https://evil.example" }))).toBe("remote_loopback");
     expect(remembered.refusal(url, page({ resourceType: "mainFrame", initiatorOrigin: "http://localhost:3000" }))).toBe("private_address_blocked");
   });
   it("a host without browser-refusal-reasons receives the established wire code for every refusal", () => {
@@ -73,6 +73,35 @@ describe("browser refusal reasons", () => {
 
 describe("page request attribution (loopback hole)", () => {
   const admitted = { 7: ["http://localhost:3000"] };
+  it("main-verified owner intent allows private top-level SSO hops, never cross-origin fetch or control ports", () => {
+    const origins = ["http://localhost:3000", "https://nas.local:5001", "https://keycloak.lan"];
+    const p = policy({ admitted: { 7: origins }, lan: { "nas.local:5001": "ready", "keycloak.lan:443": "ready" } });
+    for (const url of origins) {
+      expect(p.refusal(url, page({ resourceType: "mainFrame", initiatorOrigin: "https://public.example", ownerNavigation: true }))).toBeNull();
+      expect(p.refusal(url, page({ resourceType: "xhr", initiatorOrigin: "https://public.example", ownerNavigation: true }))).toBe("private_address_blocked");
+    }
+    expect(p.refusal("http://localhost:24370/v2/health", page({ resourceType: "mainFrame", ownerNavigation: true }))).toBe("protected_endpoint");
+    const service = "http://docs.svc.localhost:24370";
+    expect(p.refusal(service, page({ resourceType: "mainFrame", initiatorOrigin: "http://other.svc.localhost:24370", ownerNavigation: true }))).toBeNull();
+    expect(p.refusal(`${service}/__cutex/lease`, page({ resourceType: "mainFrame", initiatorOrigin: service, ownerNavigation: true }))).toBe("protected_endpoint");
+  });
+  it("two admitted private origins cannot submit top-level requests to each other", () => {
+    const origins = ["http://localhost:3000", "http://localhost:3001", "http://nas.local"];
+    const p = policy({ admitted: { 7: origins }, lan: { "nas.local:80": "ready" } });
+    for (const target of origins) for (const initiator of origins) {
+      expect(p.refusal(`${target}/delete`, page({ resourceType: "mainFrame", initiatorOrigin: initiator })))
+        .toBe(target === initiator ? null : "private_address_blocked");
+    }
+  });
+  it("public and other service documents cannot navigate or post to an authenticated service", () => {
+    const p = policy({ external: "ready" });
+    const target = "http://docs.svc.localhost:24370";
+    for (const initiatorOrigin of ["https://evil.example", "http://other.svc.localhost:24370", "null"]) {
+      expect(p.refusal(`${target}/delete`, page({ resourceType: "mainFrame", initiatorOrigin }))).toBe("private_address_blocked");
+    }
+    expect(p.refusal(`${target}/page`, page({ resourceType: "mainFrame", initiatorOrigin: target }))).toBeNull();
+    expect(p.refusal(`${target}/page`, page({ resourceType: "mainFrame" }))).toBeNull();
+  });
   it("a public page cannot probe arbitrary desktop loopback ports, not even with a top-level navigation", () => {
     const p = policy({ external: "ready", admitted });
     for (const resourceType of ["xhr", "script", "image", "webSocket", "subFrame", "mainFrame"])
@@ -107,7 +136,7 @@ describe("page request attribution (loopback hole)", () => {
     expect(p.refusal(`${svc}/app.js`, page({ resourceType: "script", initiatorOrigin: svc }))).toBeNull();
     expect(p.refusal(`${svc}/api`, page({ resourceType: "xhr", initiatorOrigin: "https://evil.example" }))).toBe("private_address_blocked");
     expect(p.refusal(`${svc}/api`, page({ resourceType: "xhr", initiatorOrigin: "http://other.svc.localhost:24370" }))).toBe("private_address_blocked");
-    expect(p.refusal(`${svc}/`, page({ resourceType: "mainFrame", initiatorOrigin: "http://other.svc.localhost:24370" }))).toBeNull();
+    expect(p.refusal(`${svc}/`, page({ resourceType: "mainFrame", initiatorOrigin: "http://other.svc.localhost:24370" }))).toBe("private_address_blocked");
     expect(p.refusal(`${svc}/__cutex/auth?ticket=x`, page({ resourceType: "mainFrame" }))).toBeNull();
     expect(p.refusal(`${svc}/__cutex/auth?ticket=x`, page({ resourceType: "mainFrame", initiatorOrigin: svc }))).toBe("protected_endpoint");
     expect(p.refusal(`${svc}/__cutex/lease`, page({ resourceType: "xhr", initiatorOrigin: svc }))).toBe("protected_endpoint");

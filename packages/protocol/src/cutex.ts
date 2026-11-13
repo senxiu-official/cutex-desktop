@@ -932,7 +932,23 @@ export interface ProjectPresentation {
   color: string;
   revision?: number;
   stored?: boolean;
+  /**
+   * cutex `project-icon`: the project's icon (null = none, the letter badge). Absent on a cutex
+   * without the capability. In a presentation update an omitted field keeps the icon, null clears it.
+   * Hand-written like the rest of these types; matches cutex feat/project-icon (e15ce464): an emoji
+   * is one grapheme ≤ 32 UTF-8 bytes, an icon id `[a-z0-9-]{1,32}`, text 1–2 characters.
+   */
+  icon?: ProjectIcon | null;
 }
+
+/** cutex `project-icon`: `emoji` = an emoji, `icon` = a lucide id from the desktop catalog, `text` = 1–2 characters. */
+export interface ProjectIcon {
+  kind: "emoji" | "icon" | "text";
+  value: string;
+}
+
+/** Capability of hosts that store the project icon in the presentation. */
+export const PROJECT_ICON_FEATURE = "project-icon";
 
 export interface ProjectSummary {
   project_id: string;

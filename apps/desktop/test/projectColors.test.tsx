@@ -5,8 +5,9 @@ import { afterEach, expect, it, vi } from "vitest";
 import { PROJECT_EXTRA_COLORS, customProjectColor, projectHex, sameProjectColor } from "../src/renderer/src/lib/projectColors";
 import { PROJECT_PALETTE, createProject } from "../src/renderer/src/lib/projectCreate";
 import { projectColor } from "../src/renderer/src/lib/sidebar";
-import { MARK_MIN_CONTRAST, markInk } from "../src/renderer/src/lib/projectMark";
-import { contrast } from "../src/shared/windowChrome";
+import { MARK_MIN_CONTRAST, MARK_TILE_TINT, markTileInks } from "../src/renderer/src/lib/projectMark";
+import { mixHex, SIDEBAR_BACKGROUNDS } from "../src/renderer/src/lib/folderInk";
+import { contrastRatio, hexRgb } from "../src/renderer/src/lib/workSurface";
 import { mockProjectColor } from "../src/renderer/src/dev/mockProjectColor";
 import { groupColor } from "../src/renderer/src/lib/projectSeparation";
 vi.mock("../src/renderer/src/i18n", () => ({ useI18n: () => ({ t: (key: string) => key }) }));
@@ -28,7 +29,7 @@ it("keeps the original named colours first and offers twelve distinct RGB colour
   act(() => buttons[6]!.click());
   expect(change).toHaveBeenCalledWith(PROJECT_EXTRA_COLORS[0]);
   for (const c of PROJECT_EXTRA_COLORS) {
-    expect(contrast(markInk(c), c)).toBeGreaterThanOrEqual(MARK_MIN_CONTRAST);
+    for (const theme of ["light", "dark"] as const) for (const bg of SIDEBAR_BACKGROUNDS[theme]) expect(contrastRatio(hexRgb(markTileInks(c)[theme]), hexRgb(mixHex(bg, c, MARK_TILE_TINT[theme])))).toBeGreaterThanOrEqual(MARK_MIN_CONTRAST);
     expect(groupColor(c)).toBe(c);
   }
 });

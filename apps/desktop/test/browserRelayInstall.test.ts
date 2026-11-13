@@ -661,6 +661,25 @@ describe("installed I3 owner two-phase grants and IPC identity", () => {
 });
 
 describe("installed I3 held background agent-open", () => {
+  it("an explicit retry from an agent tab opens an owner tab without granting the agent's pool the target", async () => {
+    const f = fixture(); await f.enable(); const open = await pendingAgentOpen(f);
+    const { guest } = await f.mount(open.intent.tabKey, open.intent.url, "local", { pendingOpen: open.intent.requestId, agentOpened: true });
+    await until(() => open.peer.options.localLeases().length === 1);
+    const lease = open.peer.options.localLeases()[0]!;
+    await f.ipc({ op: "holdReady", tabKey: open.intent.tabKey, leaseId: lease.leaseId, held: true }); await open.result;
+    const previous = guest.url, target = "http://localhost:26190/private";
+    const event = { url: target, isMainFrame: true, preventDefault: vi.fn() };
+    guest.emit("will-navigate", event); expect(event.preventDefault).toHaveBeenCalledOnce();
+    const notice = f.events.at(-1)!.blockedNavigation!; expect(notice.canOpen).toBe(true);
+    await f.ipc({ op: "openBlockedNavigation", tabKey: open.intent.tabKey, id: notice.id });
+    const recovery = f.events.findLast(event => event.kind === "new-tab")!;
+    expect(recovery).toMatchObject({ newTabOwner: true, pool: "agent", newTabUrl: target });
+    expect(guest.url).toBe(previous);
+    const owner = await f.mount(recovery.newTabKey!, target);
+    expect(owner.reserved.partition).toBe("persist:browser-local"); expect(owner.guest.url).toBe(target);
+    expect((await f.list()).find(row => row.tabKey === open.intent.tabKey)?.pool).toBe("agent");
+    expect((await f.list()).find(row => row.tabKey === recovery.newTabKey)?.pool).toBe("owner");
+  });
   it.each(["local", "ssh", "dev-direct"] as const)("%s opens a main-resolved service alias and never sends its private bootstrap URL to the relay", async kind => {
     const f = fixture(["local"], true, { local: kind }), conn = f.connections.get("local")!;
     conn.daemon.capabilities.mockResolvedValue({ featureList: ["browser-relay-v1", "services-proxy", "services-lifetime"] });
@@ -921,6 +940,10 @@ describe("installed I3 held background agent-open", () => {
     const next = await f.mount(event.newTabKey!, event.newTabUrl!, "local", { agentOpened: true });
     expect(next.reserved.partition).toBe("persist:browser-agent-local");
     expect(next.guest.loads.at(-1)).toBe("http://localhost:26180/popup?code=secret");
+    // Same-origin owner inheritance must not give this agent-pool popup private redirect intent.
+    const redirect = { url: "http://localhost:26190/private", isMainFrame: true, preventDefault: vi.fn() };
+    next.guest.emit("will-redirect", redirect); expect(redirect.preventDefault).toHaveBeenCalledOnce();
+    expect(next.guest.loads).not.toContain(redirect.url);
     expect((await f.list()).find(row => row.tabKey === event.newTabKey)?.lease).toBeUndefined();
     expect(f.peer().grantLease).toHaveBeenCalledOnce();
     expect(guest.setWindowOpenHandler).toHaveBeenCalledOnce();
@@ -1235,7 +1258,7 @@ describe("agent-pool login warning boundary", () => {
     guest.emit("did-start-navigation", {}, guest.getURL(), false, true);
     expect((await f.list())[0]?.loginOrigin).toBeNull();
     const owner = await f.mount("real-owner", "http://localhost:26180/login");
-    owner.guest.executeJavaScriptInIsolatedWorld.mockResolvedValue(true);
+    owner.guest.executeJavaScriptInIsolatedWorld.mockClear().mockResolvedValue(true);
     owner.guest.emit("before-input-event", {}, { type: "keyDown", key: "a" }); await flush();
     expect(owner.guest.executeJavaScriptInIsolatedWorld).not.toHaveBeenCalled();
   });

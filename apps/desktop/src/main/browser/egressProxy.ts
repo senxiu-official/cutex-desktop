@@ -44,6 +44,8 @@ function bodyLimit(): Transform {
 }
 
 export interface BrowserEgressPolicy {
+  /** Main's control endpoints, checked on numeric DNS answers immediately before dialing. */
+  protectedAddress?: (address: string, port: number) => boolean;
   /** The owner switch 「允许浏览外部网页」, re-read per connection (default: on). */
   publicAllowed?: () => boolean;
   /** An authority main admitted after an owner navigation (LAN / tailnet). Only such a target may
@@ -104,7 +106,8 @@ export async function startBrowserEgressProxy(options: { lookup?: BrowserEgressL
       }
       check();
       if (!Array.isArray(addresses) || !addresses.length || addresses.length > BROWSER_EGRESS_LIMITS.addresses ||
-        addresses.some(item => !item || isIP(item.address) !== item.family || !isAllowedEgressAddress(item.address, target.lan))) throw new Error("denied");
+        addresses.some(item => !item || isIP(item.address) !== item.family || !isAllowedEgressAddress(item.address, target.lan)
+          || options.protectedAddress?.(item.address, target.port) === true)) throw new Error("denied");
       const selected = addresses[0]!;
       const socket = dial({ address: selected.address, family: selected.family, port: target.port }, context.controller.signal);
       context.upstreams.add(socket);

@@ -1,6 +1,7 @@
 import { OPERATOR_ACTION_SCHEMA, hasOperatorActionsProjection, type OperatorProjectWorkspace } from "@cutex-desktop/cutex-client";
 import type { DaemonApi } from "../../../shared/ipc";
 import { isOwnerFeatures } from "../../../shared/users";
+import { projectOperatorIds } from "../../../shared/projectOperatorMembers";
 import { apiFor } from "../bridge";
 import { translate } from "../i18n";
 import { featuresOf, useApp } from "../store";
@@ -13,10 +14,12 @@ export function operatorSupported(workspace: OperatorProjectWorkspace | null | u
 }
 
 export function operatorIds(workspace: OperatorProjectWorkspace | null | undefined): ReadonlySet<string> {
-  if (!operatorSupported(workspace)) return new Set();
-  return new Set(workspace.agent_operators.flatMap(({ grant, member }) =>
-    grant.project_id === workspace.project_id && grant.operator_cutex_session_id === member.agent.cutex_session_id &&
-    grant.operator_cutex_session_id !== workspace.director?.cutex_session_id && member.agent.retired_at == null ? [grant.operator_cutex_session_id] : []));
+  return operatorSupported(workspace) ? projectOperatorIds(workspace, workspace.project_id) : new Set();
+}
+
+// The daemon lists a member holding this project's Operator grant under agent_operators, not active_agents.
+function isProjectMember(workspace: OperatorProjectWorkspace & { agent_operators: NonNullable<OperatorProjectWorkspace["agent_operators"]> }, sessionId: string): boolean {
+  return workspace.active_agents.some(member => member.agent.cutex_session_id === sessionId && member.agent.retired_at == null) || operatorIds(workspace).has(sessionId);
 }
 
 interface ChangeOptions {
@@ -36,7 +39,7 @@ export async function changeProjectOperator(options: ChangeOptions): Promise<voi
   if (!options.current() || !options.owner() || workspace.project_id !== projectId || !operatorSupported(workspace) ||
       workspace.access_role !== "human_management" || workspace.lifecycle !== "active" || !workspace.director ||
       !Number.isSafeInteger(workspace.authority_epoch) || workspace.authority_epoch < 0 ||
-      workspace.director.cutex_session_id === sessionId || !workspace.active_agents.some(member => member.agent.cutex_session_id === sessionId && member.agent.retired_at == null)) {
+      workspace.director.cutex_session_id === sessionId || !isProjectMember(workspace, sessionId)) {
     throw Error("operator_unavailable");
   }
   if (operatorIds(workspace).has(sessionId) === grant) { await options.refresh(); return; }

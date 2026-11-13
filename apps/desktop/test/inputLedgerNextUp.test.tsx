@@ -69,6 +69,19 @@ describe("D4 ledger surfaces", () => {
     expect(ids()).toEqual(["bus", "a", "b", "sending", "unmatched", "no-action"]);
     await act(async () => finish()); expect(button.disabled).toBe(false);
   });
+  it("a queued owner row keeps one height with and without its hover actions (owner 2026-11-02, 接下来 flicker)", () => {
+    // The probe on real layout: apps/desktop/scripts/probe-nextup-hover.mjs. jsdom has no layout: this pins the rules it relies on.
+    seed([mergeable("a", 1, { preview: "你自己创建agent哈 ".repeat(40) })], delivery("turn", 1));
+    panel({ items: [queued("a")], onSendNow: noop });
+    const row = el.querySelector<HTMLElement>('[data-testid="ledger-queue-row"]')!;
+    for (const rule of ["h-6", "min-h-6", "max-h-6", "shrink-0", "overflow-hidden"]) expect(row.classList.contains(rule)).toBe(true);
+    const actions = [...row.querySelectorAll<HTMLElement>("span")].find(s => s.className.includes("group-hover/row:opacity-100"))!;
+    expect(actions.classList.contains("h-5")).toBe(true); expect(actions.classList.contains("max-h-5")).toBe(true);
+    expect([...actions.querySelectorAll("button")].map(b => b.textContent)).toEqual(["queue.sendNow", "queue.edit", "queue.delete"]);
+    for (const button of actions.querySelectorAll("button")) expect(button.classList.contains("h-5")).toBe(true);
+    // Hover may only show / hide / recolour: no hover rule anywhere in the row sets a height, padding, margin-block or display.
+    for (const node of [row, ...row.querySelectorAll<HTMLElement>("*")]) expect(String(node.className)).not.toMatch(/(?:^|\s)group-hover\/row:(?:h-|min-h-|max-h-|p[ytb]?-|m[ytb]-|block|flex|grid)/);
+  });
   it("hides merge with fewer than two eligible items or without insert capability", () => {
     const merge = vi.fn();
     seed([mergeable("a", 1), mergeable("held", 2, { reason: "hostBusy" })]);

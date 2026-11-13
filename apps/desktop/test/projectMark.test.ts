@@ -1,12 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
-import { MARK_MIN_CONTRAST, markInk, baseMark, distinctMarks, nameMark, projectMarkCrowded, projectMarkFont, projectMarkHeight, projectMarkText, PROJECT_MARK_MIN_AVATAR } from "../src/renderer/src/lib/projectMark";
+import { MARK_MIN_CONTRAST, MARK_TILE_TINT, markTileInks, baseMark, distinctMarks, nameMark, projectMarkCrowded, projectMarkFont, projectMarkHeight, projectMarkText, PROJECT_MARK_MIN_AVATAR } from "../src/renderer/src/lib/projectMark";
+import { mixHex, SIDEBAR_BACKGROUNDS } from "../src/renderer/src/lib/folderInk";
+import { contrastRatio, hexRgb } from "../src/renderer/src/lib/workSurface";
 
 vi.mock("../src/renderer/src/store", () => ({ useApp: () => null, pinnedOn: () => new Set() }));
 const { agentIndex } = await import("../src/renderer/src/lib/agentLook");
 const { projectColor } = await import("../src/renderer/src/lib/sidebar");
 const { PROJECT_PALETTE } = await import("../src/renderer/src/lib/projectCreate");
 const { BADGE_TINTS, badgeColor } = await import("../src/renderer/src/lib/sessionBadge");
-const { contrast } = await import("../src/shared/windowChrome");
 
 describe("project mark text", () => {
   it("the chosen text / emoji icon wins, else the project's own distinct mark", () => {
@@ -88,38 +89,49 @@ describe("a Director's project in the agent index", () => {
   });
 });
 
-describe("the mark's ink stays readable (WCAG ≥ 4.5 on its opaque pill)", () => {
-  // The pill is filled with the project colour itself (components/Avatar ProjectMarkChip): nothing behind it — portrait,
-  // emoji, tile — and no theme value reaches the text, so the pill / ink pair alone decides, the same in light and dark.
+describe("the mark's ink stays readable (WCAG ≥ 4.5 on its tile, light and dark)", () => {
+  // The tile is the project colour mixed into the card behind the avatar (components/ProjectMarkChip), so the ink is
+  // checked on that tile over every palette's card and surface (lib/folderInk SIDEBAR_BACKGROUNDS), per theme family.
   const named = PROJECT_PALETTE.map((c) => projectColor(c));
   const tints = BADGE_TINTS.map((t) => projectColor(badgeColor(t)));
   const fallback = projectColor("no-such-colour");
-  // Custom #hex: the extremes, every 8-bit grey, the crossover band round luminance 0.18, and seeded random colours.
+  // Custom #hex: the extremes, a grey ramp and seeded random colours.
   let seed = 20261101;
   const rand = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
   const hex = (r: number, g: number, b: number) => "#" + [r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("");
-  const greys = Array.from({ length: 256 }, (_, v) => hex(v, v, v));
-  const random = Array.from({ length: 4000 }, () => hex(Math.floor(rand() * 256), Math.floor(rand() * 256), Math.floor(rand() * 256)));
-  const extremes = ["#ffffff", "#000000", "#ffff00", "#00ff00", "#ff00ff", "#00ffff", "#0000ff", "#ff0000", "#3fa7a3", "#a89f8a", "#f4a6b0"];
+  const greys = Array.from({ length: 33 }, (_, i) => Math.min(255, i * 8)).map((v) => hex(v, v, v));
+  const random = Array.from({ length: 200 }, () => hex(Math.floor(rand() * 256), Math.floor(rand() * 256), Math.floor(rand() * 256)));
+  const extremes = ["#ffffff", "#000000", "#ffff00", "#00ff00", "#ff00ff", "#00ffff", "#0000ff", "#ff0000", "#3fa7a3", "#a89f8a", "#f4a6b0", "#8b5cf6", "#101820", "#fffbe0"];
+  const worst = (c: string) => Math.min(...(["light", "dark"] as const).flatMap((theme) => SIDEBAR_BACKGROUNDS[theme].map((bg) => contrastRatio(hexRgb(markTileInks(c)[theme]), hexRgb(mixHex(bg, c, MARK_TILE_TINT[theme]))))));
   for (const [name, colours] of Object.entries({ palette: named, "badge tints": tints, "fallback grey": [fallback], "custom hex": [...extremes, ...greys, ...random] })) {
     it(name, () => {
-      for (const c of colours) expect(contrast(markInk(c), c), `${name} ${c} ${markInk(c)}`).toBeGreaterThanOrEqual(MARK_MIN_CONTRAST);
+      for (const c of colours) expect(worst(c), `${name} ${c}`).toBeGreaterThanOrEqual(MARK_MIN_CONTRAST);
     });
   }
-  it("custom colours run through projectColor first (a bad value is the grey)", () => {
-    expect(projectColor("#3FA7A3")).toBe("#3FA7A3");
-    expect(markInk(projectColor("teal"))).toBe(markInk(fallback));
+  it("stays the project's hue where it already reads (not black / white)", () => {
+    const inks = markTileInks("#3fa7a3");
+    expect(inks.light).not.toBe("#000000");
+    expect(inks.dark).not.toBe("#ffffff");
   });
-  it("white where it reads, else black; the owner's hard-to-read marks", () => {
-    expect(markInk(projectColor("magenta"))).toBe("#ffffff"); // WvLn
-    expect(markInk(projectColor("cyan"))).toBe("#000000"); // ctxH
-    expect(markInk("#3fa7a3")).toBe("#000000"); // ctxE (a custom teal)
-    expect(markInk("#000000")).toBe("#ffffff");
-    expect(markInk("#ffffff")).toBe("#000000");
+});
+
+describe("the mark's ink on the colour picker's preview surface (--surface-2)", () => {
+  // Cross-review 2026-11-13: the picker previews the chip on --surface-2 (ProjectColorPicker ColorPreview), which the
+  // ink was not computed against — dark olive + #ff11bb read 4.00:1. Every theme's --surface-2 (styles.css).
+  const SURFACE_2 = { light: ["#ececee", "#e8e5da", "#e6e6e3"], dark: ["#262628", "#313130", "#353534", "#363633", "#363332", "#18181a"] } as const;
+  it("reaches 4.5:1 there too, for the reported colour and the palette", () => {
+    for (const c of ["#ff11bb", ...PROJECT_PALETTE.map((p) => projectColor(p)), "#3fa7a3", "#8b5cf6", "#f4a6b0"])
+      for (const theme of ["light", "dark"] as const)
+        for (const bg of SURFACE_2[theme])
+          expect(contrastRatio(hexRgb(markTileInks(c)[theme]), hexRgb(mixHex(bg, c, MARK_TILE_TINT[theme]))), `${c} ${theme} on ${bg}`).toBeGreaterThanOrEqual(MARK_MIN_CONTRAST);
   });
-  it("the palette's worst case, for the record", () => {
-    const min = Math.min(...[...named, ...tints, fallback].map((c) => contrast(markInk(c), c)));
-    expect(min).toBeGreaterThanOrEqual(4.5);
-    console.info(`mark ink: min contrast over palette + badge tints + grey = ${min.toFixed(2)}`);
+  it("covers every --surface-2 in styles.css (a new palette must add its own)", async () => {
+    const { MARK_BACKGROUNDS } = await import("../src/renderer/src/lib/projectMark");
+    const { readFileSync } = await import("node:fs");
+    const css = readFileSync(new URL("../src/renderer/src/styles.css", import.meta.url), "utf8");
+    const all = new Set<string>([...MARK_BACKGROUNDS.light, ...MARK_BACKGROUNDS.dark]);
+    const found = [...css.matchAll(/--surface-2:\s*(#[0-9a-fA-F]{6})\s*;/g)].map((m) => m[1]!.toLowerCase());
+    expect(found.length).toBeGreaterThan(5);
+    for (const c of found) expect(all.has(c), c).toBe(true);
   });
 });

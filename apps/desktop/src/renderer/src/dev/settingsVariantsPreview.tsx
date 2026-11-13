@@ -976,7 +976,7 @@ function MiniApp({ p }: { p: Palette }) {
             </div>
           ))}
         </div>
-        <div className="my-2 mr-2 flex min-w-0 flex-1 flex-col gap-2 rounded-lg bg-bg p-3 text-meta/[inherit]" style={{ background: "var(--bg)" }}>
+        <div className="my-2 mr-2 flex min-w-0 flex-1 flex-col gap-2 rounded-lg bg-background p-3 text-meta/[inherit]" style={{ background: "var(--bg)" }}>
           <div className="self-end rounded-lg bg-bubble px-2.5 py-1.5">把设置页的配色也看一下</div>
           <div className="leading-relaxed">好的。浅色加了「暖白」，深色加了「暖灰」和「纯黑」。<span className="text-accent">查看对比 →</span></div>
           <div className="mt-auto rounded-lg border border-card-border bg-surface px-3 py-1">

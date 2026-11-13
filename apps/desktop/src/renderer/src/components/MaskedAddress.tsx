@@ -9,7 +9,7 @@ export function MaskedAddress({ address }: { address: string }) {
   return (
     <button
       type="button"
-      className="cursor-pointer tabular-nums hover:text-fg"
+      className="cursor-pointer tabular-nums hover:text-foreground"
       title={shown ? t("address.hide") : t("address.show")}
       aria-label={shown ? t("address.hide") : t("address.show")}
       onClick={(e) => {

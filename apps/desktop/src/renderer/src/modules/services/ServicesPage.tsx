@@ -15,6 +15,7 @@ import { hostKey, type HostItem, type HostLook } from "../../lib/hostScope";
 import { groupServices, openService, serviceMenu } from "../../lib/services";
 import { projectColor } from "../../lib/sidebar";
 import { projectIcon } from "../../lib/projectIcons";
+import { useProjectIcons } from "../../lib/projectIconSync";
 import { useUiPrefs } from "../../lib/prefs";
 import { serviceStatus } from "../../lib/status";
 import { useApp } from "../../store";
@@ -104,7 +105,7 @@ function ServiceOrganizer({ row, hostName, done, error }: { row: Row; hostName: 
     }
   };
   return (
-    <div className="flex flex-wrap items-end gap-2 rounded-md border border-border bg-surface-1 px-3 py-2 text-xs">
+    <div className="flex flex-wrap items-end gap-2 rounded-md border border-border bg-surface px-3 py-2 text-xs">
       {s.lifetime === "persistent" && <Select width="w-32" label={t("services.purpose")} value={s.purpose === "foreground" || s.purpose === "background" ? s.purpose : "unknown"} options={(["foreground", "background", "unknown"] as const).map((purpose) => ({ value: purpose, label: t(`services.purpose.${purpose}`) }))} onChange={(purpose) => void patch({ purpose: purpose === "unknown" ? null : purpose })} />}
       <label className="grid gap-1 text-subtle">{t("services.group")}<input defaultValue={s.groupName ?? ""} maxLength={80}
         onBlur={(e) => { if (!isImeComposing(e)) void patch({ groupName: e.currentTarget.value.trim() || null }); }}
@@ -144,7 +145,7 @@ function ServicesTable({ project, initialQuery }: { project?: { hostId: string; 
   const loaded = served.some((d) => d.services !== null);
   const all = useMemo(() => served.flatMap((d) => (projectId === undefined ? (d.services ?? []) : projectServiceList(d.services, projectId)).map((item): Row => ({ hostId: d.hostId, key: hostKey(d.hostId, item.slug), item }))), [served, projectId]);
   const sidebarOf = useMemo(() => new Map<string, SidebarSnapshot | null>(hosts.data.map((d) => [d.hostId, d.sidebar])), [hosts.data]);
-  const icons = useUiPrefs().projectIcons;
+  const icons = useProjectIcons();
 
   useEffect(() => void refresh(), [refresh]);
   useEffect(() => { if (!project) localStorage.setItem(VIEW_KEY, view); }, [view, project]);

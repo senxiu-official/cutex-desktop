@@ -23,7 +23,7 @@ function PendingNoticeRow({ notice }: { notice: PendingNotices["entries"][number
   const askId = useResolvedAskId(notice.delegation, hostId);
   return <li className="flex min-w-0 gap-2">
     {notice.kind && <span className="shrink-0 text-subtle">{t(`conversation.tools.pendingNotices.${notice.kind}`)}</span>}
-    <button type="button" className="min-w-0 truncate text-left hover:text-text hover:underline" title={notice.title} onClick={() => openDelegationDetail(hostId, askId, { title: notice.title })}>{notice.title}</button>
+    <button type="button" className="min-w-0 truncate text-left hover:text-foreground hover:underline" title={notice.title} onClick={() => openDelegationDetail(hostId, askId, { title: notice.title })}>{notice.title}</button>
   </li>;
 }
 function Details({ item, model }: { item: RawItem; model: StandardToolModel }) {

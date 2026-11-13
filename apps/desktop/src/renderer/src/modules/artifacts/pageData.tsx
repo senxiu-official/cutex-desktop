@@ -80,7 +80,7 @@ export function PageDataSettings() {
     <Section title={t("artifacts.pageData.title")}>
       <SettingsGroup agents="none" source="local">
       <p className="mb-2 text-xs text-subtle">{t("artifacts.pageData.hint", { page: formatBytes(usage?.pageLimit ?? 0), total: formatBytes(usage?.totalLimit ?? 0) })}</p>
-      {usage?.totalRefused && <p className="mb-2 rounded-md border border-warning/40 bg-warning/10 px-2 py-1.5 text-xs text-warning">{t("artifacts.pageData.totalFull", { total: formatBytes(usage.totalLimit) })}</p>}
+      {usage?.totalRefused && <p className="mb-2 rounded-md border border-warn/40 bg-warn/10 px-2 py-1.5 text-xs text-warn-text">{t("artifacts.pageData.totalFull", { total: formatBytes(usage.totalLimit) })}</p>}
       {!usage || usage.items.length === 0 ? (
         <p className="text-xs text-subtle">{t("artifacts.pageData.empty")}</p>
       ) : (

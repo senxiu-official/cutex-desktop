@@ -115,6 +115,42 @@
         "zh-Hant-CN": "在一臺 Linux 或 Windows 機器上運行 cutex，再把它添加爲主機。",
         "en": "Run cutex on a Linux or Windows machine and add it as a host."
       }
+    },
+    {
+      "id": "claudeStdioLocale",
+      "title": {
+        "zh-CN": "Claude 直接 stdio 在非 UTF-8 区域设置下的限制",
+        "zh-Hant-CN": "Claude 直接 stdio 在非 UTF-8 區域設定下的限制",
+        "en": "Claude direct stdio on non-UTF-8 locales"
+      },
+      "body": {
+        "zh-CN": "claude-r46 的直接 stdio 使用 Python 标准输出编码，非 UTF-8 编码下的中文 JSON 可能无法读取。cutex 管理的会话使用本地 WebSocket，不经过此输出路径。",
+        "zh-Hant-CN": "claude-r46 的直接 stdio 使用 Python 標準輸出編碼，非 UTF-8 編碼下的中文 JSON 可能無法讀取。cutex 管理的會話使用本機 WebSocket，不經過此輸出路徑。",
+        "en": "Direct stdio uses Python stdout encoding, which can produce non-UTF-8 JSON. Normal cutex-managed sessions use a loopback WebSocket and do not use this writer."
+      },
+      "workaround": {
+        "zh-CN": "直接启动 stdio 时，为该进程设置 PYTHONIOENCODING=utf-8。",
+        "zh-Hant-CN": "直接啟動 stdio 時，為該程序設定 PYTHONIOENCODING=utf-8。",
+        "en": "Set PYTHONIOENCODING=utf-8 when launching direct stdio."
+      }
+    },
+    {
+      "id": "modelTransport",
+      "title": {
+        "zh-CN": "模型连接失败",
+        "zh-Hant-CN": "模型連線失敗",
+        "en": "Model transport failures"
+      },
+      "body": {
+        "zh-CN": "模型请求可能在没有 HTTP 响应时失败；本次运行时恢复修复不代表已定位或解决 DNS、TLS、代理或供应商故障。",
+        "zh-Hant-CN": "模型請求可能在沒有 HTTP 回應時失敗；本次執行階段恢復修復不代表已定位或解決 DNS、TLS、代理或供應商故障。",
+        "en": "An external model request may fail without an HTTP response. Runtime recovery fixes do not establish or resolve DNS, TLS, proxy or provider failures."
+      },
+      "workaround": {
+        "zh-CN": "检查主机连接和供应商状态后重试。",
+        "zh-Hant-CN": "檢查主機連線和供應商狀態後重試。",
+        "en": "Check host connectivity and provider status, then retry."
+      }
     }
   ]
 }

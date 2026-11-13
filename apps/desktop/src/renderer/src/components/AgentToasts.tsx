@@ -1,6 +1,6 @@
 // A module's cards of lib/agentToasts.ts for the agent in view, rendered from its `conversation.overlay`
 // into one shared stack (bottom right of the conversation, above the composer). Never takes focus.
-// Long text wraps (at most three lines, the whole text in the tooltip), never a sideways scrollbar;
+// Long text wraps (at most three lines; the whole text in a tooltip only when cut off), never a sideways scrollbar;
 // hovering or focusing a card holds its timer.
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -42,7 +42,7 @@ function Card({ toast }: { toast: AgentToast }) {
       }}
     >
       <Icon size={13} data-toast-icon="" className="mt-0.5" />
-      <span className="line-clamp-3 min-w-0 flex-1 leading-[18px] [overflow-wrap:anywhere] text-foreground" title={toast.text}>
+      <span className="line-clamp-3 min-w-0 flex-1 leading-[18px] [overflow-wrap:anywhere] text-foreground" data-tip={toast.text} data-tip-overflow="">
         {toast.text}
       </span>
       {toast.action && (

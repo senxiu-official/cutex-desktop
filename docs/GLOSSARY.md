@@ -143,6 +143,7 @@ The layout rules for these are at the top of `.claude/reports/settings-layout-au
 
 | 中文 | English | 是什么 | 主要文件 |
 |---|---|---|---|
+| 设置导航 · 分组 | settings nav · groups | The left list of settings pages, top to bottom: 你 (no heading) · 应用 (通用 外观 通知 键盘与手势) · 面板 · 连接 (主机 网络代理) · 智能体 · 工具 · 数据 · 系统 (模块 and the two update pages) · 帮助与关于 (关于 新功能 帮助). Owner 2026-11-11; the grouping is display only, page ids and links are unchanged. | `lib/settingsNav.ts` |
 | 页头 | page header | A settings page's title, one-line purpose and its place / timing chips (and host picker). | `SettingsPage` |
 | 分部 · 分部导航 | part · part bar | A long page's parts (会话: 消息 / 输入 / 布局 / 旁边对话与批注): a quiet heading on a rule, and the row of chips at the top that jumps to them. | `PartHeading`, `PartNav` |
 | 设置卡片 | settings card | A titled group of settings: title + chips + actions on one line, a hint under it, then the card. A card holds settings; a note alone is a title + hint with no card. | `Section`, `Card` |

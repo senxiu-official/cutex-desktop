@@ -60,6 +60,7 @@ import { nextAfterClose } from "./trayNext";
 import { AGENT_NOTE_MAX, APP_NOTE_MAX, noteLine, noteText, openNoteEdit, pinNote, withPinNote } from "./trayNotes";
 import { TrayNoteEditor } from "./TrayNoteEditor";
 import { setAgentNote } from "../../lib/menus";
+import { operatorMenuItem } from "../../lib/operatorMenu";
 
 const ICON = 32;
 
@@ -426,6 +427,9 @@ function EntryItem({ view, onUsed, pinnedOrder = [] }: { view: EntryView; onUsed
       if (!m.row || !features.has("session-badge") || !isOwnerFeatures(features)) return [];
       return [{ label: capsule ? t("info.badgeFor", { name: m.name }) : t("info.badgeMenu"), flyout: <AgentBadgeEditor session={m.row.session} hostId={m.agent.hostId} />, onSelect: () => {} }];
     });
+    // 设为副主管 / 取消副主管 for one agent (lib/operatorMenu; a capsule of several has none).
+    const operator = solo ? operatorMenuItem(solo.agent.hostId, solo.agent.sessionId, t) : null;
+    if (operator) out.push(operator);
     if (out.length) out.push("separator");
     const noteItem: MenuEntry[] =
       session && solo

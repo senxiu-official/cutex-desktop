@@ -12,6 +12,7 @@
 // sandboxed, contextIsolation, no nodeIntegration, no navigation. Its IPC channel only accepts calls
 // from that window and only for the alerts it shows.
 import { join } from "node:path";
+import { devRendererUrl } from "./devRenderer";
 import { app, BrowserWindow, ipcMain, nativeTheme, screen, type WebContents } from "electron";
 import type { EventEnvelope, OwnerNotification } from "@cutex-desktop/protocol";
 import type { DaemonState, OwnerNotifyAction, ShellEventAlert } from "../shared/ipc";
@@ -324,7 +325,7 @@ export class OwnerAlerts {
     win.on("closed", () => {
       if (this.win === win) this.win = null;
     });
-    const devUrl = process.env.ELECTRON_RENDERER_URL;
+    const devUrl = devRendererUrl(app.isPackaged);
     if (devUrl) void win.loadURL(`${devUrl.replace(/\/$/, "")}/owner-alert.html`);
     else void win.loadFile(join(__dirname, "../renderer/owner-alert.html"));
   }

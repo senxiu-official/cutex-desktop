@@ -38,6 +38,15 @@ import type {
 } from "@cutex-desktop/protocol";
 import type { OperatorActionRequest, OperatorActionReceipt, OperatorProjectWorkspace, CutexBuild, ProfileImageKind } from "@cutex-desktop/cutex-client";
 import type { ThreadMemoryMode } from "@cutex-desktop/protocol/codex";
+import type { ProjectIcon } from "@cutex-desktop/protocol";
+
+/** Body of a project presentation update (cutex project-presentation; `icon` needs `project-icon`). */
+export interface ProjectPresentationUpdate {
+  display_name: string;
+  badge_label: string;
+  color: string;
+  icon?: ProjectIcon | null;
+}
 import type { CollaborationModeMask, ReviewTarget, ThreadGoal, ThreadGoalStatus } from "@cutex-desktop/protocol/codex/v2";
 import type { AddSshHostRequest, DirBrowse, HostAppearancePatch, HostGroupDraft, HostResult, HostsState, HostStartOn, HostTestResult, SshHostPatch, ViewScope } from "./hosts";
 import type { LaunchOverrides, NewThreadDefaults, NewThreadDefaultsPatch } from "./launch";
@@ -1956,6 +1965,8 @@ export interface DaemonApi extends StorageCleanupApi {
   putUserInstructions(content: string, expectedRevision: string): Promise<UserInstructions>;
   /** Allowlisted cutex session mutations for menus: metadata/update, retire, restore, visibility/*, runtime/offline|online. */
   sessionAction(sessionId: string, method: SessionActionMethod, params: Record<string, unknown>): Promise<unknown>;
+  /** `POST /v2/sessions/{id}/reapprove-paths` (cutex session-path-reapproval): approve a child agent's moved folders (shared/creatorPaths). */
+  reapproveSessionPaths(sessionId: string): Promise<import("./creatorPaths").ReapprovePathsResult>;
   /**
    * `cutex/session/fork` (feature session-fork): a new agent (same project; optional compatible profile) whose thread
    * is this one up to `afterTurnId` (null = the latest turn).
@@ -2027,11 +2038,16 @@ export interface DaemonApi extends StorageCleanupApi {
   operatorRuntimeNotice(projectId: string, sessionId: string): Promise<{ state: "required" | "offline" }>;
   operatorAction(request: OperatorActionRequest): Promise<OperatorActionReceipt>;
   projectMutation(projectId: string, expected: { authorityEpoch: number; projectRevision: number }, operation: ProjectMutationOperation): Promise<unknown>;
-  /** cutex project presentation update (name / badge / color). */
-  projectPresentation(projectId: string, expected: { authorityEpoch: number; presentationRevision: number }, presentation: { display_name: string; badge_label: string; color: string }): Promise<unknown>;
+  /** cutex project presentation update (name / badge / color; `icon` on cutex `project-icon`: omitted keeps it, null clears it). */
+  projectPresentation(projectId: string, expected: { authorityEpoch: number; presentationRevision: number }, presentation: ProjectPresentationUpdate): Promise<unknown>;
   /** `GET /v2/projects/{id}/memory`; null on older cutex. */
   projectMemory(projectId: string): Promise<ProjectMemoryView | null>;
-  projectMemoryFile(projectId: string, file: string): Promise<{ file: string; content: string; bytes: number; updatedAt: string | null }>;
+  projectMemoryFile(projectId: string, file: string): Promise<{ file: string; content: string; bytes: number; updatedAt: string | null; revision?: string }>;
+  /** `PUT /v2/projects/{id}/memory/{file}` (cutex `project-memory`, root). `expectedRevision`: the revision the edit started
+   *  from; null = create only (the file must not exist). `updateIndex` false leaves MEMORY.md alone (the caller writes it). */
+  projectMemoryWrite(projectId: string, file: string, content: string, expectedRevision: string | null, updateIndex: boolean): Promise<ProjectMemoryMutation>;
+  /** `DELETE /v2/projects/{id}/memory/{file}?expectedRevision=`: removes the file and its MEMORY.md line(s). */
+  projectMemoryDelete(projectId: string, file: string, expectedRevision: string): Promise<ProjectMemoryMutation>;
   /** `GET /v2/projects/{id}/mcp` (project layer of scoped MCP); null on older cutex. */
   projectMcp(projectId: string): Promise<{ servers: Record<string, unknown>; revision: number; updatedAt: string | null } | null>;
   /** cutex `scoped-mcp`: the MCP servers this agent launches with (merged layers) and its own on / off list. */
@@ -3061,9 +3077,18 @@ export interface ProjectMemoryView {
   dir: string;
   /** MEMORY.md (index) content, if present. */
   index?: string | null;
-  entries: { file: string; name: string; description?: string | null; type?: string | null; bytes?: number | null; updatedAt?: string | null; [k: string]: unknown }[];
+  /** Content hash of MEMORY.md (`sha256:…`); null / absent when there is no index. */
+  indexRevision?: string | null;
+  entries: { file: string; name: string; description?: string | null; type?: string | null; bytes?: number | null; updatedAt?: string | null; revision?: string; [k: string]: unknown }[];
   [k: string]: unknown;
 }
+
+/** A project memory write / delete. Refusals come back as data (codes are cutex's), not as thrown errors, so a
+ *  conflict's revision survives IPC. `currentRevision` on `revision_conflict`: the file's revision now (null = gone). */
+export type ProjectMemoryMutation =
+  | { ok: true; file: string; revision: string | null; indexUpdated: boolean }
+  | { ok: false; code: "revision_conflict"; currentRevision: string | null; message: string }
+  | { ok: false; code: "invalid_memory_file" | "invalid_memory_content" | "memory_not_found" | "other"; message: string };
 
 // ---------- delegations (委托; cutex "asks", wire names kept) ----------
 

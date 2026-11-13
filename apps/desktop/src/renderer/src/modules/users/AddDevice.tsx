@@ -185,7 +185,7 @@ function PairingRequestRow({ invite, invites, host }: { invite: PairingInviteVie
         </div>
       )}
       {pending && <p className="mt-1 ml-[30px] text-xs text-subtle">{t("users.pair.codeHint")}</p>}
-      <button className="mt-1 ml-[30px] flex items-center gap-0.5 rounded text-xs text-subtle hover:text-fg" aria-expanded={details} onClick={() => setDetails((d) => !d)}>
+      <button className="mt-1 ml-[30px] flex items-center gap-0.5 rounded text-xs text-subtle hover:text-foreground" aria-expanded={details} onClick={() => setDetails((d) => !d)}>
         <ChevronRight size={12} className={details ? "rotate-90 transition-transform" : "transition-transform"} />
         {t("users.pair.details")}
       </button>

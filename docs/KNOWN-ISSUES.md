@@ -1,6 +1,6 @@
 # Known issues
 
-Applies to **Cutex Desktop 0.2.3 — Beautiful World** with **cutex 0.2.2 — Beautiful World**,
+Applies to **Cutex Desktop 0.2.5 — Beautiful World** with **cutex 0.2.3 — Beautiful World**,
 unless an entry specifies an older host version. Update the desktop and each host separately.
 
 The application displays these entries in Settings → About → Known issues. Three Windows entries
@@ -53,3 +53,20 @@ The macOS package provides the desktop client. Run cutex on a Windows or Linux h
 - Fix schedule: not scheduled.
 
 For NCI setup, see [NCI remote jobs](install/ANU.md).
+
+## Claude direct stdio on non-UTF-8 locales
+
+The Claude claude-r46 component's direct stdio transport uses Python's stdout encoding.
+On a non-UTF-8 locale, non-ASCII JSON frames may be unreadable by a UTF-8 client.
+Normal cutex-managed Claude sessions use a loopback WebSocket and do not use this stdio writer.
+
+- Workaround: when launching direct stdio, set `PYTHONIOENCODING=utf-8` in that process's environment.
+- Fix schedule: not scheduled; a follow-up transport fix is under validation.
+
+## Model transport failures
+
+An external model request can fail without an HTTP response. This release's runtime
+recovery fixes do not establish or resolve the cause of DNS, TLS, proxy or provider failures.
+
+- Workaround: check the host's connectivity and provider status, then retry the request.
+- Fix schedule: not scheduled; investigation continues.

@@ -70,7 +70,7 @@ function OrientationRows() {
       </SettingRow>
       {/* P4: the dividers' heights / widths (this window, portrait only) — set by dragging them; reset here. */}
       <SettingRow agents="none" source="local" label={t("orientation.split")} hint={t("orientation.splitHint")} reset={<ResetButton disabled={split === DEFAULT_PORTRAIT.split && band === undefined} onClick={() => setPortraitPrefs(key, { split: DEFAULT_PORTRAIT.split, band: undefined })} />}>
-        <span data-orientation-split="" className="text-body text-muted tabular-nums">
+        <span data-orientation-split="" className="text-ui text-muted tabular-nums">
           {t("orientation.splitValue", { pct: Math.round(split * 100) })}
         </span>
       </SettingRow>

@@ -1,5 +1,11 @@
 import type { zhCN } from "./i18n";
 const zhHantCN = {
+  "browser.blockedNav.notice": "已攔下一次自動跳轉：{host}",
+  "browser.blockedNav.open": "仍然打開",
+  "browser.blockedNav.opening": "正在打開…",
+  "browser.blockedNav.openDesktop": "仍然在本機打開",
+  "browser.blockedNav.desktopLoopbackHint": "這個地址指向本機（這臺電腦），不是遠程主機：{url}",
+  "browser.blockedNav.dismiss": "隱藏提示",
   "browser.carrierFrameRate": "後臺網頁幀率",
   "browser.carrierFrameRateHint": "{{agent}}在後臺操作的網頁（遊戲、動畫、錄屏）用 30 fps 更流暢，但更佔 CPU 和 GPU；卡片上的畫面仍是每秒一張",
   "browser.carrierFrameRate15": "省 CPU 和 GPU（預設）",

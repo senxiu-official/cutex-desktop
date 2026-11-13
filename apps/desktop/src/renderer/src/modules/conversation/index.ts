@@ -6,6 +6,10 @@ import { Columns2, MessageSquareText, MessagesSquare } from "lucide-react";
 import { projectInto } from "../../lib/workspaces";
 import { StandardToolRow } from "./StandardToolRow";
 import { standardToolRow } from "../../lib/standardToolRows";
+import { webToolRow } from "../../lib/webToolRows";
+import { toolOutput } from "../../lib/workGroups";
+import { WebToolRow } from "./WebToolRow";
+import { FileChangeRow } from "./FileChangeRow";
 import { isAgentTaskTool } from "../../lib/taskRows";
 import { defineModule } from "../slots";
 import { AgentToolRow, AskReceivedRow, ResultsReceivedRow } from "./TimelineRows";
@@ -31,7 +35,10 @@ export default defineModule({
     // After delegations.tool (100): a finished delegate call is the 委托 card when that module is on.
     "timeline.tool": [{ id: "conversation.agentTools", order: 250, match: isAgentTaskTool, Row: AgentToolRow },
       // After approval/safety rows: their decisions stay visible through the ordinary fallback.
-      { id: "conversation.standardTools", order: 450, match: item => standardToolRow(item) !== null, Row: StandardToolRow }],
+      { id: "conversation.standardTools", order: 450, match: item => standardToolRow(item) !== null, Row: StandardToolRow },
+      // TODO 工具行专用视图 (2026-11-12): web lookups by what they looked up; a file change's diff in the diff viewer.
+      { id: "conversation.webTools", order: 455, match: item => webToolRow(item) !== null, Row: WebToolRow },
+      { id: "conversation.fileChange", order: 460, match: item => item.type === "fileChange" && !!toolOutput(item), Row: FileChangeRow }],
     // The turn reference (§19.4): ungated, like the timeline it reads. v1.17 (§24.4): another agent's
     // live conversation (`conversation.agent`, v1.16) is a conversation pane now — no side component.
     // §24.13 (owner 2026-10-21): a projection — another agent's live conversation in the focused conversation's Shelf.

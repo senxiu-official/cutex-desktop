@@ -1,10 +1,10 @@
 // The project mark on a Director's avatar (owner 2026-10-23, option (a) of the avatar-marks preview): 1–4 columns
-// at the avatar's bottom-left, in the project's colour. The text is what the sidebar header's project icon shows:
+// at the avatar's bottom-left, drawn as the sidebar header's project tile (components/ProjectMarkChip). The text is what that icon shows:
 // the chosen text / emoji icon (prefs `projectIcons`), else the project's badge label, else the first characters of
 // its name (a CJK name: one character; Latin: two capitals). A Director of several projects, or of none: no mark.
-import { contrast } from "../../../shared/windowChrome";
 import { clipToWidth, displayWidth } from "./badgeWidth";
 import { graphemes } from "./graphemes";
+import { mixHex, readableInk, SIDEBAR_BACKGROUNDS } from "./folderInk";
 import type { ProjectIconChoice } from "./projectIcons";
 
 /** The most display columns a mark shows: all a wide cutex badge label holds (project-badge-wide; CJK 2, Latin 1), so
@@ -104,22 +104,14 @@ export const MARK_RADIUS = 3;
 
 /** WCAG AA for the mark's 8.5–12 px text. */
 export const MARK_MIN_CONTRAST = 4.5;
-const MARK_INK_LIGHT = "#ffffff";
-const MARK_INK_DARK = "#000000";
-
-/** The mark's ink on its pill (owner 2026-11-01, avatar-badges): the pill is opaque and filled with the project colour
- *  `hex` (lib/sidebar projectColor: a palette colour or any custom #rrggbb), so nothing behind it — portrait, emoji,
- *  letter tile, either theme — reaches the text. White when it meets MARK_MIN_CONTRAST, else black: below white's
- *  threshold (luminance > 0.183) black gives ≥ 4.66:1, so every sRGB colour gets ≥ 4.5:1 (test/projectMark.test.ts).
- *  (The frosted glass it replaces let a light portrait through a 18 % tint, under ink tuned for the bare surface.) */
-export function markInk(hex: string): string {
-  return contrast(MARK_INK_LIGHT, hex) >= MARK_MIN_CONTRAST ? MARK_INK_LIGHT : MARK_INK_DARK;
-}
 
 /** What a mark is drawn from: its text and a project colour (a palette name or #hex, lib/sidebar projectColor). */
 export interface AvatarMark {
   text: string;
   color: string;
+  /** The project's lucide icon (presentation.icon kind `icon`), drawn instead of `text` when the catalog has it;
+   *  `text` stays the letters for an id this desktop cannot draw. Text / emoji icons already are `text`. */
+  icon?: ProjectIconChoice | null;
 }
 
 /** The mark an avatar carries (owner 2026-10-27): the agent's own badge (cutex `badge`, set from the tray's 徽章… or
@@ -136,4 +128,32 @@ export function avatarMark(project: AvatarMark | null, badge: AvatarMark | null)
  *  that shows the badge as a chip beside the name drops that chip when the avatar carries it. */
 export function avatarCarriesMark(size: number): boolean {
   return size >= PROJECT_MARK_MIN_AVATAR;
+}
+
+/** What a mark's tile is laid over, per theme family: every palette's card and surface (lib/folderInk SIDEBAR_BACKGROUNDS)
+ *  and its --surface-2 (styles.css), where the colour picker previews the chip (cross-review 2026-11-13: dark olive +
+ *  #ff11bb read 4.0:1 there). */
+export const MARK_BACKGROUNDS = {
+  light: [...SIDEBAR_BACKGROUNDS.light, "#ececee", "#e8e5da", "#e6e6e3"],
+  dark: [...SIDEBAR_BACKGROUNDS.dark, "#262628", "#313130", "#353534", "#363633", "#363332", "#18181a"],
+} as const;
+/** The mark's tile strength per theme family: styles.css `--project-icon-tint` (the sidebar's project icon). */
+export const MARK_TILE_TINT = { light: 0.14, dark: 0.18 } as const;
+/** Where the mark's ink starts (toward black / white): a step past the sidebar's `--project-icon-ink`, since the
+ *  mark's 8.5–9.5 px text is smaller than the sidebar's and must reach MARK_MIN_CONTRAST on a portrait's corner. */
+const MARK_TILE_INK_START = { light: 0.36, dark: 0.24 } as const;
+const tileInks = new Map<string, { light: string; dark: string }>();
+
+/** The mark's ink of project colour `hex` for light and dark themes: from the start mix further toward black /
+ *  white until it reads INK_TARGET (≥ 4.5:1) on the tile over every MARK_BACKGROUNDS colour, so a pale
+ *  yellow in light themes or a deep violet in dark ones still reads (2026-11-12: the sidebar's own ink gave 3.4:1 there). */
+export function markTileInks(hex: string): { light: string; dark: string } {
+  const key = hex.toLowerCase();
+  let inks = tileInks.get(key);
+  if (!inks) {
+    const ink = (theme: "light" | "dark") => readableInk(key, theme, MARK_TILE_INK_START[theme], MARK_BACKGROUNDS[theme].map((bg) => mixHex(bg, key, MARK_TILE_TINT[theme])));
+    inks = { light: ink("light"), dark: ink("dark") };
+    tileInks.set(key, inks);
+  }
+  return inks;
 }

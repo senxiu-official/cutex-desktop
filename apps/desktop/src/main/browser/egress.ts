@@ -10,6 +10,7 @@ type Loader = () => Promise<{ startBrowserEgressProxy: typeof startBrowserEgress
  * never imported, no listener exists and no session is touched. Turning it off must be followed
  * by stop(), which closes the listener and restores every configured session synchronously. */
 export function createBrowserEgress(options: { isEnabled: () => boolean; load?: Loader;
+  protectedAddress?: (address: string, port: number) => boolean;
   /** Owner-admitted LAN / tailnet authorities (main's per-tab admissions). The proxy also runs for
    * these while websites are off; it then dials only them, never a public target. */
   lanAllowed?: (hostname: string, port: number) => boolean; hasLan?: () => boolean }) {
@@ -48,7 +49,8 @@ export function createBrowserEgress(options: { isEnabled: () => boolean; load?: 
       if (admitted !== generation) throw new Error("browser_egress_revoked");
       let proxy: Proxy | undefined;
       proxy = await module.startBrowserEgressProxy({ onClosed() { if (proxy && current === proxy) stop(); },
-        publicAllowed: on, lanAllowed: (hostname, port) => options.lanAllowed?.(hostname, port) === true });
+        publicAllowed: on, lanAllowed: (hostname, port) => options.lanAllowed?.(hostname, port) === true,
+        protectedAddress: options.protectedAddress });
       if (admitted !== generation) { await proxy.close(); throw new Error("browser_egress_revoked"); }
       current = proxy; return proxy;
     })();

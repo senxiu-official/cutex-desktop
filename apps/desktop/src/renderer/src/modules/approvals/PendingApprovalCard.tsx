@@ -6,14 +6,14 @@ import type { ApprovalDecision, ApprovalDecisionOrigin, ApprovalRecord, ServiceV
 import { useI18n, type MessageKey } from "../../i18n";
 import { approvalDecisionTrace, approvalFacts, approvalPeer, APPROVAL_DECIDED_BY_FEATURE, APPROVAL_NOTICE_FEATURE, decisionInput, formatHold, grantKind, holdLeftMs, RETRYING_KINDS } from "../../lib/approvals";
 import { peerPartyText } from "../../lib/delegations";
+import { approvalHeading, titleAgent } from "../../lib/approvalTitle";
 import { ClaimedCaps, PeerParty } from "../../components/PeerParty";
-import { openHostAgent } from "../../lib/hostLists";
+import { ProjectRef, Who } from "../../components/Parties";
 import { sendApprovalDecision } from "../../lib/approvalDecision";
 import type { HostLook } from "../../lib/hostScope";
 import { refusalText } from "../../lib/profileCreate";
 import { formatAbsolute, formatWhen, useClock, useNow } from "../../lib/time";
 import { featuresOf, useApp } from "../../store";
-import { Avatar } from "../../components/Avatar";
 import { HostMark } from "../../components/HostMark";
 import { ApprovalSource } from "../../components/ApprovalSource";
 import { Button } from "../../components/settings/Form";
@@ -39,16 +39,20 @@ export function KindChip({ kind }: { kind: ApprovalRecord["kind"] }) {
   const { t } = useI18n();
   const Icon = kind === "managed_service" || kind === "service_lifetime" ? Server : kind === "static_root" ? FolderOpen : kind === "agent_profile" ? Boxes : kind === "browser_claim" || kind === "browser_open" ? Globe : kind === "workflow_run" ? Workflow : ShieldAlert;
   const key = `approvals.kind.${kind}` as MessageKey;
+  const label = t(key) === key ? kind : t(key);
+  // A long label ellipsizes in a narrow card (full text on hover) instead of wrapping.
   return (
-    <Tag>
-      <Icon size={12} strokeWidth={1.75} />
-      {t(key) === key ? kind : t(key)}
-    </Tag>
+    <span className="flex min-w-0 items-center" title={label}>
+      <Tag fit className="max-w-full">
+        <Icon size={12} strokeWidth={1.75} className="mr-1 inline-block shrink-0 align-[-2px]" />
+        {label}
+      </Tag>
+    </span>
   );
 }
 
 /** "Requested by <agent> · <project>" with a link to the agent. */
-export function Requester({ record, hostId, sidebar }: { record: ApprovalRecord; hostId: string; sidebar: SidebarSnapshot | null }) {
+export function Requester({ record, hostId }: { record: ApprovalRecord; hostId: string; /** Kept for callers; names resolve through the host's sidebar in components/Parties. */ sidebar?: SidebarSnapshot | null }) {
   const { t } = useI18n();
   const peer = approvalPeer(record);
   if (peer) {
@@ -63,24 +67,28 @@ export function Requester({ record, hostId, sidebar }: { record: ApprovalRecord;
       </div>
     );
   }
-  const session = [...(sidebar?.active ?? []), ...(sidebar?.retired ?? [])].find((s) => s.cutexSessionId === record.requesterCutexSessionId);
-  const name = session?.displayName ?? record.requesterName ?? record.requesterCutexSessionId;
-  const project = record.projectId ? (sidebar?.projects?.projects.find((p) => p.project_id === record.projectId)?.presentation.display_name ?? record.projectId) : null;
+  // The app's agent / project references (components/Parties): avatar or project icon, click opens it on this host.
   return (
-    <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted">
+    <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-muted">
       <span className="shrink-0">{t("approvals.requestedBy")}</span>
-      <button disabled={!session} onClick={() => openHostAgent(hostId, record.requesterCutexSessionId)} className="flex min-w-0 items-center gap-1 rounded px-0.5 font-medium text-foreground enabled:hover:text-accent enabled:hover:underline" title={record.requesterCutexSessionId}>
-        <Avatar name={name} avatar={session?.avatar} seed={record.requesterCutexSessionId} size={16} />
-        <span className="truncate">{name}</span>
-      </button>
-      {project && <span className="shrink-0 text-subtle">· {t("approvals.inProject", { project })}</span>}
+      <span data-approval-requester="" className="inline-flex min-w-0 font-medium">
+        <Who id={record.requesterCutexSessionId} name={record.requesterName ?? null} hostId={hostId} />
+      </span>
+      {record.projectId && (
+        <span className="inline-flex min-w-0 items-center gap-1 text-subtle">
+          · {t("approvals.inProject", { project: "" }).trim()} <ProjectRef hostId={hostId} projectId={record.projectId} />
+        </span>
+      )}
     </div>
   );
 }
 
-export function Facts({ record }: { record: ApprovalRecord }) {
+export function Facts({ record, hostId }: { record: ApprovalRecord; hostId: string }) {
   const { t } = useI18n();
-  const facts = approvalFacts(record.details, record.kind);
+  // A delegation's target is an agent reference (avatar, click opens it): one row, its name row folded in.
+  const target = record.kind === "ask_delivery" && typeof record.details?.target === "string" ? record.details.target : null;
+  const targetName = typeof record.details?.targetName === "string" ? record.details.targetName : null;
+  const facts = approvalFacts(record.details, record.kind).filter((f) => !(target && f.key === "targetName"));
   if (facts.length === 0) return null;
   return (
     <dl className="mt-2 grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-0.5 rounded-lg bg-surface-2/60 px-3 py-2 text-xs">
@@ -89,7 +97,11 @@ export function Facts({ record }: { record: ApprovalRecord }) {
         return (
           <div key={f.key} className="contents">
             <dt className="text-subtle">{t(key) === key ? f.key : t(key)}</dt>
-            <dd className={`min-w-0 break-words ${f.mono ? "font-mono text-caption/[inherit]" : ""}`}>{f.value}</dd>
+            {target && f.key === "target" ? (
+              <dd data-approval-target="" className="flex min-w-0"><Who id={target} name={targetName} hostId={hostId} /></dd>
+            ) : (
+              <dd className={`min-w-0 break-words ${f.mono ? "font-mono text-caption/[inherit]" : ""}`}>{f.value}</dd>
+            )}
           </div>
         );
       })}
@@ -97,6 +109,19 @@ export function Facts({ record }: { record: ApprovalRecord }) {
   );
 }
 
+/** The title, with the agent it names (a delegation's target) as an agent reference. */
+function TitleText({ title, record, hostId }: { title: string; record: ApprovalRecord; hostId: string }) {
+  const agent = titleAgent(record);
+  const at = agent ? title.indexOf(agent.text) : -1;
+  if (!agent || at < 0) return <>{title}</>;
+  return (
+    <>
+      {title.slice(0, at)}
+      <span className="inline-flex max-w-full align-bottom"><Who id={agent.id} name={agent.name} hostId={hostId} /></span>
+      {title.slice(at + agent.text.length)}
+    </>
+  );
+}
 
 /** Where a card / row belongs: its host, that host's sidebar (requester names), its look and state. */
 export interface Origin {
@@ -123,6 +148,7 @@ export function PendingCard({ record, origin, variant = "page" }: { record: Appr
   const [claimBusy, setClaimBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const grant = grantKind(record);
+  const heading = approvalHeading(record, t);
   const openApprovalsPage = useApp((s) => s.openPage);
   // The agent retries itself after the decision (services, agent profiles, browser opens); with
   // approval-decision-notice cutex tells it to.
@@ -164,14 +190,18 @@ export function PendingCard({ record, origin, variant = "page" }: { record: Appr
   };
   return (
     <section data-approval-card={variant} className={variant === "inline" ? `pr-5 ${origin.stale ? "opacity-60" : ""}` : `mb-3 rounded-xl border border-border bg-surface px-4 py-3 ${origin.stale ? "opacity-60" : ""}`}>
-      {/* Wraps in a narrow Shelf: the title keeps 10rem, the chips go to the next line (no one-letter column). */}
-      <div className="flex flex-wrap items-start gap-2">
-        {origin.mark && origin.look && <HostMark host={origin.look} className="mt-0.5 shrink-0" />}
+      {/* Row 1: what kind of request (ellipsized when narrow) and, on the right, its source and time. Below it the
+          title and cutex's summary at the card's full width, so a long chip never squeezes them into a column. */}
+      <div className="flex min-w-0 items-center gap-2">
+        {origin.mark && origin.look && <HostMark host={origin.look} className="shrink-0" />}
         <KindChip kind={record.kind} />
-        <h3 className="min-w-0 flex-1 basis-40 text-sm font-medium break-words">{record.summary}</h3>
-        <ApprovalSource source="cutex" />
-        <When iso={record.createdAt} />
+        <span className="ml-auto flex shrink-0 items-center gap-2">
+          <ApprovalSource source="cutex" />
+          <When iso={record.createdAt} />
+        </span>
       </div>
+      <h3 data-approval-title className="mt-1.5 text-sm font-medium break-words"><TitleText title={heading.title} record={record} hostId={origin.hostId} /></h3>
+      {heading.detail && <p data-approval-summary className="mt-0.5 text-xs text-subtle break-words">{heading.detail}</p>}
       <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5">
         {variant === "page" ? <Requester record={record} hostId={origin.hostId} sidebar={origin.sidebar} /> : holdLeft === null && <span className="text-xs text-muted">{t("approvals.inline.asks")}</span>}
         {holdLeft !== null && (
@@ -189,7 +219,7 @@ export function PendingCard({ record, origin, variant = "page" }: { record: Appr
         )}
       </div>
       {record.autoDecision && record.matchedRuleId && <p className="mt-1 text-caption/[inherit] text-accent">{t("approvals.rules.autoDecided", { rule: record.matchedRuleId })}</p>}
-      <Facts record={record} />
+      <Facts record={record} hostId={origin.hostId} />
       {record.kind !== "browser_claim" && record.kind !== "browser_open" && <ApprovalDifferences value={record.details?.differences} />}
       {grant !== "other" && grant !== "claimBrowser" && (
         <p className="mt-2 flex items-start gap-1.5 text-xs text-warn">

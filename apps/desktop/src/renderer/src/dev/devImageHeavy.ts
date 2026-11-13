@@ -1,5 +1,6 @@
 // Deterministic, synthetic image history. No network, filesystem or owner data.
-// ?imageheavy=300&heavyMode=mixed|refs|inline&heavyTurns=60&heavyTransport=direct|clone|json
+// ?imageheavy=300&heavyMode=mixed|refs|inline|paths (paths: every image a sent attachment, a host path)&heavyTurns=60&heavyTransport=direct|clone|json
+// &heavyLatency=<ms>: each host read (hostFile / eventBlob) answers after this long (IPC + daemon stand-in; default 0).
 import type { HistoryMediaPayload } from "../../../shared/ipc";
 
 const query = new URLSearchParams(typeof location === "undefined" ? "" : location.search);
@@ -9,6 +10,9 @@ const count = Math.min(1000, Math.max(0, Number(query.get("imageheavy")) || 0));
 const turns = Math.min(200, Math.max(1, Number(query.get("heavyTurns")) || 60));
 const mode = query.get("heavyMode") || "mixed";
 const transport = query.get("heavyTransport") || "direct";
+const latency = Math.min(5000, Math.max(0, Number(query.get("heavyLatency")) || 0));
+/** The simulated host round trip of one read (`heavyLatency`). */
+export const imageHeavyDelay = () => latency ? new Promise<void>(resolve => setTimeout(resolve, latency)) : Promise.resolve();
 type Image = { bytes: Uint8Array; url: string; sha: string; path: string };
 let prepared: Promise<void> | null = null;
 let thread: { id: string; turns: { id: string; [key: string]: unknown }[] } | null = null;
@@ -50,7 +54,7 @@ export function prepareImageHeavy(): Promise<void> {
       const items: Record<string, unknown>[] = [{ type: "userMessage", id: `heavy-u-${turn}`, content: [{ type: "text", text: `Synthetic image batch ${turn + 1}: compare composition and colours.` }] }];
       const content = items[0]!.content as unknown[];
       for (let i = Math.floor(turn * count / turns); i < Math.floor((turn + 1) * count / turns); i++) {
-        const image = images[i]!, route = i % 5;
+        const image = images[i]!, route = mode === "paths" ? 1 : i % 5;
         const inline = mode === "inline" || (mode === "mixed" && [0, 2, 3].includes(route));
         if (inline) metrics.inlineChars += image.url.length;
         const value = inline ? image.url : descriptor(image);
@@ -78,13 +82,16 @@ export async function imageHeavyMedia(session: string, sha: string): Promise<His
   if (!IMAGE_HEAVY || session !== IMAGE_HEAVY_SESSION) return null;
   const start = performance.now(), image = images.find(image => image.sha === sha);
   if (!image) return null;
+  await imageHeavyDelay();
   calls.push({ kind: "eventBlob", ms: performance.now() - start, bytes: image.bytes.length });
   return { bytes: image.bytes.slice(), mime: "image/jpeg", size: image.bytes.length };
 }
-export function imageHeavyFile(path: string) {
+/** cutex fs/file of a fixture image; `maxBytes` 1 is the size / mtime read (one byte of content, like the host). */
+export function imageHeavyFile(path: string, maxBytes?: number) {
   if (!IMAGE_HEAVY || !path.startsWith("/synthetic/image-heavy/")) return null;
   const image = images[Number(path.split("/").pop()?.split(".")[0])];
   if (!image) return null;
+  if (maxBytes === 1) { calls.push({ kind: "hostFileVersion", ms: 0, bytes: 0 }); return { path, size: image.bytes.length, modifiedAt: "2026-10-26T00:00:00Z", encoding: "base64" as const, content: "", truncated: true, mime: "image/jpeg" }; }
   calls.push({ kind: "hostFile", ms: 0, bytes: image.bytes.length });
   return { path, size: image.bytes.length, modifiedAt: "2026-10-26T00:00:00Z", encoding: "base64" as const, content: image.url.slice(image.url.indexOf(",") + 1), truncated: false, mime: "image/jpeg" };
 }

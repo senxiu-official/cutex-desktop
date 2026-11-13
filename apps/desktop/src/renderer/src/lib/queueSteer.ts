@@ -1,4 +1,4 @@
-import { useDebug } from "./debugState";
+import { captureDebugError } from "./debugState";
 // Queue tray 插入 / 立即发送 on cutex with queue-steer (r223): main uses the atomic
 // `cutex/userInput/queue/steer`; its refusals arrive as `queue_steer_refused:` messages.
 import { parseQueueSteerError, type QueueSteerErrorKind } from "../../../shared/queueSteer";
@@ -83,17 +83,35 @@ export function queueMergeNotice(message: string, t: (key: MessageKey, vars?: Re
   return reason ? t("queue.merge.keptReason", { reason }) : t("queue.merge.kept");
 }
 
-/** A raw error (IPC-wrapped from main, or cutex's `snake_code: message`), not a notice the store worded. */
-const RAW_ERROR = /^Error invoking remote method |^[a-z][a-z0-9]*(?:_[a-z0-9]+)+: /;
+/** Errors whose outcome a visible row already states (an unknown-outcome insert shown 不确定是否送达 in 接下来). */
+const shownInRow = new WeakSet<object>();
+/** The store confirmed the failed action's row now shows its uncertain state itself. */
+export function markShownInRow(error: unknown): void {
+  if (typeof error === "object" && error !== null) shownInRow.add(error);
+}
 
 /**
- * A 接下来 action's failure (删除 / 插话 / 移动 / 继续 / 放回 / 清空 / 让出 / 中断并发送) as a toast: the store's
- * own worded notice as is; a raw error becomes a plain 「没有完成」 (a toast has no 详情; it goes to the console).
+ * A raw error, not a notice the store worded: IPC-wrapped from main, cutex's `snake_code: message`, a refusal
+ * main coded for the renderer (`queue_steer_refused:kind …`, no space after the colon), or a socket errno.
  */
-export function queueActionNotice(e: unknown, t: (key: MessageKey) => string): string {
+const RAW_ERROR = /^Error invoking remote method |^[a-z][a-z0-9]*(?:_[a-z0-9]+)+:|\bE(?:CONNREFUSED|CONNRESET|TIMEDOUT|PIPE|HOSTUNREACH|NOTFOUND|ADDRINUSE)\b/;
+
+/**
+ * A 接下来 action's failure (删除 / 插话 / 移动 / 继续 / 放回 / 清空 / 让出 / 中断并发送) as one plain sentence for
+ * the composer's notice line, or null when there is nothing to say there. The store's own worded notice as is; a
+ * queue-steer / merge refusal in its readable words; an unknown outcome → null only when the store confirmed its
+ * 接下来 row now says 不确定是否送达 with 重新发送 / 放弃 (markShownInRow), else its plain sentence; any other raw error → a plain 「没有完成」. Never the backend's codes or
+ * words: those go to the console and, with 调试模式 on, to its error list (which can be copied).
+ */
+export function queueActionNotice(e: unknown, t: (key: MessageKey) => string): string | null {
   const message = e instanceof Error ? e.message : String(e);
-  if (useDebug.getState().state.enabled) return message;
-  if (!RAW_ERROR.test(message)) return message;
+  const steer = parseQueueSteerError(message);
+  const merge = steer ? null : parseQueueMergeError(message);
+  if (!steer && !merge && !RAW_ERROR.test(message)) return message;
   console.warn("queue action failed:", message);
+  captureDebugError(e, "renderer.queueAction");
+  if (steer?.kind === "outcomeUnknown" && typeof e === "object" && e !== null && shownInRow.has(e)) return null;
+  if (steer) return queueSteerNotice(message, t);
+  if (merge) return queueMergeNotice(message, t);
   return t("queue.actionFailed");
 }

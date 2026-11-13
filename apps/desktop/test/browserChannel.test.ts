@@ -24,6 +24,7 @@ describe("browser narrow channel parsing", () => {
     { op: "list" }, { op: "setEnabled", enabled: false }, { op: "resetOrigins" }, { op: "reserveOwnerTab" },
     { op: "dismissLoginWarning", tabKey: "side", origin: "https://login.example" },
     { op: "openOwnerCopy", tabKey: "side" },
+    { op: "openBlockedNavigation", tabKey: "side", id: "main-retry" },
     { op: "open", tabKey: "side", url: "about:blank" },
     { op: "open", tabKey: "side", url: "http://localhost:26111/", desktopLoopback: "a".repeat(64) },
     { op: "open", tabKey: "side", url: "about:blank", receipt: { src: "about:blank#fixture", webContentsId: 4 } },
@@ -43,6 +44,8 @@ describe("browser narrow channel parsing", () => {
     { op: "dismissLoginWarning", tabKey: "side", origin: "https://login.example", hostId: "other" },
     { op: "openOwnerCopy", tabKey: "side", url: "https://forged.example" },
     { op: "openOwnerCopy", tabKey: "side", pool: "owner" },
+    { op: "openBlockedNavigation", tabKey: "side", id: "main-retry", url: "http://localhost/forged" },
+    { op: "openBlockedNavigation", tabKey: "side", id: "main-retry", userGesture: true },
     { op: "list", hostId: "ssh-other" }, { op: "setEnabled", enabled: "yes" },
     { op: "setEnabled", enabled: true, hostId: "local" }, { op: "close", tabKey: "side", unmount: 1 },
     { op: "open", tabKey: "side", url: "about:blank", partition: "persist:browser-local" },
@@ -141,7 +144,7 @@ describe("browser preload bindings", () => {
     const bridge = browserBridge({ invoke, binding: () => ({ hostId: "remote", epoch: "epoch", focus: true }), subscribe: () => () => {} });
     const browser = bridge.forHost("remote");
     expect(browser).not.toHaveProperty("grant");
-    expect(Object.keys(browser).sort()).toEqual(["agents", "back", "claimAllowRevoke", "claimAllows", "claimAudit", "claimOpen", "claimPolicy", "clearIdempotency", "close", "desktopLoopback", "desktopLoopbackChallenge", "dismissLoginWarning", "forward", "grantAgent", "holdReady", "list", "navigate", "open", "openOwnerCopy", "openRefused", "ownerInput", "pauseLease", "pauseMedia", "profileTools", "releaseLease", "reload", "reserveOwnerTab", "resumeLease", "setMuted", "setZoom", "settings", "stop", "toBackground", "toolItem", "turnShot", "turnShots"]);
+    expect(Object.keys(browser).sort()).toEqual(["agents", "back", "claimAllowRevoke", "claimAllows", "claimAudit", "claimOpen", "claimPolicy", "clearIdempotency", "close", "desktopLoopback", "desktopLoopbackChallenge", "dismissLoginWarning", "forward", "grantAgent", "holdReady", "list", "navigate", "open", "openBlockedNavigation", "openOwnerCopy", "openRefused", "ownerInput", "pauseLease", "pauseMedia", "profileTools", "releaseLease", "reload", "reserveOwnerTab", "resumeLease", "setMuted", "setZoom", "settings", "stop", "toBackground", "toolItem", "turnShot", "turnShots"]);
     expect(invoke).not.toHaveBeenCalled();
   });
   it("binds login dismissal and owner-copy requests to the source host without accepting a target URL", async () => {

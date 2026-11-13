@@ -12,6 +12,7 @@ const fx = vi.hoisted(() => ({
   look: {
     color: "#3366cc", family: "openai", themes: null, isDirector: false, isOperator: false, pinned: false,
     project: null as null | { hostId: string; id: string; mark: string; color: string },
+    icons: {} as Record<string, { kind: "emoji" | "icon" | "text"; value: string }>,
     badge: null as null | { text: string; tint?: "blue" | "green" | "amber" | "pink" | "violet" },
   },
   minor: false,
@@ -20,6 +21,7 @@ vi.mock("../src/renderer/src/i18n", () => ({ useI18n: () => ({ t: (key: string) 
 vi.mock("../src/renderer/src/lib/agentLook", () => ({ useAgentLook: (seed: string | undefined) => (seed ? fx.look : null), useMinorDot: () => fx.minor, useProjectStyleWorn: () => new Set() }));
 vi.mock("../src/renderer/src/lib/directorAvatars", () => ({ useDirectorAvatarUrl: () => null }));
 vi.mock("../src/renderer/src/lib/portraitPacks", () => ({ portraitFor: () => null, portraitRefOf: () => null, usePortraitImage: () => null, usePortraitPacks: () => ({ index: {} }) }));
+vi.mock("../src/renderer/src/lib/projectIconSync", () => ({ useProjectIcons: () => fx.look.icons }));
 vi.mock("../src/renderer/src/lib/avatarStylePreview", () => ({ useStyleAssignmentPreview: () => null }));
 import { Avatar } from "../src/renderer/src/components/Avatar";
 import { setUiPref } from "../src/renderer/src/lib/prefs";
@@ -47,13 +49,15 @@ describe("avatarMark", () => {
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let host: HTMLDivElement; let root: Root;
 beforeEach(() => {
-  fx.look.isDirector = false; fx.look.project = null; fx.look.badge = null; fx.minor = false;
+  fx.look.isDirector = false; fx.look.project = null; fx.look.badge = null; fx.look.icons = {}; fx.minor = false;
   host = document.createElement("div"); document.body.append(host); root = createRoot(host);
   act(() => setUiPref("agentAvatarDefault", "letter"));
 });
 afterEach(() => { act(() => root.unmount()); host.remove(); });
 const draw = (props: Record<string, unknown> = {}) => act(() => root.render(h(Avatar, { name: "Agent", seed: "s", size: 32, ...props } as never)));
 const chip = () => host.querySelector<HTMLElement>("[data-project-mark]");
+/** The host key of project p on host local (lib/hostKeys hostKey). */
+const KEY = JSON.stringify(["local", "p"]);
 
 describe("Avatar: the owner's badge as the mark", () => {
   it("draws the badge exactly as a project mark of the same text would be drawn (place, box, font)", () => {
@@ -75,27 +79,17 @@ describe("Avatar: the owner's badge as the mark", () => {
     draw();
     expect(host.querySelectorAll("[data-project-mark]")).toHaveLength(1);
     expect(chip()!.textContent).toBe("主管");
-    expect(chip()!.style.background).toContain("rgb(250, 82, 82)"); // projectColor("red")
-  });
-  it("an opaque pill in the project colour with black / white ink: no glass, no blur, nothing per theme", () => {
-    for (const [color, ink] of [["red", "rgb(0, 0, 0)"], ["magenta", "rgb(255, 255, 255)"], ["#3fa7a3", "rgb(0, 0, 0)"]] as const) {
-      fx.look.isDirector = true; fx.look.project = { hostId: "local", id: "p", mark: "WvLn", color }; fx.look.badge = null;
-      draw();
-      const c = chip()!;
-      expect(c.style.backgroundColor || c.style.background).not.toMatch(/gradient|color-mix|transparent/);
-      expect(c.style.color).toBe(ink);
-      expect(c.style.backdropFilter).toBe("");
-      expect(c.getAttribute("style")).not.toMatch(/light-dark|backdrop/);
-    }
+    expect(chip()!.style.getPropertyValue("--project-icon-color")).toBe("#fa5252"); // projectColor("red")
   });
   it("box sizes are unchanged (no layout shift): place, height, padding per avatar size", () => {
     fx.look.isDirector = true; fx.look.project = { hostId: "local", id: "p", mark: "ctxH", color: "cyan" }; fx.look.badge = null;
     const box = () => { const c = chip()!.style; return [c.left, c.bottom, c.height, c.minWidth, c.padding, c.fontSize, c.borderRadius]; };
-    draw({ size: 28 }); expect(box()).toEqual(["-3px", "-2px", "12px", "12px", "0px 4px", "8.5px", "3px"]);
-    draw({ size: 32 }); expect(box()).toEqual(["-3px", "-2px", "13px", "13px", "0px 4px", "9px", "3px"]);
-    draw({ size: 40 }); expect(box()).toEqual(["-3px", "-2px", "13px", "13px", "0px 4px", "9px", "3px"]);
-    draw({ size: 48 }); expect(box()).toEqual(["-3px", "-2px", "14px", "14px", "0px 4px", "9.5px", "3px"]);
-    draw({ size: 28, status: { presence: "online" } }); expect(box()).toEqual(["-5px", "-2px", "12px", "12px", "0px 1px", "8.5px", "3px"]);
+    // Heights and places as before the 2026-11-12 redesign (the avatar row never moves); the UI font needs 3 px sides.
+    draw({ size: 28 }); expect(box()).toEqual(["-3px", "-2px", "12px", "12px", "0px 3px", "8.5px", "4px"]);
+    draw({ size: 32 }); expect(box()).toEqual(["-3px", "-2px", "13px", "13px", "0px 3px", "9px", "4px"]);
+    draw({ size: 40 }); expect(box()).toEqual(["-3px", "-2px", "13px", "13px", "0px 3px", "9px", "4px"]);
+    draw({ size: 48 }); expect(box()).toEqual(["-3px", "-2px", "14px", "14px", "0px 3px", "9.5px", "4px"]);
+    draw({ size: 28, status: { presence: "online" } }); expect(box()).toEqual(["-5px", "-2px", "12px", "12px", "0px 1px", "8.5px", "4px"]);
   });
   it("crowded rules apply with a presence dot (the same as a project mark)", () => {
     fx.look.badge = { text: "ABCD" };
@@ -109,5 +103,49 @@ describe("Avatar: the owner's badge as the mark", () => {
     fx.minor = true; draw({ size: 32 }); expect(chip()).toBeNull();
     fx.minor = false; draw({ size: 96, picture: "data:image/png;base64,AA==", cutout: true }); expect(chip()).toBeNull();
     draw({ size: 32 }); expect(chip()!.textContent).toBe("HELP");
+  });
+});
+
+describe("Avatar mark: the sidebar's project tile (owner 2026-11-13)", () => {
+  it("is the sidebar's project icon: .project-icon tile, opaque over the card, per-theme ink, the UI font", () => {
+    fx.look.isDirector = true; fx.look.project = { hostId: "local", id: "p", mark: "ctxE", color: "#3fa7a3" };
+    draw();
+    const c = chip()!;
+    expect(c.classList.contains("project-icon")).toBe(true);
+    expect(c.classList.contains("project-mark-tile")).toBe(true);
+    expect(c.style.getPropertyValue("--mark-ink-light")).toMatch(/^#[0-9a-f]{6}$/);
+    expect(c.style.getPropertyValue("--mark-ink-dark")).toMatch(/^#[0-9a-f]{6}$/);
+    expect(c.style.getPropertyValue("--project-icon-color")).toBe("#3fa7a3");
+    // Opaque: the tint is mixed into the card colour behind the avatar, never into transparent (a portrait must not show).
+    const style = c.getAttribute("style")!;
+    expect(style).toContain("var(--avatar-cut, var(--bg)))");
+    expect(style).not.toMatch(/backdrop/);
+    expect(c.style.background).not.toContain("transparent");
+    expect(c.style.fontFamily).toBe("var(--font-sans)");
+    expect(c.textContent).toBe("ctxE");
+  });
+  it("a project's lucide icon is drawn as the glyph; emoji / text icons are the text", () => {
+    fx.look.isDirector = true; fx.look.project = { hostId: "local", id: "p", mark: "RO", color: "blue" };
+    fx.look.icons = { [KEY]: { kind: "icon", value: "globe" } };
+    draw();
+    expect(chip()!.dataset.markGlyph).toBe("icon");
+    expect(chip()!.querySelector("svg")).not.toBeNull();
+    expect(chip()!.style.padding).toBe("0px");
+    fx.look.icons = { [KEY]: { kind: "emoji", value: "🌊" } };
+    draw();
+    expect(chip()!.dataset.markGlyph).toBe("emoji");
+    expect(chip()!.textContent).toBe("🌊");
+    // An id this desktop's catalog does not have: the letters.
+    fx.look.icons = { [KEY]: { kind: "icon", value: "no-such-icon" } };
+    draw();
+    expect(chip()!.querySelector("svg")).toBeNull();
+    expect(chip()!.textContent).toBe("RO");
+  });
+  it("the owner's badge on a Director drops the project icon (the badge text wins)", () => {
+    fx.look.isDirector = true; fx.look.project = { hostId: "local", id: "p", mark: "RO", color: "blue" }; fx.look.badge = { text: "主管" };
+    fx.look.icons = { [KEY]: { kind: "icon", value: "globe" } };
+    draw();
+    expect(chip()!.querySelector("svg")).toBeNull();
+    expect(chip()!.textContent).toBe("主管");
   });
 });

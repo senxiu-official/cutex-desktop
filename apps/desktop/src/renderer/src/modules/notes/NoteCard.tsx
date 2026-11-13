@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ArrowUpRight, Eye, Pencil, Pin, Quote } from "lucide-react";
 import { Streamdown } from "streamdown";
+import { BARE_STREAMDOWN_REHYPE } from "../../lib/markdownPathText";
 import type { Note, NoteScope } from "../../../../shared/notes";
 import { ArmedRemove, Button, IconButton } from "../../components/settings/Form";
 import { useI18n } from "../../i18n";
@@ -51,7 +52,7 @@ export function NoteCard({ hostId, note, projectId, readOnly = false, onDismissE
       <ArmedRemove title={t("notes.delete")} disabled={busy} armedLabel={t("notes.deleteConfirm")} onRemove={() => void run(() => notesCache.remove(hostId, note))} /></>}
     </div>
     {/* Wraps like a notification (styles.css .wrap-all): code and tables too, never a sideways scrollbar. */}
-    <div className="wrap-all min-w-0 break-words text-ui/[inherit] leading-relaxed"><Streamdown mode="static" className="markdown" translations={translations}>{note.body}</Streamdown></div>
+    <div className="wrap-all min-w-0 break-words text-ui/[inherit] leading-relaxed"><Streamdown mode="static" className="markdown" rehypePlugins={BARE_STREAMDOWN_REHYPE} translations={translations}>{note.body}</Streamdown></div>
     {unavailable && <p className="text-xs text-warn" title={note.anchorStateAt ?? undefined}>{t(status === "sessionDeleted" ? "notes.sessionDeleted" : "notes.reverted")}</p>}
     {status === "unknown" && <p className="text-xs text-subtle">{t("notes.sourceUnknown")}</p>}
     {error && <p role="alert" className="text-xs text-danger">{noteErrorText(error, t)}</p>}

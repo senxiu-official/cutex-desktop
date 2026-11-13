@@ -19,7 +19,7 @@ import { observeSync } from "../lib/syncResize";
 import { ArrowLeftRight, ChevronRight, Maximize2, Minimize2, PanelLeftClose, PanelLeftOpen, Search, X } from "lucide-react";
 import { useI18n, type MessageKey } from "../i18n";
 import { resetDragonSize } from "../lib/aboutDragon";
-import { settingsNavGroups, settingsNavPage, settingsTab } from "../lib/settingsNav";
+import { SETTINGS_NAV_UNTITLED, settingsNavGroups, settingsNavPage, settingsTab } from "../lib/settingsNav";
 import { setSettingsHost } from "../lib/settingsHost";
 import { useSettingsAffectsHover } from "../lib/panelSettings";
 import {
@@ -145,7 +145,7 @@ function WideNav({ tab: shown }: { tab: string }) {
     <nav data-settings-rail="wide" aria-label={t("settingsShelf.rail")} className="flex shrink-0 flex-col overflow-y-auto pt-1 pr-2 pb-2 select-none" style={{ width: SETTINGS_NAV_W }}>
       {groups.map(({ group, entries }) => (
         <div key={group} className="mb-3">
-          <div className="px-2 pt-1 pb-1 text-sm text-subtle">{t(`settings.group.${group}` as MessageKey)}</div>
+          {!SETTINGS_NAV_UNTITLED.includes(group) && <div className="px-2 pt-1 pb-1 text-sm text-subtle">{t(`settings.group.${group}` as MessageKey)}</div>}
           {entries.map((e) => (
             <ItemBoundary key={e.item.id} moduleId={e.moduleId}>
               <Category entry={e} current={tab === e.item.page} wide />

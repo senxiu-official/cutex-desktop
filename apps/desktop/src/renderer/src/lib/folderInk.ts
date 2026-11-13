@@ -44,16 +44,23 @@ export function worstContrast(ink: string, theme: "light" | "dark"): number {
   return Math.min(...SIDEBAR_BACKGROUNDS[theme].map((bg) => contrastRatio(hexRgb(ink), hexRgb(bg))));
 }
 
+/** `a` (#RRGGBB) mixed with `b` in oklab, `amount` of `b` (CSS `color-mix(in oklab, a (1-amount), b)`), as #rrggbb. */
+export function mixHex(a: string, b: string, amount: number): string {
+  return hex(mix(hexRgb(a), hexRgb(b), amount));
+}
+
+/** `color` from `start` further toward black (light) / white (dark) until it reads INK_TARGET on every one of `backgrounds`. */
+export function readableInk(color: string, theme: "light" | "dark", start: number, backgrounds: readonly string[]): string {
+  const c = hexRgb(color);
+  const toward: Rgb = theme === "light" ? [0, 0, 0] : [1, 1, 1];
+  for (let amount = start; amount < 1; amount += 0.02) {
+    const ink = hex(mix(c, toward, amount));
+    if (Math.min(...backgrounds.map((bg) => contrastRatio(hexRgb(ink), hexRgb(bg)))) >= INK_TARGET) return ink;
+  }
+  return hex(toward);
+}
+
 /** The ink of `color` (#RRGGBB) for light and dark themes. */
 export function folderInks(color: string): { light: string; dark: string } {
-  const c = hexRgb(color);
-  const derive = (theme: "light" | "dark", start: number) => {
-    const toward: Rgb = theme === "light" ? [0, 0, 0] : [1, 1, 1];
-    for (let amount = start; amount < 1; amount += 0.02) {
-      const ink = hex(mix(c, toward, amount));
-      if (worstContrast(ink, theme) >= INK_TARGET) return ink;
-    }
-    return hex(toward);
-  };
-  return { light: derive("light", 0.24), dark: derive("dark", 0.12) };
+  return { light: readableInk(color, "light", 0.24, SIDEBAR_BACKGROUNDS.light), dark: readableInk(color, "dark", 0.12, SIDEBAR_BACKGROUNDS.dark) };
 }

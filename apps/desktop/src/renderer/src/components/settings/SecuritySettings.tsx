@@ -28,6 +28,7 @@ import { MessageTemplatesSection } from "./GlobalSettings";
 import { AddButton, ArmedRemove, Button, EmptyState, ErrorNote, ListFilter, Loading, Notice, ResetButton, SettingRow, Section, Segmented, SettingsGroup, SubPageRow } from "./Form";
 import { useTargetFeatures, useTargetHostId, useTargetHostLabel, useTargetSelect, useTargetSidebar } from "../../lib/targetHost";
 import { projectIcon } from "../../lib/projectIcons";
+import { useProjectIcons } from "../../lib/projectIconSync";
 import { useUiPrefs } from "../../lib/prefs";
 import { ProjectBadge } from "../ProjectBadge";
 
@@ -102,7 +103,7 @@ function ProjectGrants({ projectId, security, patch, saving, showProject }: { pr
   const grants = security.externalAgents ?? [];
   const mine = grantsFor(grants, projectId);
   const project = sidebar?.projects?.projects.find((p) => p.project_id === projectId);
-  const icon = projectIcon(useUiPrefs().projectIcons, hostId, projectId);
+  const icon = projectIcon(useProjectIcons(), hostId, projectId);
   const picker = useGrantMenu(security, setPending, setError, projectId)(projectId);
   const all = [...(sidebar?.active ?? []), ...(sidebar?.retired ?? [])];
   return (

@@ -43,8 +43,10 @@ import { applyTurnEvent, endTurn, serverRequestEventOf, turnEventOf, turnOwnerOf
 import { markSeenOn, recordTurnEndOn, recordTurnStartOn, turnEndOf, turnStartOf } from "./lib/turnUnread";
 import { agentFeaturesOf, lacks, isAcpAgent } from "./lib/agentFeatures";
 import { applyApprovalChange, approvalChangeOf, approvalOfToolEvent, APPROVALS_FEATURE, APPROVALS_LIVE_FEATURE, noteApprovalState, sortApprovals, withoutApproval } from "./lib/approvals";
+import { approvalHeading } from "./lib/approvalTitle";
 import { parseUnsupported } from "../../shared/unsupported";
-import { QUEUE_STEER_FEATURE, queueMergeNotice, queueSteerNotice, queueSteerRaw } from "./lib/queueSteer";
+import { inputLabel } from "./lib/inputLedger/labels";
+import { QUEUE_STEER_FEATURE, markShownInRow, queueActionNotice, queueMergeNotice, queueSteerNotice, queueSteerRaw } from "./lib/queueSteer";
 import { beginQueueInsert, clearQueueInsert, dismissQueueInsert, finishQueueInsert, hasQueueInsertRequest, insertFeedbackOf, linkQueueInsertDelivery, markQueueInsertDelivered, noteQueueInsertImageDelivery, queueInsertByToken, reconcileQueueInsert, setQueueInsertChecking, useQueueInsertFeedback } from "./lib/queueInsertFeedback";
 import { withoutDeliveredOwnerItems } from "./lib/legacyDelivery/ownerInputDelivery";
 import { OUTCOME_CHECK_DELAYS_MS, OUTCOME_EVENT_MIN_GAP_MS, OUTCOME_SLOW_POLLS_MS, rawErrorText, steerOutcome } from "./lib/legacyDelivery/steerOutcome";
@@ -86,6 +88,7 @@ import { recordRuntimeStop } from "./lib/runtimeStops";
 import { startJobSync, useJobs } from "./lib/jobStore";
 import { startRuntimePackageSync } from "./lib/runtimePackageStore";
 import { hostBusyActionError } from "../../shared/hostBusyAction";
+import { CREATOR_PATHS_CODE, creatorPathsBlock, creatorPathsWire } from "../../shared/creatorPaths";
 import { hostBusyActionKey, hostBusyActionShown, isHostBusyActionPending, runHostBusyAction } from "./lib/hostBusyActions";
 import { useAgentMessages } from "./lib/agentMessageStore";
 import { refreshPendingOwnerNotes, seedOwnerNotes, startOwnerNotifySync } from "./lib/ownerNotifyStore";
@@ -514,6 +517,8 @@ interface AppState {
    * host (default: the host of its open view, else the focus host; menus of another host's rows pass it).
    */
   sessionAction(sessionId: string, method: SessionActionMethod, params?: Record<string, unknown>, hostId?: string): Promise<unknown>;
+  /** 重新批准文件夹 (shared/creatorPaths): approve the child agent's current folders, then start it again. */
+  reapprovePathsAndStart(sessionId: string, hostId: string): Promise<void>;
   /** Replaces `fields` of agent `sessionId` in host `hostId`'s sidebar snapshot at once (optimistic metadata, lib/menus). */
   patchSessionResource(sessionId: string, hostId: string, fields: Partial<SessionResource>): void;
   /**
@@ -1295,7 +1300,8 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
       } catch (error) {
         hostBusy = hostBusyActionError(error) !== null;
         if (starting && !hostBusy && scope.current() && viewOn(sessionId, scope.host)) {
-          const message = error instanceof Error ? error.message : String(error);
+          const paths = creatorPathsBlock(error);
+          const message = paths ? creatorPathsWire({ code: CREATOR_PATHS_CODE, details: paths })! : error instanceof Error ? error.message : String(error);
           // A failed send-start (queued inputs) keeps its own, more specific line.
           patchSession(sessionId, (v) => (v.startErrorQueueIds?.length ? {} : { startError: message, startErrorQueueIds: undefined }), scope.host);
         }
@@ -1759,7 +1765,9 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
     } catch (e) {
       if (!scope.current()) return;
       setSteers(sessionId, host, (list) => [...list.filter((x) => x.id !== p.id), { ...p, state: "undelivered" }]);
-      notifyAgent(sessionId, host, sendErrorText(e, () => translate("outbox.capacityExceeded"), (code) => code === "owner_required" ? translate("queue.steer.ownerRequired") : translate(`users.access.${code}`)), "error");
+      // One plain sentence, never cutex's raw code (lib/queueSteer queueActionNotice).
+      const text = queueActionNotice(new Error(sendErrorText(e, () => translate("outbox.capacityExceeded"), (code) => code === "owner_required" ? translate("queue.steer.ownerRequired") : translate(`users.access.${code}`))), translate);
+      if (text) notifyAgent(sessionId, host, text, "error");
     }
   };
 
@@ -2406,6 +2414,16 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
     },
 
     sessionAction: performSessionAction,
+
+    async reapprovePathsAndStart(sessionId, hostId) {
+      const scope = captureHost(hostId);
+      await apiOn(scope.host).reapproveSessionPaths(sessionId);
+      if (!scope.current()) return;
+      // The refusal is answered; the start that follows reports its own outcome.
+      patchSession(sessionId, (v) => (v.startError && creatorPathsBlock(v.startError) ? { startError: null, startErrorQueueIds: undefined } : {}), scope.host);
+      // A failed start shows on the conversation's start line (performSessionAction), not as a re-approval failure.
+      await performSessionAction(sessionId, "cutex/runtime/online", { openVisibleTerminal: false }, scope.host).catch(() => {});
+    },
 
     patchSessionResource(sessionId, hostId, fields) {
       const patch = (sidebar: SidebarSnapshot | null): SidebarSnapshot | null => {
@@ -3163,7 +3181,7 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
               agentName: requester,
               projectId: a.projectId !== undefined ? a.projectId : row ? (row.projectId ?? null) : undefined,
               title: titled(`${requester} · ${translate("notify.approval")}`),
-              body: a.summary,
+              body: approvalHeading(a, translate).title,
               looking: focus && appHasFocus() && (pageOf(get().view) === "approvals.page" || pageInShelfShown("approvals.page")),
               // A local agent's request: its conversation shows the decision card (BrowserClaimOverlay).
               onClick: () => (row ? void get().openAgent(a.requesterCutexSessionId, hostId) : openApprovalsOn(hostId)),
@@ -3384,7 +3402,7 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
                 await performSessionAction(sessionId, "cutex/runtime/online", { openVisibleTerminal: false, expectedRuntimeGeneration: intent.generation }, hostId, busy);
               })().catch(() => {});
             } else {
-              patchSession(sessionId, { startError: error?.message ?? "start failed", startErrorQueueIds: failed?.queueIds }, hostId);
+              patchSession(sessionId, { startError: creatorPathsWire(error) ?? error?.message ?? "start failed", startErrorQueueIds: failed?.queueIds }, hostId);
             }
           }
           // The offline-start worker can lose a race to another successful launch. Its failure
@@ -3820,7 +3838,12 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
           const result = await apiOn(host).queuePromote(id, item.queueId, item.revision, true, joinDelegation, options?.ifIdle ? { ifIdle: options.ifIdle } : undefined);
           if (current()) await mergeLedgerReply(id, host, result.result.input, generation);
         } catch (error) {
-          if (current()) await getLedgerInput(id, host, item.clientUserMessageId).catch(() => {});
+          const read = current() ? await getLedgerInput(id, host, item.clientUserMessageId).then(() => true, () => false) : false;
+          // The composer stays quiet about an unknown outcome only when its 接下来 row now says so itself
+          // (不确定是否送达 · 重新发送 / 放弃); an unreadable record leaves the row as it was → the notice speaks.
+          const held = read && current() ? ledgerSession(id, host).records.get(item.clientUserMessageId) : undefined;
+          const label = held ? inputLabel(held) : null;
+          if (label?.kind === "label" && label.id === "uncertain") markShownInRow(error);
           throw error;
         } finally { refreshQueue(id, host); release(); }
         return;

@@ -16,8 +16,9 @@ import { useStyleAssignmentPreview } from "../lib/avatarStylePreview";
 import { useUiPrefs } from "../lib/prefs";
 import { badgeBox, type AvatarBadgeTone, type AvatarStatus } from "../lib/avatarStatus";
 import { projectIcon } from "../lib/projectIcons";
-import { projectColor } from "../lib/sidebar";
-import { avatarCarriesMark, avatarMark, MARK_RADIUS, markInk, projectMarkCrowded, projectMarkFont, projectMarkHeight, projectMarkText, type AvatarMark } from "../lib/projectMark";
+import { useProjectIcons } from "../lib/projectIconSync";
+import { avatarCarriesMark, avatarMark, projectMarkText, type AvatarMark } from "../lib/projectMark";
+import { ProjectMarkChip } from "./ProjectMarkChip";
 import { badgeColor } from "../lib/sessionBadge";
 import { useI18n } from "../i18n";
 import { headwearBox, headwearFor, headwearSources, useSeasonalHeadwear, type HeadwearPicture } from "../lib/directorHeadwear";
@@ -65,7 +66,8 @@ import { headwearBox, headwearFor, headwearSources, useSeasonalHeadwear, type He
  * the same box and font rules, in the badge's tint; on a Director it replaces the project's text (lib/projectMark avatarMark).
  */
 export function Avatar({ name, color, avatar, avatarMode: draftMode, picture, size = 28, initial: given, seed, status, cutout, agent }: { name: string; color?: string | null; avatar?: SessionAvatar | null; avatarMode?: AvatarMode; picture?: string | null; size?: number; initial?: string | null; seed?: string | null; status?: AvatarStatus | null; cutout?: boolean; /** An agent without a `seed` (or one the snapshots do not hold): what is known of it (lib/agentHint AgentHint). */ agent?: AgentHint | null }) {
-  const { avatarTint, projectIcons, directorHeadwear, operatorHeadwear, seasonalHeadwear } = useUiPrefs();
+  const { avatarTint, directorHeadwear, operatorHeadwear, seasonalHeadwear } = useUiPrefs();
+  const projectIcons = useProjectIcons();
   const festival = useSeasonalHeadwear(seasonalHeadwear);
   const look = useAgentLook(seed);
   // An agent the snapshots do not hold (being created, another host, deleted; owner 2026-11-01): its letter tile with the
@@ -160,7 +162,9 @@ export function Avatar({ name, color, avatar, avatarMode: draftMode, picture, si
   // badge; not on small avatars or a minor tile.
   const marked = !dot && avatarCarriesMark(size);
   const directed = marked && look?.isDirector ? look.project : null;
-  const projectMark = directed ? { text: projectMarkText(projectIcon(projectIcons, directed.hostId, directed.id), directed.mark), color: directed.color } : null;
+  const directedIcon = directed ? projectIcon(projectIcons, directed.hostId, directed.id) : null;
+  // A lucide icon is drawn as the glyph (ProjectMarkChip); text / emoji icons are the text.
+  const projectMark = directed ? { text: projectMarkText(directedIcon, directed.mark), color: directed.color, icon: directedIcon?.kind === "icon" ? directedIcon : null } : null;
   const mark = marked ? avatarMark(projectMark, look?.badge ? { text: look.badge.text, color: badgeColor(look.badge.tint) } : null) : null;
   const hat = dot || cutout || !look ? null : headwearFor(directorHeadwear, look, size, { operators: operatorHeadwear, seasonal: festival });
   if (hat) face = <HeadwearFrame size={size} style={hat}>{face}</HeadwearFrame>;
@@ -175,41 +179,6 @@ const BADGE_TONE: Record<AvatarBadgeTone, { background: string; color: string }>
 };
 
 type DirectorMark = AvatarMark;
-
-/** The project mark chip (also the owner's badge, lib/projectMark avatarMark): a small opaque rectangle in the project colour,
- *  1–4 columns in white or black, whichever reads (lib/projectMark markInk, ≥ 4.5:1 over any portrait, either theme). A 1 px
- *  cut in `--avatar-cut` (as the corner badge has) parts it from the face, so it reads as a label, not a second avatar. */
-function ProjectMarkChip({ size, mark, dot = false }: { size: number; mark: DirectorMark; dot?: boolean }) {
-  const h = projectMarkHeight(size);
-  const crowded = projectMarkCrowded(size, mark.text, dot);
-  const font = projectMarkFont(h, mark.text, crowded);
-  const hex = projectColor(mark.color);
-  return (
-    <span
-      data-project-mark=""
-      aria-hidden
-      className="pointer-events-none absolute flex items-center justify-center font-semibold whitespace-nowrap"
-      style={{
-        left: crowded ? -5 : -3,
-        bottom: -2,
-        height: h,
-        minWidth: h,
-        padding: crowded ? "0 1px" : font.sans ? "0 2px" : "0 4px",
-        borderRadius: MARK_RADIUS,
-        background: hex,
-        color: markInk(hex),
-        // The code font (Latin letters even-spaced at 9 px); text with a hanzi: the UI font, bigger (lib/projectMark).
-        fontFamily: font.sans ? "var(--font-sans)" : "var(--font-mono), var(--font-sans)",
-        letterSpacing: font.sans ? 0 : "0.02em",
-        fontSize: font.size,
-        lineHeight: 1,
-        boxShadow: "0 0 0 1px var(--avatar-cut, var(--bg))",
-      }}
-    >
-      {mark.text}
-    </span>
-  );
-}
 
 /** The face with the Director's headwear over it (lib/directorHeadwear: the owner's fit, relative to the diameter). */
 function HeadwearFrame({ size, style, children }: { size: number; style: HeadwearPicture; children: ReactNode }) {

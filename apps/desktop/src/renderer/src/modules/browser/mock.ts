@@ -7,6 +7,8 @@
 // `?browserChrome=none|granted|operating|paused|pending` (`&browserPool=agent`, `&browserZoom=1.25`): every browser card
 // shows an attached page in that control state, so the card's three rows can be looked at without a host (the buttons
 // reach no bridge; a click reports a failure in the row).
+// `&browserBlocked=open|noopen`: main refused an automatic navigation into a private origin — the in-tab notice, with or
+// without 仍然打开 (which reaches no bridge here: clicking it shows the inline failure).
 import type { ModuleMock } from "../../dev/mockTypes";
 import { browserActivation, type BrowserTabView } from "../../../../shared/browser";
 
@@ -23,6 +25,7 @@ function previewChrome(params: URLSearchParams): void {
       url: service ? url : "https://example.org/research/notes", title: service ? "RNA velocity" : "Research notes · Example",
       pool: params.get("browserPool") === "agent" ? "agent" : "owner", zoom: Number(params.get("browserZoom")) || undefined, lease,
       control: lease && state !== "pending" ? { grantee: "Moth", state: state === "paused" ? "paused" : "granted", operating: state === "operating" } : undefined,
+      blockedNavigation: params.has("browserBlocked") ? { id: "preview-blocked-1", url: "http://10.0.0.20:8123/lovelace/0?kiosk", canOpen: params.get("browserBlocked") !== "noopen" } : undefined,
     };
     // browserCache.ts takes it (dev-only listener): a module mock reaches module state only through events.
     window.dispatchEvent(new CustomEvent("cutex-preview-browser-view", { detail: view }));

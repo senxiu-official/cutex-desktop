@@ -26,6 +26,7 @@ export function browserBridge(options: BrowserPreloadOptions): BrowserBridge {
         return options.invoke(BROWSER_CHANNEL, request, binding);
       };
       return {
+        openBlockedNavigation: (tabKey, id) => call({ op: "openBlockedNavigation", tabKey, id }) as Promise<void>,
         dismissLoginWarning: (tabKey, origin) => call({ op: "dismissLoginWarning", tabKey, origin }) as Promise<void>,
         openOwnerCopy: tabKey => call({ op: "openOwnerCopy", tabKey }) as Promise<{ tabKey: string; url: string }>,
         reserveOwnerTab: () => call({ op: "reserveOwnerTab" }) as Promise<{ tabKey: string }>,

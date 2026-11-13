@@ -136,7 +136,8 @@ import { unlistedModel, composerEfforts } from "../lib/models";
 import { claudePickerItems, claudeShortName } from "../lib/claudeModels";
 import { sharedResizeObserver } from "../lib/resizeHub";
 import { NoSteerSendHint } from "./NoSteerSendHint";
-import { busyPlaceholderKey, noSteerHintShown } from "../lib/noSteerHint";
+import { noSteerHintShown } from "../lib/noSteerHint";
+import { composerPlaceholder, TEXTAREA_PLACEHOLDER_CLASS } from "../lib/composerPlaceholder";
 import { useOwnerWindow } from "../lib/ownerContext";
 
 
@@ -500,6 +501,11 @@ export function Composer({
   const scope = useConvScope();
   const here = useMemo<AgentAddress>(() => ({ hostId, sessionId }), [hostId, sessionId]);
   const notifyHere = (text: string, tone?: "info" | "error") => useApp.getState().notify(text, tone, here);
+  /** A 接下来 action failed: one plain sentence, or nothing when its row already says it (lib/queueSteer). */
+  const notifyAction = (e: unknown) => {
+    const text = queueActionNotice(e, t);
+    if (text) notifyHere(text, "error");
+  };
   const signalHere = (target: string, arg?: string) => useApp.getState().signal(target, arg, here);
   const { text, setText, images, setImages, pickedSkills, setPickedSkills, clearDraft, captureDraft } = useComposerDraft(hostId, sessionId);
   const { sendKeys, delegationSteerKeys, queueSectionStrip, queuePanelFold } = useUiPrefs();
@@ -707,6 +713,7 @@ export function Composer({
   const liveExtras = !isAcpAgent(agent) && liveExtrasApply({ feature: liveExtrasFeature, claude: !!session && runtimeOf(session) === "claude", online, settings });
   const noSteer = lacks(agent, "turnSteer");
   const cannotInsert = noSteer || (!!delegation && !canJoin);
+  const placeholder = composerPlaceholder(t, { delegation: !!delegation, awaiting: !!awaiting, busy: busyLook, noSteer, name });
   // image-input-steering (lib/imageSteer): what an explicit 插话 with images does on this agent.
   const imageSteerFeature = features.has(IMAGE_INPUT_STEERING_FEATURE);
   const imageSteering = imageSteerMode(features, session);
@@ -1045,7 +1052,7 @@ export function Composer({
     try {
       await useApp.getState().interruptAndSendSteers(sessionId, hostId);
     } catch (e) {
-      notifyHere(queueActionNotice(e, t), "error");
+      notifyAction(e);
     }
   };
 
@@ -1102,7 +1109,7 @@ export function Composer({
     try {
       await action();
     } catch (e) {
-      notifyHere(queueActionNotice(e, t), "error");
+      notifyAction(e);
     }
   };
 
@@ -1148,7 +1155,7 @@ export function Composer({
         await useApp.getState().interruptAndSend(draft, extra, sessionId, hostId);
       } catch (e) {
         // Not stopped: the store put the text back into the composer.
-        notifyHere(e instanceof Error ? e.message : String(e), "error");
+        notifyAction(e);
       } finally {
         setSending(false);
       }
@@ -1331,10 +1338,10 @@ export function Composer({
           onClearPaused={() => void pausedAction(() => useApp.getState().discardPaused(sessionId, hostId))}
           items={shownQueue}
           canEdit={!text.trim()}
-          onSendNow={cannotInsert && sendBusy ? undefined : (item) => void sendQueuedNow(item).catch((e: unknown) => notifyHere(queueActionNotice(e, t), "error"))}
-          onMergeInsert={ledgerMode && !(cannotInsert && sendBusy) ? (list) => mergeQueuedNow(list).catch((e: unknown) => notifyHere(queueActionNotice(e, t), "error")) : undefined}
+          onSendNow={cannotInsert && sendBusy ? undefined : (item) => void sendQueuedNow(item).catch((e: unknown) => notifyAction(e))}
+          onMergeInsert={ledgerMode && !(cannotInsert && sendBusy) ? (list) => mergeQueuedNow(list).catch((e: unknown) => notifyAction(e)) : undefined}
           sendNowStartsTurn={!sendBusy}
-          onDelete={(item) => void queueRemove(item, sessionId, hostId).catch((e: unknown) => notifyHere(queueActionNotice(e, t), "error"))}
+          onDelete={(item) => void queueRemove(item, sessionId, hostId).catch((e: unknown) => notifyAction(e))}
           onEdit={(item) => void queueTakeForEdit(item, sessionId, hostId)}
           stripEnabled={queueSectionStrip}
           autoCompact={queueAutoCompact(queuePanelFold, shortWindow)}
@@ -1347,14 +1354,14 @@ export function Composer({
                   nextStep,
                   ridealongsHeld: admission.ridealongsHeld,
                   ownerYielded: admission.ownerYielded,
-                  onYield: features.has(OWNER_YIELD_FEATURE) ? () => void useApp.getState().queueYield(sessionId, hostId).catch((e: unknown) => notifyHere(queueActionNotice(e, t), "error")) : undefined,
+                  onYield: features.has(OWNER_YIELD_FEATURE) ? () => void useApp.getState().queueYield(sessionId, hostId).catch((e: unknown) => notifyAction(e)) : undefined,
                   running: busy,
                   runningSince: activeTurnStart === null ? null : activeTurnStart * 1000,
                   currentTurn: currentTurnOf(busy, admission.currentTurn, delegation?.askId ?? null),
                   sessionId,
                   // Dropping onto 「下个工具边界」 = 插入 (the same path as the row's button).
-                  onInsert: cannotInsert && sendBusy ? undefined : (item: QueueItem) => void sendQueuedNow(item).catch((e: unknown) => notifyHere(queueActionNotice(e, t), "error")),
-                  onMergeInsert: cannotInsert && sendBusy ? undefined : (list: QueueItem[]) => void mergeQueuedNow(list).catch((e: unknown) => notifyHere(queueActionNotice(e, t), "error")),
+                  onInsert: cannotInsert && sendBusy ? undefined : (item: QueueItem) => void sendQueuedNow(item).catch((e: unknown) => notifyAction(e)),
+                  onMergeInsert: cannotInsert && sendBusy ? undefined : (list: QueueItem[]) => void mergeQueuedNow(list).catch((e: unknown) => notifyAction(e)),
                   mayPass,
                   onMove: (item, before) =>
                     void useApp
@@ -1362,7 +1369,7 @@ export function Composer({
                       .queueMove(item, before, sessionId, hostId)
                       .catch((e: unknown) => {
                         if ((e as { moveRefusal?: string } | null)?.moveRefusal === "passingNotAllowed") reloadOwnerMayPassAsks();
-                        notifyHere(queueActionNotice(e, t), "error");
+                        notifyAction(e);
                       }),
                   actions: orderedAsks ? <PauseAsksButton sessionId={sessionId} /> : null,
                 }
@@ -1448,7 +1455,7 @@ export function Composer({
               aria-expanded={mentionPopupOpen ? true : undefined}
               aria-controls={mentionPopupOpen ? mentionListId : undefined}
               aria-activedescendant={mentionPopupOpen && popupCount > 0 ? `${mentionListId}-${selectedCandidate}` : undefined}
-              placeholder={delegation || awaiting ? "" : busyLook ? t(busyPlaceholderKey(noSteer)) : t("composer.placeholder", { name })}
+              placeholder={placeholder}
               // Two lines + padding: exactly the textarea's rows={2} box, so the swap on the first @ does not jump (owner 2026-10-25).
               className="max-h-[min(15rem,var(--composer-input-max,15rem))] min-h-[calc(2lh+0.5rem)] min-w-0 flex-1 overflow-y-auto whitespace-pre-wrap break-words bg-transparent py-1 pr-2.5 outline-none"
             /> : <textarea
@@ -1468,8 +1475,8 @@ export function Composer({
               onKeyDown={onKeyDown}
               onPaste={onPaste}
               rows={2}
-              placeholder={delegation || awaiting ? "" : busyLook ? t(busyPlaceholderKey(noSteer)) : t("composer.placeholder", { name })}
-              className="max-h-[min(15rem,var(--composer-input-max,15rem))] flex-1 resize-none bg-transparent py-1 pr-2.5 outline-none placeholder:text-subtle"
+              placeholder={placeholder}
+              className={`max-h-[min(15rem,var(--composer-input-max,15rem))] flex-1 resize-none bg-transparent py-1 pr-2.5 outline-none ${TEXTAREA_PLACEHOLDER_CLASS}`}
             />}
             {/* Stop: a fixed round slot, empty while idle, so a turn starting or ending never changes the input's
                 width (the 「■ 停止」 pill used to appear beside it and rewrap the draft; flicker recorder 2026-10-26). */}
@@ -1647,7 +1654,7 @@ export function Composer({
       <div className="flex h-5 min-w-0 items-center justify-end" data-testid="composer-notice-slot">
         {shownNotice && meantHere(shownNotice.agent, here, focused) && (
           // The one toast face (040 §2.1), sized to the reserved line: an error leads with a danger icon, not a red box.
-          <div role="status" data-tip={shownNotice.text} data-tone={shownNotice.tone === "error" ? "error" : undefined}
+          <div role="status" data-tip={shownNotice.text} data-tip-overflow="" data-tone={shownNotice.tone === "error" ? "error" : undefined}
             className="float float-toast h-5 max-w-full gap-1.5 py-0 pr-2 pl-1.5 text-xs"
             data-testid="composer-notice">
             {shownNotice.tone === "error" ? <CircleAlert size={12} aria-hidden data-toast-icon="" /> : <Info size={12} aria-hidden data-toast-icon="" />}

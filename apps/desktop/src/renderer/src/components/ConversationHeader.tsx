@@ -28,6 +28,7 @@ import { useRuntimeStartSince } from "../lib/runtimeStart";
 import { agentMenu, runtimeItem } from "../lib/menus";
 import { isQuickChat } from "../lib/sidebar";
 import { projectIcon } from "../lib/projectIcons";
+import { useProjectIcons } from "../lib/projectIconSync";
 import { hostListKeys, toggleStarred, useUiPrefs } from "../lib/prefs";
 import { gitStatusFlight } from "../lib/gitStatusFlight";
 import { hostKey } from "../lib/hostKeys";
@@ -195,6 +196,7 @@ function OnlineState({ session, hostId, info, compact = false }: { session: Sess
 function ProjectChip({ project, hostId }: { project: NonNullable<ConvHeaderInfo["project"]>; hostId: string }) {
   const { t } = useI18n();
   const prefs = useUiPrefs();
+  const projectIcons = useProjectIcons();
   const sidebar = useApp((s) => sidebarOf(s, hostId));
   const projectId = project.id;
   const groupId = projectId ?? INDEPENDENT_PROJECT;
@@ -211,7 +213,7 @@ function ProjectChip({ project, hostId }: { project: NonNullable<ConvHeaderInfo[
           data-tip={t("titlebar.openProject", { name })}
           className="flex min-w-0 items-center gap-1 rounded-chip px-0.5 hover:bg-hover hover:text-foreground"
         >
-          {presentation && <ProjectBadge icon={projectIcon(prefs.projectIcons, hostId, projectId)} badge={presentation.badge_label || name.slice(0, 1)} color={presentation.color} />}
+          {presentation && <ProjectBadge icon={projectIcon(projectIcons, hostId, projectId)} badge={presentation.badge_label || name.slice(0, 1)} color={presentation.color} />}
           <span className="truncate">
             <ScriptText text={name} />
           </span>

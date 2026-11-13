@@ -8,6 +8,7 @@ export const en: Record<keyof typeof zhCN, string> = {
   // ---- settings (moved from the base catalog, 2026-10-09) ----
   "owner-notify.settings.ownerNotify.title": "{{Owner}} notifications",
   "owner-notify.hint": "How you are alerted when {{an agent}} messages you; {{agents}} only pick a level and never see where or how you are reached.",
+  "owner-notify.levels": "Level of each kind of message",
   "owner-notify.toolDesc": "{{Agents}} use it to message you and give each message a notification level.",
   "owner-notify.delivery": "Delivery",
   "owner-notify.deliveryHint": "Where each level goes; the message always shows in the {{agent}}'s conversation",

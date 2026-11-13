@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.2.5 "Beautiful World" (2026-11-13)
+
+- Fixes composer placeholder layout and IME composition handling.
+  修复输入框占位文字的布局及输入法组合输入处理。
+
+- Preserves backslashes in Windows file links. Approval cards use localized titles and a clearer two-row header; agent and project chips open their corresponding views.
+  Windows 文件链接保留反斜杠；审批卡使用本地化标题和更清晰的两行标题区，智能体与项目标记可点击打开对应页面。
+
+- Improves notice toast placement and tooltips, and replaces raw send-error codes with readable messages.
+  改进通知浮条的位置与提示，用易懂的说明替代原始发送错误码。
+
+- Reduces flicker in the upcoming-input area and revalidates image previews when their source changes.
+  减少「接下来」区域闪烁，并在图片来源变化时重新验证预览。
+
+- Adds right-click actions to appoint or remove a Deputy Director. Fixes Operator delegation routing, revoked access, restart notices and owner member operations.
+  右键菜单可设为或取消副主管；修复 Operator 的委托路由、撤销权限、重启提示及主人成员操作。
+
+- Project memory can be created, edited and deleted on capable hosts, with revision checks and index updates. Project badges use the sidebar's project tile appearance with readable text in each theme.
+  支持的主机上可新建、编辑和删除项目记忆，保存时检查版本并更新索引；项目标记采用侧栏项目图块的样式，并适配各主题下的文字对比度。
+
+- Adds dedicated tool views for file changes, web searches and fetched pages.
+  文件改动、网页搜索和网页读取结果使用专门的工具视图。
+
+- Compatibility: new host-dependent features require the corresponding host capability. Existing agents retain their selected runtimes. This desktop update is separate from the cutex 0.2.3 backend and Claude claude-r46 component updates.
+  兼容性：新主机功能需要相应主机能力；已有智能体保留所选运行时。桌面更新与 cutex 0.2.3 后端及 Claude claude-r46 组件更新分别进行。
+
 ## 0.2.4 "Beautiful World" (2026-11-11)
 
 - Fixes a crash when opening the tray from its handle (React error #310).

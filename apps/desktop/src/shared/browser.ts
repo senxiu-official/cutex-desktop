@@ -81,6 +81,8 @@ export const BROWSER_ZOOM_BOUNDS = { min: 0.33, max: 3 } as const;
 export const BROWSER_CHANNEL = "cutex-desktop:browser";
 export type BrowserTabStatus = "pending" | "attached" | "unmounted" | "crashed" | "closed";
 export interface BrowserTabView {
+  /** Main retains the exact refused URL; the app may redeem this one-use owner retry. Null clears it. */
+  blockedNavigation?: { id: string; url: string; canOpen: boolean; /** SSH host: retry explicitly opens this desktop, not that host. */ desktopLoopback?: true } | null;
   /** Main-detected owner login input in an agent pool; null clears the inline reminder. */
   loginOrigin?: string | null;
   guestId: string;
@@ -141,6 +143,8 @@ export type BrowserEvent = HostTag & BrowserTabView & { kind: "changed" | "new-t
   thumbnail?: string;
   /** new-tab: the opener's agent caused this popup (its own click), not the owner. */
   newTabAgent?: true;
+  /** Explicit owner retry from an agent-pool opener: the new tab has its own owner identity. */
+  newTabOwner?: true;
   /** new-tab: the host granted it to that agent under the opener's lease (browser-popup-grant). */
   newTabGranted?: true;
   /** blocked: what main stopped without the owner's action (shown once as a notice). */
@@ -149,6 +153,7 @@ export type BrowserEvent = HostTag & BrowserTabView & { kind: "changed" | "new-t
 /** Completion of a one-use owner UI mount, not an agent target identifier. */
 export interface BrowserAttachReceipt { src: string; webContentsId: number }
 export type BrowserRequest =
+  | { op: "openBlockedNavigation"; tabKey: string; id: string }
   | { op: "dismissLoginWarning"; tabKey: string; origin: string }
   | { op: "openOwnerCopy"; tabKey: string }
   | { op: "setEnabled"; enabled: boolean }
@@ -188,6 +193,8 @@ export type BrowserRequest =
   | { op: "back" | "forward" | "reload" | "stop" | "toBackground"; tabKey: string }
   | { op: "close"; tabKey: string; unmount?: boolean };
 export interface HostBrowserBridge {
+  /** Opens the exact navigation main refused, after the owner's explicit retry. */
+  openBlockedNavigation(tabKey: string, id: string): Promise<void>;
   dismissLoginWarning(tabKey: string, origin: string): Promise<void>;
   /** Fresh owner identity; exact target is retained transiently in main, URL here is display-safe. */
   openOwnerCopy(tabKey: string): Promise<{ tabKey: string; url: string }>;

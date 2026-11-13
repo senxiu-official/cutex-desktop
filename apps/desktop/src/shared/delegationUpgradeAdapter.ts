@@ -1,5 +1,6 @@
 import { DELEGATION_CAPABILITIES, type DelegationControlRequest, type DelegationTreePage, type DelegationTreeNode, type DelegationApproval, type DelegationActorAudit, type DelegationGrant, type DelegationOperationResult, type SessionResource } from "@cutex-desktop/protocol";
 import { type CutexClient, delegationId, userAccessOf } from "@cutex-desktop/cutex-client";
+import { projectOperatorMembers } from "./projectOperatorMembers";
 import type { UpgradeAction, UpgradeActor, UpgradeApprovalRead, UpgradeNode, UpgradeSnapshot, UpgradeResult } from "./delegationUpgradePreview";
 
 function need(condition: unknown, message: string): asserts condition { if (!condition) throw new Error(message); }
@@ -66,14 +67,18 @@ export async function readDelegationUpgrade(client: CutexClient, projectId: stri
   if (grants) flags(grants.allowedActions,["create"]);
   if (runControl) flags(runControl.allowedActions,["pause","pauseAll","resume"]);
   const projected = tree && projectDelegationTree(tree);
-  const roster=workspace && [...workspace.active_agents,...workspace.retired_agents,...(workspace.archived_agents??[])];
+  // Operators are listed by the daemon under agent_operators only; owner lifecycle actions still come from each session's allowedActions.
+  const roster=workspace && [...workspace.active_agents,...projectOperatorMembers(workspace,projectId),...workspace.retired_agents,...(workspace.archived_agents??[])];
   const directorId=workspace?.director?.cutex_session_id ?? null;
   const members=workspace && sessionLists && (()=>{
     const ids=new Set(roster!.map(row=>row.agent.cutex_session_id)); if(directorId)ids.add(directorId);
     return [...sessionLists[0].sessions,...sessionLists[1].sessions].filter(row=>ids.has(row.cutexSessionId)).map(row=>member(row,directorId,activity,lifecycle));
   })();
   const parties=workspace && routing && (()=>{
-    const active=[...workspace.active_agents,...(workspace.director?.member?[workspace.director.member]:[])];
+    // The daemon lists a member holding this project's Agent Operator grant under
+    // agent_operators instead of active_agents; it is still a routing member.
+    const operators=projectOperatorMembers(workspace,projectId);
+    const active=[...workspace.active_agents,...operators,...(workspace.director?.member?[workspace.director.member]:[])];
     return [...new Map(active.filter(row=>!row.agent.retired_at).map(row=>{
       delegationId(row.agent.cutex_session_id); need(typeof row.agent.spec.name === "string","delegation_party_name_missing");
       return [row.agent.cutex_session_id,{id:row.agent.cutex_session_id,hostId:caps.hostId,name:row.agent.spec.name}] as const;
@@ -156,7 +161,7 @@ export async function executeDelegationUpgrade(client: CutexClient, projectId: s
     else need(features.has("agent-archive-kind-v1"),"unsupported retirement lifecycle");
     const memberId = action.kind === "retire" ? action.payload.cutex_session_id : action.memberId;
     const workspace = await client.project(projectId);
-    const members = [...workspace.active_agents,...workspace.retired_agents,...(workspace.archived_agents??[])];
+    const members = [...workspace.active_agents,...projectOperatorMembers(workspace,projectId),...workspace.retired_agents,...(workspace.archived_agents??[])];
     need(members.some(row=>row.agent.cutex_session_id===memberId)||workspace.director?.cutex_session_id===memberId,"member_scope_changed");
     const session = await client.session(memberId, action.kind === "restore" ? "retired" : undefined);
     if (action.kind === "retire") {

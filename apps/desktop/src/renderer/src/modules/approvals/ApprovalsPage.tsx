@@ -9,6 +9,7 @@ import { ShieldCheck } from "lucide-react";
 import type { ApprovalRecord } from "../../../../shared/ipc";
 import { useI18n, type MessageKey } from "../../i18n";
 import { APPROVALS_FEATURE, sortApprovals } from "../../lib/approvals";
+import { approvalHeading } from "../../lib/approvalTitle";
 import { useListHosts } from "../../lib/hostLists";
 import { usePagedApprovalHistory } from "../../lib/usePagedApprovalHistory";
 import { mergeHostLists, type HostItem, type HostLook } from "../../lib/hostScope";
@@ -25,6 +26,7 @@ const STATE_TONE: Record<ApprovalRecord["state"], string> = { pending: "text-war
 
 function DecidedRow({ record, origin }: { record: ApprovalRecord; origin: Origin }) {
   const { t } = useI18n();
+  const heading = approvalHeading(record, t);
   return (
     <div className="flex items-start gap-3 border-b border-border py-2 last:border-b-0">
       <span className={`flex w-14 shrink-0 items-center gap-1.5 pt-px text-xs ${STATE_TONE[record.state]}`}>
@@ -33,7 +35,7 @@ function DecidedRow({ record, origin }: { record: ApprovalRecord; origin: Origin
       </span>
       <div className="min-w-0 flex-1">
         <div className="flex items-start gap-2">
-          <span className="min-w-0 flex-1 truncate text-sm" title={record.summary}>{record.summary}</span>
+          <span className="min-w-0 flex-1 truncate text-sm" title={heading.detail ? `${heading.title}\n${heading.detail}` : heading.title}>{heading.title}</span>
           <When iso={record.decidedAt ?? record.createdAt} />
         </div>
         <Requester record={record} hostId={origin.hostId} sidebar={origin.sidebar} />

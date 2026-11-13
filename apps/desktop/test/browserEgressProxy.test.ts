@@ -41,6 +41,17 @@ async function get(proxy: BrowserEgressProxy, target = "http://public.example.co
 const upgradeRequest = (proxy: BrowserEgressProxy, key = "dGhlIHNhbXBsZSBub25jZQ==", extra = "") => `GET ws://public.example.com/chat HTTP/1.1\r\nHost: public.example.com\r\nProxy-Authorization: ${auth(proxy)}\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Key: ${key}\r\nSec-WebSocket-Version: 13\r\n${extra}\r\n`;
 
 describe("browser-only N2 egress proxy (X1–X3; dev and packaged share this module)", () => {
+  it("blocks an owner-admitted DNS alias resolving to a protected control address before dialing", async () => {
+    const dial = vi.fn<BrowserEgressDial>(() => { throw new Error("must not dial protected control address"); });
+    const proxy = await startBrowserEgressProxy({
+      lookup: async () => [{ address: "10.0.0.12", family: 4 }], dial,
+      lanAllowed: (hostname, port) => hostname === "desktop-alias.local" && port === 24370,
+      protectedAddress: (address, port) => address === "10.0.0.12" && port === 24370,
+    });
+    cleanup.push(proxy.close);
+    expect(await get(proxy, "http://desktop-alias.local:24370/v2/health")).toMatch(/^HTTP\/1.1 403 /);
+    expect(dial).not.toHaveBeenCalled();
+  });
   it("binds only IPv4 loopback, generates per-instance secrets and synchronously withdraws candidates", async () => {
     const a = await fixture(), b = await fixture();
     expect(a.proxy.port).toBeGreaterThan(0); expect(a.proxy.credentials.password).toMatch(/^[a-f0-9]{64}$/);

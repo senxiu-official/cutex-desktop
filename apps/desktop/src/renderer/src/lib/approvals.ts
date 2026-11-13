@@ -104,8 +104,48 @@ export function approvalOfTool(item: { type: string; server?: unknown; status?: 
   if (!code) return null;
   const id = APPROVAL_ID.exec(text)?.[0];
   if (!id) return null;
-  const summary = /needs the owner's approval \((.+?)\)\. The owner/.exec(text)?.[1] ?? null;
-  return { approvalId: id, code, summary: summary ? summary.replace(/\\"/g, "\"") : null };
+  // The refusal's `detail` as a string (the result text is its JSON: a path in it reads `C:\\x` there).
+  const detail = refusalDetail(item.result) ?? refusalDetail(item.error);
+  const found = /needs the owner's approval \((.+?)\)\. The owner/s.exec(detail ?? text)?.[1] ?? null;
+  return { approvalId: id, code, summary: found === null || detail !== null ? found : jsonStringText(found, /^\s*[[{]/.test(text)) };
+}
+
+/** A piece of a JSON string literal read out of JSON text that did not parse, decoded (`\\` → `\`, `\"` → `"`). */
+function jsonStringText(raw: string, json: boolean): string {
+  if (json) try {
+    const value: unknown = JSON.parse(`"${raw}"`);
+    if (typeof value === "string") return value;
+  } catch {
+    /* not a JSON string piece: plain text */
+  }
+  return raw.replace(/\\"/g, "\"");
+}
+
+/** The `detail` of a cutex refusal object, also when it comes as JSON text (MCP content), else null. */
+function refusalDetail(value: unknown, depth = 0): string | null {
+  if (depth > 3 || value == null) return null;
+  if (typeof value === "string") {
+    if (!value.trimStart().startsWith("{")) return null;
+    try {
+      return refusalDetail(JSON.parse(value), depth + 1);
+    } catch {
+      return null;
+    }
+  }
+  if (typeof value !== "object") return null;
+  const detail = (value as { detail?: unknown }).detail;
+  if (typeof detail === "string") return detail;
+  // Agent Management's receipt: `{outcome: {code, detail}}`.
+  const outcome = refusalDetail((value as { outcome?: unknown }).outcome, depth + 1);
+  if (outcome) return outcome;
+  const content = (value as { content?: unknown }).content;
+  if (Array.isArray(content)) {
+    for (const c of content) {
+      const found = c && typeof c === "object" ? refusalDetail((c as { text?: unknown }).text, depth + 1) : null;
+      if (found) return found;
+    }
+  }
+  return null;
 }
 
 /** The tool approval carried by a host / session event (a cutex tool call finished), or null. */

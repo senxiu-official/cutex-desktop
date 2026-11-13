@@ -9,6 +9,10 @@ export const locales = {
     "projects.operatorOffline": "{{operator}}授權已更新，下次啟動時生效",
     "projects.operatorRestartNow": "現在重啟",
     "projects.operatorSuccessor": "請先取消 {name} 的{{operator}}授權，再設為{{director}}",
+    "projects.operatorMenuArmed": "再左鍵點擊一次：讓 {name} 成為本項目的{{operator}}，可代{{director}}行事",
+    "projects.operatorMenuDirector": "{{director}}不能同時是{{operator}}",
+    "projects.operatorMenuUnavailable": "這個項目現在不能更改{{operator}}（沒有{{director}}或不在進行中）",
+    "projects.operatorMenuFailed": "{action}失敗：{error}",
     "projects.operatorRuntimeUnknown": "{{operator}}授權已更新，重啟後生效；暫時無法讀取運行時狀態",
     "projects.operatorRestartArmed": "再左鍵點擊一次重啟；若有正在進行的回合，將會中斷"
   },
@@ -117,6 +121,10 @@ export const locales = {
     "projects.operatorOffline": "{{Operator}} permissions updated; they apply on the next start.",
     "projects.operatorRestartNow": "Restart now",
     "projects.operatorSuccessor": "Revoke {name}’s {{operator}} grant before making them {{director}}.",
+    "projects.operatorMenuArmed": "Click again: make {name} this project's {{operator}}, able to act for the {{director}}",
+    "projects.operatorMenuDirector": "The {{director}} can't also be {{operator}}",
+    "projects.operatorMenuUnavailable": "{{Operator}} grants can't be changed in this project right now (no {{director}}, or not active)",
+    "projects.operatorMenuFailed": "{action} failed: {error}",
     "projects.operatorRuntimeUnknown": "{{Operator}} permissions updated. Runtime status is unavailable; restart to apply.",
     "projects.operatorRestartArmed": "Click again to restart; any active turn will be interrupted"
   }

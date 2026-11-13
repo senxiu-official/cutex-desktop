@@ -134,6 +134,26 @@ describe("D3 owner ledger integration", () => {
     expect(app.getState().pendingSteers).toEqual({});
   });
 
+  it.each([
+    { read: "fails", quiet: false },
+    { read: "still waiting", quiet: false },
+    { read: "uncertain", quiet: true },
+  ])("an outcome-unknown insert is left to its row only once the row says 不确定 (read $read)", async ({ read, quiet }) => {
+    const { queueActionNotice } = await import("../src/renderer/src/lib/queueSteer");
+    const { queueSteerErrorMessage } = await import("../src/shared/queueSteer");
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const item = { queueId: "q", revision: 4, clientUserMessageId: "u" } as any;
+    mock.responses.set("queuePromote", () => { throw new Error(queueSteerErrorMessage("outcomeUnknown", "request_outcome_unknown: the cutex operation completed far enough that its durable outcome is unknown")); });
+    mock.responses.set("inputGet", () => {
+      if (read === "fails") throw new Error("connection lost");
+      return { ledgerEpoch: "e", stateRevision: 2, records: [record("u", read === "uncertain" ? { rev: 2, stateRevision: 2, state: "uncertain", reason: "outcomeUnknown", surface: "nextUp", actions: ["retry", "dismiss"] } : { rev: 2, stateRevision: 2, state: "waiting", reason: "turnRunning", surface: "nextUp" })], missing: [] };
+    });
+    const error = await app.getState().queueSendNow(item, "cutex.s1", "local").then(() => null, (e: unknown) => e);
+    expect(error).toBeInstanceOf(Error);
+    const t = (k: string) => k;
+    expect(queueActionNotice(error, t)).toBe(quiet ? null : "queue.steer.outcomeUnknown");
+  });
+
   it.each([false, true])("atomic merge applies every superseded record before steering (one revision=%s)", async sameRevision => {
     const items = ["a", "b"].map((id, index) => ({ queueId: `q-${id}`, clientUserMessageId: id, revision: index + 3, input: [{ type: "text", text: id }] })) as any;
     const attachment = { type: "image", url: "data:image/png;base64,AA==" };

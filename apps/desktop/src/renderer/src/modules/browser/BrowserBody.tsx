@@ -29,6 +29,7 @@ import { serviceAddressOf, serviceTabPath } from "../../lib/serviceAddress";
 import { useApp } from "../../store";
 import { btn } from "../../components/Button";
 import { BrowserLoginPoolPill, BrowserLoginWarning } from "./BrowserLoginHint";
+import { BrowserBlockedNavigation } from "./BrowserBlockedNavigation";
 import { browserLoginOrigin, openOwnerLoginCopy } from "./loginHint";
 import { browserCache } from "./browserCache";
 import { sideOpenFrom } from "../../lib/shelfTarget";
@@ -318,7 +319,10 @@ export function BrowserBody(props: SideBodyProps<BrowserState>) {
     else if (hostId && bridge.browser) void run(() => bridge.browser!.forHost(hostId).reload(tabKey), currentUrl);
   }
 
-  const rawReason = error ?? view?.error;
+  // A refused automatic navigation into a private origin: the page stays, the notice below says so (and offers 仍然打开);
+  // the same refusal is not repeated as a red error row.
+  const blockedNavigation = view?.status === "attached" ? view.blockedNavigation ?? null : null;
+  const rawReason = error ?? (blockedNavigation && view?.error === "private_address_blocked" ? undefined : view?.error);
   const reason = rawReason === dismissedError ? null : rawReason;
   const reasonKey = reason ? browserErrorKey(reason) : null;
   const candidateFix = reason && (ready || (recoverable && reason === "remote_loopback")) ? browserRefusalAction(reason) : null;
@@ -339,6 +343,10 @@ export function BrowserBody(props: SideBodyProps<BrowserState>) {
     const api = bridge.browser.forHost(hostId);
     await openOwnerLoginCopy({ reserve: () => api.openOwnerCopy(tabKey), close: key => api.close(key), current: loginCurrent,
       open: params => sideOpenFrom({ instanceId: instance.id }, BROWSER_TAB, params, { binding: { kind: "host", hostId }, focus: true, reveal: true }) });
+  }
+  async function openBlockedNavigation(id: string): Promise<void> {
+    if (!hostId || !bridge.browser) throw Error("browser_unavailable");
+    await bridge.browser.forHost(hostId).openBlockedNavigation(tabKey, id);
   }
   async function dismissLogin(): Promise<void> {
     if (!hostId || !bridge.browser || !loginOrigin || !loginCurrent() || browserCache.get(hostId, tabKey)?.loginOrigin !== loginOrigin) throw Error("stale_browser");
@@ -400,6 +408,8 @@ export function BrowserBody(props: SideBodyProps<BrowserState>) {
         {pageMessage && <span role={pageMessage.failed ? "alert" : "status"} className={`ml-1 max-w-40 min-w-0 truncate text-meta ${pageMessage.failed ? "text-danger" : "text-subtle"}`} title={pageMessage.text}>{pageMessage.text}</span>}
         <button type="button" data-browser-page-menu="" className={BUTTON} data-tip={t("browser.page.menu")} aria-label={t("browser.page.menu")} aria-haspopup="menu" onClick={(event) => openMenuFrom(event.currentTarget, pageMenu())}><MoreHorizontal size={14} /></button>
       </form>
+      {blockedNavigation && <BrowserBlockedNavigation key={`${hostId}:${tabKey}:${blockedNavigation.id}`} blocked={blockedNavigation}
+        disabled={!ready && !preview} open={() => openBlockedNavigation(blockedNavigation.id)} />}
       {loginOrigin && <BrowserLoginWarning key={loginScope} disabled={!ready || working} openOwner={openOwner} dismiss={dismissLogin} />}
       {view?.sitePermission && <p role={view.sitePermission.state === "waiting" ? "status" : "alert"} data-browser-site-permission={view.sitePermission.state}
         className={`shrink-0 border-b border-border px-3 py-2 text-xs ${view.sitePermission.state === "waiting" ? "text-foreground" : "text-warn"}`}>

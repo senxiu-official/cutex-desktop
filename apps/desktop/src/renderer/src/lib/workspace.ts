@@ -105,7 +105,7 @@ export function writtenWindowsPath(source: string, parsed: string): string | nul
   const m = LINK_DESTINATION.exec(source);
   if (!m) return null;
   const written = m[1]!.startsWith("<") ? m[1]!.slice(1, -1) : m[1]!;
-  if (!WINDOWS_ABSOLUTE.test(written)) return null;
+  if (!WINDOWS_ABSOLUTE.test(written) || markdownEscapedPath(written)) return null;
   const unescaped = written.replace(MARKDOWN_ESCAPE, "$1");
   if (unescaped === written) return null;
   // Only the destination the parser read from this very source (it may come back percent-encoded).
@@ -116,6 +116,53 @@ export function writtenWindowsPath(source: string, parsed: string): string | nul
     /* not percent-encoded */
   }
   return parsed === unescaped || decoded === unescaped ? written : null;
+}
+
+/**
+ * A path written with every separator doubled (`C:\\Users\\me`, `\\\\server\\share`): the writer escaped it for
+ * Markdown on purpose, so CommonMark's reading (`C:\Users\me`) is the meant path. A single backslash anywhere
+ * (`C:\Users\me`, a UNC `\\server\share`) means it was written verbatim.
+ */
+function markdownEscapedPath(written: string): boolean {
+  const runs = written.match(/\\+/g);
+  return !!runs && runs.every((run) => run.length % 2 === 0);
+}
+
+/**
+ * A Windows path in Markdown prose: `C:\…` or a UNC `\\server\…`, not inside a word or after another backslash.
+ * It runs to the next whitespace; a space continues it when the next word goes on with a backslash
+ * (`C:\Program Files\x`). Spilling into the words after it is harmless: only its backslash escapes matter.
+ */
+const WINDOWS_PATH_IN_TEXT = /(?<![\w\\])(?:[a-zA-Z]:\\|\\\\(?=[\w.$-]+\\))[^\s<>"|?*]*(?: [^\s<>"|?*\\]+\\[^\s<>"|?*]*)*/g;
+
+/**
+ * A Markdown text node with the Windows paths in it as they were written. CommonMark reads a backslash before
+ * ASCII punctuation as an escape, so plain prose `C:\Users\me\.cutex\a.md` renders `C:\Users\me.cutex\a.md` and
+ * `\\server\share` renders `\server\share`; agents write host paths verbatim. `source` is the node's markdown,
+ * `value` the text the parser made of it; null when nothing needs restoring (or the text is not a plain reading
+ * of the source, e.g. it holds character references: then it stays as parsed).
+ */
+export function writtenWindowsText(source: string, value: string): string | null {
+  if (!source.includes("\\")) return null;
+  let out = value;
+  let from = 0;
+  let changed = false;
+  // Every path is located in turn, also one that needs nothing, so the same text earlier in the line is never the one
+  // restored (`C:\a.b then C:\a\.b` restores the second).
+  for (const m of source.matchAll(WINDOWS_PATH_IN_TEXT)) {
+    const written = m[0];
+    const parsed = written.replace(MARKDOWN_ESCAPE, "$1");
+    const at = out.indexOf(parsed, from);
+    if (at < 0) continue;
+    if (parsed === written || markdownEscapedPath(written)) {
+      from = at + parsed.length;
+      continue;
+    }
+    out = out.slice(0, at) + written + out.slice(at + parsed.length);
+    from = at + written.length;
+    changed = true;
+  }
+  return changed ? out : null;
 }
 
 export function unescapeFileHref(href: string): string {

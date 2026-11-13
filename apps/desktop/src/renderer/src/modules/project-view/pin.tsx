@@ -13,6 +13,7 @@ import { hostData } from "../../lib/hostScope";
 import { pagePinKey, registerPagePin, type PagePinCandidate, type PagePinView } from "../../lib/pagePins";
 import { registerProjectMenuExtra } from "../../lib/projectMenuExtras";
 import { projectIcon, projectLucideIcon, type ProjectIconChoice } from "../../lib/projectIcons";
+import { useProjectIcons } from "../../lib/projectIconSync";
 import { useUiPrefs } from "../../lib/prefs";
 import { useScopedAttention, useScopedSidebar } from "../../lib/scopedSidebarView";
 import { projectColor, rowKey, type ProjectGroup } from "../../lib/sidebar";
@@ -74,6 +75,7 @@ function useProjectPin(hostId: string, projectId: string, title: string | null):
   const scoped = useScopedSidebar();
   const attention = useScopedAttention(scoped.model, scoped.scope);
   const prefs = useUiPrefs();
+  const projectIcons = useProjectIcons();
   const focus = scoped.scope.focus;
   const online = useApp((s) => hostData(s, hostId)?.daemon.kind === "connected");
   const group = useMemo(
@@ -82,7 +84,7 @@ function useProjectPin(hostId: string, projectId: string, title: string | null):
   );
   const needs = group ? [...group.online, ...group.offline].filter((r) => attention.signals.get(rowKey(r)) === "needsYou").length : 0;
   const name = group?.name ?? title ?? projectId;
-  const icon = projectIcon(prefs.projectIcons, hostId, projectId);
+  const icon = projectIcon(projectIcons, hostId, projectId);
   const badge = group?.badge || name.slice(0, 1);
   const color = group?.color ?? "#64748b";
   return {

@@ -11,7 +11,9 @@ it("preserves today's friendly messages while off and exposes the original messa
   captureDebugError(new Error("invalid text"), "api.send");
   expect(useDebug.getState().errors).toEqual([]);
   useDebug.setState(s => ({ state: { ...s.state, enabled: true } }));
-  expect(queueActionNotice(new Error("bad_request: invalid text"), () => "friendly")).toBe("bad_request: invalid text");
+  // A queue action's notice stays plain (owner 2026-11-13); the original goes to the debug error list instead.
+  expect(queueActionNotice(new Error("bad_request: invalid text"), () => "friendly")).toBe("friendly");
+  expect(useDebug.getState().errors.at(-1)).toMatchObject({ source: "renderer.queueAction" });
   expect(sideErrorText("side_chat_invalid_message: empty", () => "friendly")).toBe("side_chat_invalid_message: empty");
 });
 it("keeps the richest code/source rather than three copies of the same IPC error", () => {

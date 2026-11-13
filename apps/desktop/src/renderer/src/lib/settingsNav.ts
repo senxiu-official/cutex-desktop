@@ -28,22 +28,37 @@ export const SETTINGS_GROUP_ORDER: readonly SettingsGroupId[] = ["app", "connect
  */
 export const PANEL_PAGES: readonly string[] = ["sidebar", "conversation", "status", "sides", "tray", "desktop"];
 
-/** A group of the settings nav: a module group, or the shell's 面板. */
-export type SettingsNavGroupId = SettingsGroupId | "panels";
+/** A group of the settings nav: a module group, or one the shell makes (面板, 你, 帮助与关于). */
+export type SettingsNavGroupId = SettingsGroupId | "panels" | "you" | "help";
 
-/** The nav's groups in order: 应用, then 面板, then the rest. */
-export const SETTINGS_NAV_GROUP_ORDER: readonly SettingsNavGroupId[] = ["app", "panels", "connection", "agents", "tools", "data", "system"];
+/** The nav's groups in order: 你 on top, 应用, then 面板, the rest, and 帮助与关于 at the bottom. */
+export const SETTINGS_NAV_GROUP_ORDER: readonly SettingsNavGroupId[] = ["you", "app", "panels", "connection", "agents", "tools", "data", "system", "help"];
 
-/** The nav group a page shows in (a panel page in 面板, else its own group). */
+/** Groups the wide nav shows without a heading (你: its one page says the same). */
+export const SETTINGS_NAV_UNTITLED: readonly SettingsNavGroupId[] = ["you"];
+
+/**
+ * Pages the nav shows in another group than their module declares (owner 2026-11-11): 你 on its own at the top
+ * (it is about the person, not the connection), 键盘与手势 with 应用, 关于 / 新功能 / 帮助 in their own group at
+ * the bottom. A display grouping like 面板: page ids, routes and the modules' `group` are unchanged.
+ */
+export const NAV_PAGE_GROUPS: Readonly<Record<string, SettingsNavGroupId>> = { me: "you", shortcuts: "app", about: "help", "whats-new": "help", help: "help" };
+
+/** The nav group a page shows in (a panel page in 面板, a moved page in its new group, else its own group). */
 export function navGroupOf(item: { page: string; group: SettingsGroupId }): SettingsNavGroupId {
-  return PANEL_PAGES.includes(item.page) ? "panels" : item.group;
+  return PANEL_PAGES.includes(item.page) ? "panels" : NAV_PAGE_GROUPS[item.page] ?? item.group;
 }
 
-/** The settings pages by nav group, in nav order (面板 in PANEL_PAGES order, the others as given); empty groups left out. `details`: also the pages without a nav row (settings search finds those). */
+/**
+ * The settings pages by nav group, in nav order (面板 in PANEL_PAGES order; elsewhere as given, a page moved in after
+ * the group's own); empty groups left out. `details`: also the pages without a nav row (settings search finds those).
+ */
 export function settingsNavGroups<T extends { item: { page: string; group: SettingsGroupId; navParent?: string } }>(pages: readonly T[], details = false): { group: SettingsNavGroupId; entries: T[] }[] {
+  const movedIn = (e: T) => (e.item.group !== navGroupOf(e.item) ? 1 : 0);
   return SETTINGS_NAV_GROUP_ORDER.map((group) => {
     const entries = pages.filter((e) => navGroupOf(e.item) === group && (details || !e.item.navParent));
     if (group === "panels") entries.sort((a, b) => PANEL_PAGES.indexOf(a.item.page) - PANEL_PAGES.indexOf(b.item.page));
+    else entries.sort((a, b) => movedIn(a) - movedIn(b));
     return { group, entries };
   }).filter((g) => g.entries.length > 0);
 }

@@ -65,3 +65,27 @@ it("old projections are unsupported, and a Director or mismatched grant cannot e
   expect([...operatorIds(view)]).toEqual(["member"]);
   view.agent_operators[1]!.member = member("other"); expect(operatorIds(view).size).toBe(0);
 });
+
+// The daemon lists an Operator only under agent_operators (never active_agents); revoke must still reach it.
+const operatorGrant = (id: string, project = "p", grantee = id) => ({ grant: { project_id: project, operator_cutex_session_id: grantee, grant_revision: 6, granted_at: "now", granted_by_primary_director_session: "director" }, member: member(id) });
+function operatorOnly(row = operatorGrant("member")) {
+  const f = setup(); f.grant = false; f.view.active_agents = []; f.view.agent_operators = [row]; return f;
+}
+it("revokes an Operator listed only under agent_operators", async () => {
+  const f = operatorOnly(); await changeProjectOperator(f);
+  expect(f.api.operatorAction).toHaveBeenCalledWith(expect.objectContaining({ operation: "revoke", operator_cutex_session_id: "member", expected_authority_epoch: 3, expected_grant_revision: 7 }));
+  expect(f.runtimeNotice).toHaveBeenCalledOnce();
+});
+it("granting an agent already listed only as Operator is a no-op refresh", async () => {
+  const f = operatorOnly(); f.grant = true; await changeProjectOperator(f);
+  expect(f.api.operatorAction).not.toHaveBeenCalled(); expect(f.refresh).toHaveBeenCalledOnce();
+});
+it.each([
+  ["mismatched grantee", { ...operatorGrant("member", "p", "someone-else") }],
+  ["retired", { ...operatorGrant("member"), member: { ...member("member"), agent: { ...member("member").agent, retired_at: "2026-11-12T00:00:00Z" } } }],
+  ["other project", operatorGrant("member", "other")],
+  ["Director row", { ...operatorGrant("director") }],
+])("operator-only %s is not a member: no write", async (reason, row) => {
+  const f = operatorOnly(row as never); if (reason === "Director row") f.sessionId = "director";
+  await expect(changeProjectOperator(f)).rejects.toThrow("operator_unavailable"); expect(f.api.operatorAction).not.toHaveBeenCalled();
+});

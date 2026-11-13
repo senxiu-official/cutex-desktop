@@ -53,7 +53,7 @@ import { projectIcon } from "../../lib/projectIcons";
 import { autoBadge, CREATE_ROOT_FEATURE, createProject, ensureNewProject, OPTIONAL_DIRECTOR_FEATURE, ProjectNameTakenError, sameProjectElsewhere, slugifyProjectId } from "../../lib/projectCreate";
 import { ProjectIconPicker } from "../../components/ProjectIconPicker";
 import type { ProjectIconChoice } from "../../lib/projectIcons";
-import { setProjectIcon } from "../../lib/prefs";
+import { setProjectIconOn, useProjectIcons } from "../../lib/projectIconSync";
 import { useHostScope } from "../../lib/useHostScope";
 import { ComponentNotice } from "../../components/ComponentCard";
 import { CLAUDE_RUNTIME_COMPONENT, componentBlocks } from "../../lib/componentCard";
@@ -337,7 +337,7 @@ function NewAgentForm({ params, target, presetHost, restored }: { params: PagePa
     const lists = [{ hostId: scope.focus, projects: focusSidebar?.projects }, ...Object.entries(byHost).map(([id, slice]) => ({ hostId: id, projects: slice.sidebar?.projects }))];
     return sameProjectElsewhere(lists, hostId, name);
   }, [newProject, projectName, projects, scope.focus, focusSidebar, byHost, hostId]);
-  const icons = useUiPrefs().projectIcons;
+  const icons = useProjectIcons();
   // Director checkbox: a new project, or an existing project that has none.
   const canDirect = optional && (newProject || (!!selectedSummary && !selectedSummary.director_cutex_session_id));
   const directorReason = canDirect ? null : t(!optional ? "agent-config.newAgent.directorUnsupported" : selectedSummary?.director_cutex_session_id ? "agent-config.newAgent.directorExists" : "agent-config.newAgent.directorNeedsProject");
@@ -539,7 +539,7 @@ function NewAgentForm({ params, target, presetHost, restored }: { params: PagePa
         const ensured = await ensureNewProject({ listProjects, create: (spec) => createProject(api, spec, true) }, hostId,
           { id: slugifyProjectId(display), presentation: { display_name: display, badge_label: projectBadge.trim() || autoBadge(display, projectBadgeWidth(features)), color: projectColorName }, workspaceRoot: cwd.trim() || null, director: null, createDirectory: features.has(CREATE_ROOT_FEATURE) });
         target = ensured.projectId;
-        if (ensured.outcome === "created" && projectIconChoice) setProjectIcon(hostId, target, projectIconChoice);
+        if (ensured.outcome === "created" && projectIconChoice) void setProjectIconOn(hostId, target, projectIconChoice);
         await useApp.getState().refreshHostSidebar(hostId);
         keepSteps.current = true;
         setProject(target);

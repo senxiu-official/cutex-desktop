@@ -810,7 +810,7 @@ function LedgerQueuePanel(props: React.ComponentProps<typeof LegacyQueuePanel>) 
       <span className="flex-1" />
       {mergePlan && props.onMergeInsert && props.onSendNow && <button type="button" disabled={merging} className="h-5 rounded px-1 text-caption hover:bg-surface-2 disabled:opacity-50" data-testid="queue-merge-insert" title={t("queue.merge.hint", { n: mergePlan.items.length })} onClick={() => {
         setMerging(true);
-        void props.onMergeInsert!(mergePlan.items).catch(error => useApp.getState().notify(queueActionNotice(error, t), "error", { hostId, sessionId })).finally(() => setMerging(false));
+        void props.onMergeInsert!(mergePlan.items).catch(error => { const text = queueActionNotice(error, t); if (text) useApp.getState().notify(text, "error", { hostId, sessionId }); }).finally(() => setMerging(false));
       }}>{t("queue.merge.action")}</button>}
       {uncertain.length > 0 && <button type="button" disabled={clearing} onBlur={() => setArmed(false)} onClick={() => void clean()} className={`h-5 rounded px-1 text-caption ${armed ? "bg-danger/10 text-danger-text" : "hover:bg-surface-2"}`} data-testid="input-cleanup-all" title={t("inputLedger.cleanupHint")}>{t(armed ? "inputLedger.cleanupAgain" : "inputLedger.cleanup", { n: uncertain.length })}</button>}
       <button type="button" className="h-5 rounded px-1 hover:bg-surface-2" aria-label={t(folded ? "queue.header.expand" : "queue.header.collapse")} aria-expanded={!folded || overlay} data-testid="queue-collapse" onClick={() => { if (shortPane.fold) setOverlay(!overlay); else { setCollapsed(!collapsed); setQueueView(sessionId, { collapsed: !collapsed }); } }}>{folded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</button>

@@ -33,7 +33,7 @@ import { contextMenu, openMenuFrom, type MenuEntry } from "../lib/contextMenu";
 import { copyText, fileMenu, outsideFileMenu } from "../lib/menus";
 import { fileKind, isThumbnailPath, THUMBNAIL_MAX_BYTES, type FileKind } from "../lib/fileKinds";
 import { FILE_KIND_ICON } from "../lib/fileKindIcons";
-import { useThumbnail } from "../lib/fileThumbnails";
+import { fileVersion, useThumbnail } from "../lib/fileThumbnails";
 import { useUiPrefs } from "../lib/prefs";
 import { openHostPath, openPath } from "../lib/sideOpen";
 import { escapeCutexHref, parseCutexLink, unescapeCutexHref } from "../lib/cutexLinks";
@@ -44,6 +44,7 @@ import { CodeBlockScope, fenceLanguage } from "../lib/codeBlockScope";
 import { ReplyCodeBlock } from "./ReplyCodeBlock";
 import { useStreamdownTranslations } from "../lib/streamdownTranslations";
 import { mathKindOf, remarkMarkdownMath } from "../lib/markdownMath";
+import { restoreWindowsText, type HastNode } from "../lib/markdownPathText";
 import { preloadKatex } from "../lib/katexRender";
 import { MathNode } from "./MathNode";
 
@@ -61,17 +62,15 @@ preloadKatex();
 // `D:/x`, `file:///x` and `README.md:12` would lose their href (or an image its src) in `sanitize`
 // (unknown "protocol"): carry them through it escaped (see `escapeFileHref`), right before it.
 // A Windows path keeps the backslashes it was written with (lib/workspace writtenWindowsPath): read back from the
-// node's markdown source, which CommonMark's escapes would otherwise change (`me\.cutex` → `me.cutex`).
-interface HastNode {
-  type: string;
-  tagName?: string;
-  properties?: Record<string, unknown>;
-  children?: HastNode[];
-  position?: { start: { offset?: number }; end: { offset?: number } };
-}
+// node's markdown source, which CommonMark's escapes would otherwise change (`me\.cutex` → `me.cutex`). Paths in
+// plain prose likewise (lib/markdownPathText).
+
 function escapeFileHrefs() {
   let source = "";
   const walk = (node: HastNode) => {
+    if (node.type === "text") return restoreWindowsText(node, source);
+    // Code spans / blocks and math (a `code` element) keep every backslash already.
+    if (node.type === "element" && (node.tagName === "code" || node.tagName === "pre")) return;
     const attr = node.type === "element" ? (node.tagName === "a" ? "href" : node.tagName === "img" ? "src" : null) : null;
     const parsed = attr ? node.properties?.[attr] : undefined;
     if (attr && typeof parsed === "string") {
@@ -146,6 +145,8 @@ interface FileLink {
   /** Thumbnail cache key + reader through cutex fs/file; null when the file cannot be read. */
   key: string | null;
   read: (() => Promise<FsFile>) | null;
+  /** The file's size + mtime without its bytes (lib/fileThumbnails fileVersion): a thumbnail in memory is checked by it. */
+  version?: () => Promise<string | null>;
 }
 
 /**
@@ -203,6 +204,7 @@ function useFileLink(href: string | undefined): FileLink | null {
     menu,
     key: preview && abs ? `${hostId}|host|${abs}` : null,
     read: preview && abs ? () => hostApi(hostId).hostFile(abs, THUMBNAIL_MAX_BYTES) : null,
+    version: preview && abs ? () => hostApi(hostId).hostFile(abs, 1).then(fileVersion) : undefined,
   };
 }
 
@@ -211,7 +213,7 @@ function useFileLink(href: string | undefined): FileLink | null {
  * cutex. Renders `fallback` when the image cannot be shown (missing, too big, no capability).
  */
 function Thumbnail({ link, alt, fallback }: { link: FileLink; alt: string; fallback: ReactNode }) {
-  const { ref, state } = useThumbnail(link.key, link.read, { revalidate: true });
+  const { ref, state } = useThumbnail(link.key, link.read, { revalidate: true, version: link.version });
   if (state.status === "failed") return <>{fallback}</>;
   return (
     <span ref={ref} className="my-1.5 block">

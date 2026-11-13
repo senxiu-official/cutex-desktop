@@ -55,6 +55,7 @@ import { openInNewDesk, openInWindow, windowChoices } from "./deskActions";
 import { MAIN_WINDOW } from "./windowScope";
 import type { SessionBadge, SessionAvatar, SessionResource } from "@cutex-desktop/protocol";
 import { translate, type MessageKey } from "../i18n";
+import { creatorPathsBlock } from "../../../shared/creatorPaths";
 import { agentHost, featuresOf, hostApi, pinnedOn, sidebarOf, useApp, viewHostOf, viewOf } from "../store";
 import type { FileRef } from "./workspace";
 import { apiFor } from "../bridge";
@@ -89,6 +90,7 @@ import { OWNER_ROTATION_FEATURE } from "../../../shared/directorRotation";
 import { FORK_PROFILE_FEATURE } from "../../../shared/sessionFork";
 import type { MutationResult } from "../../../shared/ipc";
 import { asksPauseKind } from "./stopHold";
+import { operatorMenuItem } from "./operatorMenu";
 import { loadQuotaContinue, quotaContinueNow, setQuotaContinue } from "./quotaContinue";
 import { isOwnerFeatures } from "../../../shared/users";
 import { runtimeStartSince } from "./runtimeStart";
@@ -112,6 +114,8 @@ function reportError(error: unknown): void {
   // "Not available for this agent" is a notice, not a failure dialog.
   const feature = parseUnsupported(message);
   if (feature !== null) return useApp.getState().notify(unsupportedNotice(feature));
+  // A child agent whose folders moved: its conversation says so and offers 重新批准文件夹 (CreatorPathsNote).
+  if (creatorPathsBlock(error)) return useApp.getState().notify(translate("creatorPaths.notice"), "error");
   // So is a busy Claude agent's refusal of fork / revert (it got busy after the menu opened).
   const structural = structuralErrorText(error);
   if (structural.refused) return useApp.getState().notify(structural.text);
@@ -712,6 +716,8 @@ export function agentMenu(session: SessionResource, t: T, hostId?: string): Menu
     "separator",
     // ── who it is (one-off actions): 编辑信息… holds the display name (first field), avatar, badge and note ──
     { label: t("menu.editInfo"), icon: <Pencil size={ICON} />, onSelect: guarded(() => editAgentInfo(session, host)) },
+    // 设为副主管 / 取消副主管 beside 编辑信息 (the project page's member-row action, lib/operatorMenu).
+    !retired && operatorMenuItem(host, id, t),
     !retired && avatarItem(session, t, host, features, pinned),
     // 转为智能体… (quick-chat-promote-v1): the same conversation, now an agent with an own name, standalone or in a project.
     promoteOffered(features, session, sidebarOf(app, host)?.hostRows?.[id]) && {

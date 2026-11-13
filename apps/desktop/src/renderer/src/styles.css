@@ -39,6 +39,11 @@
   --color-card-border: var(--card-border);
   /* streamdown code-block chrome uses `sidebar`; unregistered, its toolbar border fell back to white. */
   --color-sidebar: var(--surface);
+  /* Its Copy / Download buttons use `text-muted-foreground` (and `text-primary`): unregistered, they took the text
+     colour. Same values as `.markdown` gives them. For streamdown only: app code uses text-muted / text-accent
+     (test/tailwindClasses). */
+  --color-muted-foreground: var(--fg-muted);
+  --color-primary: var(--accent);
   --font-sans: "Inter", "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
   /* CJK after the Latin mono fonts: the same faces as --font-sans (lib/fontFaces buildFontPlan replaces both on
      <html> with the owner's 外观 fonts, mono again ending in the UI's CJK list). */
@@ -538,6 +543,15 @@
 .project-icon.project-icon-line {
   background: transparent;
 }
+/* The avatar's project mark in the tile look (components/ProjectMarkChip): the sidebar tile, with an ink per theme
+   family computed for its smaller text (lib/projectMark markTileInks, ≥ 4.5:1 on every palette). */
+.project-icon.project-mark-tile {
+  color: var(--mark-ink-light);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .project-icon.project-mark-tile { color: var(--mark-ink-dark); }
+}
+:root[data-theme="dark"] .project-icon.project-mark-tile { color: var(--mark-ink-dark); }
 
 /* Sidebar 项目分隔 (lib/projectSeparation): a project's section as a block in its own colour
    (`--project-color` on the section). The strengths are per theme and low enough that status

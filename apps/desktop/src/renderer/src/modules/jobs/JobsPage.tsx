@@ -32,6 +32,7 @@ import { useAllJobs, useJobOps } from "../../lib/jobsView";
 import { openHostAgent } from "../../lib/hostLists";
 import { projectColor } from "../../lib/sidebar";
 import { projectIcon } from "../../lib/projectIcons";
+import { useProjectIcons } from "../../lib/projectIconSync";
 import { useUiPrefs } from "../../lib/prefs";
 import { groupByProject } from "../../lib/tasks";
 import { formatAbsolute, formatWhen, useClock } from "../../lib/time";
@@ -182,7 +183,7 @@ function JobList({ preset, presetScope }: { preset?: string; presetScope?: Scope
     .filter((j) => !q || `${j.jobId} ${j.actionId} ${j.command ?? ""} ${j.cwd ?? ""} ${j.remoteId ?? ""} ${j.remoteName ?? ""} ${j.agentName ?? who(j.hostId, j.sessionId).name}`.toLowerCase().includes(q));
   const count = (s: Scope) => filtered.filter((j) => jobStatus(j).group === s).length;
   const rows = sortJobs(filtered.filter((j) => jobStatus(j).group === scope)) as Row[];
-  const icons = useUiPrefs().projectIcons;
+  const icons = useProjectIcons();
   const groups = served.flatMap((d) => {
     const projects = d.sidebar?.projects?.projects ?? [];
     const look = hosts.look(d.hostId);

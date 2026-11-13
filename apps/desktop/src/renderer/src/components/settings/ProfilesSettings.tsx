@@ -369,7 +369,7 @@ function ProfilesBody() {
     if (item)
       return (
         <>
-          {unavailableAnchor?.profile === name && <div role="status" className="mb-4 rounded-md border border-edge p-3 text-sm text-muted">
+          {unavailableAnchor?.profile === name && <div role="status" className="mb-4 rounded-md border border-border p-3 text-sm text-muted">
             <p className="mb-2">{t("settings.searchIa.profileUnavailable" as MessageKey)}</p>
             <Button onClick={() => openSettings("profiles", { anchor: unavailableAnchor.anchor })}>{t("agent-config.profiles.backToList")}</Button>
           </div>}

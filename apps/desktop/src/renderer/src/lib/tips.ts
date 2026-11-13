@@ -2,7 +2,8 @@
 // 500 ms of hover or on keyboard focus, instead of the OS tooltip of a native `title`. One delegated listener per app
 // window (installed by components/Tip for this window and every desk window), so it works in desk windows too.
 // Rules: a tip never covers the panel its own button opened (the anchor, or a button inside it, is
-// `aria-expanded="true"` → no tip); an anchor inside an open float, or in the sidebar (`data-tip-beside`), gets its
+// `aria-expanded="true"` → no tip); an anchor marked `data-tip-overflow` (a label that repeats its own text) gets one
+// only while that text is cut off; an anchor inside an open float, or in the sidebar (`data-tip-beside`), gets its
 // tip outside that edge; a press, Esc, a scroll or leaving the window hides it at once. Reduced motion: no fade
 // (`--motion-short` is 0).
 import { placePanel, type PanelSide } from "./anchoredPanel";
@@ -54,6 +55,15 @@ export function tipSuppressed(anchor: Element): boolean {
   return expanded && !!anchor.ownerDocument.querySelector(OPEN_FLOAT);
 }
 
+/**
+ * A `data-tip-overflow` anchor repeats its own text in the tip: worth showing only when the text is cut off (the
+ * anchor or an element in it is truncated / line-clamped). Any other anchor: always.
+ */
+export function tipWanted(anchor: Element): boolean {
+  if (!anchor.hasAttribute("data-tip-overflow")) return true;
+  return [anchor, ...anchor.querySelectorAll("*")].some((el) => el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1);
+}
+
 /** The float the anchor sits in (not the anchor itself), for placing its tip outside. */
 export function floatAround(anchor: Element): Element | null {
   return anchor.parentElement?.closest(".float") ?? null;
@@ -73,9 +83,8 @@ export function installTips(win: Window): () => void {
 
   const text = (el: HTMLElement) => el.getAttribute("data-tip")?.trim() ?? "";
 
-  const hide = () => {
-    win.clearTimeout(timer);
-    timer = 0;
+  /** The tip goes; the anchor stays armed (a `data-tip-overflow` label whose text fits again). */
+  const dropTip = () => {
     if (watch) win.clearInterval(watch);
     watch = 0;
     if (tip) {
@@ -87,13 +96,51 @@ export function installTips(win: Window): () => void {
         else anchor.setAttribute("aria-describedby", describedBy);
       }
     }
+  };
+
+  /**
+   * While a `data-tip-overflow` anchor is hovered / focused its size can change (the window or its pane is
+   * resized): the tip follows whether the text is cut off now — it appears once it is, goes once it fits.
+   */
+  let overflow: { el: HTMLElement; stop: () => void } | null = null;
+  const stopOverflow = () => {
+    overflow?.stop();
+    overflow = null;
+  };
+  const watchOverflow = (el: HTMLElement) => {
+    if (overflow?.el === el || !el.hasAttribute("data-tip-overflow")) return;
+    stopOverflow();
+    const check = () => {
+      if (anchor !== el || timer) return;
+      if (tip && !tipWanted(el)) dropTip();
+      else if (!tip && tipWanted(el)) show(el);
+    };
+    const Observer = (win as Window & { ResizeObserver?: typeof ResizeObserver }).ResizeObserver;
+    const ro = Observer ? new Observer(check) : null;
+    ro?.observe(el);
+    win.addEventListener("resize", check);
+    overflow = {
+      el,
+      stop: () => {
+        ro?.disconnect();
+        win.removeEventListener("resize", check);
+      },
+    };
+  };
+
+  const hide = () => {
+    win.clearTimeout(timer);
+    timer = 0;
+    dropTip();
+    stopOverflow();
     anchor = null;
   };
 
   const show = (el: HTMLElement) => {
     timer = 0;
     const label = text(el);
-    if (!el.isConnected || !label || tipSuppressed(el)) return;
+    if (el === anchor) watchOverflow(el);
+    if (!el.isConnected || !label || tipSuppressed(el) || !tipWanted(el)) return;
     tip?.remove();
     const t = doc.createElement("div");
     t.className = "tip";
