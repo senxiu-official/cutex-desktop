@@ -1,0 +1,87 @@
+name: Candidate runtime smoke
+on:
+  workflow_dispatch:
+    inputs:
+      build_run: {description: Successful canonical build, required: true, type: string}
+      sign_run: {description: Production dry-sign run, required: true, type: string}
+      product_commit: {description: Full public product commit, required: true, type: string}
+      version: {description: Candidate version, required: true, type: string}
+permissions:
+  contents: read
+  actions: read
+jobs:
+  smoke:
+    name: candidate runtime ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {platform: linux-x64, runner: ubuntu-22.04}
+          - {platform: windows-x64, runner: windows-2022}
+          - {platform: macos-arm64, runner: macos-15}
+    defaults:
+      run: {shell: bash}
+    steps:
+      - run: git config --global core.autocrlf false
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with: {persist-credentials: false}
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with: {node-version: '24.21.0'}
+      - name: Validate canonical provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUILD_RUN: ${{ inputs.build_run }}
+          SIGN_RUN: ${{ inputs.sign_run }}
+          PRODUCT_COMMIT: ${{ inputs.product_commit }}
+        run: |
+          set -euo pipefail
+          [[ "$BUILD_RUN" =~ ^[1-9][0-9]*$ && "$SIGN_RUN" =~ ^[1-9][0-9]*$ && "$PRODUCT_COMMIT" =~ ^[a-f0-9]{40}$ ]] || exit 1
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$BUILD_RUN" > "$RUNNER_TEMP/candidate-build-run.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SIGN_RUN" > "$RUNNER_TEMP/candidate-sign-run.json"
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          root=Path(os.environ['RUNNER_TEMP'])
+          for file,path in [('candidate-build-run.json','.github/workflows/build-binaries.yml'),('candidate-sign-run.json','.github/workflows/sign-release.yml')]:
+              run=json.loads((root/file).read_text())
+              if run['status']!='completed' or run['conclusion']!='success' or run['head_sha']!=os.environ['PRODUCT_COMMIT'] or run['path']!=path or run['repository']['full_name']!=os.environ['GITHUB_REPOSITORY']:
+                  raise SystemExit('Canonical product/signing provenance mismatch: '+file)
+          PY
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.build_run }}
+          name: desktop-${{ matrix.platform }}
+          path: ${{ runner.temp }}/candidate-build
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.sign_run }}
+          name: sign-release-${{ inputs.sign_run }}
+          path: ${{ runner.temp }}/candidate-sign
+      - name: Linux display and runtime libraries
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -q && sudo apt-get install -y -q xvfb libgtk-3-0 libnss3 libgbm1 libasound2
+      - name: Signature self-test and unchanged packaged runtime launch
+        env:
+          FROM_VERSION: ${{ inputs.version }}
+          TO_VERSION: ${{ inputs.version }}
+          TO_COMMIT: ${{ inputs.product_commit }}
+          CANDIDATE_BUILD_ASSETS: ${{ runner.temp }}/candidate-build
+          CANDIDATE_SIGNED_ASSETS: ${{ runner.temp }}/candidate-sign
+          PUBLIC_UPDATE_WORK: ${{ runner.temp }}/candidate-runtime
+        run: |
+          node .github/ci/candidate-runtime-smoke.mjs --self-test
+          if [ "$RUNNER_OS" = Linux ]; then xvfb-run -a node .github/ci/candidate-runtime-smoke.mjs; else node .github/ci/candidate-runtime-smoke.mjs; fi
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        if: always()
+        with:
+          name: candidate-runtime-${{ matrix.platform }}
+          path: |
+            ${{ runner.temp }}/candidate-runtime/logs/
+            ${{ runner.temp }}/candidate-build-run.json
+            ${{ runner.temp }}/candidate-sign-run.json
+          if-no-files-found: ignore
+          retention-days: 14

@@ -13,6 +13,11 @@
       "size": 74
     },
     {
+      "path": ".github/ci/candidate-runtime-smoke.mjs",
+      "size": 11665,
+      "sha256": "d6ff67b41a35a60850e09b87f58aabea19d60e4be006415c4fe4c5d5cd62d4a5"
+    },
+    {
       "path": ".github/ci/cutex-release.pub",
       "sha256": "5bd650f330c62ec62f71b32048bf4eaf6b29e9286b11ae4b926e5245f694c1ae",
       "size": 113
@@ -41,6 +46,11 @@
       "path": ".github/workflows/build-binaries.yml",
       "sha256": "faf3d19a1d749c49b3d5fbe5e7e8b499c8545d29ba4b9c4f1a08a55d277f721e",
       "size": 3854
+    },
+    {
+      "path": ".github/workflows/candidate-runtime-smoke.yml",
+      "size": 4331,
+      "sha256": "2a91c3c3f810875811cd76a9e92ea5de1c4b33e3b84beb51e38c5b8deac156e2"
     },
     {
       "path": ".github/workflows/modules-release.yml",
@@ -238,21 +248,6 @@
       "size": 230
     },
     {
-      "path": "LICENSES/fonts/swei-spring/COPYRIGHT-AND-NOTICES.txt",
-      "sha256": "645294325961fef252e640ada225919cd3bc8bb91dbcce767d15202c603fec25",
-      "size": 23
-    },
-    {
-      "path": "LICENSES/fonts/swei-spring/OFL.txt",
-      "sha256": "e564f06d018e7b95bc3594c96a17f1d41865af4038c375e7aa974dd69df38602",
-      "size": 4302
-    },
-    {
-      "path": "LICENSES/fonts/swei-spring/SOURCE.txt",
-      "sha256": "56a55b66c492ff6db320622db95213aa4e7d0569c371bbe849154808f924d934",
-      "size": 226
-    },
-    {
       "path": "LICENSES/fonts/swei-spring-sugar/COPYRIGHT-AND-NOTICES.txt",
       "sha256": "645294325961fef252e640ada225919cd3bc8bb91dbcce767d15202c603fec25",
       "size": 23
@@ -264,6 +259,21 @@
     },
     {
       "path": "LICENSES/fonts/swei-spring-sugar/SOURCE.txt",
+      "sha256": "56a55b66c492ff6db320622db95213aa4e7d0569c371bbe849154808f924d934",
+      "size": 226
+    },
+    {
+      "path": "LICENSES/fonts/swei-spring/COPYRIGHT-AND-NOTICES.txt",
+      "sha256": "645294325961fef252e640ada225919cd3bc8bb91dbcce767d15202c603fec25",
+      "size": 23
+    },
+    {
+      "path": "LICENSES/fonts/swei-spring/OFL.txt",
+      "sha256": "e564f06d018e7b95bc3594c96a17f1d41865af4038c375e7aa974dd69df38602",
+      "size": 4302
+    },
+    {
+      "path": "LICENSES/fonts/swei-spring/SOURCE.txt",
       "sha256": "56a55b66c492ff6db320622db95213aa4e7d0569c371bbe849154808f924d934",
       "size": 226
     },
