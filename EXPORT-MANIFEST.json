@@ -59,8 +59,8 @@
     },
     {
       "path": ".github/workflows/sign-release.yml",
-      "sha256": "248dd323e903f7654ab9efccbcfa3e723a423e4a21bdeb6dc6c24d9564cdc53b",
-      "size": 5820
+      "sha256": "9888245cd4ef7dc8711aede3c757feade176c2e0c2d83332c37e900b7de78348",
+      "size": 5811
     },
     {
       "path": ".gitignore",

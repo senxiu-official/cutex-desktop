@@ -123,7 +123,7 @@ jobs:
           path: |
             ${{ runner.temp }}/sign.log
             ${{ runner.temp }}/sign/release/SHA256SUMS
-            ${{ runner.temp }}/sign/release/SHA256SUMS.minisig
+            ${{ runner.temp }}/sign/release/*.minisig
           if-no-files-found: ignore
           retention-days: 14
       - name: Delete the signing key
