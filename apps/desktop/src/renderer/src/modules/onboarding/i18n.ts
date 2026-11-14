@@ -5,11 +5,11 @@
 import { panelGuidesZhCN } from "./panelGuideMessages";
 export const zhCN = {
   "onboarding.feature.pause.title": "暂停与继续{{agent}}",
-  "onboarding.feature.pause.body": "暂停后，当前一轮可以完成，后续消息、委托和提醒等待继续。可在{{agent}}菜单中操作；需要 r259 主机。",
+  "onboarding.feature.pause.body": "暂停后，当前一轮可以完成，后续消息、委托和提醒等待继续。可在{{agent}}菜单中操作；需要支持此功能的主机。",
   "onboarding.feature.images.title": "更轻的图片会话",
-  "onboarding.feature.images.body": "新主机通过图片引用传递图片，减少会话数据体积。旧版内嵌图片和历史图片仍可查看；需要 r259 才能使用新的图片引用。",
+  "onboarding.feature.images.body": "新主机通过图片引用传递图片，减少会话数据体积。旧版内嵌图片和历史图片仍可查看；需要支持此功能的主机才能使用新的图片引用。",
   "onboarding.feature.claudeSource.title": "选择 Claude Code 来源",
-  "onboarding.feature.claudeSource.body": "安装 claude-r28 后，在 Claude 运行时卡片中查看随附版本；主机也检测到已安装版本时，可以选择使用哪一个。需要 r259 主机。",
+  "onboarding.feature.claudeSource.body": "安装兼容的 Claude 运行时后，在 Claude 运行时卡片中查看随附版本；主机也检测到已安装版本时，可以选择使用哪一个。需要支持此功能的主机。",
   "onboarding.claudeRuntime.using": "Claude Code：{source} {version}",
   "onboarding.claudeRuntime.bundled": "自带",
   "onboarding.claudeRuntime.system": "本机已装",

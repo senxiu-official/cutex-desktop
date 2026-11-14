@@ -3,11 +3,11 @@ import { panelGuidesItIT } from "./panelGuideMessages.locales";
 
 export const itIT: Record<keyof typeof zhCN, string> = {
   "onboarding.feature.pause.title": "Metti in pausa e riprendi gli {{agents}}",
-  "onboarding.feature.pause.body": "La pausa lascia finire il turno attuale e trattiene messaggi, deleghe e allarmi successivi fino alla ripresa. Usa il menu dell’{{agent}}. Richiede un host r259.",
+  "onboarding.feature.pause.body": "La pausa lascia finire il turno attuale e trattiene messaggi, deleghe e allarmi successivi fino alla ripresa. Usa il menu dell’{{agent}}. Richiede un host compatibile.",
   "onboarding.feature.images.title": "Conversazioni con immagini più leggere",
-  "onboarding.feature.images.body": "I nuovi host inviano riferimenti alle immagini per ridurre le dimensioni delle conversazioni. Le immagini incorporate e della cronologia restano leggibili. I nuovi riferimenti richiedono un host r259.",
+  "onboarding.feature.images.body": "I nuovi host inviano riferimenti alle immagini per ridurre le dimensioni delle conversazioni. Le immagini incorporate e della cronologia restano leggibili. I nuovi riferimenti richiedono un host compatibile.",
   "onboarding.feature.claudeSource.title": "Scegli l’origine di Claude Code",
-  "onboarding.feature.claudeSource.body": "Con claude-r28 installato, la scheda del runtime Claude mostra la versione inclusa. Se l’host rileva anche una versione installata, puoi scegliere quale usare. Richiede un host r259.",
+  "onboarding.feature.claudeSource.body": "Con un runtime Claude compatibile installato, la scheda del runtime Claude mostra la versione inclusa. Se l’host rileva anche una versione installata, puoi scegliere quale usare. Richiede un host compatibile.",
   "onboarding.claudeRuntime.using": "Claude Code: {source} {version}",
   "onboarding.claudeRuntime.bundled": "Incluso",
   "onboarding.claudeRuntime.system": "Installato sull’host",

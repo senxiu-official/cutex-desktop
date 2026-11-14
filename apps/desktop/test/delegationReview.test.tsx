@@ -53,7 +53,7 @@ import { DelegationCard } from "../src/renderer/src/components/DelegationCard";
 import { DelegationRow } from "../src/renderer/src/components/DelegationQueue";
 
 const ask = (over: Partial<AskSummary> = {}): AskSummary => ({
-  askId: "ask-1", title: "构建 r208 release", requester: { kind: "agent", cutexSessionId: "lead" }, target: "alden",
+  askId: "ask-1", title: "构建 the next release", requester: { kind: "agent", cutexSessionId: "lead" }, target: "alden",
   targetName: "Alden", execution: "pendingReview", closed: null, attempts: 0, revision: 1,
   createdAt: "2026-10-19T00:00:00Z", updatedAt: "2026-10-19T00:00:00Z", ...over,
 });

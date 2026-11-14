@@ -1,5 +1,5 @@
 // The TS input-ledger vocabulary equals cutex `schema/export/input-states.json` (054 §2.4, §4.2).
-// Fixture is the byte-exact export of the deployed backend r282 (cutex c77e63d4, src/management/v2/schema/export/input-states.json),
+// Fixture preserves the input-state contract exported by the public backend schema,
 // including discardedReason superseded / historyReverted (Next Up registry 1.4 contract).
 import { describe, expect, it } from "vitest";
 import exported from "./__fixtures__/input-states.json";

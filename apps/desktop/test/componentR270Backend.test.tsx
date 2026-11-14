@@ -1,10 +1,6 @@
 // @vitest-environment jsdom
-// r270 backend follow-up (cutex fix/r270-component-contract ae9cced9, docs/contracts/component-external-ui-v1.md "Private-daemon
-// follow-up"): a kit base without install.json stays managed but reports installFrom source-only — that only means no legacy
-// manifest install, so the verified index offer stays installable explicitly ({version}; the empty install that cutex refuses
-// with 409 is never sent); Node: plain minimum + full range + observed version (never the recommendation); a missing
-// package.json is external_root_invalid with cutex's path and steps; compact `actual` is shown as cutex sends it.
-// Bodies: test/fixtures/component-external-ui-v1.ae9cced9.json (Wren's real Linux HTTP smoke, unchanged).
+// Managed component contracts: a source-only base can still install a verified index offer.
+// Exercise explicit versions, observed Node requirements and external-root diagnostics.
 import { act, createElement as h } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";

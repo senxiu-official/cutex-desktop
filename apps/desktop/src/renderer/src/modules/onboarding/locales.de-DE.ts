@@ -3,11 +3,11 @@ import { panelGuidesDeDE } from "./panelGuideMessages.locales";
 
 export const deDE: Record<keyof typeof zhCN, string> = {
   "onboarding.feature.pause.title": "{{Agents}} pausieren und fortsetzen",
-  "onboarding.feature.pause.body": "Beim Pausieren endet der aktuelle Durchlauf noch. Spätere Nachrichten, Delegierungen und Alarme warten bis zum Fortsetzen. Nutze das Menü des {{agent}}. Erfordert einen r259-Host.",
+  "onboarding.feature.pause.body": "Beim Pausieren endet der aktuelle Durchlauf noch. Spätere Nachrichten, Delegierungen und Alarme warten bis zum Fortsetzen. Nutze das Menü des {{agent}}. Erfordert einen kompatiblen Host.",
   "onboarding.feature.images.title": "Schlankere Unterhaltungen mit Bildern",
-  "onboarding.feature.images.body": "Neue Hosts übertragen Bildverweise, um die Datenmenge zu reduzieren. Bisherige eingebettete Bilder und Verlaufsbilder bleiben lesbar. Neue Bildverweise erfordern einen r259-Host.",
+  "onboarding.feature.images.body": "Neue Hosts übertragen Bildverweise, um die Datenmenge zu reduzieren. Bisherige eingebettete Bilder und Verlaufsbilder bleiben lesbar. Neue Bildverweise erfordern einen kompatiblen Host.",
   "onboarding.feature.claudeSource.title": "Claude-Code-Quelle wählen",
-  "onboarding.feature.claudeSource.body": "Mit installiertem claude-r28 zeigt die Claude-Laufzeitkarte die mitgelieferte Version. Erkennt der Host auch eine installierte Version, kannst du die gewünschte wählen. Erfordert einen r259-Host.",
+  "onboarding.feature.claudeSource.body": "Mit einer installierten kompatiblen Claude-Laufzeit zeigt die Claude-Laufzeitkarte die mitgelieferte Version. Erkennt der Host auch eine installierte Version, kannst du die gewünschte wählen. Erfordert einen kompatiblen Host.",
   "onboarding.claudeRuntime.using": "Claude Code: {source} {version}",
   "onboarding.claudeRuntime.bundled": "Mitgeliefert",
   "onboarding.claudeRuntime.system": "Auf dem Host installiert",

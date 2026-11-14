@@ -3,11 +3,11 @@ import { panelGuidesKoKR } from "./panelGuideMessages.locales";
 
 export const koKR: Record<keyof typeof zhCN, string> = {
   "onboarding.feature.pause.title": "{{agent}} 일시정지 및 재개",
-  "onboarding.feature.pause.body": "현재 턴이 끝난 뒤 후속 메시지, 위임, 알림은 재개할 때까지 기다립니다. {{agent}} 메뉴에서 사용할 수 있습니다. r259 호스트가 필요합니다.",
+  "onboarding.feature.pause.body": "현재 턴이 끝난 뒤 후속 메시지, 위임, 알림은 재개할 때까지 기다립니다. {{agent}} 메뉴에서 사용할 수 있습니다. 이 기능을 지원하는 호스트가 필요합니다.",
   "onboarding.feature.images.title": "이미지 대화를 더 가볍게",
-  "onboarding.feature.images.body": "새 호스트는 이미지 참조를 전달해 대화 데이터 크기를 줄입니다. 기존 인라인 이미지와 기록의 이미지도 계속 볼 수 있습니다. 새 이미지 참조에는 r259 호스트가 필요합니다.",
+  "onboarding.feature.images.body": "새 호스트는 이미지 참조를 전달해 대화 데이터 크기를 줄입니다. 기존 인라인 이미지와 기록의 이미지도 계속 볼 수 있습니다. 새 이미지 참조에는 이 기능을 지원하는 호스트가 필요합니다.",
   "onboarding.feature.claudeSource.title": "Claude Code 출처 선택",
-  "onboarding.feature.claudeSource.body": "claude-r28을 설치하면 Claude 런타임 카드에 포함된 버전이 표시됩니다. 호스트에 설치된 버전도 감지되면 사용할 버전을 고를 수 있습니다. r259 호스트가 필요합니다.",
+  "onboarding.feature.claudeSource.body": "호환되는 Claude 런타임을 설치하면 Claude 런타임 카드에 포함된 버전이 표시됩니다. 호스트에 설치된 버전도 감지되면 사용할 버전을 고를 수 있습니다. 이 기능을 지원하는 호스트가 필요합니다.",
   "onboarding.claudeRuntime.using": "Claude Code: {source} {version}",
   "onboarding.claudeRuntime.bundled": "번들 버전",
   "onboarding.claudeRuntime.system": "호스트에 설치됨",

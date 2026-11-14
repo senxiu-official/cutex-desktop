@@ -21,11 +21,10 @@ const shown = (r: InputRecord): Shown => {
   return p;
 };
 /**
- * The actions a deployed r282 host (cutex c77e63d4) offers for a record: a copy of management/v2/input_ledger.rs
- * `record_actions` / `actions_for` / `owner_stuck` (lines 815-900). Tests use these, never "every action", so the
- * disposal check sees what the real backend allows (Director 2026-11-14).
+ * The actions offered by the public 0.2.3 backend. Tests use the actual action contract rather than
+ * every possible action, so the disposal check reflects legacy backend capabilities.
  */
-function r282Actions(r: Pick<InputRecord, "kind" | "state" | "reason" | "stalled" | "details">): InputAction[] {
+function legacyHostActions(r: Pick<InputRecord, "kind" | "state" | "reason" | "stalled" | "details">): InputAction[] {
   const stuck = r.kind === "owner" && (
     (r.state === "waiting" && r.reason === "ownerRetry" && r.stalled?.reason === "noProgress")
     || ((r.state === "sending" || r.state === "accepted") && (r.stalled?.reason === "runtimeDisconnected" || (r.stalled?.reason === "noProgress" && ["generationChanged", "leaseStale", "orphan"].includes(String(r.details?.stuck))))));
@@ -36,15 +35,13 @@ function r282Actions(r: Pick<InputRecord, "kind" | "state" | "reason" | "stalled
     : r.state === "waiting" && r.kind !== "owner" && r.kind !== "delegationRequest" ? ["dismiss"]
     : [];
   // interruptSend (owner, running turn) and hold / releaseHold (details.ownerHold) are never disposals.
-  // (This is the r282 host: no input-disposal-v1. A host with it: disposalActions below.)
+  // (This is the 0.2.3 host: no input-disposal-v1. A host with it: disposalActions below.)
   if (r.state === "waiting" && r.kind !== "owner" && r.kind !== "delegationRequest" && typeof r.details?.ownerHold === "boolean") out.push(r.details.ownerHold ? "releaseHold" : "hold");
   return out;
 }
 
 /**
- * The actions a host with input-disposal-v1 offers (cutex 52a1ef8f, fix/input-disposal-guarantee-20261114; re-synced
- * 2026-11-14: unchanged from 3099f411 — 52a1ef8f only narrowed the absolute deadline to received / sending):
- * management/v2/input_ledger.rs `record_actions` / `actions_for` / `owner_stuck` there. Failed and uncertain: retry +
+ * The action contract for hosts with input-disposal-v1. Failed and uncertain: retry +
  * dismiss for every kind; the owner's explicit queue adds dismiss; waiting / held / accepted: dismiss for every kind;
  * received / sending: none (the id-only `cutex/input/dispose` still works there — `dismissible` is every unfinished state).
  */
@@ -62,8 +59,8 @@ function disposalActions(r: Pick<InputRecord, "kind" | "state" | "reason" | "sta
 }
 
 /**
- * Rows the r282 backend gives no disposal (no action that ends the row), grouped. Each line is a backend fix Alice-2
- * is making (audit EXITS A/B item in brackets); the desktop shows the grey 放弃 with its reason meanwhile and turns it
+ * Rows the public 0.2.3 backend cannot dispose of, grouped by capability gap.
+ * The desktop shows the grey 放弃 with its reason on legacy hosts and turns it
  * on by itself once the host offers `dismiss`. The test fails if a gap appears outside this list, or a listed gap
  * is closed (then remove the line).
  */
@@ -76,11 +73,11 @@ const NEEDS_BACKEND: Record<string, string> = {
   "request:waiting≠reviewPending": "a waiting delegation request has no dismiss / cancel (E3)",
   "nonOwner:failed": "a failed non-owner input offers only retry (E13)",
 };
-/** Backend work not visible as a missing action (kept with the list for the report; Alice-2's branch). */
+/** Backend capability gaps beyond missing actions. */
 export const NEEDS_BACKEND_NOTES = [
   "staleHeld: the dedicated release_stale_held action (desktop shows 允许发送 only when releaseHold is offered; dispose ends it meanwhile)",
 ] as const;
-/** Every gap above is closed by input-disposal-v1 (cutex 52a1ef8f): with the capability nothing is left. Held / accepted rows
+/** Every gap above is closed by input-disposal-v1: with the capability nothing is left. Held / accepted rows
  *  no longer get a host deadline there (only received / sending do); their exit is the owner disposal checked here. */
 const NEEDS_BACKEND_WITH_DISPOSAL: Record<string, string> = {};
 const gapKey = (r: InputRecord): string =>
@@ -93,7 +90,7 @@ const gapKey = (r: InputRecord): string =>
 const FULL_CTX: NextUpContext = { queueItem: true, askKnown: true, canReview: true, canResume: true, canStart: true, canReadNow: true, hasText: true, idle: true, composerEmpty: true };
 
 /** Every (kind, state, reason) the schema allows, as a record on Next Up. */
-function allRecords(actionsOf: (r: InputRecord) => InputAction[] = r282Actions): InputRecord[] {
+function allRecords(actionsOf: (r: InputRecord) => InputAction[] = legacyHostActions): InputRecord[] {
   const out: InputRecord[] = [];
   for (const kind of INPUT_KINDS) for (const state of INPUT_STATES) {
     const reasons = (INPUT_REASONS_BY_STATE[state] as readonly string[] | undefined) ?? [];
@@ -103,7 +100,7 @@ function allRecords(actionsOf: (r: InputRecord) => InputAction[] = r282Actions):
         out.push({ ...r, actions: actionsOf(r) });
       }
   }
-  // Owner records the host marks stuck get retry / dismiss (r274.2 §9.4).
+  // Owner records the host marks stuck get retry / dismiss (legacy backend action contract).
   for (const state of ["sending", "accepted"] as const) {
     const r = record(`owner-${state}-stuck`, { kind: "owner", state, reason: null, surface: "nextUp", stalled: { reason: "runtimeDisconnected", since: new Date(T0).toISOString() } });
     out.push({ ...r, actions: actionsOf(r) });
@@ -211,7 +208,7 @@ describe("projection: backend codes → one registry state", () => {
 });
 
 describe("disposal guarantee (registry §五)", () => {
-  it("with r282's real actions, every row has an enabled disposal — except exactly the 'needs backend' list", () => {
+  it("with 0.2.3's real actions, every row has an enabled disposal — except exactly the 'needs backend' list", () => {
     const gaps = new Map<string, string[]>();
     let checked = 0;
     for (const r of allRecords()) {

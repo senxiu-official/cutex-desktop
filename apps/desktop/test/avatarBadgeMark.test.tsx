@@ -82,7 +82,7 @@ describe("Avatar: the owner's badge as the mark", () => {
     expect(chip()!.style.getPropertyValue("--project-icon-color")).toBe("#fa5252"); // projectColor("red")
   });
   it("box sizes are unchanged (no layout shift): place, height, padding per avatar size", () => {
-    fx.look.isDirector = true; fx.look.project = { hostId: "local", id: "p", mark: "ctxH", color: "cyan" }; fx.look.badge = null;
+    fx.look.isDirector = true; fx.look.project = { hostId: "local", id: "p", mark: "AppH", color: "cyan" }; fx.look.badge = null;
     const box = () => { const c = chip()!.style; return [c.left, c.bottom, c.height, c.minWidth, c.padding, c.fontSize, c.borderRadius]; };
     // Heights and places as before the 2026-11-12 redesign (the avatar row never moves); the UI font needs 3 px sides.
     draw({ size: 28 }); expect(box()).toEqual(["-3px", "-2px", "12px", "12px", "0px 3px", "8.5px", "4px"]);
@@ -108,7 +108,7 @@ describe("Avatar: the owner's badge as the mark", () => {
 
 describe("Avatar mark: the sidebar's project tile (owner 2026-11-13)", () => {
   it("is the sidebar's project icon: .project-icon tile, opaque over the card, per-theme ink, the UI font", () => {
-    fx.look.isDirector = true; fx.look.project = { hostId: "local", id: "p", mark: "ctxE", color: "#3fa7a3" };
+    fx.look.isDirector = true; fx.look.project = { hostId: "local", id: "p", mark: "AppE", color: "#3fa7a3" };
     draw();
     const c = chip()!;
     expect(c.classList.contains("project-icon")).toBe(true);
@@ -122,7 +122,7 @@ describe("Avatar mark: the sidebar's project tile (owner 2026-11-13)", () => {
     expect(style).not.toMatch(/backdrop/);
     expect(c.style.background).not.toContain("transparent");
     expect(c.style.fontFamily).toBe("var(--font-sans)");
-    expect(c.textContent).toBe("ctxE");
+    expect(c.textContent).toBe("AppE");
   });
   it("a project's lucide icon is drawn as the glyph; emoji / text icons are the text", () => {
     fx.look.isDirector = true; fx.look.project = { hostId: "local", id: "p", mark: "RO", color: "blue" };

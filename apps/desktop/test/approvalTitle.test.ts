@@ -39,9 +39,9 @@ const SAMPLES: Record<string, { record: Pick<ApprovalRecord, "kind" | "summary" 
     en: "Create Agent reviewer with Profile gamma",
   },
   ask_delivery: {
-    record: rec("ask_delivery", { askId: "ask-1", target: "cutex.alden", targetName: "Alden", title: "构建 r208 release" }, "委托 Lead → Alden: 构建 r208 release"),
-    zh: "委托给 Alden：构建 r208 release",
-    en: "Delegate to Alden: 构建 r208 release",
+    record: rec("ask_delivery", { askId: "ask-1", target: "cutex.alden", targetName: "Alden", title: "构建 the next release" }, "委托 Lead → Alden: 构建 the next release"),
+    zh: "委托给 Alden：构建 the next release",
+    en: "Delegate to Alden: 构建 the next release",
   },
   browser_claim: {
     record: rec("browser_claim", { reason: "log in", urlHint: "https://x.test/" }, "Select an owner browser tab (shares its login state)"),

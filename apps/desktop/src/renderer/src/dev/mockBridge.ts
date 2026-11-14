@@ -874,16 +874,16 @@ function ownerRowSessions(): SessionResource[] {
 // receipt (the chip had only the name: a round 'W' on a fill), one still creating an agent not in the sidebar yet, a delegate
 // and a note by name; wuwa-rotation-scout asks a question (需要你).
 // Opt-in ?badgerow (owner 2026-11-01, avatar-badges): the owner's tray row whose project marks were hard to read — Directors
-// of WvLn (magenta), ctxH (cyan), ctxE (a custom teal), ROVE (a custom grey-beige) on portraits, an emoji Director and two
+// of WvLn (magenta), AppH (cyan), AppE (a custom teal), ROVE (a custom grey-beige) on portraits, an emoji Director and two
 // agents carrying the owner's badge (pink / violet tints).
 const BADGE_ROW_SCENE = typeof location !== "undefined" && new URLSearchParams(location.search).has("badgerow");
-const BADGE_ROW_AGENTS: [id: string, project: string | null][] = [["wvln-dir", "wvln"], ["ctxh-dir", "ctxh"], ["ctxe-dir", "ctxe"], ["rove-dir", "rove"], ["bnotes-dir", "bnotes"], ["badge-pink", null], ["badge-violet", null]];
+const BADGE_ROW_AGENTS: [id: string, project: string | null][] = [["wvln-dir", "wvln"], ["apph-dir", "apph"], ["appe-dir", "appe"], ["rove-dir", "rove"], ["bnotes-dir", "bnotes"], ["badge-pink", null], ["badge-violet", null]];
 function badgeRowSessions(): SessionResource[] {
   const pic = (s: SessionResource, ref: string): SessionResource => ({ ...s, avatar: { kind: "icon", value: `portrait:kit-20261029/${ref}` } });
   return [
     pic(session("wvln-dir", "WvLn-Director", { profile: "claude", output: "发布说明写好了。", idle: 4 }), "sunlit-shores/claude/02"),
-    pic(session("ctxh-dir", "ctxH-Director", { profile: "gamma", turn: "ctxh-t1", tool: "$ cargo test" }), "misty-city-cyberpunk/gpt/03"),
-    pic(session("ctxe-dir", "ctxE-Director", { profile: "gamma", output: "等你确认。", idle: 9 }), "great-ming/gpt/04"),
+    pic(session("apph-dir", "AppH-Director", { profile: "gamma", turn: "apph-t1", tool: "$ cargo test" }), "misty-city-cyberpunk/gpt/03"),
+    pic(session("appe-dir", "AppE-Director", { profile: "gamma", output: "等你确认。", idle: 9 }), "great-ming/gpt/04"),
     pic(session("rove-dir", "ROVE-Director", { profile: "GLM", output: "跑完了。", idle: 30 }), "great-ming/gpt/01"),
     { ...session("bnotes-dir", "Notes-Director", { profile: "omega", idle: 60 }), avatar: { kind: "emoji", value: "🐙" } },
     { ...pic(session("badge-pink", "Pink-Badge", { profile: "claude", idle: 12 }), "sunlit-shores/claude/01"), badge: { text: "HELP", tint: "pink" } } as SessionResource,
@@ -1731,7 +1731,7 @@ if (BADGE_ROW_SCENE) {
   // &badgeicons: two of them with a host project icon (WvLn an emoji, ROVE a lucide glyph), to show icons on the mark.
   const icons: Record<string, { kind: "emoji" | "icon"; value: string }> = new URLSearchParams(location.search).has("badgeicons") ? { wvln: { kind: "emoji", value: "🌊" }, rove: { kind: "icon", value: "globe" } } : {};
   const project = (id: string, label: string, color: string) => ({ project_id: id, authority_epoch: 1, director_cutex_session_id: `${id}-dir`, presentation: { display_name: id, badge_label: label, color, ...(icons[id] ? { icon: icons[id] } : {}) }, active_member_count: 1, lifecycle: "active" }) as never;
-  snapshot.projects!.projects.push(project("wvln", "WvLn", "magenta"), project("ctxh", "ctxH", "cyan"), project("ctxe", "ctxE", "#3fa7a3"), project("rove", "ROVE", "#a89f8a"), project("bnotes", "笔记", "yellow"));
+  snapshot.projects!.projects.push(project("wvln", "WvLn", "magenta"), project("apph", "AppH", "cyan"), project("appe", "AppE", "#3fa7a3"), project("rove", "ROVE", "#a89f8a"), project("bnotes", "笔记", "yellow"));
   for (const [id, p] of BADGE_ROW_AGENTS) snapshot.hostRows[id] = hostRow(id, p);
 }
 

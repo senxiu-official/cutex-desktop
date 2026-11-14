@@ -4,11 +4,11 @@ import { panelGuidesZhHantCN } from "./panelGuideMessages.locales";
 
 export const zhHantCN: Record<keyof typeof zhCN, string> = {
   "onboarding.feature.pause.title": "暫停與繼續{{agent}}",
-  "onboarding.feature.pause.body": "暫停後，當前一輪可以完成，後續消息、委託和提醒等待繼續。可在{{agent}}菜單中操作；需要 r259 主機。",
+  "onboarding.feature.pause.body": "暫停後，當前一輪可以完成，後續消息、委託和提醒等待繼續。可在{{agent}}菜單中操作；需要支持此功能的主機。",
   "onboarding.feature.images.title": "更輕的圖片會話",
-  "onboarding.feature.images.body": "新主機通過圖片引用傳遞圖片，減少會話數據體積。舊版內嵌圖片和歷史圖片仍可查看；需要 r259 才能使用新的圖片引用。",
+  "onboarding.feature.images.body": "新主機通過圖片引用傳遞圖片，減少會話數據體積。舊版內嵌圖片和歷史圖片仍可查看；需要支持此功能的主機才能使用新的圖片引用。",
   "onboarding.feature.claudeSource.title": "選擇 Claude Code 來源",
-  "onboarding.feature.claudeSource.body": "安裝 claude-r28 後，在 Claude 運行時卡片中查看隨附版本；主機也檢測到已安裝版本時，可以選擇使用哪一個。需要 r259 主機。",
+  "onboarding.feature.claudeSource.body": "安裝兼容的 Claude 運行時後，在 Claude 運行時卡片中查看隨附版本；主機也檢測到已安裝版本時，可以選擇使用哪一個。需要支持此功能的主機。",
   "onboarding.claudeRuntime.using": "Claude Code：{source} {version}",
   "onboarding.claudeRuntime.bundled": "隨附版本",
   "onboarding.claudeRuntime.system": "主機上已安裝",

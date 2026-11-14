@@ -3,11 +3,11 @@ import { panelGuidesEsES } from "./panelGuideMessages.locales";
 
 export const esES: Record<keyof typeof zhCN, string> = {
   "onboarding.feature.pause.title": "Pausar y reanudar {{agents}}",
-  "onboarding.feature.pause.body": "La pausa deja terminar el turno actual y retiene los mensajes, delegaciones y alarmas posteriores hasta que reanudes. Usa el menú del {{agent}}. Requiere un host r259.",
+  "onboarding.feature.pause.body": "La pausa deja terminar el turno actual y retiene los mensajes, delegaciones y alarmas posteriores hasta que reanudes. Usa el menú del {{agent}}. Requiere un host compatible.",
   "onboarding.feature.images.title": "Conversaciones con imágenes más ligeras",
-  "onboarding.feature.images.body": "Los hosts nuevos envían referencias a imágenes para reducir el tamaño de las conversaciones. Las imágenes integradas y del historial siguen disponibles. Las referencias nuevas requieren un host r259.",
+  "onboarding.feature.images.body": "Los hosts nuevos envían referencias a imágenes para reducir el tamaño de las conversaciones. Las imágenes integradas y del historial siguen disponibles. Las referencias nuevas requieren un host compatible.",
   "onboarding.feature.claudeSource.title": "Elegir el origen de Claude Code",
-  "onboarding.feature.claudeSource.body": "Con claude-r28 instalado, la tarjeta del entorno Claude muestra la versión incluida. Si el host también detecta una versión instalada, puedes elegir cuál usar. Requiere un host r259.",
+  "onboarding.feature.claudeSource.body": "Con un entorno Claude compatible instalado, la tarjeta del entorno Claude muestra la versión incluida. Si el host también detecta una versión instalada, puedes elegir cuál usar. Requiere un host compatible.",
   "onboarding.claudeRuntime.using": "Claude Code: {source} {version}",
   "onboarding.claudeRuntime.bundled": "Incluido",
   "onboarding.claudeRuntime.system": "Instalado en el host",

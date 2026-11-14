@@ -3,11 +3,11 @@ import { panelGuidesJaJP } from "./panelGuideMessages.locales";
 
 export const jaJP: Record<keyof typeof zhCN, string> = {
   "onboarding.feature.pause.title": "{{agent}}を一時停止・再開",
-  "onboarding.feature.pause.body": "現在のターンが終わった後、後続のメッセージ・委任・アラームは再開まで待機します。{{agent}}のメニューから操作できます。r259 ホストが必要です。",
+  "onboarding.feature.pause.body": "現在のターンが終わった後、後続のメッセージ・委任・アラームは再開まで待機します。{{agent}}のメニューから操作できます。対応ホストが必要です。",
   "onboarding.feature.images.title": "画像を含む会話を軽く",
-  "onboarding.feature.images.body": "新しいホストは画像の参照を渡し、会話データを小さく保ちます。従来の埋め込み画像と履歴の画像も表示できます。新しい画像参照には r259 ホストが必要です。",
+  "onboarding.feature.images.body": "新しいホストは画像の参照を渡し、会話データを小さく保ちます。従来の埋め込み画像と履歴の画像も表示できます。新しい画像参照には 対応ホストが必要です。",
   "onboarding.feature.claudeSource.title": "Claude Code の取得元を選ぶ",
-  "onboarding.feature.claudeSource.body": "claude-r28 をインストールすると、Claude ランタイムのカードに同梱バージョンが表示されます。ホスト上の既存バージョンも検出された場合は、使用する方を選べます。r259 ホストが必要です。",
+  "onboarding.feature.claudeSource.body": "対応する Claude ランタイムをインストールすると、Claude ランタイムのカードに同梱バージョンが表示されます。ホスト上の既存バージョンも検出された場合は、使用する方を選べます。対応ホストが必要です。",
   "onboarding.claudeRuntime.using": "Claude Code：{source} {version}",
   "onboarding.claudeRuntime.bundled": "同梱版",
   "onboarding.claudeRuntime.system": "ホストにインストール済み",

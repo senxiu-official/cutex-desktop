@@ -1042,7 +1042,7 @@ describe("an agent created by a Director (agent_create, cutex Agent Bus process)
     expect(ids(store.getState().sidebar?.active)).toEqual(["a1", "b2", "n3"]);
   });
 
-  it("shows up on cutex/sessions/changed (r240 host event)", async () => {
+  it("shows up on cutex/sessions/changed (host session-change event)", async () => {
     await start();
     mock.responses.set("local:sidebar", created);
     transport.host("local", cutex("cutex.host", "cutex/sessions/changed", { added: ["n3"], removed: [], changed: [], projectsChanged: true, hostId: "HOST-A" }));

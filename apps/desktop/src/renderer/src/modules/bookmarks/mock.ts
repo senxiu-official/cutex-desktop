@@ -67,7 +67,7 @@ const local: OwnerPin[] = [
   pin("sora", "note", "DESKTOP_PARITY.md 第 3 节是 timeline 改动的检查单", 5 * 86400, { links: [{ target: "D:/Work/app/docs/DESKTOP_PARITY.md", label: "DESKTOP_PARITY.md" }] }),
   pin("eva", "note", "夜间测试的失败用例都在 e2e/nightly-1109.md", 9 * 3600),
   pin("mika", "todo", "看一眼新的输入框草稿迁移", 4 * 86400, { state: "done", resolvedBy: "owner", resolvedAt: iso(3 * 86400) }),
-  pin("eva", "decide", "要不要把旧的 r274 kit 删掉？", 6 * 86400, { state: "dropped", resolvedBy: "agent", resolution: "你在对话里说了删，已删除，释放 41 GB。", resolvedAt: iso(5 * 86400) }),
+  pin("eva", "decide", "要不要把旧的测试升级包 删掉？", 6 * 86400, { state: "dropped", resolvedBy: "agent", resolution: "你在对话里说了删，已删除，释放 41 GB。", resolvedAt: iso(5 * 86400) }),
   pin("sora", "todo", "给 Waveline 重新 pin cutex-mobile", 7 * 86400, { state: "done", resolvedBy: "agent", resolution: "已 pin 到 0.2.4。", resolvedAt: iso(6 * 86400) }),
 ];
 

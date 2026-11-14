@@ -53,8 +53,8 @@ const mockApprovals: MockApproval[] = [
   // card in Lead's conversation, the row in Alden's queue and the side detail decide it too.
   {
     approvalId: "apr-5e1f0a7c", kind: "ask_delivery", reason: "target_capabilities_not_subset", requesterCutexSessionId: "lead", requesterName: "Lead", projectId: "desktop",
-    summary: "委托 Lead → Alden: 构建 r208 release",
-    details: { askId: "ask-review", target: "alden", targetName: "Alden", title: "构建 r208 release", brief: "构建 r208 release。完成后简短汇报。", differences: [{ field: "sandbox", requester: "workspace-write", target: "danger-full-access" }], grants: "delivery of this one ask, once, under the target's existing permissions; each action in its turn still follows the target's approval policy" },
+    summary: "委托 Lead → Alden: 构建 the next release",
+    details: { askId: "ask-review", target: "alden", targetName: "Alden", title: "构建 the next release", brief: "构建 the next release。完成后简短汇报。", differences: [{ field: "sandbox", requester: "workspace-write", target: "danger-full-access" }], grants: "delivery of this one ask, once, under the target's existing permissions; each action in its turn still follows the target's approval policy" },
     requestSha256: "77c1…", state: "pending", createdAt: iso(1500),
   },
   {

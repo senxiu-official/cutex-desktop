@@ -4,11 +4,11 @@ import { panelGuidesEnAU } from "./panelGuideMessages.locales";
 
 export const enAU: Record<keyof typeof zhCN, string> = {
   "onboarding.feature.pause.title": "Pause and resume {{agents}}",
-  "onboarding.feature.pause.body": "Pause lets the current turn finish, then holds later messages, delegations and alarms until you resume. Use the {{agent}} menu. Requires an r259 host.",
+  "onboarding.feature.pause.body": "Pause lets the current turn finish, then holds later messages, delegations and alarms until you resume. Use the {{agent}} menu. Requires a compatible host.",
   "onboarding.feature.images.title": "Lighter image conversations",
-  "onboarding.feature.images.body": "New hosts pass image references to keep conversation data smaller. Existing inline and history images remain readable. New image references require an r259 host.",
+  "onboarding.feature.images.body": "New hosts pass image references to keep conversation data smaller. Existing inline and history images remain readable. New image references require a compatible host.",
   "onboarding.feature.claudeSource.title": "Choose the Claude Code source",
-  "onboarding.feature.claudeSource.body": "With claude-r28 installed, the Claude runtime card shows its bundled version. If the host also detects an installed version, choose which to use. Requires an r259 host.",
+  "onboarding.feature.claudeSource.body": "With a compatible Claude runtime installed, the Claude runtime card shows its bundled version. If the host also detects an installed version, choose which to use. Requires a compatible host.",
   "onboarding.claudeRuntime.using": "Claude Code: {source} {version}",
   "onboarding.claudeRuntime.bundled": "Bundled",
   "onboarding.claudeRuntime.system": "Installed on host",

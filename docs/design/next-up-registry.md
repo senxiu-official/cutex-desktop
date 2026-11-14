@@ -1,15 +1,15 @@
 # 「接下来」固定状态表（Next Up registry）
 
-Version 1.8. **Approved by the owner on 2026-11-14** ("可以用这14种"); merged by Director ctxE-Alice from two independent GPT audits (nextup-audit-a, nextup-audit-b). Any new state, label, button or action change needs approval from the owner or the Director, and an entry in the change log at the end of this file.
+Version 1.9. This registry defines the Next Up states, labels, actions and disposal guarantees. Changes require a registry version update, matching documentation and reviewed tests.
 
-## 〇、固定的状态 key（v1.5，主人 2026-11-14 确定；文字可以改，key 不改）
+## 〇、固定的状态 key（v1.5；文字可以改，key 不改）
 
-这些 key 只是程序用的标识，不是给人或 agent 看的文字：代码里每个 key 都要有注释，写明它是什么消息、正在发生什么、你能做什么、怎么离开。凡是给人或 agent 看的地方（帮助页、悬停提示、诊断信息、工具和 agent 读到的文字），都用白话解释，不直接甩 key。界面文字（zh-CN / en）是 key 的翻译，主人还在推敲；改文字只改翻译表，不动 key。
+这些 key 只是程序用的标识，不是给人或 agent 看的文字：代码里每个 key 都要有注释，写明它是什么消息、正在发生什么、你能做什么、怎么离开。凡是给人或 agent 看的地方（帮助页、悬停提示、诊断信息、工具和 agent 读到的文字），都用白话解释，不直接甩 key。界面文字（zh-CN / en）是 key 的翻译，可以通过翻译表调整；改文字只改翻译表，不动 key。
 
 **用词规则：** Send / 发送 = 消息还在我们这边，或正在交出；Deliver / 送达 = 已到对方、未读；Read / 读取 = 对方读进去了（读进去即离开「接下来」）。
 
 | # | key | 当前文字 zh-CN | 当前文字 en |
-|---|---|---|---|
+|---|---|---|
 | 1 | `sending` | 正在发送 | Sending |
 | 2 | `queued` | 排队中 | Queued |
 | 3 | `afterWork`（variant `timed`） | {time} 内发送 ⓘ | Sends within {time} ⓘ |
@@ -33,7 +33,7 @@ Version 1.8. **Approved by the owner on 2026-11-14** ("可以用这14种"); merg
 ## 一、每一行只会是下面 14 种之一
 
 | # | 显示（中文） | English | 什么时候出现 | 按钮 |
-|---|---|---|---|---|
+|---|---|---|---|
 | 1 | 正在发送 | Sending | 消息正在往 agent 那边送 | 无 |
 | 2 | 排队等待 | Queued | 前面还有别的消息，或在等几条结果合并一起送 | 你的消息：插话 / 立即发送 / 编辑 / 删除；别人的消息：暂缓这条 / 放弃 / 查看委托 |
 | 3 | 忙完或到点后送达（有倒计时）／忙完后送达（设为一直等时） | Sends when free or when time is up / Sends when free | 对方正在干活：干完就送；行末倒计时先到，就在它下一次调用工具的间隙插进去（转为第 4 种） | 暂缓这条 / 放弃 / 查看委托；你的消息多一个：打断并发送 |
@@ -50,7 +50,7 @@ Version 1.8. **Approved by the owner on 2026-11-14** ("可以用这14种"); merg
 | 14 | 状态无法识别，消息已保留 | Status unknown; message kept | 后端发来这张表里没有的状态 | 刷新状态 / 查看详情 |
 
 补充规则：
-- 倒计时保持现在的界面样子（主人 2026-11-14：满意，前提是稳定），是附加在行末尾的项目，不是单独的状态；**不能替换按钮**。
+- 倒计时保持现在的界面样子，是附加在行末尾的项目，不是单独的状态；**不能替换按钮**。
 - 某个按钮当下不能用时，显示成灰的并说明原因，不会悄悄消失。
 - 已读、已放弃、已被替代的消息直接离开「接下来」，不留空行。
 
@@ -77,7 +77,7 @@ Version 1.8. **Approved by the owner on 2026-11-14** ("可以用这14种"); merg
 5. 你自己的排队消息在重连时按钮可能全部消失。
 6. 桌面端的协议少了后端已有的两个状态，会露出原始代码。
 
-## 五、每一行都必须能被处置（主人 2026-11-14）
+## 五、每一行都必须能被处置
 
 不要求一定送进模型，但每一行必须有合理的处置。规则（可自动测试）：
 
@@ -86,7 +86,7 @@ Version 1.8. **Approved by the owner on 2026-11-14** ("可以用这14种"); merg
 
 另外：处置一旦成功，这一行不会因为迟到的回执、重连、重启或重建账本再冒出来；按钮失败（忙、冲突、原文过期）后这一行仍然有处置按钮；同一批里处置一条，其余的仍可处置。
 
-为此对按钮做的补充（Director 批准，1.4）：
+为此对按钮做的补充（1.4）：
 - 第 1 种：超过绝对期限仍未结束，转为第 12 种（送达未确认）。
 - 第 7 种：加「放弃」。
 - 第 13 种：失败的行不再 15 分钟后自动隐藏，一直留到你处置。
@@ -94,9 +94,9 @@ Version 1.8. **Approved by the owner on 2026-11-14** ("可以用这14种"); merg
 - 所有「放弃」：对方忙时先记下你的决定，空出来立即执行，不再只回一句“稍后再试”。
 - 面板控件「重置券」：加「收起」，不用券也能移走。
 
-**主机支持 input-disposal-v1 时（1.9，Director ctxE-Alice）：** 所有「放弃」「忽略此通知」「放回输入框」都走只要输入编号的处置（任何状态、任何类型都能用，不再看这一行当时提供哪些操作）；第 1 种和第 14 种也加「放弃」；第 10 种仍以「拒绝」作为处置，不另加按钮。主机已经记下但还没执行完时，这一行的按钮变灰（沿用「正在处理」提示），桌面端会重新读取这一条，直到它执行完、这一行消失（不会自己再发一次处置）；不加新状态。
+**主机支持 input-disposal-v1 时（1.9）：** 所有「放弃」「忽略此通知」「放回输入框」都走只要输入编号的处置（任何状态、任何类型都能用，不再看这一行当时提供哪些操作）；第 1 种和第 14 种也加「放弃」；第 10 种仍以「拒绝」作为处置，不另加按钮。主机已经记下但还没执行完时，这一行的按钮变灰（沿用「正在处理」提示），桌面端会重新读取这一条，直到它执行完、这一行消失（不会自己再发一次处置）；不加新状态。
 
-**行的身份（1.7，Director）：** 一行对应一次具体投递（occurrence），不是一个委托编号。同一个委托再次被打开、追加修订或重试，是新的一次投递，有自己的身份（关联原 askId），按现有状态正常进入「接下来」；你处置掉的那一次永远不会再出现。
+**行的身份（1.7）：** 一行对应一次具体投递（occurrence），不是一个委托编号。同一个委托再次被打开、追加修订或重试，是新的一次投递，有自己的身份（关联原 askId），按现有状态正常进入「接下来」；你处置掉的那一次永远不会再出现。
 
 **待读留言什么时候读（核实于 2026-11-14）：** 留言不会叫醒对方，也不会自己开新一回合。对方正在工作时，会在它下一次思考（模型请求）前读到；工具调完后写最终回复通常也算一次，所以多半在本回合就读了。只有本回合恰好没有下一次思考时，留言才会留到对方下次开工，这期间一直显示「待读留言」，可以点「现在读取」或「放弃」。
 
@@ -106,19 +106,19 @@ Version 1.8. **Approved by the owner on 2026-11-14** ("可以用这14种"); merg
 
 - 桌面端只保留一张代码表（`lib/inputLedger/nextUpRegistry.ts`），所有显示都只从这里取。
 - 测试会对照后端实际发的全部状态：后端多了一个状态而表里没有，测试就失败，合不进去。
-- 表一改，快照测试就失败，必须附上批准记录（谁、哪天、为什么）才能更新。
+- 表一改，快照测试就失败，必须同步更新版本和对应测试。
 
 ## 变更记录 / Change log
 
-| Version | Date | Approved by | Change |
-|---|---|---|---|
-| 1 | 2026-11-14 | owner | Initial closed set of 14 row states and panel controls |
-| 1.1 | 2026-11-14 | owner | Countdown keeps its current look (a row-end add-on); it must be stable and never replace the buttons |
-| 1.2 | 2026-11-14 | owner | Alarms no longer always wait for the turn end (design mistake); they follow the same busy-wait as other messages (state 3 with countdown, then 4). Approval notices stay immediate. Backend change in the next kit |
-| 1.3 | 2026-11-14 | owner | State 3 label says both exits (free / time up); fixed variant without the time-up part only when wait is set to forever. Every state and its explanation is listed in the app Help, generated from the same code table |
-| 1.4 | 2026-11-14 | Director (per owner requirement) | Disposal guarantee (section 五): state 1 deadline to 12, Dismiss on 7, failed rows stay until handled, Clear on 14, durable dismiss intent when busy, Hide on reset credit. From audits EXITS A/B |
-| 1.5 | 2026-11-14 | owner | Fixed state keys (section 〇) and Send/Deliver/Read wording rule; short labels are the current translation, still being tuned by the owner |
-| 1.6 | 2026-11-14 | owner (labels) / Director (icon set) | passiveNote label 待读留言 / Unread note; info icon (ⓘ) on passiveNote, afterWork timed, unconfirmed, needsAction; hover explanation on every state |
-| 1.7 | 2026-11-14 | Director | Row identity is per occurrence (askId + occurrence); disposed occurrences never return; new occurrences use existing states. Passive-note read timing verified and documented |
-| 1.8 | 2026-11-14 | Director | Panel controls: agent-paused Resume (kept from before); legacy-host paused queue Resume / Move to composer / Dismiss all (legacy only, confirm) |
-| 1.9 | 2026-11-14 | Director (ctxE-Alice) | Host input-disposal-v1: every Dismiss / Ignore / Move to composer uses the id-only `cutex/input/dispose` (works in any state for any kind; never waits for the row's offered actions); states 1 and 14 also get Dismiss on such a host; state 10 keeps Reject as its disposal. A dispose accepted but not applied yet greys the row's buttons (existing "Working on it" reason) and the desktop re-reads the input until the row leaves (it never re-sends the dispose by itself); no new state. Row identity = the input id (the host's per-occurrence id, `askId::input-N`; occurrence 0 keeps askId); askId stays the delegation link |
+| Version | Date | Change |
+|---|---|---|
+| 1 | 2026-11-14 | Initial closed set of 14 row states and panel controls |
+| 1.1 | 2026-11-14 | Countdown keeps its current look (a row-end add-on); it must be stable and never replace the buttons |
+| 1.2 | 2026-11-14 | Alarms follow the same busy-wait as other messages (state 3 with countdown, then 4). Approval notices stay immediate. Available on supporting hosts |
+| 1.3 | 2026-11-14 | State 3 label says both exits (free / time up); fixed variant without the time-up part only when wait is set to forever. Every state and its explanation is listed in the app Help, generated from the same code table |
+| 1.4 | 2026-11-14 | Disposal guarantee (section 五): state 1 deadline to 12, Dismiss on 7, failed rows stay until handled, Clear on 14, durable dismiss intent when busy, Hide on reset credit.  |
+| 1.5 | 2026-11-14 | Fixed state keys (section 〇) and Send/Deliver/Read wording rule; short labels are the current translation, maintained in the translation table |
+| 1.6 | 2026-11-14 | passiveNote label 待读留言 / Unread note; info icon (ⓘ) on passiveNote, afterWork timed, unconfirmed, needsAction; hover explanation on every state |
+| 1.7 | 2026-11-14 | Row identity is per occurrence (askId + occurrence); disposed occurrences never return; new occurrences use existing states. Passive-note read timing verified and documented |
+| 1.8 | 2026-11-14 | Panel controls: agent-paused Resume; legacy-host paused queue Resume / Move to composer / Dismiss all (legacy only, confirm) |
+| 1.9 | 2026-11-14 | Host input-disposal-v1: every Dismiss / Ignore / Move to composer uses the id-only `cutex/input/dispose` (works in any state for any kind; never waits for the row's offered actions); states 1 and 14 also get Dismiss on such a host; state 10 keeps Reject as its disposal. A dispose accepted but not applied yet greys the row's buttons (existing "Working on it" reason) and the desktop re-reads the input until the row leaves (it never re-sends the dispose by itself); no new state. Row identity = the input id (the host's per-occurrence id, `askId::input-N`; occurrence 0 keeps askId); askId stays the delegation link |

@@ -136,7 +136,7 @@ const asks: AskSummary[] = [
   ask("ask-run", "重构 queue flush 的 CAS 校验", HELPER, "running", { ago: 70, ran: 45, attempts: 2, attempt: { n: 2, state: "running", turnId: "helper-t2", startedAt: iso(45), model: "deepseek-v4-flash", activity: { toolCalls: 7, line: "跑 user_input 的测试" }, progress: [{ text: "读完 dispatch_queue_flush，开始改", at: iso(30) }] } }),
   ask("ask-queue2", "补 flush 并发测试", HELPER, "queued", { ago: 300, queuePosition: 2, ...held({ reason: "targetBusy", position: 2 }) }),
   ask("ask-wait", "更新 queue 面板文案", MIKA, "queued", { ago: 420, queuePosition: 1, ...held({ reason: "targetBusy", position: 1 }) }),
-  ask("ask-review", "构建 r208 release", ALDEN, "pendingReview", { ago: 1500 }),
+  ask("ask-review", "构建 the next release", ALDEN, "pendingReview", { ago: 1500 }),
   ask("ask-paused", "迁移脚本 dry-run", REI, "queued", { ago: 2000, ...held({ reason: "paused", by: "owner" }) }),
   ask("ask-plan", "评估 Claude adapter 的 thread/read 投影", SORA, "admitted", { ago: 640, ...held({ reason: "paused", by: "planMode" }) }),
   ask("ask-offline", "清理 Rei 的旧日志", REI, "queued", { ago: 5000, ...held({ reason: "blocked", by: "runtimeDown" }) }),

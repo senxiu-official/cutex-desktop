@@ -3,11 +3,11 @@ import { panelGuidesFrFR } from "./panelGuideMessages.locales";
 
 export const frFR: Record<keyof typeof zhCN, string> = {
   "onboarding.feature.pause.title": "Mettre en pause et reprendre les {{agents}}",
-  "onboarding.feature.pause.body": "La pause laisse finir le tour en cours, puis retient les messages, délégations et alarmes jusqu’à la reprise. Utilisez le menu de l’{{agent}}. Nécessite un hôte r259.",
+  "onboarding.feature.pause.body": "La pause laisse finir le tour en cours, puis retient les messages, délégations et alarmes jusqu’à la reprise. Utilisez le menu de l’{{agent}}. Nécessite un hôte compatible.",
   "onboarding.feature.images.title": "Des conversations avec images plus légères",
-  "onboarding.feature.images.body": "Les nouveaux hôtes transmettent des références aux images pour réduire le volume des conversations. Les anciennes images intégrées et historiques restent lisibles. Les nouvelles références nécessitent un hôte r259.",
+  "onboarding.feature.images.body": "Les nouveaux hôtes transmettent des références aux images pour réduire le volume des conversations. Les anciennes images intégrées et historiques restent lisibles. Les nouvelles références nécessitent un hôte compatible.",
   "onboarding.feature.claudeSource.title": "Choisir la source de Claude Code",
-  "onboarding.feature.claudeSource.body": "Avec claude-r28 installé, la carte du runtime Claude affiche la version fournie. Si l’hôte détecte aussi une version installée, vous pouvez choisir celle à utiliser. Nécessite un hôte r259.",
+  "onboarding.feature.claudeSource.body": "Avec un runtime Claude compatible installé, la carte du runtime Claude affiche la version fournie. Si l’hôte détecte aussi une version installée, vous pouvez choisir celle à utiliser. Nécessite un hôte compatible.",
   "onboarding.claudeRuntime.using": "Claude Code : {source} {version}",
   "onboarding.claudeRuntime.bundled": "Fourni",
   "onboarding.claudeRuntime.system": "Installé sur l’hôte",

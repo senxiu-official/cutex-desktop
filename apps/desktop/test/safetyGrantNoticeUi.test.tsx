@@ -70,7 +70,7 @@ describe("接下来 row of the approval notice", () => {
     }
   });
 
-  it("r282 sends the approval notice as systemNotice: same add-on (older hosts: alarm)", () => {
+  it("capable hosts send approval notices as systemNotice: same add-on (older hosts: alarm)", () => {
     fx.notes = { n: note(block()) };
     row(record({ kind: "systemNotice", state: "waiting" }));
     expect(container.querySelector("[data-testid=grant-notice-waiting]")).not.toBeNull();

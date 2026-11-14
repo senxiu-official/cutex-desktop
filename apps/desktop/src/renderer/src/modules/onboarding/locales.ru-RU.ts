@@ -3,11 +3,11 @@ import { panelGuidesRuRU } from "./panelGuideMessages.locales";
 
 export const ruRU: Record<keyof typeof zhCN, string> = {
   "onboarding.feature.pause.title": "Приостановка и продолжение работы {{agents}}",
-  "onboarding.feature.pause.body": "Текущий ход завершится, а последующие сообщения, делегирования и напоминания будут ждать продолжения. Используйте меню {{agent}}. Нужен хост r259.",
+  "onboarding.feature.pause.body": "Текущий ход завершится, а последующие сообщения, делегирования и напоминания будут ждать продолжения. Используйте меню {{agent}}. Нужен совместимый хост.",
   "onboarding.feature.images.title": "Меньше данных в беседах с изображениями",
-  "onboarding.feature.images.body": "Новые хосты передают ссылки на изображения, уменьшая объём данных беседы. Старые встроенные изображения и изображения из истории остаются доступны. Для новых ссылок нужен хост r259.",
+  "onboarding.feature.images.body": "Новые хосты передают ссылки на изображения, уменьшая объём данных беседы. Старые встроенные изображения и изображения из истории остаются доступны. Для новых ссылок нужен совместимый хост.",
   "onboarding.feature.claudeSource.title": "Выбор источника Claude Code",
-  "onboarding.feature.claudeSource.body": "С установленной claude-r28 карточка среды Claude показывает встроенную версию. Если хост также обнаружит установленную версию, можно выбрать нужную. Требуется хост r259.",
+  "onboarding.feature.claudeSource.body": "С установленной совместимой средой Claude карточка среды Claude показывает встроенную версию. Если хост также обнаружит установленную версию, можно выбрать нужную. Требуется совместимый хост.",
   "onboarding.claudeRuntime.using": "Claude Code: {source} {version}",
   "onboarding.claudeRuntime.bundled": "В комплекте",
   "onboarding.claudeRuntime.system": "Установлен на хосте",
