@@ -62,7 +62,7 @@ describe("queue card: auto-compact", () => {
     const html = render({ ...twoKinds, sendingSteers: failed, sessionId: "agent-c2" });
     expect(html).not.toContain('data-compact="true"');
     expect(html).toContain('data-testid="outbox-failed"');
-    expect(html).toContain("outbox.retry");
+    expect(html).toContain('data-effect="retry"'); // registry 重新发送 (legacy rows read the Next Up registry)
   });
 });
 
@@ -101,5 +101,14 @@ describe("queue card: 「接下来」面板 setting", () => {
     }
     setQueueView("agent-f4", { collapsed: false });
     expect(panel("open", false, "agent-f4")).not.toContain("data-collapsed");
+  });
+});
+
+describe("old-host paused queue (registry 1.8 legacyPausedQueue)", () => {
+  it("shows 继续 / 放回输入框 / 全部放弃 with the registry words", () => {
+    const html = render({ paused: { steers: [], items: [queued("P")], count: 1 }, sessionId: "agent-p" });
+    expect(html).toContain('data-testid="paused-section"');
+    expect(html).toContain('data-testid="paused-restore"');
+    for (const word of ["Resume", "Back to input box", "Dismiss all"]) expect(html).toContain(word);
   });
 });

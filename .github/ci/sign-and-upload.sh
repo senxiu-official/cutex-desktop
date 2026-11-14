@@ -488,7 +488,24 @@ if [ "$project" = cutex ]; then
   finish_release "cutex-$label" false "${cutex_files[@]}"
   if [ -n "$native_version" ]; then
     ensure_release "native-$native_version" "cute-codex native $native_version (backend update files)" "cute-codex native files for cutex's in-app backend updates."
-    do_gh release upload "native-$native_version" -R "$repo" --clobber "$dir"/native/*
+    # An existing native identity is immutable: verify present assets, then
+    # upload only missing names. Keep the original public signatures and IDs.
+    rc=0; release_assets "native-$native_version" > "$dir/native-assets" || rc=$?
+    [ "$rc" = 0 ] || [ "$rc" = 3 ] || exit "$rc"
+    native_present=() native_missing=()
+    for f in "$dir"/native/*; do
+      if grep -qxF "$(basename "$f")" "$dir/native-assets"; then
+        native_present+=("$f")
+      else
+        native_missing+=("$f")
+      fi
+    done
+    if [ ${#native_present[@]} -gt 0 ]; then
+      verify_release "native-$native_version" "${native_present[@]}"
+    fi
+    if [ ${#native_missing[@]} -gt 0 ]; then
+      do_gh release upload "native-$native_version" -R "$repo" "${native_missing[@]}"
+    fi
     finish_release "native-$native_version" false "$dir"/native/*
   fi
   # Components before the channel flips: never --clobber (a published version is immutable). Every

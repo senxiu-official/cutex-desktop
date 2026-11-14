@@ -317,7 +317,8 @@ export function delegationStatus(d: StatusInput, ctx: DelegationContext = {}): D
       return { key: "cancelled", tone: "muted", glyph: "cross" };
     case "interrupted": {
       const reason = interruptReasonOf(d);
-      if (reason === "outcomeUnknown") return { key: "outcomeUnknown", tone: "warn", glyph: "hollow" };
+      // Owner decision 9: dismissing an unknown outcome closes the delegation as stopped; once closed it reads stopped.
+      if (reason === "outcomeUnknown" && d.closed !== "stopped") return { key: "outcomeUnknown", tone: "warn", glyph: "hollow" };
       if (reason && PEER_INTERRUPTS.has(reason)) return { key: reason as DelegationStatusKey, tone: "neutral", glyph: "cross" };
       if (d.closed === "stopped") return { key: "stopped", tone: "neutral", glyph: "ring" };
       return { key: reason === "ownerStopped" ? "ownerStopped" : reason === "runtimeRestart" ? "runtimeRestart" : "stopped", tone: "neutral", glyph: "ring" };

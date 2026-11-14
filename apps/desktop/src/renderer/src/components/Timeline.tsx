@@ -6,6 +6,8 @@ import { usesInputLedger, usesOwnerCarries } from "../lib/deliveryMode";
 import { showStandaloneDelivery } from "../lib/inputLedger/deliveryPresentation";
 import { missingTimelineRecords, placeMissingRecords, strandedNote, timelineRecordIndex, ownerRecordFor, ownerTimelineEntry, ownerOutboxTimelineEntry, predictedOwnerSurface, type LedgerOwnerOutbox } from "../lib/inputLedger/owner";
 import { carriedInputs, carriedReceivedRow } from "../lib/inputLedger/carries";
+import { placeholderMessage } from "../lib/inputLedger/placeholder";
+import { useDelegation } from "../lib/delegationStore";
 import { CarriedInputRows } from "./CarriedInputRows";
 import { InputStatus } from "./InputStatus";
 import { featuresOf } from "../store";
@@ -262,11 +264,17 @@ function TurnTime({ startedAt, completedAt }: { startedAt: number; completedAt: 
   );
 }
 
-/** A ledger row's sender, by the name the owner knows it (lib/viewHost useSenderName). */
-function LedgerSenderName({ record }: { record: InputRecord }) {
-  const fallback = record.sender?.name ?? record.kind;
-  const agent = record.sender?.kind === "agent" ? record.sender.cutexSessionId ?? record.sender.id : null;
-  return <>{useSenderName(agent, fallback).name}</>;
+/**
+ * A non-owner ledger record without its native item (not read in yet): the row that item will be, built from the
+ * record and its delegation (lib/inputLedger/placeholder), with the record's status under it like the native row.
+ */
+function LedgerPlaceholderRow({ record, hostId, carried, nameOf, sessionId, readOnly }: { record: InputRecord; hostId: string; carried: boolean; nameOf: (id: string) => string; sessionId: string; readOnly: boolean }) {
+  const ask = useDelegation(hostId, record.askId);
+  // A new entry per record / ask change: MemoEntry compares the entry, not the ledger record.
+  const entry = useMemo<TimelineEntry>(() => ({ kind: "received", id: record.timelineItemId ?? record.inputId, turnId: record.turnId ?? "", message: placeholderMessage(record, ask) }), [record, ask]);
+  return <div data-input-id={record.inputId} data-ledger-placeholder={record.kind} data-carried-input-id={carried ? record.inputId : undefined}>
+    <MemoEntry entry={entry} ledgerRecord={record} nameOf={nameOf} sessionId={sessionId} readOnly={readOnly} actionable={false} bar={undefined} dropped={0} foldRole="off" />
+  </div>;
 }
 
 /** A sent row: the kind cutex reported last (a wake may be downgraded to a note) wins over the event's. */
@@ -679,8 +687,8 @@ export function TimelineBody({ timeline, entries: suppliedEntries, version, sess
     ...Object.keys(ownerDrafts ?? {}),
     ...(ledgerOutbox ?? []).map(entry => entry.inputId),
   ], loadedTurns), [identityEntries, suppliedEntries, timeline, version, ledgerIndex, ownerDrafts, ledgerOutbox, recent, loadedTurns]);
-  const ledgerRows = useMemo(() => ledgerEnabled ? missingTimelineRecords(ledger?.records, ledgerEntries, ledgerIndex, { hasOlder: !!older?.cursor, turns: timeline.turns, hasTurn: id => loadedTurns.has(id) }) : [],
-    [ledgerEnabled, ledger?.records, ledgerEntries, ledgerIndex, older?.cursor, timeline.turns, turnCount, loadedTurns]);
+  const ledgerRows = useMemo(() => ledgerEnabled ? missingTimelineRecords(ledger?.records, ledgerEntries, ledgerIndex, { hasOlder: !!older?.cursor, turns: timeline.turns, hasTurn: id => loadedTurns.has(id), loading }) : [],
+    [ledgerEnabled, ledger?.records, ledgerEntries, ledgerIndex, older?.cursor, timeline.turns, turnCount, loadedTurns, loading]);
   const carries = useMemo(() => {
     const joined = carriedInputs(ledger?.records, usesOwnerCarries([...features]));
     const visibleOwners = new Set(ledgerRows.filter(r => r.kind === "owner").map(r => r.inputId));
@@ -716,11 +724,8 @@ export function TimelineBody({ timeline, entries: suppliedEntries, version, sess
     }
     return byOwner;
   }, [ledgerEntries, ledgerIndex, carries]);
-  // A non-owner ledger record without a native row: sender, preview and its status.
-  const ledgerInputRow = (record: InputRecord) => <div className="my-2" data-input-id={record.inputId} data-carried-input-id={carries.inputIds.has(record.inputId) ? record.inputId : undefined}>
-    <div className="text-xs text-subtle"><LedgerSenderName record={record} /></div><div className="whitespace-pre-wrap text-sm">{record.preview}</div>
-    <InputStatus record={record} sessionId={sessionId} hostId={view.hostId} readOnly={readOnly} timeline />
-  </div>;
+  // A non-owner ledger record without a native row: drawn as that row will be, with its status.
+  const ledgerInputRow = (record: InputRecord) => <LedgerPlaceholderRow record={record} hostId={view.hostId} carried={carries.inputIds.has(record.inputId)} nameOf={nameOf} sessionId={sessionId} readOnly={readOnly} />;
   // A record without its native item, inline or at the bottom: same key as the native row that may replace it.
   const missingRow = (record: InputRecord) => {
     const note = strandedNote(record, visibleTurns);

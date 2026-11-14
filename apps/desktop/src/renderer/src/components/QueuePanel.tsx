@@ -36,11 +36,14 @@ import { DeliveryStatus } from "./DeliveryStatus";
 import { showStandaloneDelivery } from "../lib/inputLedger/deliveryPresentation";
 import { mentionPlainText } from "../lib/mentionWire";
 import { Fragment, useCallback, useEffect, useMemo, useId, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { ArrowDownToLine, ChevronDown, ChevronRight, ChevronUp, CornerDownRight, Info, Pencil, Trash2, UserRound, X } from "lucide-react";
+import { ArrowDownToLine, ChevronDown, ChevronRight, ChevronUp, CircleHelp, CornerDownRight, Info, Pencil, Trash2, UserRound, X } from "lucide-react";
 import { useShortPaneFold } from "../lib/shortPane";
 import type { QueueItem } from "@cutex-desktop/protocol";
 import { RailStripContext, useStripInside } from "../lib/railStrip";
 import { useI18n, type MessageKey } from "../i18n";
+import type { InputActionResult } from "../lib/inputLedger/actionResult";
+import { type NextUpPanelControlId, isLedgerPanelControl, NEXT_UP_PANEL_CONTROLS, fill, NEXT_UP_EFFECTS, NEXT_UP_STATES, langOf, stateLabelKey, type Lang, type NextUpEffectId, type NextUpStateId } from "../lib/inputLedger/nextUpRegistry";
+import { LEGACY_FAILED_SEND_EFFECTS, legacyItemState, legacyOutboxState, legacySteerState } from "../lib/inputLedger/legacyNextUp";
 import { useModelOverloadRetry } from "../lib/modelOverloadRetryView";
 import { openMenuAt } from "../lib/contextMenu";
 import { panelGuideItem } from "../lib/panelGuideMenu";
@@ -52,6 +55,7 @@ import { queuedRowText, type PausedSection } from "../lib/queuePause";
 import { queueViewOf, setQueueView } from "../lib/queueView";
 import { autoCompact as startsCompact, mergeChips, openedThisRun, queueChips, setOpenedThisRun, turnCounts, type QueueChip } from "../lib/queueChips";
 import { META_YIELDS, QUEUE_ROW, ROW_ACTIONS, ROW_META, ROW_TEXT, rowText } from "../lib/queueRow";
+import { LocalSendStatus } from "./LocalSendStatus";
 import { KindIcon, SteerDeliveryNote } from "./AdmissionRows";
 import { QueuedImages } from "./ImageThumbs";
 import { messageImages } from "../../../shared/input";
@@ -87,6 +91,9 @@ const ICON_BUTTON_DANGER = "rounded-md p-1 text-muted hover:text-danger focus-vi
 export interface QueueSection {
   node: React.ReactNode;
   chip?: QueueChip;
+  /** The registered panel control this section is (Next Up registry §三). With the input ledger only registered
+   *  controls render; a section without one shows on older hosts only. */
+  control?: NextUpPanelControlId;
 }
 
 /** An extra-section slot with something to show (null / undefined / booleans / "" are empty slots). */
@@ -105,6 +112,22 @@ function ChipText({ chip }: { chip: QueueChip }) {
   );
 }
 
+/** Registry 1.8 legacy-only control: the paused queue of an older host (继续 / 全部放弃 with a second click). */
+const LEGACY_PAUSED = NEXT_UP_PANEL_CONTROLS.legacyPausedQueue;
+
+/** A registry state's short label with its plain explanation on hover (legacy rows; lib/inputLedger/legacyNextUp). */
+function StateWord({ state, className = "" }: { state: NextUpStateId; className?: string }) {
+  const { t, locale } = useI18n();
+  const def = NEXT_UP_STATES[state];
+  const tone = def.tone === "danger" ? "text-danger-text" : def.tone === "warn" ? "text-warn-text" : "text-subtle";
+  return <span className={`${ROW_META} ${tone} ${className}`} data-tip={def.meaning[langOf(locale)]} data-next-up-state={state}>{t(stateLabelKey(state) as MessageKey)}</span>;
+}
+/** A registry effect's word and its tooltip (the tip, else the word). */
+const effectWord = (effect: NextUpEffectId, lang: Lang) => {
+  const e = NEXT_UP_EFFECTS[effect];
+  return { label: e.label[lang], tip: "tip" in e ? e.tip[lang] : e.label[lang] };
+};
+
 export interface OutboxActions {
   onRetry(id: string): void;
   onEdit(id: string): void;
@@ -117,9 +140,11 @@ export interface OutboxActions {
  * same anatomy (kind icon · text · meta) as that row.
  */
 function OutboxRow({ entry, kind, actions, hostId }: { entry: OutboxEntry; kind: "steer" | "queue"; actions: OutboxActions; hostId?: string }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
+  const lang = langOf(locale);
   const failed = entry.state === "failed";
-  const status = outboxStatusCopy(entry);
+  const state = legacyOutboxState(entry);
+  const run: Record<(typeof LEGACY_FAILED_SEND_EFFECTS)[number], () => void> = { retry: () => actions.onRetry(entry.id), moveToComposer: () => actions.onEdit(entry.id), dismiss: () => actions.onDiscard(entry.id) };
   return (
     <div className={`${QUEUE_ROW} min-h-6 max-h-6 shrink-0 ${failed ? "bg-danger/5" : ""}`} data-testid={failed ? "outbox-failed" : "outbox-sending"}>
       <KindIcon icon={kind === "steer" ? CornerDownRight : UserRound} label={t(kind === "steer" ? "queue.turn.inserting" : "queue.delivery.owner")} />
@@ -128,8 +153,8 @@ function OutboxRow({ entry, kind, actions, hostId }: { entry: OutboxEntry; kind:
       {failed ? (
         <>
           {/* Plain words only; a raw transport / backend error is the 详情 tooltip. */}
-          <span className="max-w-[40%] shrink truncate text-caption/[inherit] text-danger-text" title={entry.error ? (entry.errorRaw ? `${t("queue.insert.details")}: ${entry.error}` : entry.error) : undefined} data-testid="outbox-failed-text">
-            {t("outbox.failed")}
+          <span className="max-w-[40%] shrink truncate text-caption/[inherit] text-danger-text" title={entry.error ? (entry.errorRaw ? `${t("queue.insert.details")}: ${entry.error}` : entry.error) : NEXT_UP_STATES.failed.meaning[lang]} data-next-up-state="failed" data-testid="outbox-failed-text">
+            {t(stateLabelKey("failed") as MessageKey)}
             {entry.error && !entry.errorRaw ? ` · ${entry.error}` : ""}
           </span>
           {entry.error && entry.errorRaw && (
@@ -137,20 +162,12 @@ function OutboxRow({ entry, kind, actions, hostId }: { entry: OutboxEntry; kind:
               <Info size={11} aria-hidden />
             </span>
           )}
-          <button onClick={() => actions.onRetry(entry.id)} title={t("outbox.retryHint")} className="shrink-0 rounded-md bg-surface-2 px-2 py-0.5 text-xs hover:text-accent">
-            {t("outbox.retry")}
-          </button>
-          <button onClick={() => actions.onEdit(entry.id)} title={t("outbox.edit")} aria-label={t("outbox.edit")} className={ICON_BUTTON}>
-            <Pencil size={12} aria-hidden />
-          </button>
-          <button onClick={() => actions.onDiscard(entry.id)} title={t("outbox.discard")} aria-label={t("outbox.discard")} className={ICON_BUTTON_DANGER}>
-            <X size={12} aria-hidden />
-          </button>
+          {LEGACY_FAILED_SEND_EFFECTS.map(effect => { const w = effectWord(effect, lang); return effect === "retry"
+            ? <button key={effect} onClick={run[effect]} title={w.tip} data-effect={effect} className="shrink-0 rounded-md bg-surface-2 px-2 py-0.5 text-xs hover:text-accent">{w.label}</button>
+            : <button key={effect} onClick={run[effect]} title={w.tip} aria-label={w.label} data-effect={effect} className={effect === "dismiss" ? ICON_BUTTON_DANGER : ICON_BUTTON}>{effect === "dismiss" ? <X size={12} aria-hidden /> : <Pencil size={12} aria-hidden />}</button>; })}
         </>
       ) : (
-        <span className={`${ROW_META} text-subtle`} title={t(status.hint)}>
-          {t(status.label, status.vars)}
-        </span>
+        <StateWord state={state} />
       )}
     </div>
   );
@@ -243,7 +260,8 @@ function LegacyQueuePanel({
   /** Start compact by the rule of lib/queueChips; `short` = the window is short. Omitted = never by itself. */
   autoCompact?: { short: boolean };
 }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
+  const lang = langOf(locale);
   const userToggle = useUserLayoutToggle();
   // Ride-alongs still settling (lib/settledRideAlongs) are left out of everything at once — rows,
   // count, chips and whether the card shows — so the card never flashes empty.
@@ -437,9 +455,7 @@ function LegacyQueuePanel({
       <span className={`${ROW_TEXT} text-foreground`}>{rowText(mentionPlainText(queuedRowText(item)))}</span>
       {feedback && !feedback.hidden ? insertStatus(item.clientUserMessageId) : extra.paused ? (
         // The ❚❚ glyph is the section's (rail / divider); the row just says it.
-        <span className={`${ROW_META} ${META_YIELDS} text-warn-text`} title={t("queue.state.paused")} data-testid="queue-item-paused">
-          {t("queue.meta.held")}
-        </span>
+        <span data-testid="queue-item-paused" className="contents"><StateWord state={legacyItemState({ paused: true })} className={META_YIELDS} /></span>
       ) : (
         extra.note && (
           <span className={`${ROW_META} ${META_YIELDS} text-subtle`} data-testid="queue-delivery-note">
@@ -453,23 +469,23 @@ function LegacyQueuePanel({
           <button
             onClick={() => onSendNow(item)}
             disabled={locked}
-            title={t(feedback?.hidden && feedback.state === "unknown" ? "queue.insert.unknown" : sendNowStartsTurn ? "queue.sendNowIdleHint" : "queue.sendNowHint")}
+            title={feedback?.hidden && feedback.state === "unknown" ? t("queue.insert.unknown") : effectWord(sendNowStartsTurn ? "sendNow" : "insertNow", lang).tip}
             className="rounded-md bg-surface-2 px-2 py-0.5 text-xs hover:text-accent focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none"
             data-testid="queue-send-now"
           >
-            {t(sendNowStartsTurn ? "queue.sendNowIdle" : "queue.sendNow")}
+            {effectWord(sendNowStartsTurn ? "sendNow" : "insertNow", lang).label}
           </button>
         )}
         <button
           onClick={() => onEdit(item)}
           disabled={!canEdit || held}
-          title={canEdit ? t("queue.edit") : t("queue.editDraftConflict")}
-          aria-label={canEdit ? t("queue.edit") : t("queue.editDraftConflict")}
+          title={canEdit ? effectWord("edit", lang).tip : t("queue.editDraftConflict")}
+          aria-label={canEdit ? effectWord("edit", lang).label : t("queue.editDraftConflict")}
           className={ICON_BUTTON}
         >
           <Pencil size={12} aria-hidden />
         </button>
-        <button onClick={() => onDelete(item)} disabled={held} title={t("queue.delete")} aria-label={t("queue.delete")} className={ICON_BUTTON_DANGER} data-testid="queue-delete">
+        <button onClick={() => onDelete(item)} disabled={held} title={effectWord("remove", lang).tip} aria-label={effectWord("remove", lang).label} className={ICON_BUTTON_DANGER} data-testid="queue-delete">
           <Trash2 size={12} aria-hidden />
         </button>
       </span>
@@ -628,8 +644,8 @@ function LegacyQueuePanel({
               {t("steer.pending")}
             </span>
             {waiting.some(p => (p.state ?? "waiting") === "waiting") && (
-              <button onClick={onInterruptSendSteers} title={t("steer.interruptSendHint")} className="rounded-md px-1.5 py-0.5 text-xs text-danger hover:bg-danger/10">
-                {t("steer.interruptSend")}
+              <button onClick={onInterruptSendSteers} title={effectWord("interruptSend", lang).tip} className="rounded-md px-1.5 py-0.5 text-xs text-danger hover:bg-danger/10">
+                {effectWord("interruptSend", lang).label}
               </button>
             )}
           </div>
@@ -651,32 +667,30 @@ function LegacyQueuePanel({
               ❚❚
             </span>
             <span className="min-w-0 flex-1 truncate" title={clearArmed ? undefined : (pausedHint ?? t("paused.titleHint"))} data-testid={pausedHint && !clearArmed ? "paused-hint" : undefined}>
-              {clearArmed ? t("paused.clearAgain", { n: paused.count }) : (pausedHint ?? t("paused.title"))}
+              {clearArmed ? fill(LEGACY_PAUSED.armed[lang], { n: paused.count }) : (pausedHint ?? LEGACY_PAUSED.label[lang])}
             </span>
             {!clearArmed && (<>
             <button onClick={onResumePaused} title={t(stopHold ? "paused.resumeHintStop" : "paused.resumeHint")} className={btn({ size: "sm" })}>
-              {t("paused.resume")}
+              {LEGACY_PAUSED.buttons[0][lang]}
             </button>
-            <button onClick={onRestorePaused} title={t("paused.restoreHint")} className="rounded-md px-1.5 py-0.5 text-xs text-muted hover:text-foreground">
-              {t("paused.restore")}
+            <button onClick={onRestorePaused} title={t("paused.restoreHint")} className="rounded-md px-1.5 py-0.5 text-xs text-muted hover:text-foreground" data-testid="paused-restore">
+              {LEGACY_PAUSED.buttons[1][lang]}
             </button>
             </>)}
             <button
               onClick={() => (clearArmed ? (setClearArmed(false), onClearPaused()) : setClearArmed(true))}
-              title={t("paused.clearHint")}
+              title={LEGACY_PAUSED.buttons[2][lang]}
               className={clearArmed ? ARMED_BUTTON : "rounded-md px-1.5 py-0.5 text-xs text-muted hover:text-danger"}
               data-testid="paused-clear"
             >
-              {t("paused.clear")}
+              {LEGACY_PAUSED.buttons[2][lang]}
             </button>
           </div>
           {paused.steers.map((p) =>
             steerRow(
               p,
-              <span className={`${ROW_META} ${META_YIELDS} text-warn-text`} title={t("steer.undeliveredHint")}>
-                {t("steer.undelivered")}
-              </span>,
-              <button onClick={() => onDismissSteer(p.id)} title={t("steer.dismiss")} aria-label={t("steer.dismiss")} className={ICON_BUTTON_DANGER}>
+              <StateWord state={legacySteerState(true)} className={META_YIELDS} />,
+              <button onClick={() => onDismissSteer(p.id)} title={effectWord("dismiss", lang).tip} aria-label={effectWord("dismiss", lang).label} className={ICON_BUTTON_DANGER} data-effect="dismiss">
                 <X size={12} aria-hidden />
               </button>,
               "undelivered-steer",
@@ -706,7 +720,7 @@ function LegacyQueuePanel({
       )}
       {(rest.length > 0 || (!ordered && sendingQueue.length > 0)) && (
         <div className={SECTION} data-queue-section="">
-          {rest.map((item, i) => itemRow(item, running && i === 0 ? { note: t("queue.deliverAfterTurn") } : {}))}
+          {rest.map((item, i) => itemRow(item, running && i === 0 ? { note: t(stateLabelKey(legacyItemState({ afterTurn: true })) as MessageKey) } : {}))}
           {sendingQueue.map((e) => (
             <OutboxRow key={e.id} entry={e} kind="queue" actions={outbox} hostId={hostId} />
           ))}
@@ -754,7 +768,7 @@ export function QueuePanel(props: React.ComponentProps<typeof LegacyQueuePanel>)
 }
 
 function LedgerQueuePanel(props: React.ComponentProps<typeof LegacyQueuePanel>) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const sessionId = props.sessionId ?? props.ordered?.sessionId ?? "";
   const hostId = props.hostId ?? "local";
   const ledger = useApp(s => agentState(s.inputs, hostId, sessionId));
@@ -794,11 +808,13 @@ function LedgerQueuePanel(props: React.ComponentProps<typeof LegacyQueuePanel>) 
     const results: PromiseSettledResult<unknown>[] = [];
     // Large backlogs must not turn one cleanup gesture into hundreds of concurrent RPCs.
     for (let i = 0; i < uncertain.length; i += 4) results.push(...await Promise.allSettled(uncertain.slice(i, i + 4).map(r => useApp.getState().dismissInput(sessionId, r.inputId, hostId))));
-    const failures = results.filter(r => r.status === "rejected");
+    // A refusal ({ok:false}) is a failure too: the row stays and the owner is told.
+    const failures = results.filter(r => r.status === "rejected" || (r.value as InputActionResult | undefined)?.ok === false);
     if (failures.length) useApp.getState().notify(t("inputLedger.cleanupFailed", { n: failures.length }), "error", { hostId, sessionId });
     setClearing(false); setArmed(false);
   };
-  const sections = props.sections?.filter(filled) ?? [];
+  // Registry §三: only registered panel controls (no free sections).
+  const sections = props.sections?.filter(filled).filter(section => isLedgerPanelControl(section.control)) ?? [];
   const count = rows.nextUp.length + rows.notes.length + preResponse.length;
   const showDelivery = showStandaloneDelivery(ledger?.delivery) && (ledger?.delivery?.state === "held" || !!ledger?.delivery?.lease);
   if (!count && !uncertain.length && !showDelivery && !sections.length) return null;
@@ -807,12 +823,13 @@ function LedgerQueuePanel(props: React.ComponentProps<typeof LegacyQueuePanel>) 
     <div className="flex h-6 min-w-0 items-center gap-1.5 px-1.5 text-meta text-subtle" data-testid="queue-header">
       <span className="font-semibold text-foreground">{t("queue.header.title")}</span>
       {count > 0 && <CountBadge tone="neutral" count={count} data-testid="queue-count" />}
+      <button type="button" className="flex h-5 w-5 items-center justify-center rounded text-subtle hover:bg-surface-2 hover:text-foreground" aria-label={t("nextUp.help.open")} data-tip={t("nextUp.help.open")} data-testid="next-up-help" onClick={() => useApp.getState().openSettings("next-up-states")}><CircleHelp size={12} aria-hidden /></button>
       <span className="flex-1" />
       {mergePlan && props.onMergeInsert && props.onSendNow && <button type="button" disabled={merging} className="h-5 rounded px-1 text-caption hover:bg-surface-2 disabled:opacity-50" data-testid="queue-merge-insert" title={t("queue.merge.hint", { n: mergePlan.items.length })} onClick={() => {
         setMerging(true);
         void props.onMergeInsert!(mergePlan.items).catch(error => { const text = queueActionNotice(error, t); if (text) useApp.getState().notify(text, "error", { hostId, sessionId }); }).finally(() => setMerging(false));
       }}>{t("queue.merge.action")}</button>}
-      {uncertain.length > 0 && <button type="button" disabled={clearing} onBlur={() => setArmed(false)} onClick={() => void clean()} className={`h-5 rounded px-1 text-caption ${armed ? "bg-danger/10 text-danger-text" : "hover:bg-surface-2"}`} data-testid="input-cleanup-all" title={t("inputLedger.cleanupHint")}>{t(armed ? "inputLedger.cleanupAgain" : "inputLedger.cleanup", { n: uncertain.length })}</button>}
+      {uncertain.length > 0 && <button type="button" disabled={clearing} onBlur={() => setArmed(false)} onClick={() => void clean()} className={`h-5 rounded px-1 text-caption ${armed ? "bg-danger/10 text-danger-text" : "hover:bg-surface-2"}`} data-testid="input-cleanup-all" title={NEXT_UP_PANEL_CONTROLS.cleanupUnconfirmed.tip[langOf(locale)]}>{fill(NEXT_UP_PANEL_CONTROLS.cleanupUnconfirmed[armed ? "armed" : "label"][langOf(locale)], { n: uncertain.length })}</button>}
       <button type="button" className="h-5 rounded px-1 hover:bg-surface-2" aria-label={t(folded ? "queue.header.expand" : "queue.header.collapse")} aria-expanded={!folded || overlay} data-testid="queue-collapse" onClick={() => { if (shortPane.fold) setOverlay(!overlay); else { setCollapsed(!collapsed); setQueueView(sessionId, { collapsed: !collapsed }); } }}>{folded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</button>
     </div>
     {(!collapsed || shortPane.fold) && <div className={`flex min-h-0 flex-col overflow-y-auto overscroll-contain ${SECTION_RULES} ${shortPane.fold ? `absolute bottom-full left-[-1px] right-[-1px] z-20 max-h-[var(--short-pane-overlay-max,240px)] rounded-t-inner border border-border bg-surface p-1 shadow-lg ${overlay ? "" : "pointer-events-none invisible"}` : ""}`} {...(shortPane.fold ? { role: "dialog", "aria-label": t("queue.header.title"), "aria-hidden": !overlay || undefined } : {})} data-queue-body="" data-testid={shortPane.fold ? "queue-overlay" : undefined}>
@@ -825,17 +842,13 @@ function LedgerQueuePanel(props: React.ComponentProps<typeof LegacyQueuePanel>) 
   </div>;
 }
 
-/** Only O0 predicts placement; the first ledger record replaces this row by id. */
+/** Only O0 predicts placement; the first ledger record replaces this row by id. Words and buttons: the Next Up registry. */
 function LedgerOutboxRow({ entry, sessionId, hostId }: { entry: LedgerOwnerOutbox; sessionId: string; hostId: string }) {
   const { t } = useI18n();
   return <div className={`${QUEUE_ROW} min-h-6 max-h-6 shrink-0 overflow-hidden`} data-testid="ledger-nextup-outbox" data-input-id={entry.inputId}>
     <KindIcon icon={UserRound} label={t("queue.delivery.owner")} />
     <span className={`${ROW_TEXT} text-muted`}>{rowText(mentionPlainText(entry.text))}</span>
     <QueuedImages images={messageImages(entry.extra)} hostId={hostId} />
-    <span className="truncate text-caption text-subtle" title={entry.error}>{t(entry.phase === "sending" ? "inputLedger.record.sending" : entry.error === "input_not_found" ? "outbox.failed" : "inputLedger.unconfirmed")}</span>
-    {entry.phase === "unconfirmed" && <>
-      <button type="button" className="h-5 shrink-0 rounded px-1 text-caption hover:bg-surface-2" onClick={() => void useApp.getState().retryLedgerOutbox(sessionId, entry.inputId, hostId).catch(error => useApp.getState().notify(String(error), "error", { hostId, sessionId }))}>{t("inputLedger.retry")}</button>
-      <button type="button" className="h-5 shrink-0 rounded px-1 text-caption hover:bg-surface-2" onClick={() => useApp.getState().discardLedgerOutbox(sessionId, entry.inputId, hostId)}>{t("inputLedger.dismiss")}</button>
-    </>}
+    <LocalSendStatus entry={entry} sessionId={sessionId} hostId={hostId} />
   </div>;
 }

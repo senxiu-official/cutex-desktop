@@ -5,7 +5,7 @@
 // cutex: a workspace path through the workspace route (fs/file), `host` = an absolute path on the host
 // (fs-file-read).
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
-import { FILE_PAGE_MAX_BYTES } from "../../../../shared/frames";
+import { FILE_PAGE_WINDOW_BYTES } from "../../../../shared/frames";
 import type { DaemonApi, FsFile, WorkspaceScope } from "../../../../shared/ipc";
 import { DocumentPreview } from "../../components/DocumentPreview";
 import { FilePageFrame, type FilePageProblem } from "../../components/FilePageFrame";
@@ -166,13 +166,14 @@ export function FileView({ api, hostId, scope, path, host, visible = true, line 
 
 /**
  * An HTML file as a page (owner 2026-10-24): FilePageFrame mounts main's offline document. Over
- * FILE_PAGE_PROMPT_BYTES it asks first; over FILE_PAGE_MAX_BYTES (one cutex read) it can only show the source.
+ * FILE_PAGE_PROMPT_BYTES it asks first (main then reads it in windows, as a large artifact page); over the bound main
+ * reports (FILE_PAGE_MAX_BYTES, or one cutex read on a host without windowed reads) it can only show the source.
  * Inline-only: when the page refers to files next to it or to the network, a note says they do not load.
  */
 function HtmlPage({ hostId, scope, path, onSource }: { hostId: string; scope: WorkspaceScope | null; path: string; onSource?(source: boolean): void }) {
   const { t } = useI18n();
   const [large, setLarge] = useState(false);
-  const [problem, setProblem] = useState<{ kind: FilePageProblem; bytes?: number; identity: string | null } | null>(null);
+  const [problem, setProblem] = useState<{ kind: FilePageProblem; bytes?: number; max: number; identity: string | null } | null>(null);
   const [refs, setRefs] = useState(0);
   const [ready, setReady] = useState(false);
   const [navigated, setNavigated] = useState(false);
@@ -198,7 +199,7 @@ function HtmlPage({ hostId, scope, path, onSource }: { hostId: string; scope: Wo
   let overlay: ReactNode = null;
   if (problem) {
     const size = problem.bytes != null ? formatSize(problem.bytes) : "";
-    if (problem.kind === "too-large" && !large && (problem.bytes ?? 0) <= FILE_PAGE_MAX_BYTES)
+    if (problem.kind === "too-large" && !large && (problem.bytes ?? 0) <= problem.max)
       overlay = note(
         t("workspace.page.large", { size }),
         <button
@@ -213,7 +214,7 @@ function HtmlPage({ hostId, scope, path, onSource }: { hostId: string; scope: Wo
           {t("workspace.page.showLarge")}
         </button>,
       );
-    else if (problem.kind === "too-large") overlay = note(t("workspace.page.tooLarge", { size, max: formatSize(FILE_PAGE_MAX_BYTES) }));
+    else if (problem.kind === "too-large") overlay = note(t("workspace.page.tooLarge", { size, max: formatSize(problem.max) }));
     else overlay = note(t(problem.kind === "not-text" ? "workspace.page.notText" : problem.kind === "host-offline" ? "workspace.page.offline" : problem.kind === "unavailable" ? "workspace.page.unavailable" : "workspace.page.failed"));
   } else if (navigated)
     overlay = note(
@@ -245,12 +246,14 @@ function HtmlPage({ hostId, scope, path, onSource }: { hostId: string; scope: Wo
             title={t("workspace.page.title", { name })}
             large={large}
             mount={mount}
-            onProblem={(kind, bytes, modifiedAt) => {
+            onProblem={(kind, bytes, modifiedAt, maxBytes) => {
+              // A main without a bound (older build) read the file in one request.
+              const max = maxBytes ?? FILE_PAGE_WINDOW_BYTES;
               const identity = kind === "too-large" ? fileRenderIdentity(hostId, scope, path, bytes, modifiedAt) : null;
               const choice = identity ? largeRenderChoices.get(identity) : undefined;
-              if (!large && choice === "page" && (bytes ?? Infinity) <= FILE_PAGE_MAX_BYTES) return setLarge(true);
+              if (!large && choice === "page" && (bytes ?? Infinity) <= max) return setLarge(true);
               if (!large && choice === "source" && onSource) return onSource(true);
-              setProblem({ kind, bytes, identity });
+              setProblem({ kind, bytes, max, identity });
             }}
             onReady={(n) => {
               setRefs(n);

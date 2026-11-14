@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { predictedOwnerSurface, missingTimelineRecords } from "./owner";
-import { inputLabel } from "./labels";
+import { projectNextUp } from "./nextUpRegistry";
 import { delivery, record } from "./testkit";
 import { carriedInputs } from "./carries";
 
@@ -20,7 +20,7 @@ describe("idle busy owner surface", () => {
     const b = record("b", { state: "waiting", reason: "hostBusy" });
     const records = new Map([["b", b], ["a", a]]);
     expect(missingTimelineRecords(records, []).map(r => r.inputId)).toEqual(["a", "b"]);
-    expect(inputLabel(b)).toMatchObject({ kind: "label", id: "held" });
+    expect(projectNextUp(b)).toMatchObject({ kind: "state", state: "queued" });
     records.set("a", { ...a, state: "failed", reason: "admission_timeout", actions: ["retry", "dismiss"] });
     expect(missingTimelineRecords(records, []).map(r => r.inputId)).toEqual(["a", "b"]);
     records.set("a", { ...a, state: "discarded", surface: "none", actions: [] });
@@ -37,5 +37,23 @@ describe("idle busy owner surface", () => {
     expect([...joined.inputIds]).toEqual(["notice"]);
     expect(joined.inputIds.has("owner")).toBe(false);
     expect(missingTimelineRecords(rows, []).filter(r => !joined.inputIds.has(r.inputId)).map(r => r.inputId)).toEqual(["owner"]);
+  });
+});
+
+describe("missing records while the history loads", () => {
+  it("drops records done with no action left until the history is read, keeps in-flight and action-needing ones", () => {
+    const rows = new Map([
+      record("read", { kind: "agentMessage", state: "inContext", timelineItemId: "read", turnId: "t0" }),
+      record("lost", { kind: "agentMessage", state: "uncertain" }),
+      record("coming", { kind: "agentMessage", state: "accepted" }),
+      record("failed", { kind: "agentMessage", state: "failed", actions: ["retry", "dismiss"] }),
+      record("rejected", { kind: "agentMessage", state: "rejected" }),
+      record("gone", { kind: "agentMessage", state: "discarded" }),
+      record("replaced", { kind: "agentMessage", state: "superseded" }),
+    ].map(r => [r.inputId, r]));
+    const window = { hasOlder: false, turns: [] };
+    // The history read has no timeout: records needing an action (retry / dismiss) never wait for it.
+    expect(missingTimelineRecords(rows, [], undefined, { ...window, loading: true }).map(r => r.inputId)).toEqual(["coming", "failed", "lost", "rejected"]);
+    expect(missingTimelineRecords(rows, [], undefined, window).map(r => r.inputId)).toEqual(["coming", "failed", "gone", "lost", "read", "rejected", "replaced"]);
   });
 });

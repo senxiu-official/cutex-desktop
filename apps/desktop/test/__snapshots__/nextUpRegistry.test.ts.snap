@@ -1,0 +1,585 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`registry snapshot ↔ docs change log > the table matches its snapshot and REGISTRY_VERSION is the doc's newest change-log entry > registry 1.9 1`] = `
+{
+  "effects": {
+    "approve": {
+      "action": null,
+      "disposal": false,
+      "label": {
+        "en": "Approve",
+        "zh": "批准",
+      },
+    },
+    "clearNotice": {
+      "action": null,
+      "disposal": true,
+      "label": {
+        "en": "Clear this notice",
+        "zh": "清除此提示",
+      },
+    },
+    "dismiss": {
+      "action": "dismiss",
+      "disposal": true,
+      "label": {
+        "en": "Dismiss",
+        "zh": "放弃",
+      },
+    },
+    "edit": {
+      "action": "edit",
+      "disposal": false,
+      "label": {
+        "en": "Edit",
+        "zh": "编辑",
+      },
+    },
+    "hideLocal": {
+      "action": null,
+      "disposal": true,
+      "label": {
+        "en": "Hide",
+        "zh": "不再显示",
+      },
+    },
+    "hold": {
+      "action": "hold",
+      "disposal": false,
+      "label": {
+        "en": "Hold",
+        "zh": "暂缓这条",
+      },
+    },
+    "ignoreNotice": {
+      "action": "dismiss",
+      "disposal": true,
+      "label": {
+        "en": "Ignore this notice",
+        "zh": "忽略此通知",
+      },
+    },
+    "insertNow": {
+      "action": "sendNow",
+      "disposal": false,
+      "label": {
+        "en": "Insert",
+        "zh": "插话",
+      },
+    },
+    "interruptSend": {
+      "action": "interruptSend",
+      "disposal": false,
+      "label": {
+        "en": "Interrupt and send",
+        "zh": "打断并发送",
+      },
+    },
+    "moveToComposer": {
+      "action": "dismiss",
+      "disposal": true,
+      "label": {
+        "en": "Back to input box",
+        "zh": "放回输入框",
+      },
+    },
+    "readNow": {
+      "action": null,
+      "disposal": false,
+      "label": {
+        "en": "Read now",
+        "zh": "现在读取",
+      },
+    },
+    "refresh": {
+      "action": null,
+      "disposal": false,
+      "label": {
+        "en": "Refresh status",
+        "zh": "刷新状态",
+      },
+    },
+    "reject": {
+      "action": null,
+      "disposal": true,
+      "label": {
+        "en": "Reject",
+        "zh": "拒绝",
+      },
+    },
+    "releaseHold": {
+      "action": "releaseHold",
+      "disposal": false,
+      "label": {
+        "en": "Allow sending",
+        "zh": "允许发送",
+      },
+    },
+    "remove": {
+      "action": "cancel",
+      "disposal": true,
+      "label": {
+        "en": "Delete",
+        "zh": "删除",
+      },
+    },
+    "resume": {
+      "action": null,
+      "disposal": false,
+      "label": {
+        "en": "Resume",
+        "zh": "继续",
+      },
+    },
+    "retry": {
+      "action": "retry",
+      "disposal": false,
+      "label": {
+        "en": "Resend",
+        "zh": "重新发送",
+      },
+    },
+    "retryNotice": {
+      "action": "retry",
+      "disposal": false,
+      "label": {
+        "en": "Resend notice",
+        "zh": "重发通知",
+      },
+    },
+    "sendNow": {
+      "action": "sendNow",
+      "disposal": false,
+      "label": {
+        "en": "Send now",
+        "zh": "立即发送",
+      },
+    },
+    "start": {
+      "action": null,
+      "disposal": false,
+      "label": {
+        "en": "Start",
+        "zh": "启动",
+      },
+    },
+    "viewDelegation": {
+      "action": null,
+      "disposal": false,
+      "label": {
+        "en": "View delegation",
+        "zh": "查看委托",
+      },
+    },
+    "viewDetails": {
+      "action": null,
+      "disposal": false,
+      "label": {
+        "en": "View details",
+        "zh": "查看详情",
+      },
+    },
+    "viewReason": {
+      "action": null,
+      "disposal": false,
+      "label": {
+        "en": "View reason",
+        "zh": "查看原因",
+      },
+    },
+  },
+  "labels": {
+    "nextUp.state.afterWork.timed": [
+      "{time} 内发送",
+      "Sends within {time}",
+    ],
+    "nextUp.state.afterWork.untimed": [
+      "本回合后发送",
+      "Sends after this turn",
+    ],
+    "nextUp.state.awaitingOnline": [
+      "上线后发送",
+      "Sends when online",
+    ],
+    "nextUp.state.awaitingRead": [
+      "已送达，待读取",
+      "Delivered, unread",
+    ],
+    "nextUp.state.awaitingReconnect": [
+      "重连后发送",
+      "Sends after reconnect",
+    ],
+    "nextUp.state.failed": [
+      "发送失败",
+      "Send failed",
+    ],
+    "nextUp.state.held": [
+      "已暂缓发送",
+      "Held",
+    ],
+    "nextUp.state.needsAction": [
+      "需要你处理",
+      "Needs your action",
+    ],
+    "nextUp.state.passiveNote": [
+      "待读留言",
+      "Unread note",
+    ],
+    "nextUp.state.paused": [
+      "暂停中，未发送",
+      "Paused, not sent",
+    ],
+    "nextUp.state.queued": [
+      "排队中",
+      "Queued",
+    ],
+    "nextUp.state.review": [
+      "等你审核",
+      "Awaiting your review",
+    ],
+    "nextUp.state.sending": [
+      "正在发送",
+      "Sending",
+    ],
+    "nextUp.state.unconfirmed": [
+      "送达未确认",
+      "Delivery unconfirmed",
+    ],
+    "nextUp.state.unknown": [
+      "状态无法识别",
+      "Unknown status",
+    ],
+  },
+  "panel": {
+    "agentPaused": {
+      "buttons": [
+        {
+          "en": "Resume",
+          "zh": "继续",
+        },
+      ],
+      "label": {
+        "en": "Agent paused",
+        "zh": "智能体已暂停",
+      },
+    },
+    "cleanupUnconfirmed": {
+      "armed": {
+        "en": "Click again to clear ({n})",
+        "zh": "再点一次清理（{n}）",
+      },
+      "buttons": [],
+      "label": {
+        "en": "Clear all unconfirmed ({n})",
+        "zh": "清理所有未确认（{n}）",
+      },
+      "tip": {
+        "en": "Dismisses every unconfirmed message of this agent, including those in the timeline",
+        "zh": "放弃这个 agent 所有送达未确认的消息，包括时间线里的",
+      },
+    },
+    "grantNotice": {
+      "buttons": [],
+      "label": {
+        "en": "Approval notice waiting to be delivered",
+        "zh": "批准通知等待送达",
+      },
+    },
+    "legacyPausedQueue": {
+      "armed": {
+        "en": "Click again to dismiss all ({n})",
+        "zh": "再点一次全部放弃（{n}）",
+      },
+      "buttons": [
+        {
+          "en": "Resume",
+          "zh": "继续",
+        },
+        {
+          "en": "Back to input box",
+          "zh": "放回输入框",
+        },
+        {
+          "en": "Dismiss all",
+          "zh": "全部放弃",
+        },
+      ],
+      "label": {
+        "en": "Paused, not sent",
+        "zh": "暂停中，未发送",
+      },
+      "legacyOnly": true,
+    },
+    "releaseLease": {
+      "buttons": [],
+      "label": {
+        "en": "Release",
+        "zh": "释放占用",
+      },
+      "tip": {
+        "en": "Click twice to confirm",
+        "zh": "要点两次确认",
+      },
+    },
+    "resetCredit": {
+      "buttons": [
+        {
+          "en": "Use one",
+          "zh": "用一张",
+        },
+        {
+          "en": "Hide",
+          "zh": "收起",
+        },
+      ],
+      "label": {
+        "en": "Reset credit available",
+        "zh": "可使用重置券",
+      },
+    },
+    "scheduledContinue": {
+      "buttons": [
+        {
+          "en": "Cancel this continuation",
+          "zh": "取消本次继续",
+        },
+      ],
+      "label": {
+        "en": "Scheduled to continue later",
+        "zh": "已安排稍后继续",
+      },
+    },
+  },
+  "states": {
+    "afterWork": {
+      "buttons": [
+        "interruptSend",
+        "hold",
+        "dismiss",
+        "ignoreNotice",
+        "viewDelegation",
+      ],
+      "exit": {
+        "disposals": [
+          "dismiss",
+          "ignoreNotice",
+        ],
+        "kind": "owner",
+      },
+      "tone": "neutral",
+    },
+    "awaitingOnline": {
+      "buttons": [
+        "start",
+        "dismiss",
+        "ignoreNotice",
+        "viewDelegation",
+      ],
+      "exit": {
+        "disposals": [
+          "dismiss",
+          "ignoreNotice",
+        ],
+        "kind": "owner",
+      },
+      "tone": "neutral",
+    },
+    "awaitingRead": {
+      "buttons": [
+        "interruptSend",
+        "dismiss",
+        "ignoreNotice",
+        "viewDelegation",
+      ],
+      "exit": {
+        "disposals": [
+          "dismiss",
+          "ignoreNotice",
+        ],
+        "kind": "owner",
+      },
+      "tone": "neutral",
+    },
+    "awaitingReconnect": {
+      "buttons": [
+        "viewReason",
+        "dismiss",
+        "ignoreNotice",
+      ],
+      "exit": {
+        "disposals": [
+          "dismiss",
+          "ignoreNotice",
+        ],
+        "kind": "owner",
+      },
+      "tone": "neutral",
+    },
+    "failed": {
+      "buttons": [
+        "retry",
+        "retryNotice",
+        "moveToComposer",
+        "dismiss",
+        "ignoreNotice",
+        "hideLocal",
+        "viewReason",
+      ],
+      "exit": {
+        "disposals": [
+          "dismiss",
+          "ignoreNotice",
+          "hideLocal",
+        ],
+        "kind": "owner",
+      },
+      "tone": "danger",
+    },
+    "held": {
+      "buttons": [
+        "releaseHold",
+        "dismiss",
+        "ignoreNotice",
+      ],
+      "exit": {
+        "disposals": [
+          "dismiss",
+          "ignoreNotice",
+        ],
+        "kind": "owner",
+      },
+      "tone": "neutral",
+    },
+    "needsAction": {
+      "buttons": [
+        "releaseHold",
+        "viewReason",
+        "dismiss",
+        "ignoreNotice",
+        "viewDelegation",
+      ],
+      "exit": {
+        "disposals": [
+          "dismiss",
+          "ignoreNotice",
+        ],
+        "kind": "owner",
+      },
+      "tone": "warn",
+    },
+    "passiveNote": {
+      "buttons": [
+        "readNow",
+        "dismiss",
+        "ignoreNotice",
+      ],
+      "exit": {
+        "disposals": [
+          "dismiss",
+          "ignoreNotice",
+        ],
+        "kind": "owner",
+      },
+      "tone": "neutral",
+    },
+    "paused": {
+      "buttons": [
+        "resume",
+        "viewDetails",
+        "dismiss",
+        "ignoreNotice",
+      ],
+      "exit": {
+        "disposals": [
+          "dismiss",
+          "ignoreNotice",
+        ],
+        "kind": "owner",
+      },
+      "tone": "warn",
+    },
+    "queued": {
+      "buttons": [
+        "insertNow",
+        "sendNow",
+        "edit",
+        "remove",
+        "hold",
+        "dismiss",
+        "ignoreNotice",
+        "viewDelegation",
+      ],
+      "exit": {
+        "disposals": [
+          "remove",
+          "dismiss",
+          "ignoreNotice",
+        ],
+        "kind": "owner",
+      },
+      "tone": "neutral",
+    },
+    "review": {
+      "buttons": [
+        "approve",
+        "reject",
+        "viewDelegation",
+      ],
+      "exit": {
+        "disposals": [
+          "reject",
+        ],
+        "kind": "owner",
+      },
+      "tone": "warn",
+    },
+    "sending": {
+      "buttons": [
+        "hideLocal",
+        "dismiss",
+      ],
+      "exit": {
+        "kind": "deadline",
+        "to": "unconfirmed",
+      },
+      "tone": "neutral",
+    },
+    "unconfirmed": {
+      "buttons": [
+        "retry",
+        "retryNotice",
+        "dismiss",
+        "ignoreNotice",
+        "hideLocal",
+        "viewReason",
+      ],
+      "exit": {
+        "disposals": [
+          "dismiss",
+          "ignoreNotice",
+          "hideLocal",
+        ],
+        "kind": "owner",
+      },
+      "tone": "warn",
+    },
+    "unknown": {
+      "buttons": [
+        "refresh",
+        "viewDetails",
+        "dismiss",
+        "ignoreNotice",
+        "clearNotice",
+      ],
+      "exit": {
+        "disposals": [
+          "clearNotice",
+        ],
+        "kind": "owner",
+      },
+      "tone": "warn",
+    },
+  },
+  "version": "1.9",
+}
+`;

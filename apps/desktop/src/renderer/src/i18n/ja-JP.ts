@@ -7429,7 +7429,7 @@ export const jaJP: Partial<Record<keyof typeof zhCN, string>> = {
   "inputLedger.retryNothingSent": "送信されていません。前回の送信の結果がまだ出ていません。後でもう一度試すか、破棄してください",
   "inputLedger.retryNothingSentOffline": "送信されていません。{{agent}}は現在オフラインです。オンラインになってからもう一度試すか、破棄してください",
   "inputLedger.retryNothingSentOnlyDismiss": "送信されていません。前回の送信を確認できないため、再試行しても解決しません。破棄するしかありません",
-  "inputLedger.retryFailed": "再送信を完了できませんでした: {code}",
+  "inputLedger.retryFailed": "再送信を完了できませんでした",
   "inputLedger.retry": "再送信",
   "inputLedger.stranded.interrupted": "送信後に中断され、履歴に入っていません",
   "inputLedger.stranded.failed": "このターンは失敗し、履歴に入っていません",

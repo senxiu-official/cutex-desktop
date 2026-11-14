@@ -102,7 +102,8 @@ export function mockFrames(read: ReadContent, host?: MockPageHost, readFile?: Re
         return { ok: false, reason: "not-found" };
       }
       if (f.encoding !== "utf8") return { ok: false, reason: "not-text" };
-      if (f.truncated) return { ok: false, reason: "too-large", totalBytes: f.size, modifiedAt: f.modifiedAt };
+      // The mock host reads in windows, as a cutex with fs-file-window (main/frames.ts prepareFile).
+      if (f.truncated) return { ok: false, reason: "too-large", totalBytes: f.size, modifiedAt: f.modifiedAt, maxBytes: FILE_PAGE_MAX_BYTES };
       // No page API for a file page (?pageApi=0): it has no channels.
       const r = await fetch("/__mock-frame?pageApi=0", { method: "POST", body: f.content, headers: { "Content-Type": "text/plain; charset=utf-8" } });
       if (!r.ok) throw new Error(`mock frame: ${r.status}`);

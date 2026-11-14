@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.6 "Beautiful World" (2026-11-14)
+
+- Makes upcoming input handling consistent across message sources. On capable hosts, removing or dismissing input uses an authoritative delivery receipt and refreshes pending state before retrying.
+  统一「接下来」各来源的消息处理；在支持的主机上，移除或不再提示消息使用主机投递回执，并在重试前重新读取待处理状态。
+- Opens large HTML files through bounded file windows, preserving readable page content without loading the entire file at once.
+  大型 HTML 文件通过分段文件接口打开，避免一次读取整个文件。
+- Shows stopped delegations as stopped when their recorded outcome is unknown.
+  已停止的委托即使结果类型未知，也会正确显示为已停止。
+- Host-dependent actions require the matching capability. Existing agents keep their runtime selections.
+  依赖主机的操作需要相应能力支持；已有智能体保留运行时选择。
+
 ## 0.2.5 "Beautiful World" (2026-11-13)
 
 - Fixes composer placeholder layout and IME composition handling.

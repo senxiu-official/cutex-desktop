@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { INPUT_REASONS_BY_STATE, INPUT_STAGES, INPUT_STATES, SESSION_DELIVERY_HELD_REASONS, SESSION_DELIVERY_STATES, SESSION_TURN_KINDS } from "@cutex-desktop/protocol";
 import { applyInputLedgerSnapshot, emptyInputLedgerSession } from "./alignment";
-import { INPUT_LABEL_IDS, SESSION_DELIVERY_LABEL_IDS, inputLabel, inputLabelFor, sessionDeliveryLabel } from "./labels";
+import { SESSION_DELIVERY_LABEL_IDS, sessionDeliveryLabel } from "./labels";
+import { projectNextUp } from "./nextUpRegistry";
 import { nextUpRecords, pendingNoteRecords, timelineRecordFor, timelineRecords } from "./selectors";
 import { delivery, iso, record, T0 } from "./testkit";
 
@@ -44,69 +45,17 @@ describe("surfaces (054 §3.2)", () => {
 });
 
 describe("labels (054 §3.3, §5.3)", () => {
-  it("every documented (state, reason, stage) has a label", () => {
-    const ids = new Set<string>(INPUT_LABEL_IDS);
-    for (const state of INPUT_STATES) {
-      const reasons: (string | null)[] = [...(INPUT_REASONS_BY_STATE[state] ?? [])];
-      // States that may carry no reason (null). Terminal states must carry one, but a missing one still labels.
-      if (state !== "waiting") reasons.push(null);
-      const stages: (string | null)[] = state === "accepted" ? [null, ...INPUT_STAGES] : [null];
-      for (const reason of reasons) {
-        for (const stage of stages) {
-          for (const stalled of [null, { reason: "noProgress", since: iso(T0) }]) {
-            const label = inputLabelFor({ state, reason, stage, stalled });
-            expect(label.kind, `${state}/${reason}/${stage}`).toBe("label");
-            if (label.kind === "label") {
-              expect(ids.has(label.id)).toBe(true);
-              expect(label.reason).toBe(reason);
-              expect(label.stalled).toEqual(stalled);
-            }
-          }
-        }
-      }
+  // Record labels moved to the Next Up registry (nextUpRegistry.ts; test/nextUpRegistry.test.ts). Session labels stay here.
+  it("a record status projects into the registry; unknown codes become state unknown", () => {
+    for (const state of INPUT_STATES) for (const reason of [...(INPUT_REASONS_BY_STATE[state] ?? [])]) {
+      const p = projectNextUp(record("r", { state, reason } as never));
+      if (p.kind === "state") expect(p.state, `${state}/${reason}`).not.toBe("unknown");
     }
+    for (const stage of INPUT_STAGES) expect(projectNextUp(record("r", { state: "accepted", stage }))).toMatchObject({ kind: "state", state: "awaitingRead" });
+    expect(projectNextUp(record("r", { state: "waiting", reason: "brandNewReason" as never }))).toMatchObject({ state: "unknown", unknown: { field: "reason", code: "brandNewReason" } });
+    expect(projectNextUp(record("r", { state: "parked" as never, reason: null }))).toMatchObject({ state: "unknown", unknown: { field: "state" } });
+    expect(projectNextUp(record("r", { state: "accepted", stage: "delivered" as never }))).toMatchObject({ state: "unknown", unknown: { field: "stage" } });
   });
-
-  it("matches the §3.3 rows", () => {
-    const at = (state: string, reason: string | null = null, stage: string | null = null, insert?: boolean) => {
-      const label = inputLabelFor({ state, reason, stage, stalled: null, ...(insert === undefined ? {} : { insert }) });
-      return label.kind === "label" ? label.id : `unknown:${label.code}`;
-    };
-    expect(at("held", "hostBusy")).toBe("held");
-    for (const reason of ["turnRunning", "turnFinishing", "adapterQueued", "rideAlongAhead", "ownerQueueAhead", "hostBusy"]) expect(at("waiting", reason)).toBe("afterCurrentTurn");
-    expect(at("waiting", "agentOffline")).toBe("agentOffline");
-    expect(at("waiting", "explicitQueue")).toBe("queued");
-    expect(at("waiting", "delegationLease")).toBe("lease");
-    expect(at("waiting", "eventLease")).toBe("lease");
-    for (const reason of ["paused", "stopHold", "ownerPause"]) expect(at("waiting", reason)).toBe("paused");
-    expect(at("waiting", "nativeHeld")).toBe("nativeHeld");
-    expect(at("sending")).toBe("sending");
-    expect(at("accepted")).toBe("inserted");
-    expect(at("accepted", null, null, false)).toBe("accepted");
-    expect(at("accepted", null, "registered")).toBe("registered");
-    expect(at("accepted", null, "offered")).toBe("offered");
-    expect(at("inContext")).toBe("inContext");
-    expect(at("uncertain", "turnInterrupted")).toBe("uncertain");
-    expect(at("failed", "admission_timeout")).toBe("failed");
-  });
-
-  it("sending{interruptSend} uses the existing sending label instead of an unknown-code warning", () => {
-    expect(inputLabel(record("same", { state: "sending", reason: "interruptSend" }))).toMatchObject({ kind: "label", id: "sending", reason: "interruptSend" });
-  });
-  it("an unknown reason / stage / state is shown as its code and reported", () => {
-    expect(inputLabelFor({ state: "waiting", reason: "brandNewReason", stage: null, stalled: null })).toMatchObject({ kind: "unknown", code: "brandNewReason", field: "reason", report: true });
-    expect(inputLabelFor({ state: "failed", reason: "turnRunning", stage: null, stalled: null })).toMatchObject({ kind: "unknown", code: "turnRunning", field: "reason" });
-    expect(inputLabelFor({ state: "sending", reason: "hostBusy", stage: null, stalled: null })).toMatchObject({ kind: "unknown", code: "hostBusy" });
-    expect(inputLabelFor({ state: "accepted", reason: null, stage: "delivered", stalled: null })).toMatchObject({ kind: "unknown", code: "delivered", field: "stage" });
-    expect(inputLabelFor({ state: "parked", reason: null, stage: null, stalled: null })).toMatchObject({ kind: "unknown", code: "parked", field: "state" });
-    expect(inputLabelFor({ state: "waiting", reason: null, stage: null, stalled: null })).toMatchObject({ kind: "unknown", field: "reason" });
-  });
-
-  it("an accepted owner record is an insert; another kind is not", () => {
-    expect(inputLabel(record("a", { state: "accepted", kind: "owner" }))).toMatchObject({ id: "inserted" });
-    expect(inputLabel(record("b", { state: "accepted", kind: "agentMessage" }))).toMatchObject({ id: "accepted" });
-  });
-
   it("every session delivery has a label; a stale lease is flagged", () => {
     const ids = new Set<string>(SESSION_DELIVERY_LABEL_IDS);
     for (const state of SESSION_DELIVERY_STATES) {

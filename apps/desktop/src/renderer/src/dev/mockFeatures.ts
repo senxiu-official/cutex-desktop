@@ -119,7 +119,8 @@ export const MOCK_NEW_FEATURES: readonly string[] = [...CORE_NEW_FEATURES, ...MO
 export function mockScenarioFeatures(search: string): string[] {
   const q = new URLSearchParams(search);
   if (q.has("legacy")) return [];
-  const ledgerFeatures = q.has("inputLedger") ? ["input-ledger-v1", OWNER_IDLE_BUSY_TIMELINE_FEATURE] : [];
+  // ?inputDisposal (with ?inputLedger): cutex input-disposal-v1 — id-only dispose (dev/mockInputLedger inputDispose).
+  const ledgerFeatures = q.has("inputLedger") ? ["input-ledger-v1", OWNER_IDLE_BUSY_TIMELINE_FEATURE, ...(q.has("inputDisposal") ? ["input-disposal-v1"] : [])] : [];
   if (q.has("overloadretry") && !q.has("no-retry-visible")) return ["model-overload-retry-visible", ...ledgerFeatures];
   // ?turnerror: cutex turn-error-surface (dev/mockTurnError.ts). ?variants: cutex profile-runtime-variants (r265; dev/mockProfileVariants.ts).
   // ?rename: cutex formal-agent-name-rename-v1 (dev/mockAgentRename.ts); without it the host lacks it, as today.

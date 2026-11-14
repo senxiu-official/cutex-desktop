@@ -29,6 +29,157 @@ beforeEach(async () => {
 }, 60_000);
 afterEach(() => vi.unstubAllGlobals());
 
+describe("local clear marks are reclaimed only on positive evidence (review 2026-11-14)", () => {
+  it("absence from a host list never reclaims a 清除此提示 mark; a finished record or a host missing does", async () => {
+    const { addTombstone, hasTombstone, resetTombstonesForTest, tombstoneKey } = await import("../src/renderer/src/lib/inputLedger/nextUpTombstones");
+    resetTombstonesForTest();
+    const mark = (id: string) => tombstoneKey("local", "cutex.s1", id, "unknown:agentMessage:waiting:futureReason:::");
+    for (const id of ["u1", "u2", "u3"]) expect(addTombstone(mark(id))).toBe(true);
+    // A full list (e.g. a history window) without them: kept.
+    mock.responses.set("inputList", () => ({ ledgerEpoch: "e", stateRevision: 2, records: [], delivery: delivery("idle", 2), complete: true }));
+    await app.getState().refreshInputs("cutex.s1", "local");
+    expect(["u1", "u2", "u3"].map(id => hasTombstone(mark(id)))).toEqual([true, true, true]);
+    // The host reports u1 read: reclaimed.
+    mock.responses.set("inputList", () => ({ ledgerEpoch: "e", stateRevision: 3, records: [record("u1", { state: "inContext", surface: "timeline", rev: 5 })], delivery: delivery("idle", 3), complete: true }));
+    await app.getState().refreshInputs("cutex.s1", "local");
+    expect(hasTombstone(mark("u1"))).toBe(false);
+    // A point read says u2 is gone: reclaimed. u3 stays.
+    mock.responses.set("inputGet", (_id: string, ids: string[]) => ({ ledgerEpoch: "e", stateRevision: 3, records: [], missing: ids }));
+    // (dismissInput on an id the page does not hold re-reads it by id: the host answers "missing".)
+    await app.getState().dismissInput("cutex.s1", "u2", "local");
+    expect(mock.calls.some(call => call.method === "inputGet" && (call.args[1] as string[]).includes("u2"))).toBe(true);
+    expect(hasTombstone(mark("u2"))).toBe(false);
+    expect(hasTombstone(mark("u3"))).toBe(true);
+  });
+  it("a late 'missing' answer never reclaims the mark on a newer delivery (night-review race: R1 hangs, R2 arrives and is cleared)", async () => {
+    const { addTombstone, hasTombstone, resetTombstonesForTest, tombstoneKey, unknownWhat } = await import("../src/renderer/src/lib/inputLedger/nextUpTombstones");
+    const { rowIdentity } = await import("../src/renderer/src/lib/inputLedger/nextUpRegistry");
+    resetTombstonesForTest();
+    mock.responses.set("inputList", () => ({ ledgerEpoch: "e", stateRevision: 1, records: [], delivery: delivery("idle", 1), complete: true }));
+    await app.getState().refreshInputs("cutex.s1", "local");
+    // R1: a point read for the id while the page holds nothing for it; its answer is held back.
+    let answer!: (result: unknown) => void;
+    mock.responses.set("inputGet", () => new Promise(resolve => { answer = resolve; }));
+    const late = app.getState().dismissInput("cutex.s1", "r1", "local");
+    await vi.waitFor(() => expect(answer).toBeTypeOf("function"));
+    // R2: a newer delivery of the same input arrives; the owner clears its unknown status.
+    const r2 = record("r1", { state: "waiting", reason: "futureReason" as never, attempt: 2, rev: 2, surface: "nextUp" });
+    mock.responses.set("inputList", () => ({ ledgerEpoch: "e", stateRevision: 2, records: [r2], delivery: delivery("idle", 2), complete: true }));
+    await app.getState().refreshInputs("cutex.s1", "local");
+    const mark = tombstoneKey("local", "cutex.s1", rowIdentity(r2), unknownWhat(r2));
+    expect(addTombstone(mark)).toBe(true);
+    // R1 finally answers "missing": the ledger keeps R2 and the mark stays.
+    answer({ ledgerEpoch: "e", stateRevision: 1, records: [], missing: ["r1"] });
+    await late;
+    expect(app.getState().inputs[key]!.records.get("r1")?.rev).toBe(2);
+    expect(hasTombstone(mark)).toBe(true);
+  });
+  it("a 'missing' answer from another ledger epoch reclaims nothing", async () => {
+    const { addTombstone, hasTombstone, resetTombstonesForTest, tombstoneKey } = await import("../src/renderer/src/lib/inputLedger/nextUpTombstones");
+    resetTombstonesForTest();
+    mock.responses.set("inputList", () => ({ ledgerEpoch: "e", stateRevision: 1, records: [], delivery: delivery("idle", 1), complete: true }));
+    await app.getState().refreshInputs("cutex.s1", "local");
+    const mark = tombstoneKey("local", "cutex.s1", "x1", "unknown:agentMessage:waiting:futureReason:::");
+    expect(addTombstone(mark)).toBe(true);
+    mock.responses.set("inputGet", (_id: string, ids: string[]) => ({ ledgerEpoch: "other", stateRevision: 9, records: [], missing: ids }));
+    await app.getState().dismissInput("cutex.s1", "x1", "local");
+    expect(hasTombstone(mark)).toBe(true);
+  });
+  it("a finished record the registry still shows as unknown keeps its mark (night-review repro: inContext + unknown reason)", async () => {
+    const { addTombstone, hasTombstone, resetTombstonesForTest, tombstoneKey, unknownWhat } = await import("../src/renderer/src/lib/inputLedger/nextUpTombstones");
+    const { projectNextUp, rowIdentity } = await import("../src/renderer/src/lib/inputLedger/nextUpRegistry");
+    resetTombstonesForTest();
+    const old = record("h1", { state: "inContext", reason: "futureReadProof" as never, surface: "timeline", rev: 1 });
+    expect(projectNextUp(old)).toMatchObject({ kind: "state", state: "unknown" });
+    const mark = tombstoneKey("local", "cutex.s1", rowIdentity(old), unknownWhat(old));
+    expect(addTombstone(mark)).toBe(true); // the owner cleared it
+    // A list without it (history window): kept.
+    mock.responses.set("inputList", () => ({ ledgerEpoch: "e", stateRevision: 2, records: [], delivery: delivery("idle", 2), complete: true }));
+    await app.getState().refreshInputs("cutex.s1", "local");
+    expect(hasTombstone(mark)).toBe(true);
+    // Later read back by id: still the same historical record, still rendered unknown → the mark must stay.
+    mock.responses.set("inputGet", () => ({ ledgerEpoch: "e", stateRevision: 2, records: [old], missing: [] }));
+    await app.getState().dismissInput("cutex.s1", "h1", "local");
+    expect(mock.calls.some(call => call.method === "inputGet")).toBe(true);
+    expect(hasTombstone(mark)).toBe(true);
+    // The same record listed again: still kept.
+    mock.responses.set("inputList", () => ({ ledgerEpoch: "e", stateRevision: 3, records: [old], delivery: delivery("idle", 3), complete: true }));
+    await app.getState().refreshInputs("cutex.s1", "local");
+    expect(hasTombstone(mark)).toBe(true);
+  });
+});
+
+describe("input-disposal-v1: every disposal goes through cutex/input/dispose", () => {
+  const receipt = (inputId: string, appliedAt: string | null) => ({ inputId, cutexSessionId: "cutex.s1", dispositionId: "d1", requestedAt: "2026-11-14T00:00:00Z", appliedAt, effect: "stop" });
+  beforeEach(() => { app.setState({ features: new Set(["input-ledger-v1", "owner-idle-busy-timeline-v1", "input-disposal-v1"]) }); });
+  it("dismiss of a row with no offered action calls dispose by id; a pending receipt greys the row until it is applied", async () => {
+    vi.useFakeTimers();
+    try {
+      const sending = record("snd", { kind: "agentMessage", state: "sending", reason: null, surface: "nextUp", actions: [], rev: 4 });
+      app.setState({ inputs: { [key]: seed([sending]) } });
+      mock.responses.set("inputGet", () => ({ ledgerEpoch: "e", stateRevision: 1, records: [sending], missing: [] }));
+      mock.responses.set("inputDispose", (_s: string, id: string) => receipt(id, null));
+      const pending = app.getState().dismissInput("cutex.s1", "snd", "local");
+      await vi.advanceTimersByTimeAsync(0);
+      expect(await pending).toEqual({ ok: true });
+      expect(mock.calls.filter(c => c.method === "inputDispose").map(c => c.args)).toEqual([["cutex.s1", "snd"]]);
+      expect(mock.calls.some(c => c.method === "inputDismiss")).toBe(false);
+      expect(app.getState().inputDisposals[key]?.snd?.appliedAt).toBeNull();
+      // Still not applied: the desktop re-reads the input (never re-disposes) and the row stays grey.
+      const reads = () => mock.calls.filter(c => c.method === "inputGet").length;
+      const readsBefore = reads();
+      await vi.advanceTimersByTimeAsync(1_100);
+      expect(reads()).toBe(readsBefore + 1);
+      expect(app.getState().inputDisposals[key]?.snd?.appliedAt).toBeNull();
+      // The host applies it: the next read (2 s later) sees it leave, and the grey state goes.
+      const gone = { ...sending, state: "discarded" as const, reason: "ownerDiscarded" as never, surface: "none" as const, rev: 5, stateRevision: 2 };
+      mock.responses.set("inputGet", () => ({ ledgerEpoch: "e", stateRevision: 2, records: [gone], missing: [] }));
+      await vi.advanceTimersByTimeAsync(2_100);
+      expect(mock.calls.filter(c => c.method === "inputDispose")).toHaveLength(1);
+      expect(app.getState().inputDisposals[key]?.snd).toBeUndefined();
+    } finally { vi.useRealTimers(); }
+  });
+  it("a failed dispose is never a silent no-op: the call rejects to the row", async () => {
+    app.setState({ inputs: { [key]: seed([record("w", { kind: "owner", state: "waiting", reason: "hostBusy", surface: "nextUp", actions: [] })]) } });
+    mock.responses.set("inputDispose", () => { throw new Error("event_persistence_unavailable"); });
+    mock.responses.set("inputGet", (_s: string, ids: string[]) => ({ ledgerEpoch: "e", stateRevision: 1, records: [], missing: ids }));
+    await expect(app.getState().dismissInput("cutex.s1", "w", "local")).rejects.toThrow("event_persistence_unavailable");
+    expect(app.getState().inputDisposals[key]?.w).toBeUndefined();
+  });
+  it("an applied receipt reclaims the clear marks that existed when the owner asked; a mark made after stays", async () => {
+    const { addTombstone, hasTombstone, resetTombstonesForTest, tombstoneKey } = await import("../src/renderer/src/lib/inputLedger/nextUpTombstones");
+    resetTombstonesForTest();
+    const odd = record("odd", { kind: "agentMessage", state: "waiting", reason: "futureReason" as never, surface: "nextUp", actions: [] });
+    app.setState({ inputs: { [key]: seed([odd]) } });
+    const before = tombstoneKey("local", "cutex.s1", "odd", "unknown:before");
+    const later = tombstoneKey("local", "cutex.s1", "odd", "unknown:later");
+    expect(addTombstone(before)).toBe(true);
+    let answer!: (value: unknown) => void;
+    mock.responses.set("inputDispose", () => new Promise(resolve => { answer = resolve; }));
+    mock.responses.set("inputGet", () => ({ ledgerEpoch: "e", stateRevision: 1, records: [odd], missing: [] }));
+    const done = app.getState().dismissInput("cutex.s1", "odd", "local");
+    await vi.waitFor(() => expect(answer).toBeTypeOf("function"));
+    expect(addTombstone(later)).toBe(true);
+    answer(receipt("odd", "2026-11-14T00:00:01Z"));
+    await done;
+    expect(hasTombstone(before)).toBe(false);
+    expect(hasTombstone(later)).toBe(true);
+  });
+  it("a pending receipt reclaims nothing", async () => {
+    const { addTombstone, hasTombstone, resetTombstonesForTest, tombstoneKey } = await import("../src/renderer/src/lib/inputLedger/nextUpTombstones");
+    resetTombstonesForTest();
+    const odd = record("odd2", { kind: "agentMessage", state: "waiting", reason: "futureReason" as never, surface: "nextUp", actions: [] });
+    app.setState({ inputs: { [key]: seed([odd]) } });
+    const mark = tombstoneKey("local", "cutex.s1", "odd2", "unknown:x");
+    expect(addTombstone(mark)).toBe(true);
+    mock.responses.set("inputDispose", (_s: string, id: string) => receipt(id, null));
+    mock.responses.set("inputGet", () => ({ ledgerEpoch: "e", stateRevision: 1, records: [odd], missing: [] }));
+    await app.getState().dismissInput("cutex.s1", "odd2", "local");
+    expect(hasTombstone(mark)).toBe(true);
+    app.setState({ inputDisposals: {} }); // stop the background check
+  });
+});
+
 describe("D3 owner ledger integration", () => {
   it("submits with auto-start even when the caller disables it, without legacy optimistic state", async () => {
     mock.responses.set("submit", (_id, _text, _strategy, _start, options) => ({ disposition: "steered", input: record(options.clientUserMessageId, { state: "accepted", stateRevision: 2 }) }));

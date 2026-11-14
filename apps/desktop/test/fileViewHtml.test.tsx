@@ -4,7 +4,7 @@
 import { act, createElement as h } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { FilePageInput, FilePageResult } from "../src/shared/frames";
+import { FILE_PAGE_MAX_BYTES, type FilePageInput, type FilePageResult } from "../src/shared/frames";
 
 const prepareFilePage = vi.fn(async (_input: FilePageInput): Promise<FilePageResult> => ({ ok: true, frame: { id: "f1", url: "about:blank" }, externalRefs: 0 }));
 const release = vi.fn(async () => {});
@@ -78,12 +78,41 @@ describe("HTML in the file view", () => {
     await vi.waitFor(() => expect(prepareFilePage).toHaveBeenLastCalledWith({ hostId: "local", path: "D:/p/preview.html", large: true }));
     await vi.waitFor(() => expect(host.querySelector("iframe")).not.toBeNull());
 
+    // A main without a bound in its answer (older build) read in one request: over 10 MB only the source.
     prepareFilePage.mockImplementationOnce(async () => ({ ok: false, reason: "too-large", totalBytes: 12 * 1024 * 1024 }));
     await render({ onSource, path: "D:/p/huge.html" });
     await vi.waitFor(() => expect(host.querySelector("[data-page-note]")).not.toBeNull());
     expect(host.querySelector("[data-page-show-large]")).toBeNull();
     await act(async () => (host.querySelector("[data-page-source]") as HTMLButtonElement).click());
     expect(onSource).toHaveBeenCalledWith(true);
+  });
+
+  it("10–256 MiB on a host with windowed reads: asks, then shows the page; over 256 MiB only the source", async () => {
+    const MiB = 1024 * 1024;
+    prepareFilePage.mockImplementation(async (input) => input.large
+      ? { ok: true, frame: { id: "f3", url: "about:blank" }, externalRefs: 0 }
+      : { ok: false, reason: "too-large", totalBytes: Math.round(11.3 * MiB), modifiedAt: "2026-11-14T00:00:00Z", maxBytes: FILE_PAGE_MAX_BYTES });
+    try {
+      await render({ onSource: vi.fn(), path: "D:/decisions-site/review/grow-wide.html" });
+      await vi.waitFor(() => expect(host.querySelector("[data-page-show-large]")).not.toBeNull());
+      expect(host.querySelector("[data-page-note]")?.textContent).toContain("11.3");
+      expect(host.querySelector("iframe")).toBeNull();
+      await act(async () => (host.querySelector("[data-page-show-large]") as HTMLButtonElement).click());
+      await vi.waitFor(() => expect(prepareFilePage).toHaveBeenLastCalledWith({ hostId: "local", path: "D:/decisions-site/review/grow-wide.html", large: true }));
+      await vi.waitFor(() => expect(host.querySelector("iframe")).not.toBeNull());
+
+      prepareFilePage.mockImplementation(async () => ({ ok: false, reason: "too-large", totalBytes: 300 * MiB, modifiedAt: "2026-11-14T00:00:00Z", maxBytes: FILE_PAGE_MAX_BYTES }));
+      const onSource = vi.fn();
+      await render({ onSource, path: "D:/p/huge.html" });
+      await vi.waitFor(() => expect(host.querySelector("[data-page-note]")).not.toBeNull());
+      expect(host.querySelector("[data-page-show-large]")).toBeNull();
+      expect(host.querySelector("[data-page-note]")?.textContent).toContain("256");
+      expect(host.querySelector("iframe")).toBeNull();
+      await act(async () => (host.querySelector("[data-page-source]") as HTMLButtonElement).click());
+      expect(onSource).toHaveBeenCalledWith(true);
+    } finally {
+      prepareFilePage.mockImplementation(async () => ({ ok: true, frame: { id: "f1", url: "about:blank" }, externalRefs: 0 }));
+    }
   });
 
   it("says when the page refers to files it cannot load (inline-only)", async () => {

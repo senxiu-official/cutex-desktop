@@ -52,6 +52,69 @@ describe("054 one-time migration", () => {
     await migrateLegacyDelivery("eva", "s", api, target);
     expect(api.inputGet).toHaveBeenCalledTimes(1);
   });
+  it.each([
+    ["HTTP 200 with failed[]", () => vi.fn(async () => ({ failed: [{ inputId: "bus", code: "dismiss_failed", message: "result admission busy" }] }))],
+    ["a rejected call", () => vi.fn().mockRejectedValue(new Error("offline"))],
+  ])("a hidden row the host did not dismiss (%s) keeps its old marker and the migration stays open", async (_name, dismiss) => {
+    const target = memory();
+    target.setItem("cutex-desktop.hiddenRows", JSON.stringify(["note:eva/bus"]));
+    const bus = record("bus", { kind: "agentMessage", state: "uncertain", actions: ["dismiss"], rev: 7 });
+    const api = { inputGet: vi.fn(async () => ({ ledgerEpoch: "e", stateRevision: 4, records: [bus], missing: [] })), inputDismiss: dismiss() };
+    const result = await migrateLegacyDelivery("eva", "s", api, target);
+    expect(result.notDismissed).toEqual(["bus"]);
+    expect(JSON.parse(target.getItem("cutex-desktop.hiddenRows")!)).toEqual(["note:eva/bus"]);
+    // Not marked done: the next start tries again, and a success then finishes it.
+    api.inputDismiss = vi.fn(async () => ({}));
+    const again = await migrateLegacyDelivery("eva", "s", api, target);
+    expect(api.inputGet).toHaveBeenCalledTimes(2);
+    expect(again.notDismissed).toBeUndefined();
+    expect(target.getItem("cutex-desktop.hiddenRows")).toBeNull();
+  });
+  it("a hidden row the host does not offer dismiss for yet keeps its old marker; applied once dismiss is offered", async () => {
+    const target = memory();
+    target.setItem("cutex-desktop.hiddenRows", JSON.stringify(["ask:eva/req", "note:eva/done"]));
+    let req = record("req", { kind: "delegationRequest", state: "waiting", reason: "targetBusy", surface: "nextUp", actions: [], rev: 3 });
+    const done = record("done", { kind: "agentMessage", state: "inContext", surface: "timeline", actions: [] });
+    const api = { inputGet: vi.fn(async () => ({ ledgerEpoch: "e", stateRevision: 4, records: [req, done], missing: [] })), inputDismiss: vi.fn(async () => ({})) };
+    const first = await migrateLegacyDelivery("eva", "s", api, target);
+    expect(api.inputDismiss).not.toHaveBeenCalled();
+    expect(first.notDismissed).toEqual(["req"]);
+    // The finished one is satisfied; the unapplied one keeps its marker and the migration is not done.
+    expect(JSON.parse(target.getItem("cutex-desktop.hiddenRows")!)).toEqual(["ask:eva/req"]);
+    req = { ...req, actions: ["dismiss"] };
+    const second = await migrateLegacyDelivery("eva", "s", api, target);
+    expect(api.inputGet).toHaveBeenCalledTimes(2);
+    expect(api.inputDismiss).toHaveBeenCalledExactlyOnceWith("s", "req", 3);
+    expect(second.notDismissed).toBeUndefined();
+    expect(target.getItem("cutex-desktop.hiddenRows")).toBeNull();
+  });
+  it("with input-disposal-v1 an old hide decision is applied by dispose (any record); only an applied receipt clears its marker", async () => {
+    const target = memory();
+    target.setItem("cutex-desktop.hiddenRows", JSON.stringify(["ask:eva/req", "note:eva/note"]));
+    const req = record("req", { kind: "delegationRequest", state: "sending", surface: "nextUp", actions: [], rev: 3 });
+    const note = record("note", { kind: "agentMessage", state: "waiting", reason: "turnRunning", surface: "nextUp", actions: ["dismiss"], rev: 2 });
+    const receipt = (inputId: string, appliedAt: string | null) => ({ inputId, cutexSessionId: "s", dispositionId: `d-${inputId}`, requestedAt: "2026-11-14T00:00:00Z", appliedAt, effect: "stop" });
+    let applied = false;
+    const api = {
+      inputGet: vi.fn(async () => ({ ledgerEpoch: "e", stateRevision: 4, records: [req, note], missing: [] })),
+      inputDismiss: vi.fn(async () => ({})),
+      inputDispose: vi.fn(async (_s: string, id: string) => receipt(id, id === "note" || applied ? "2026-11-14T00:00:01Z" : null)),
+    };
+    // Accepted but not applied yet (req): its marker stays and the migration stays open; note is applied.
+    const first = await migrateLegacyDelivery("eva", "s", api, target, [], { disposal: true });
+    expect(api.inputDismiss).not.toHaveBeenCalled();
+    expect(api.inputDispose.mock.calls.map(c => c[1]).sort()).toEqual(["note", "req"]);
+    expect(first.notDismissed).toEqual(["req"]);
+    expect(JSON.parse(target.getItem("cutex-desktop.hiddenRows")!)).toEqual(["ask:eva/req"]);
+    // A failed call keeps it too.
+    api.inputDispose.mockRejectedValueOnce(new Error("busy"));
+    expect((await migrateLegacyDelivery("eva", "s", api, target, [], { disposal: true })).notDismissed).toEqual(["req"]);
+    // Next start, the host has applied it: the marker goes and the migration completes.
+    applied = true;
+    const third = await migrateLegacyDelivery("eva", "s", api, target, [], { disposal: true });
+    expect(third.notDismissed).toBeUndefined();
+    expect(target.getItem("cutex-desktop.hiddenRows")).toBeNull();
+  });
   it("keeps all source data after a failed authoritative read", async () => {
     const target = memory();
     const source = JSON.stringify({ "eva\ns": { at: 1, steers: [{ id: "a", text: "keep" }] } });

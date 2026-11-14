@@ -170,7 +170,7 @@ describe("queued insert projection replay", () => {
     expect(host.querySelectorAll('[data-testid="undelivered-steer"]')).toHaveLength(1);
     expect(host.querySelector('[data-testid="queue-insert-receipt"]')).toBeNull();
     // A paused heading is extra geometry, not an extra logical owner input.
-    expect(host.textContent).toContain("paused.title");
+    expect(host.querySelector('[data-testid="paused-section"]')).not.toBeNull(); // registry 1.8 legacyPausedQueue heading
   });
 
   for (const state of ["checking", "undelivered"] as const) {

@@ -7434,7 +7434,7 @@ export const esES: Partial<Record<keyof typeof zhCN, string>> = {
   "inputLedger.retryNothingSent": "No se ha enviado nada: el envío anterior aún no tiene resultado. Inténtalo más tarde o descártalo",
   "inputLedger.retryNothingSentOffline": "No se ha enviado nada: el {{agent}} está sin conexión. Inténtalo cuando vuelva a estar en línea o descártalo",
   "inputLedger.retryNothingSentOnlyDismiss": "No se ha enviado nada: no se puede comprobar el envío anterior, así que reintentar no servirá. Solo puedes descartarlo",
-  "inputLedger.retryFailed": "El reenvío no se completó: {code}",
+  "inputLedger.retryFailed": "El reenvío no se completó",
   "inputLedger.retry": "Reenviar",
   "inputLedger.stranded.interrupted": "Interrumpido tras enviarse; no está en el historial",
   "inputLedger.stranded.failed": "El turno falló; no está en el historial",

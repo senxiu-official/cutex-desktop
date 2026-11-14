@@ -43,6 +43,40 @@ export function buildOfflinePageDocument(page: string, maxBytes = OFFLINE_PAGE_M
   return { html: head + body, csp: OFFLINE_PAGE_CSP };
 }
 
+/**
+ * The same served document as buildOfflinePageDocument, kept as UTF-8 byte chunks (a large page main read in
+ * windows): our head, then the page's chunks as they are — never joined or re-encoded, so a page costs its
+ * size once. A leading BOM / whitespace / doctype of the page is skipped in place, as above, when it lies in
+ * the first chunk (a window of megabytes). The caller hands over the chunks; `maxBytes` bounds the page's bytes.
+ */
+export function buildOfflinePageChunks(chunks: readonly Uint8Array[], maxBytes: number, options: { pageApi?: boolean } = {}): { html: Uint8Array[]; csp: string } {
+  let total = 0;
+  for (const chunk of chunks) {
+    if (!isBytes(chunk)) throw new Error("Page must be bytes");
+    total += chunk.byteLength;
+  }
+  if (total > maxBytes) throw new Error("Page too large");
+  const body = chunks.filter((chunk) => chunk.byteLength > 0);
+  if (body.length) body[0] = body[0]!.subarray(pageLeadLength(body[0]!));
+  const head = new TextEncoder().encode(`<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${OFFLINE_PAGE_CSP}"><meta name="referrer" content="no-referrer"><script>${STRIP_RTC}</script>${options.pageApi ? `<script>${PAGE_API_SCRIPT}</script>` : ""}`);
+  return { html: [head, ...body], csp: OFFLINE_PAGE_CSP };
+}
+
+/** Bytes of a leading BOM, whitespace and `<!doctype …>` (the lead buildOfflinePageDocument drops), in the first chunk. */
+function pageLeadLength(bytes: Uint8Array): number {
+  let i = 0;
+  if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) i = 3;
+  // \s in the string rule: ASCII whitespace is what pages put there.
+  while (i < bytes.length && (bytes[i] === 0x20 || (bytes[i]! >= 0x09 && bytes[i]! <= 0x0d))) i++;
+  const doctype = "<!doctype";
+  for (let k = 0; k < doctype.length; k++) {
+    const b = bytes[i + k];
+    if (b === undefined || String.fromCharCode(b).toLowerCase() !== doctype[k]) return i;
+  }
+  const end = bytes.indexOf(0x3e, i + doctype.length); // '>'
+  return end < 0 ? i : end + 1;
+}
+
 // ---------- page API ----------
 // The page side of an agent page's three channels (docs/desktop-modules.md §10.2): `window.cutexPage`,
 // a thin promise wrapper over `parent.postMessage` with the fixed message schema the app's broker checks
@@ -71,3 +105,8 @@ Object.defineProperty(window,"cutexPage",{value:api,enumerable:true})})();`;
 
 /** Inline script that defines `window.cutexPage` (runs before the page's own scripts). */
 export const PAGE_API_SCRIPT = SOURCE;
+
+/** A Uint8Array (or Buffer) from any realm: main's Node buffers and a test DOM's typed arrays alike. */
+export function isBytes(value: unknown): value is Uint8Array {
+  return Object.prototype.toString.call(value) === "[object Uint8Array]";
+}

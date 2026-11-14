@@ -12,10 +12,10 @@
 // Multi-window P4: a page drawn in a desk window is leased to that desk's webContents (main resolved the
 // desk at prepare time); it loads only there, its confirm parents to that window, and it is released when
 // that window goes (releasePlace) as well as when the renderer that asked goes (releaseOwner).
-import { buildOfflinePageDocument, OFFLINE_PAGE_MAX_BYTES } from "@cutex-desktop/opaque-frame/page";
-import type { FrameDocumentStore } from "@cutex-desktop/opaque-frame/documents";
+import { buildOfflinePageChunks, buildOfflinePageDocument, OFFLINE_PAGE_MAX_BYTES } from "@cutex-desktop/opaque-frame/page";
+import type { FrameDocument, FrameDocumentStore } from "@cutex-desktop/opaque-frame/documents";
 import { ARTIFACT_ID, type ArtifactContent, type ArtifactDetail } from "../shared/artifactStore";
-import { ARTIFACT_PAGE_MAX_BYTES, FILE_PAGE_MAX_BYTES, FILE_PAGE_PROMPT_BYTES, type ArtifactPageInput, type ArtifactPageResult, type FilePageInput, type FilePageResult } from "../shared/frames";
+import { ARTIFACT_PAGE_MAX_BYTES, FILE_PAGE_MAX_BYTES, FILE_PAGE_PROMPT_BYTES, FILE_PAGE_WINDOW_BYTES, type ArtifactPageInput, type ArtifactPageResult, type FilePageInput, type FilePageResult } from "../shared/frames";
 import type { FsFile, WorkspaceScope } from "../shared/ipc";
 
 /** The scheme of every opaque frame document (main/index.ts registers it; the parent CSP allows only it in frame-src). */
@@ -66,9 +66,19 @@ export interface ArtifactPageDeps {
   ensureContained(): Promise<void>;
   /** The three page channels; without it a page gets no `window.cutexPage` and every request is refused. */
   page?: PageChannelDeps;
-  /** File pages: the connected host's file readers; null = not connected. Without it no file page is prepared. */
-  fileReader?(hostId: string): { fsFile(scope: WorkspaceScope, path: string, maxBytes?: number): Promise<FsFile>; hostFile(path: string, maxBytes?: number): Promise<FsFile> } | null;
+  /** File pages: the connected host's file reader; null = not connected. Without it no file page is prepared. */
+  fileReader?(hostId: string): FileWindowReader | null;
 }
+
+/** One window of a file: the workspace route (`scope`) or fs-file-read (none = an absolute host path). */
+export interface FileWindowReader {
+  fileWindow(scope: WorkspaceScope | undefined, path: string, offset: number, maxBytes: number): Promise<FileWindow>;
+}
+/**
+ * cutex's fs/file body; `offset` and `revision` (size + full-precision mtime of the opened file) come only from a
+ * cutex with windowed reads (fs-file-window).
+ */
+export type FileWindow = FsFile & { offset?: number; revision?: string };
 
 const SCOPE_ID = /^[A-Za-z0-9._:@-]{1,200}$/;
 export function parseFilePageInput(raw: unknown): FilePageInput {
@@ -92,17 +102,19 @@ export function parseFilePageInput(raw: unknown): FilePageInput {
  * A file page is inline-only: none of them loads (the document's CSP blocks every fetch); the view says so.
  */
 export function countExternalRefs(html: string): number {
-  const values: string[] = [];
-  for (const m of html.matchAll(/\b(?:src|poster|data|background)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/gi)) values.push(m[1] ?? m[2] ?? m[3] ?? "");
+  // Counted as matched: no list of every value (a dense 256 MiB page would hold millions).
+  let n = 0;
+  const count = (v: string | undefined) => {
+    const s = (v ?? "").trim();
+    if (s && !/^(?:data:|blob:|#|about:|javascript:|mailto:|tel:)/i.test(s)) n++;
+  };
+  for (const m of html.matchAll(/\b(?:src|poster|data|background)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/gi)) count(m[1] ?? m[2] ?? m[3]);
   // A plain <a href> is a link, not something the page loads; <link href> (style sheets, icons) is.
-  for (const m of html.matchAll(/<link\b[^>]*?\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/gi)) values.push(m[1] ?? m[2] ?? m[3] ?? "");
-  for (const m of html.matchAll(/\bsrcset\s*=\s*(?:"([^"]*)"|'([^']*)')/gi)) for (const part of (m[1] ?? m[2] ?? "").split(",")) values.push(part.trim().split(/\s+/)[0] ?? "");
-  for (const m of html.matchAll(/url\(\s*(?:"([^"]*)"|'([^']*)'|([^)\s]*))\s*\)/gi)) values.push(m[1] ?? m[2] ?? m[3] ?? "");
-  for (const m of html.matchAll(/@import\s+(?:"([^"]*)"|'([^']*)')/gi)) values.push(m[1] ?? m[2] ?? "");
-  return values.filter((v) => {
-    const s = v.trim();
-    return !!s && !/^(?:data:|blob:|#|about:|javascript:|mailto:|tel:)/i.test(s);
-  }).length;
+  for (const m of html.matchAll(/<link\b[^>]*?\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/gi)) count(m[1] ?? m[2] ?? m[3]);
+  for (const m of html.matchAll(/\bsrcset\s*=\s*(?:"([^"]*)"|'([^']*)')/gi)) for (const part of (m[1] ?? m[2] ?? "").split(",")) count(part.trim().split(/\s+/)[0]);
+  for (const m of html.matchAll(/url\(\s*(?:"([^"]*)"|'([^']*)'|([^)\s]*))\s*\)/gi)) count(m[1] ?? m[2] ?? m[3]);
+  for (const m of html.matchAll(/@import\s+(?:"([^"]*)"|'([^']*)')/gi)) count(m[1] ?? m[2]);
+  return n;
 }
 
 /**
@@ -178,7 +190,9 @@ export function createArtifactPageService(deps: ArtifactPageDeps) {
   const placeStillOpen = (owner: number, place: number) => {
     if (place !== owner && deps.placeOpen?.(owner, place) !== true) throw new Error("Frame window closed");
   };
-  const lease = (owner: number, place: number, document: ReturnType<typeof buildOfflinePageDocument>) => {
+  /** Large file pages are assembled one at a time across main: at most one page of windows is held in flight. */
+  let largeFileRead: Promise<unknown> = Promise.resolve();
+  const lease = (owner: number, place: number, document: FrameDocument) => {
     let held = 0;
     for (const l of leases.values()) if (l.owner === owner) held++;
     if (held >= PAGE_DOCUMENTS_PER_OWNER) throw new Error("Too many prepared frame documents");
@@ -241,25 +255,70 @@ export function createArtifactPageService(deps: ArtifactPageDeps) {
       const input = parseFilePageInput(raw);
       const reader = deps.fileReader?.(input.hostId);
       if (!reader) return { ok: false, reason: "host-offline" };
-      const maxBytes = input.large ? FILE_PAGE_MAX_BYTES : FILE_PAGE_PROMPT_BYTES;
-      let file: FsFile;
+      const read = (offset: number, maxBytes: number) => reader.fileWindow(input.scope, input.path, offset, maxBytes);
+      let file: FileWindow;
       try {
-        file = input.scope ? await reader.fsFile(input.scope, input.path, maxBytes) : await reader.hostFile(input.path, maxBytes);
+        // offset=0 is asked for explicitly: a cutex with windowed reads echoes it, an older one ignores it.
+        file = await read(0, input.large ? FILE_PAGE_WINDOW_BYTES : FILE_PAGE_PROMPT_BYTES);
       } catch {
         return { ok: false, reason: "not-found" };
       }
+      // No offset = an older cutex (one read). Any offset but the 0 asked for is a wrong answer.
+      if (file.offset !== undefined && file.offset !== 0) return { ok: false, reason: "not-found" };
       if (file.encoding !== "utf8") return { ok: false, reason: "not-text" };
-      if (file.truncated) return { ok: false, reason: "too-large", totalBytes: file.size, modifiedAt: file.modifiedAt };
-      let document: ReturnType<typeof buildOfflinePageDocument>;
+      const windowed = file.offset === 0 && typeof file.revision === "string";
+      const maxBytes = windowed ? FILE_PAGE_MAX_BYTES : FILE_PAGE_WINDOW_BYTES;
+      const tooLarge = { ok: false as const, reason: "too-large" as const, totalBytes: file.size, modifiedAt: file.modifiedAt, maxBytes };
+      if (file.truncated && (!input.large || !windowed || file.size > maxBytes)) return tooLarge;
+      // The page is kept as UTF-8 byte chunks, one per window: never joined, never re-encoded (the document
+      // streams them out once). References are counted per window, so one cut by a window edge may be missed.
+      const first = file;
+      const assemble = async (): Promise<{ chunks: Buffer[]; refs: number } | Extract<FilePageResult, { ok: false }>> => {
+        const chunks = [Buffer.from(first.content, "utf8")];
+        let refs = countExternalRefs(first.content);
+        let offset = chunks[0]!.byteLength;
+        let truncated = first.truncated;
+        while (truncated) {
+          // Over one read: the owner asked for it and the host reads in windows (checked above). Every window
+          // must be the same revision cutex reported for the first (cutex also refuses one that changed while read).
+          let next: FileWindow;
+          try {
+            next = await read(offset, FILE_PAGE_WINDOW_BYTES);
+          } catch {
+            return { ok: false, reason: "not-found" };
+          }
+          if (next.size !== first.size || next.revision !== first.revision || next.modifiedAt !== first.modifiedAt) return { ok: false, reason: "not-found" };
+          if (next.encoding !== "utf8") return { ok: false, reason: "not-text" };
+          const bytes = Buffer.from(next.content, "utf8");
+          // cutex cuts windows at character boundaries; an empty window would never end.
+          if (next.offset !== offset || bytes.byteLength === 0 || offset + bytes.byteLength > first.size) return { ok: false, reason: "not-found" };
+          refs += countExternalRefs(next.content);
+          chunks.push(bytes);
+          offset += bytes.byteLength;
+          truncated = next.truncated;
+        }
+        if (first.truncated && offset !== first.size) return { ok: false, reason: "not-found" };
+        return { chunks, refs };
+      };
+      let page: Awaited<ReturnType<typeof assemble>>;
+      if (first.truncated) {
+        // One large page in flight across main: the next waits until this one is read (or failed).
+        const run = largeFileRead.then(assemble, assemble);
+        // The queue keeps no result: a resolved value here would hold the page's bytes until the next read.
+        largeFileRead = run.then(() => {}, () => {});
+        page = await run;
+      } else page = await assemble();
+      if ("ok" in page) return page;
+      let document: FrameDocument;
       try {
-        document = buildOfflinePageDocument(file.content, FILE_PAGE_MAX_BYTES, { pageApi: false });
+        document = buildOfflinePageChunks(page.chunks, maxBytes, { pageApi: false });
       } catch {
-        return { ok: false, reason: "too-large", totalBytes: file.size, modifiedAt: file.modifiedAt };
+        return tooLarge;
       }
       // No file page exists before Chromium networking is contained.
       await deps.ensureContained();
       placeStillOpen(owner, place);
-      return { ok: true, frame: lease(owner, place, document), externalRefs: countExternalRefs(file.content) };
+      return { ok: true, frame: lease(owner, place, document), externalRefs: page.refs };
     },
     /** `place`: the webContents the frame will be drawn in (the owner's own, or a desk it opened; main resolved it). */
     async prepare(owner: number, raw: unknown, place: number = owner): Promise<ArtifactPageResult> {

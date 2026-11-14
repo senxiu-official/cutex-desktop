@@ -34,7 +34,9 @@ import { useEffect, useRef, useState, type DragEvent, type KeyboardEvent } from 
 import { createPortal } from "react-dom";
 import { ArrowDownToLine, ChevronDown, ChevronRight, Clock3, CornerDownRight, GripVertical } from "lucide-react";
 import type { AdmissionCurrentTurn, AdmissionNextStep, AdmissionRef, QueueItem } from "@cutex-desktop/protocol";
-import { useI18n } from "../i18n";
+import { useI18n, type MessageKey } from "../i18n";
+import { NEXT_UP_EFFECTS, NEXT_UP_PANEL_CONTROLS, langOf, stateLabelKey } from "../lib/inputLedger/nextUpRegistry";
+import { legacyItemState } from "../lib/inputLedger/legacyNextUp";
 import { atBoundary, beforeForSlot, canMoveTo, foldQueueRows, foldRow, insertRefusal, moveTargets, pausedFrom, rideAlongsFollowTurn, slotForGroup, turnStopped, type AdmissionRow } from "../lib/legacyDelivery/admissionOrder";
 import { formatElapsed } from "../lib/agentAttention";
 import type { OutboxEntry } from "../lib/legacyDelivery/outbox";
@@ -72,6 +74,10 @@ export function LedgerTurnQueue({ records, sessionId, hostId, items, canEdit, on
   const byId = new Map(items.map(item => [item.clientUserMessageId, item]));
   const admission = useApp(s => viewOf(s, hostId ?? "local", sessionId)?.admission);
   const [dragged, setDragged] = useState<QueueItem | null>(null);
+  // An owner row offering queue actions whose QueueItem has not loaded: its buttons show grey (loading) and the queue
+  // is re-read, instead of the buttons disappearing (registry 1.4 bug 5).
+  const missingItems = records.some(record => record.kind === "owner" && !byId.has(record.inputId) && record.actions?.some(action => action === "sendNow" || action === "edit" || action === "cancel"));
+  useEffect(() => { if (missingItems) useApp.getState().hydrateQueue(sessionId, hostId); }, [missingItems, sessionId, hostId]);
   const move = (item: QueueItem, target: InputRecord | null) => {
     const before = target ? ledgerOrderRef(target, items, admission) : null;
     if (before === undefined) return;
@@ -80,7 +86,9 @@ export function LedgerTurnQueue({ records, sessionId, hostId, items, canEdit, on
   return <>{records.map(record => {
     const item = record.kind === "owner" ? byId.get(record.inputId) : undefined;
     const movable = !!item && !!admission && record.actions?.includes("edit");
+    const handlers = item ? { insertNow: () => onSendNow?.(item), sendNow: () => onSendNow?.(item), edit: () => onEdit(item), remove: () => onDelete(item) } : undefined;
     return <LedgerAdmissionRow key={record.inputId} record={record} sessionId={sessionId} hostId={hostId} body={item ? queueItemText(item) : undefined}
+      handlers={handlers} ctx={record.kind === "owner" ? { queueItem: !!item && (!!onSendNow || !record.actions?.includes("sendNow")), idle: !!sendNowStartsTurn, composerEmpty: canEdit } : undefined}
       media={item ? <QueuedImages images={messageImages(item.input as { type: string }[])} hostId={hostId} /> : undefined}
       grip={movable ? <GripVertical size={12} className="shrink-0 cursor-grab text-subtle" aria-hidden /> : undefined}
       rowProps={{
@@ -96,13 +104,7 @@ export function LedgerTurnQueue({ records, sessionId, hostId, items, canEdit, on
           if (target === undefined) return;
           e.preventDefault(); move(item, target);
         },
-      }}>
-      {item && <>
-        {record.actions?.includes("sendNow") && onSendNow && <button type="button" className="h-5 rounded px-1 text-caption hover:bg-surface-2" onClick={() => onSendNow(item)}>{t(sendNowStartsTurn ? "queue.sendNowIdle" : "queue.sendNow")}</button>}
-        {record.actions?.includes("edit") && <button type="button" className="h-5 rounded px-1 text-caption hover:bg-surface-2" disabled={!canEdit} onClick={() => onEdit(item)}>{t("queue.edit")}</button>}
-        {record.actions?.includes("cancel") && <button type="button" className="h-5 rounded px-1 text-caption hover:bg-surface-2" onClick={() => onDelete(item)}>{t("queue.delete")}</button>}
-      </>}
-    </LedgerAdmissionRow>;
+      }} />;
   })}</>;
 }
 
@@ -199,7 +201,7 @@ export function TurnQueue({
    *  right end (「全部合并插入」). Missing = neither shows. */
   slots?: { target: HTMLElement | null; actions: HTMLElement | null };
 }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const userToggle = useUserLayoutToggle();
   const { turns, nextStep, running, currentTurn, mayPass, onMove, onInsert, onMergeInsert, sessionId } = ordered;
   const retryStatus = useModelOverloadRetry(sessionId, hostId);
@@ -390,8 +392,8 @@ export function TurnQueue({
           <QueuedImages images={messageImages((p.extra ?? []) as { type: string }[])} total={p.imageCount} hostId={hostId} />
           {(p.state === "checking" ? null : insertStatus?.(p.id)) ?? <SteerDeliveryNote steer={p} runtime={runtime} imageSteering={imageSteering} className={META_YIELDS} onRecheck={onRecheckSteer && (() => onRecheckSteer(p.id))} />}
           {p.state !== "checking" && <span className={`${ROW_ACTIONS} h-5 max-h-5`}>
-            <button onClick={onInterruptSendSteers} title={t("steer.interruptSendHint")} className={`${TINY} text-danger hover:bg-danger/10`} data-testid="boundary-interrupt-send">
-              {t("steer.interruptSend")}
+            <button onClick={onInterruptSendSteers} title={NEXT_UP_EFFECTS.interruptSend.tip[langOf(locale)]} className={`${TINY} text-danger hover:bg-danger/10`} data-testid="boundary-interrupt-send">
+              {NEXT_UP_EFFECTS.interruptSend.label[langOf(locale)]}
             </button>
           </span>}
         </div>
@@ -464,11 +466,12 @@ export function TurnQueue({
             {paused.controls && (
               <HoverActions>
                 <button onClick={paused.onResume} title={resumeHint} className={`${TINY} bg-surface-2 text-foreground hover:text-accent`}>
-                  {t("paused.resume")}
+                  {NEXT_UP_PANEL_CONTROLS.legacyPausedQueue.buttons[0][langOf(locale)]}
                 </button>
-                <button onClick={paused.onRestore} title={t("paused.restoreHint")} className={`${TINY} text-muted hover:text-foreground`}>
-                  {t("paused.restore")}
+                <button onClick={paused.onRestore} title={t("paused.restoreHint")} className={`${TINY} text-muted hover:text-foreground`} data-testid="paused-restore">
+                  {NEXT_UP_PANEL_CONTROLS.legacyPausedQueue.buttons[1][langOf(locale)]}
                 </button>
+
               </HoverActions>
             )}
           </RailRow>
@@ -518,7 +521,7 @@ export function TurnQueue({
           {row.kind === "owner" ? (
             itemRow(row.item, {
               // Only the first turn waits for nothing but the running one.
-              note: retry ? formatAutoRetryWait(t, retry, retry.phase === "pending" ? "queue.autoRetryOwnerOrder" : "queue.autoRetryWaiting") : running && index === 0 && !heldIds.has(row.item.queueId) && row.entry.state !== "paused" ? t("queue.deliverAfterTurn") : undefined,
+              note: retry ? formatAutoRetryWait(t, retry, retry.phase === "pending" ? "queue.autoRetryOwnerOrder" : "queue.autoRetryWaiting") : running && index === 0 && !heldIds.has(row.item.queueId) && row.entry.state !== "paused" ? t(stateLabelKey(legacyItemState({ afterTurn: true })) as MessageKey) : undefined,
               paused: heldIds.has(row.item.queueId) || row.entry.state === "paused",
               // Alt+↑ / Alt+↓ / Alt+End stay as an unadvertised keyboard path.
               rowProps: { tabIndex: 0, onKeyDown: onKey(row.item) },
@@ -529,11 +532,12 @@ export function TurnQueue({
           {index === firstStoppedOwner && pausedAt < 0 && paused.controls && (
             <HoverActions>
               <button onClick={paused.onResume} title={resumeHint} className={`${TINY} bg-surface-2 text-foreground hover:text-accent`} data-testid="queue-paused-resume-row">
-                {t("paused.resume")}
+                {NEXT_UP_PANEL_CONTROLS.legacyPausedQueue.buttons[0][langOf(locale)]}
               </button>
-              <button onClick={paused.onRestore} title={t("paused.restoreHint")} className={`${TINY} text-muted hover:text-foreground`}>
-                {t("paused.restore")}
+              <button onClick={paused.onRestore} title={t("paused.restoreHint")} className={`${TINY} text-muted hover:text-foreground`} data-testid="paused-restore">
+                {NEXT_UP_PANEL_CONTROLS.legacyPausedQueue.buttons[1][langOf(locale)]}
               </button>
+
             </HoverActions>
           )}
           {index === turns.length - 1 && dropSlot === turns.length && line("bottom")}

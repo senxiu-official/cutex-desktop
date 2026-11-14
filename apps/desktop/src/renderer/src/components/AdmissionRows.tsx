@@ -35,8 +35,8 @@ import { steerDelivery, type PendingSteer } from "../lib/legacyDelivery/pendingS
 import type { ImageSteering } from "../lib/imageSteer";
 import { QUEUE_ROW, ROW_META, ROW_ACTIONS, rowText } from "../lib/queueRow";
 import type { InputRecord } from "@cutex-desktop/protocol";
-import { InputHoldControl } from "./InputHoldControl";
-import { InputStatus } from "./InputStatus";
+import { InputStatus, useClearedUnknown, type NextUpOverride } from "./InputStatus";
+import { NEXT_UP_DETAILS, fill, langOf, type NextUpContext } from "../lib/inputLedger/nextUpRegistry";
 import { formatAt, formatWhen, useClock, useNow } from "../lib/time";
 import { blockOfNotice, grantNoticeRowOf } from "../lib/safetyGrantNotice";
 import { useHostOwnerNotes } from "../lib/ownerNotifyStore";
@@ -72,8 +72,12 @@ const DELIVERY_KEYS: Record<RideAlongKind, MessageKey> = {
 const KNOWN_KINDS = new Set(["answer", "question", "alarm", "tell", "bus"]);
 
 /** Asks supply presentation (title/link) only; ledger records alone decide membership, status and actions.
- * Never infer delivery state from ask execution, legacy settlement, timing or native receipts. */
-export function LedgerAdmissionRow({ record, sessionId, hostId, body, children, rowProps, grip, media }: { record: InputRecord; sessionId: string; hostId?: string; body?: string; children?: React.ReactNode; rowProps?: React.HTMLAttributes<HTMLDivElement>; grip?: React.ReactNode; media?: React.ReactNode }) {
+ * Never infer delivery state from ask execution, legacy settlement, timing or native receipts.
+ * Status and buttons come only from the Next Up registry (components/InputStatus); the countdown, an admission hold and
+ * the approval-notice line are add-ons to it and never take the place of its buttons (registry 1.1 / 1.4).
+ * A delegation's rows (request, result, question, status) keep its #tag link. `handlers` / `ctx`: the owner queue's
+ * own effects (insert / send now / edit / delete) and whether its QueueItem has loaded. */
+export function LedgerAdmissionRow({ record, sessionId, hostId, body, rowProps, grip, media, handlers, ctx }: { record: InputRecord; sessionId: string; hostId?: string; body?: string; rowProps?: React.HTMLAttributes<HTMLDivElement>; grip?: React.ReactNode; media?: React.ReactNode; handlers?: React.ComponentProps<typeof InputStatus>["handlers"]; ctx?: NextUpContext }) {
   const { t } = useI18n();
   const viewHost = useConvHost();
   const rowHost = hostId ?? viewHost;
@@ -83,66 +87,70 @@ export function LedgerAdmissionRow({ record, sessionId, hostId, body, children, 
   const senderAvatar = useApp(s => record.sender.kind === "agent" ? rowsOf(sidebarOf(s, rowHost)).find(r => r.cutexSessionId === senderId)?.avatar ?? null : null);
   const senderName = useApp(s => (record.sender.kind === "agent" ? rowsOf(sidebarOf(s, rowHost)).find(r => r.cutexSessionId === senderId)?.displayName : null) ?? record.sender.name);
   const statusNotice = record.kind === "delegationStatus";
-  const ask = useDelegation(rowHost, statusNotice ? record.askId : null);
+  const askId = record.askId;
+  const ask = useDelegation(rowHost, askId);
   // Status previews contain internal event reference keys, not owner-facing prose.
   const text = statusNotice ? ask?.title ?? t("inputLedger.statusNotification") : body ?? record.preview ?? record.inputId;
-  const askId = record.askId;
   const openAsk = askId ? () => openDelegationDetail(rowHost, askId, { title: ask?.title }) : undefined;
+  const statusRef = useRef<HTMLSpanElement>(null);
+  const wake = useWakeOverride(record, sessionId, rowHost, statusRef);
+  const grant = <GrantNoticeStatus record={record} sessionId={sessionId} hostId={rowHost} />;
+  const cleared = useClearedUnknown(record, sessionId, rowHost);
+  if (cleared) return null;
   return <div {...rowProps} className={`${QUEUE_ROW} min-h-6 max-h-6 shrink-0 overflow-hidden hover:bg-hover`} data-testid="ledger-queue-row" data-input-id={record.inputId} data-surface={record.surface}>
     {grip}
     {media}
     {agentSender ? <SenderAvatar id={senderId} name={senderName} avatar={senderAvatar} size={16} agent />
       : <KindIcon icon={record.kind === "owner" ? CornerDownLeft : record.kind === "alarm" ? AlarmClock : Mail} label={t(record.kind === "owner" ? "queue.delivery.owner" : "queue.delivery.bus")} />}
     {record.kind !== "owner" && <span className="max-w-[25%] shrink truncate text-ui font-medium" title={record.sender.host ?? undefined}>{senderName}</span>}
-    {statusNotice && askId && <DelegationTag askId={askId} onJump={openAsk} />}
+    {askId && <DelegationTag askId={askId} onJump={openAsk} />}
     {statusNotice && openAsk ? <button type="button" onClick={openAsk} className="min-w-0 flex-1 truncate text-left text-ui hover:text-accent hover:underline" title={text}>{rowText(text)}</button>
       : <span className="min-w-0 flex-1 truncate text-ui" title={statusNotice ? text : body ?? record.preview}>{rowText(text)}</span>}
-    <InputHoldControl record={record} sessionId={sessionId} hostId={hostId} />
-    <GrantNoticeStatus record={record} sessionId={sessionId} hostId={rowHost}>
-      {record.state === "waiting" && record.kind !== "owner" ? (
-        <WakeCountdown record={record} sessionId={sessionId} hostId={rowHost}>
-          <InputStatus record={record} sessionId={sessionId} hostId={hostId} />
-        </WakeCountdown>
-      ) : <InputStatus record={record} sessionId={sessionId} hostId={hostId} />}
-    </GrantNoticeStatus>
-    {children && <span className={`${ROW_ACTIONS} h-5 max-h-5`}>{children}</span>}
+    {/* Today's look: the status always shows; an owner's waiting row keeps its queue buttons on hover (owner 2026-11-02). */}
+    <span ref={statusRef} className="flex h-5 max-h-5 min-w-0 shrink items-center">
+      <InputStatus record={record} sessionId={sessionId} hostId={hostId} handlers={handlers} ctx={ctx} override={{ ...wake, addOn: grant }} buttonsClassName={record.kind === "owner" && record.state === "waiting" ? `${ROW_ACTIONS} h-5 max-h-5` : undefined} />
+    </span>
   </div>;
 }
 
 /**
  * The 「主人已批准一次」 notice of a safety-block grant (cutex safety-grant-delivery; the block names this record as
  * its `noticeInputId`): 「已批准一次，等待当前工具返回后送达 · 最晚 HH:MM 前有效」 until the agent reads it, then
- * 「已送达 · 有效至 HH:MM」 (lib/safetyGrantNotice). Otherwise, and on an older cutex, the row's own status (`children`).
+ * 「已送达 · 有效至 HH:MM」 (lib/safetyGrantNotice). A display-only add-on after the row's status: it never hides the
+ * row's buttons (registry §三: 批准通知等待送达 — 只显示，不吞掉「放弃」). Nothing without a grant.
  */
-export function GrantNoticeStatus({ record, sessionId, hostId, children }: { record: Pick<InputRecord, "inputId" | "kind" | "state" | "evidence">; sessionId: string; hostId: string; children?: React.ReactNode }) {
-  const { t } = useI18n();
+export function GrantNoticeStatus({ record, sessionId, hostId }: { record: Pick<InputRecord, "inputId" | "kind" | "state" | "evidence">; sessionId: string; hostId: string }) {
+  const { t, locale } = useI18n();
+  const lang = langOf(locale);
   const notes = useHostOwnerNotes(hostId);
-  const block = record.kind === "alarm" ? blockOfNotice(notes, sessionId, record.inputId) : null;
+  // r282 sends the approval notice as systemNotice (approval before alarm); older hosts as alarm.
+  const block = record.kind === "systemNotice" || record.kind === "alarm" ? blockOfNotice(notes, sessionId, record.inputId) : null;
   const now = Date.now();
   const status = block ? grantNoticeRowOf({ ...block, state: safetyBlockState(block, now) }, record) : null;
-  if (!block || !status) return <>{children}</>;
+  if (!block || !status) return null;
   const at = (iso: string | null) => (iso && Number.isFinite(Date.parse(iso)) ? formatAt(Date.parse(iso) / 1000, now) : "");
   const time = at(status.until);
   const minutes = Math.max(1, Math.round(block.grantSeconds / 60));
   return status.kind === "waiting" ? (
-    <TimingMeta label={t("safetyBlock.notice.waitingHint", { minutes, time })} text={time ? `${t("safetyBlock.notice.waiting")} · ${t("safetyBlock.notice.cap", { time })}` : t("safetyBlock.notice.waiting")} testId="grant-notice-waiting" />
+    <TimingMeta label={t("safetyBlock.notice.waitingHint", { minutes, time })} text={time ? `${NEXT_UP_DETAILS.grantWaiting[lang]} · ${fill(NEXT_UP_DETAILS.grantCap[lang], { time })}` : NEXT_UP_DETAILS.grantWaiting[lang]} testId="grant-notice-waiting" />
   ) : (
-    <TimingMeta label={t("safetyBlock.notice.readHint", { time })} text={t("safetyBlock.notice.read", { time })} tone="text-ok-text" testId="grant-notice-read" />
+    <TimingMeta label={t("safetyBlock.notice.readHint", { time })} text={fill(NEXT_UP_DETAILS.grantRead[lang], { time })} tone="text-ok-text" testId="grant-notice-read" />
   );
 }
 
 /**
- * A wake (or delegation results) waiting on a busy agent: the server's deadline (the record's `wakeSchedule`, else
- * `nextStepAt` of its admission ride-along matched by id; lib/wakeCountdown wakeSourceOf) as a depleting ring and 「1:45 后可插入」, then 「等待插入时机」 until the agent's next read
- * point or the turn end (lib/wakeCountdown). Held by an owner stop / 暂停委托: 已暂停 with the reason, no ring.
- * Nothing without a server deadline, once cutex waits only for the native receipt (it was read), while the agent
- * is idle, or on a runtime that reads only after the turn. Ticks once a second, only while the row is on screen
- * (lib/visibleNow). Membership and state stay the ledger's; the ride-along gives only the deadline. While it
- * shows, it takes the place of the row's status word (`children`, InputStatus: 本回合结束后 would contradict it).
+ * A wake (or delegation results) waiting on a busy agent, read from the server's deadline (the record's `wakeSchedule`,
+ * else `nextStepAt` of its admission ride-along matched by id; lib/wakeCountdown wakeSourceOf), as the registry state it
+ * makes the row (registry 1.5): counting down → `afterWork` variant `timed` (「{time} 内发送」 after the depleting ring,
+ * today's look and place); past the deadline → `awaitingRead`; held by an owner stop / 暂停委托 → `paused` (an
+ * owner hold of this one item → `held`). Without a server deadline a state-3 row is the `untimed` variant. Ticks once a
+ * second only while the row is on screen (lib/visibleNow). Changes only the shown state, never the buttons' disposals.
  */
-export function WakeCountdown({ record, sessionId, hostId, children }: { record: Pick<InputRecord, "inputId" | "createdAt" | "wakeSchedule">; sessionId: string; hostId: string; children?: React.ReactNode }) {
-  const { t } = useI18n();
-  const ride = useApp((s) => viewOf(s, hostId, sessionId)?.admission?.nextStep?.find((i) => i.id === record.inputId) ?? null);
+export function useWakeOverride(record: Pick<InputRecord, "inputId" | "createdAt" | "wakeSchedule" | "state" | "kind">, sessionId: string, hostId: string, ref: React.RefObject<HTMLElement | null>): NextUpOverride {
+  const { t, locale } = useI18n();
+  const lang = langOf(locale);
+  const applies = record.state === "waiting" && record.kind !== "owner";
+  const ride = useApp((s) => applies ? viewOf(s, hostId, sessionId)?.admission?.nextStep?.find((i) => i.id === record.inputId) ?? null : null);
   const ridealongsHeld = useApp((s) => viewOf(s, hostId, sessionId)?.admission?.ridealongsHeld);
   const busy = useApp((s) => {
     const state = agentState(s.inputs, hostId, sessionId)?.delivery?.state;
@@ -152,25 +160,17 @@ export function WakeCountdown({ record, sessionId, hostId, children }: { record:
     const row = viewRow(s, hostId, sessionId);
     return !!row && readsEarly(runtimeOf(row), agentFeaturesOf(row).map);
   });
-  const source = wakeSourceOf(record, ride, runtimeEarly, ridealongsHeld);
-  const ref = useRef<HTMLSpanElement>(null);
+  const source = applies ? wakeSourceOf(record, ride, runtimeEarly, ridealongsHeld) : null;
   const held = source?.held;
   const counting = busy && !!source && source.early && !held && !source.read && !!source.item.nextStepAt && source.item.timing !== "nextStep";
   const now = useVisibleNow(ref, counting);
-  // A hold this desktop doesn't know yet: 已暂停 without a reason.
-  if (held) return held === "ownerStop" || held === "ownerPause" ? <HeldSymbol held={held as AdmissionHeld} /> : <TimingMeta label={t("queue.turn.heldItem")} text={t("queue.meta.held")} tone="text-warn-text" testId="timing-held" />;
+  if (!applies) return {};
+  if (held) return { state: held === "ownerPause" ? "held" : "paused", tip: `${t("queue.turn.heldItem")}${held === "ownerStop" || held === "ownerPause" ? ` · ${t(heldKeys(held as AdmissionHeld).strip)}` : ""}` };
   const schedule = busy && source && !source.read ? wakeScheduleOf(source.item, now, source.early) : null;
-  if (!schedule) return <>{children}</>;
-  const readPointHint = t("agentMsg.wake.readPointHint");
-  return (
-    <span ref={ref} className="flex shrink-0" data-testid="wake-countdown" data-wake-schedule={schedule.kind}>
-      {schedule.kind === "countdown" ? (
-        <TimingMeta label={t("agentMsg.wake.countdownHint", { time: minSec(schedule.secs) })} text={t("agentMsg.wake.countdown", { time: minSec(schedule.secs) })} symbol={<CountdownRing left={schedule.left} />} />
-      ) : (
-        <TimingMeta label={readPointHint} text={t("agentMsg.wake.readPoint")} />
-      )}
-    </span>
-  );
+  if (!schedule) return { variant: "untimed" };
+  if (schedule.kind === "readPoint") return { state: "awaitingRead" };
+  const time = minSec(schedule.secs);
+  return { state: "afterWork", variant: "timed", time, symbol: <CountdownRing left={schedule.left} />, tip: undefined };
 }
 
 /** A row's kind: a small muted icon, its word as the label (no text pill). */

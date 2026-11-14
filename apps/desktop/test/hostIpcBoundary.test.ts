@@ -622,7 +622,7 @@ async function preparePage(): Promise<{ id: string; url: string }> {
   if (!fake.extra.some((conn) => conn.hostId === "page-host")) {
     const daemon = {
       currentState: { kind: "connected" },
-      hostFile: async (path: string) => ({ path, size: 29, modifiedAt: "2026-11-08T00:00:00Z", encoding: "utf8", content: "<p>isolated local fixture</p>", truncated: false, mime: "text/html" }),
+      fileWindow: async (_scope: unknown, path: string, offset: number) => ({ path, size: 29, modifiedAt: "2026-11-08T00:00:00Z", encoding: "utf8", content: "<p>isolated local fixture</p>", truncated: false, mime: "text/html", offset }),
       stop() {}
     };
     fake.extra.push({ hostId: "page-host", routingEpoch: "epoch-p", daemon: daemon as unknown as DaemonService });

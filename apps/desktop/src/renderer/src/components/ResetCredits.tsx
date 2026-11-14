@@ -2,6 +2,8 @@
 // row and the exhausted-quota strip in the composer tray. Reading happens when one of them mounts (cached,
 // lib/resetCredits); using one always goes through the confirm dialog (spendResetCredit).
 import { Ticket } from "lucide-react";
+import { addTombstone, hasTombstone, tombstoneKey, useTombstones } from "../lib/inputLedger/nextUpTombstones";
+import { NEXT_UP_PANEL_CONTROLS, langOf } from "../lib/inputLedger/nextUpRegistry";
 import type { QuotaGauge } from "../../../shared/ipc";
 import { useI18n } from "../i18n";
 import { expiryText, hasResetCredits, spendResetCredit, summaryText, useProfileResetCredits } from "../lib/resetCredits";
@@ -71,16 +73,21 @@ export function ResetCreditsDetail({ hostId, profile, afterReset }: { hostId: st
 }
 
 /** Composer tray strip when a window is used up and the account holds reset credits:
- *  「额度用完 · 有 2 张重置券 · 用一张重置券」. */
+ *  「额度用完 · 有 2 张重置券 · 用一张重置券 · 收起」. 收起 (Next Up registry 1.4 §三) moves it away without using a
+ *  credit; it is remembered on this computer until the number of credits changes. */
 export function ResetOfferSection({ hostId, profile, afterReset }: { hostId: string; profile: string; afterReset(): void }) {
   const { t, locale } = useI18n();
   const { view, using } = useProfileResetCredits(hostId, profile, true);
-  if (!view || !hasResetCredits(view)) return null;
+  useTombstones();
+  const hideKey = tombstoneKey(hostId, profile, "resetOffer", String(view?.availableCount ?? 0));
+  if (!view || !hasResetCredits(view) || hasTombstone(hideKey)) return null;
+  const hide = NEXT_UP_PANEL_CONTROLS.resetCredit.buttons[1][langOf(locale)];
   return (
     <div className="flex h-6 items-center gap-2 px-2 text-caption/[inherit] text-warn-text" data-testid="reset-offer">
       <Ticket size={12} className="shrink-0" />
       <span className="min-w-0 flex-1 truncate">{t("resets.offer", { n: view.availableCount ?? 0 })}</span>
       <UseButton compact busy={using} onClick={() => void spendResetCredit({ hostId, profile, view, t, locale, afterReset })} />
+      <button type="button" className="h-5 shrink-0 rounded px-1 text-subtle hover:bg-surface-2" data-testid="reset-offer-hide" onClick={() => addTombstone(hideKey)}>{hide}</button>
     </div>
   );
 }

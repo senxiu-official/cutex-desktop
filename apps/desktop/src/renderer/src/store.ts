@@ -1,11 +1,14 @@
 import { noteOwnerMessage } from "./lib/activityFeed";
 import { BACKGROUND_WORK_METHOD, BackgroundWorkProjection, backgroundWorkChange } from "../../shared/backgroundWork";
-import { usesInputLedger, usesOwnerCarries } from "./lib/deliveryMode";
+import { usesInputLedger, usesOwnerCarries, usesInputDisposal } from "./lib/deliveryMode";
 import { applyInputLedgerNotification, applyInputLedgerSnapshot, bootstrapSnapshot, emptyInputLedgerSession, inputGetSnapshot, inputListSnapshot, inputLedgerReconnected, inputLedgerStreamReset, queueListSnapshot, type InputLedgerSession, type InputLedgerStep, type InputLedgerFetch, type InputLedgerSnapshot } from "./lib/inputLedger/alignment";
-import type { InputRecord } from "@cutex-desktop/protocol";
+import type { InputAction, InputDisposeResult, InputRecord } from "@cutex-desktop/protocol";
 import { OWNER_IDLE_BUSY_TIMELINE_FEATURE } from "@cutex-desktop/protocol";
 import { predictedOwnerSurface, retryRefusal, type LedgerOwnerOutbox } from "./lib/inputLedger/owner";
 import { acknowledgeLedgerOutbox, loadLedgerOutbox, persistLedgerOutbox } from "./lib/inputLedger/outbox";
+import { addTombstone, hasTombstone, listTombstones, LOCAL_SEND_WHAT, pruneTombstones, tombstoneKey } from "./lib/inputLedger/nextUpTombstones";
+import type { InputActionResult } from "./lib/inputLedger/actionResult";
+import { projectNextUp, rowIdentity, shownInNextUp } from "./lib/inputLedger/nextUpRegistry";
 import { migrateLegacyDelivery } from "./lib/inputLedger/migration";
 import { captureDebugError } from "./lib/debugState";
 import type { EventCheckpoint, OwnerAdmission, OwnerJoinDelegation } from "@cutex-desktop/protocol";
@@ -45,7 +48,6 @@ import { agentFeaturesOf, lacks, isAcpAgent } from "./lib/agentFeatures";
 import { applyApprovalChange, approvalChangeOf, approvalOfToolEvent, APPROVALS_FEATURE, APPROVALS_LIVE_FEATURE, noteApprovalState, sortApprovals, withoutApproval } from "./lib/approvals";
 import { approvalHeading } from "./lib/approvalTitle";
 import { parseUnsupported } from "../../shared/unsupported";
-import { inputLabel } from "./lib/inputLedger/labels";
 import { QUEUE_STEER_FEATURE, markShownInRow, queueActionNotice, queueMergeNotice, queueSteerNotice, queueSteerRaw } from "./lib/queueSteer";
 import { beginQueueInsert, clearQueueInsert, dismissQueueInsert, finishQueueInsert, hasQueueInsertRequest, insertFeedbackOf, linkQueueInsertDelivery, markQueueInsertDelivered, noteQueueInsertImageDelivery, queueInsertByToken, reconcileQueueInsert, setQueueInsertChecking, useQueueInsertFeedback } from "./lib/queueInsertFeedback";
 import { withoutDeliveredOwnerItems } from "./lib/legacyDelivery/ownerInputDelivery";
@@ -341,14 +343,22 @@ interface AppState {
   inputs: Record<ViewKey, InputLedgerSession>;
   ledgerOutbox: Record<ViewKey, LedgerOwnerOutbox[]>;
   ledgerOwnerDrafts: Record<ViewKey, Record<string, LedgerOwnerOutbox>>;
-  retryLedgerOutbox(sessionId: string, inputId: string, host?: string): Promise<void>;
-  discardLedgerOutbox(sessionId: string, inputId: string, host?: string): void;
+  /** input-disposal-v1: the owner's disposes the host accepted but has not applied yet (receipt `appliedAt` null), by
+   *  input id. The row shows its buttons grey ("working on it") until the host applies it or the row leaves Next Up. */
+  inputDisposals: Record<ViewKey, Record<string, InputDisposeResult>>;
+  /** The host record's answer when the send already has one (then this is its Resend), else undefined. */
+  retryLedgerOutbox(sessionId: string, inputId: string, host?: string): Promise<InputActionResult | undefined>;
+  /** 「不再显示」 a local pending send: a durable local mark first; false = not stored (the row stays). Never withdraws. */
+  discardLedgerOutbox(sessionId: string, inputId: string, host?: string): boolean;
   refreshInputs(sessionId: string, host?: string): Promise<void>;
-  interruptSendInput(sessionId: string, inputId: string, host?: string): Promise<void>;
-  holdInput(sessionId: string, inputId: string, held: boolean, host?: string): Promise<void>;
-  retryInput(sessionId: string, inputId: string, host?: string): Promise<void>;
-  dismissInput(sessionId: string, inputId: string, host?: string): Promise<void>;
+  // Next Up registry: every guard answers (lib/inputLedger/actionResult), never a silent no-op.
+  interruptSendInput(sessionId: string, inputId: string, host?: string): Promise<InputActionResult>;
+  holdInput(sessionId: string, inputId: string, held: boolean, host?: string): Promise<InputActionResult>;
+  retryInput(sessionId: string, inputId: string, host?: string): Promise<InputActionResult>;
+  dismissInput(sessionId: string, inputId: string, host?: string): Promise<InputActionResult>;
   releaseInputLease(sessionId: string, host?: string): Promise<void>;
+  /** Re-read the owner queue (QueueItems) soon: a Next Up owner row whose item has not loaded asks for it. */
+  hydrateQueue(sessionId: string, host?: string): void;
   outbox: Record<ViewKey, OutboxEntry[]>;
   /** Queue rows hidden while their removal / edit / "立即" is in flight (queue ids per agent). */
   queueHidden: Record<ViewKey, string[]>;
@@ -753,6 +763,7 @@ export function routedElsewhere(hostId: string, sessionId: string): boolean {
   return !!openRouter?.(hostId, sessionId);
 }
 
+
 // Each app window sees its own selection through the hook (lib/windowScope, multi-window P3); getState / setState
 // are the active window's.
 export const useApp = selectionAware(create<AppState>((set, get) => {
@@ -760,10 +771,15 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
   const restoredLedgerOutbox: Record<ViewKey, LedgerOwnerOutbox[]> = {};
   const restoredLedgerDrafts: Record<ViewKey, Record<string, LedgerOwnerOutbox>> = {};
   for (const entry of restoredLedgerEntries) {
+    // 「不再显示」 is durable even if removing the stored send failed.
+    if (hasTombstone(tombstoneKey(entry.hostId, entry.sessionId, entry.inputId, LOCAL_SEND_WHAT))) { acknowledgeLedgerOutbox(entry.hostId, entry.sessionId, entry.inputId); continue; }
     const key = viewKey(entry.hostId, entry.sessionId);
     (restoredLedgerOutbox[key] ??= []).push(entry);
     (restoredLedgerDrafts[key] ??= {})[entry.inputId] = entry;
   }
+  // A 「不再显示」 mark goes once its stored send is gone (never by age).
+  const storedSends = new Set(restoredLedgerEntries.map(entry => tombstoneKey(entry.hostId, entry.sessionId, entry.inputId, LOCAL_SEND_WHAT)));
+  pruneTombstones((hostId, sessionId, inputId, what) => what === LOCAL_SEND_WHAT && !storedSends.has(tombstoneKey(hostId, sessionId, inputId, what)));
   // A → B → A is still a different operation lifetime. Host IDs alone cannot fence it.
   let hostEpoch = 0;
   let pendingChatRun: object | null = null;
@@ -1094,14 +1110,43 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
     const release = pinLedger(id, host);
     const request = apiOn(host).inputList(id, fetch.params).then(result => {
       ledgerReads.delete(key);
-      if (current() && ledgerOn(host)) applyLedger(id, host, applyInputLedgerSnapshot(ledgerSession(id, host), inputListSnapshot(result, fetch.params, fetch.generation)));
+      if (current() && ledgerOn(host)) {
+        const snapshot = inputListSnapshot(result, fetch.params, fetch.generation);
+        applyLedger(id, host, applyInputLedgerSnapshot(ledgerSession(id, host), snapshot));
+        if (snapshot) reclaimFinished(host, id, snapshot);
+      }
     }).finally(() => { if (ledgerReads.get(key) === request) ledgerReads.delete(key); release(); });
     ledgerReads.set(key, request);
     return request;
   };
+  /** The stored marks of these rows now (a later answer may reclaim only marks that existed when it was asked). */
+  const clearMarksOf = (host: string, id: string, rowIds: ReadonlySet<string>) => new Set(listTombstones().filter(mark => {
+    try { const [h, s, rowId] = JSON.parse(mark) as string[]; return h === host && s === id && rowIds.has(rowId!); } catch { return false; }
+  }));
+  const reclaimClearMarks = (host: string, id: string, rowIds: ReadonlySet<string>, only?: ReadonlySet<string>) =>
+    pruneTombstones((h, s, rowId, what) => h === host && s === id && what.startsWith("unknown:") && rowIds.has(rowId) &&
+      (!only || only.has(tombstoneKey(h, s, rowId, what))));
+  /** Whether an answer belongs to what the session holds now (same epoch and generation): a stale answer never
+   *  reclaims a mark. */
+  const answerIsCurrent = (id: string, host: string, epoch: string, generation: number | undefined) => {
+    const session = ledgerSession(id, host);
+    return session.epoch === epoch && (generation === undefined || generation === session.generation);
+  };
+  /** Positive evidence only: records the registry no longer shows in Next Up (a known finished state). A record it
+   *  still renders (unknown included) keeps its mark. Only an answer of the current epoch / generation counts, and
+   *  the record the session holds wins over the answer's (a newer delivery keeps its mark). */
+  const reclaimFinished = (host: string, id: string, snapshot: InputLedgerSnapshot) => {
+    if (!answerIsCurrent(id, host, snapshot.ledgerEpoch, snapshot.generation)) return;
+    const held = ledgerSession(id, host).records;
+    const finished = new Set(snapshot.records.map(record => held.get(record.inputId) ?? record).filter(record => !shownInNextUp(record)).map(record => rowIdentity(record)));
+    if (finished.size) reclaimClearMarks(host, id, finished);
+  };
   const mergeLedgerSnapshot = (id: string, host: string, snapshot: InputLedgerSnapshot | null) => {
     if (snapshot && ledgerOn(host)) {
       applyLedger(id, host, applyInputLedgerSnapshot(ledgerSession(id, host), snapshot));
+      // A 「清除此提示」 mark goes only on positive evidence that its input left Next Up for good (registry
+      // shownInNextUp is false). Absence from a list (a history window, a partial page) never counts.
+      reclaimFinished(host, id, snapshot);
       if (snapshot.coverage.kind === "full" && snapshot.ledgerEpoch === ledgerSession(id, host).epoch &&
           !snapshot.resyncRequired && snapshot.stateRevision >= ledgerSession(id, host).rev)
         ledgerDirty.delete(viewKey(host, id));
@@ -1113,6 +1158,10 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
     const generation = ledgerSession(id, host).generation;
     const held = ledgerSession(id, host).records.get(inputId);
     const key = JSON.stringify([host, id, inputId, generation, held?.rev]);
+    // The marks a "missing" answer may reclaim: only those already there when this read started (a mark made later is
+    // about a newer delivery the answer knows nothing about).
+    const rowIds = new Set([inputId, ...(held ? [rowIdentity(held)] : [])]);
+    const marksBefore = clearMarksOf(host, id, rowIds);
     const pending = ledgerPointReads.get(key);
     if (pending) return pending;
     const release = pinLedger(id, host);
@@ -1120,6 +1169,11 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
       const result = await apiOn(host).inputGet(id, [inputId]);
       if (current()) {
         mergeLedgerSnapshot(id, host, inputGetSnapshot(result, generation));
+        // Positive evidence: the host answered this id is gone — counted only when the answer is current (same epoch
+        // and generation) and the session still holds nothing newer for it than when the read started.
+        if (result.missing.includes(inputId) && marksBefore.size && answerIsCurrent(id, host, result.ledgerEpoch, generation) &&
+            ledgerSession(id, host).records.get(inputId)?.rev === held?.rev)
+          reclaimClearMarks(host, id, rowIds, marksBefore);
         if (result.missing.includes(inputId)) set(state => ({ ledgerOutbox: { ...state.ledgerOutbox,
           [viewKey(host, id)]: (state.ledgerOutbox[viewKey(host, id)] ?? []).map(item => item.inputId === inputId ? { ...item, phase: "unconfirmed", error: "input_not_found" } : item) } }));
       }
@@ -1213,7 +1267,7 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
       // Retain the message in memory even when the browser cannot write storage.
       addDrafts([...(get().ledgerOutbox[key] ?? []), ...oldDrafts.values()]);
       const generation = ledgerSession(id, host).generation;
-      const migrated = await migrateLegacyDelivery(host, id, apiOn(host), target, [...oldDrafts.values()]);
+      const migrated = await migrateLegacyDelivery(host, id, apiOn(host), target, [...oldDrafts.values()], { disposal: disposalOn(host) });
       if (!current() || !ledgerOn(host)) return;
       addDrafts(migrated.recovered);
       set(state => ({ outbox: withoutKey(state.outbox, key), pendingSteers: withoutKey(state.pendingSteers, key) }));
@@ -1864,6 +1918,72 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
   };
 
   /** (Re)build the agent's view on `host` (default: `hostOf`) from its bootstrap and subscribe its feed. */
+  /** An input action's precondition, answered (Next Up registry: no silent no-ops). Re-reads the record when it refuses. */
+  // Synchronous when the action may run (callers start their RPC in the same tick); a refusal re-reads first.
+  /** The host has input-disposal-v1 (`cutex/input/dispose`). */
+  const disposalOn = (host: string) => usesInputDisposal(featuresOn(host));
+  const setDisposal = (id: string, host: string, inputId: string, receipt: InputDisposeResult | null) => set(state => {
+    const key = viewKey(host, id);
+    const list = { ...state.inputDisposals[key] };
+    if (receipt) list[inputId] = receipt; else if (inputId in list) delete list[inputId]; else return {};
+    return { inputDisposals: { ...state.inputDisposals, [key]: list } };
+  });
+  const disposeChecks = new Map<string, ReturnType<typeof setTimeout>>();
+  /**
+   * A receipt is the host's word about exactly this input (one occurrence). Applied: the decision is carried out, so a
+   * 「清除此提示」 mark that existed when the owner asked may go (positive evidence; a mark made later stays). Not applied
+   * yet: the row stays grey and the input is re-read (never re-disposed; only the owner's own click calls dispose again)
+   * with backoff until the row leaves Next Up. Never a silent no-op: a failed call throws to the row (toast and details).
+   */
+  const noteDisposeReceipt = (id: string, host: string, receipt: InputDisposeResult, marksBefore: ReadonlySet<string>) => {
+    if (receipt.appliedAt) {
+      if (marksBefore.size) reclaimClearMarks(host, id, new Set([receipt.inputId]), marksBefore);
+      setDisposal(id, host, receipt.inputId, null);
+      return;
+    }
+    setDisposal(id, host, receipt.inputId, receipt);
+    watchDisposal(id, host, receipt, 0);
+  };
+  /** Re-read a disposed input (1 s, doubling to 30 s) until the row leaves Next Up; then its grey state goes. */
+  const watchDisposal = (id: string, host: string, receipt: InputDisposeResult, attempt: number) => {
+    const checkKey = JSON.stringify([host, id, receipt.inputId]);
+    clearTimeout(disposeChecks.get(checkKey));
+    const current = captureHostAction(host);
+    const left = () => { const record = ledgerSession(id, host).records.get(receipt.inputId); return !record || !shownInNextUp(record); };
+    disposeChecks.set(checkKey, setTimeout(() => {
+      disposeChecks.delete(checkKey);
+      if (!current() || get().inputDisposals[viewKey(host, id)]?.[receipt.inputId] !== receipt) return;
+      if (left()) { setDisposal(id, host, receipt.inputId, null); return; }
+      void getLedgerInput(id, host, receipt.inputId).catch(() => {}).finally(() => {
+        if (!current() || get().inputDisposals[viewKey(host, id)]?.[receipt.inputId] !== receipt) return;
+        if (left()) setDisposal(id, host, receipt.inputId, null); else watchDisposal(id, host, receipt, attempt + 1);
+      });
+    }, Math.min(30_000, 1000 * 2 ** Math.min(attempt, 5))));
+  };
+  /** input-disposal-v1: the owner's id-only, durable dispose (any state, any kind; no revision or offered action). */
+  const disposeInput = async (id: string, host: string, inputId: string): Promise<InputActionResult> => {
+    const current = captureHostAction(host);
+    const marksBefore = clearMarksOf(host, id, new Set([inputId]));
+    const release = pinLedger(id, host);
+    try {
+      const receipt = await apiOn(host).inputDispose(id, inputId);
+      if (receipt?.inputId !== inputId) throw new Error(`dispose receipt does not match (${receipt?.inputId ?? "none"})`);
+      if (current()) noteDisposeReceipt(id, host, receipt, marksBefore);
+    } finally { try { if (current()) await getLedgerInput(id, host, inputId); } finally { release(); } }
+    return { ok: true };
+  };
+  const guardInput = (sessionId: string, host: string, inputId: string, record: InputRecord | undefined, action: InputAction): Promise<InputActionResult> | null => {
+    if (!ledgerOn(host)) return Promise.resolve({ ok: false, reason: "featureOff" });
+    if (record && record.actions?.includes(action)) return null;
+    return refuseInput(sessionId, host, inputId, action);
+  };
+  const refuseInput = async (sessionId: string, host: string, inputId: string, action: InputAction): Promise<InputActionResult> => {
+    await getLedgerInput(sessionId, host, inputId).catch(() => {});
+    const now = ledgerSession(sessionId, host).records.get(inputId);
+    if (!now || now.surface === "none") return { ok: false, reason: "gone" };
+    return now.actions?.includes(action) ? { ok: false, reason: "changed" } : { ok: false, reason: "notOffered" };
+  };
+
   const load = async (sessionId: string, host = hostOf(sessionId)) => {
     const scope = captureHost(host);
     const daemon = apiOn(scope.host);
@@ -2679,6 +2799,7 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
     inputs: {},
     ledgerOutbox: restoredLedgerOutbox,
     ledgerOwnerDrafts: restoredLedgerDrafts,
+    inputDisposals: {},
     async retryLedgerOutbox(sessionId, inputId, hostId) {
       const host = hostId ?? hostOf(sessionId);
       if (!ledgerOn(host)) return;
@@ -2691,11 +2812,14 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
       const retry: LedgerOwnerOutbox = { ...entry, phase: "sending", error: undefined, predictedSurface: predictedOwnerSurface({ strategy: entry.strategy }, ledgerSession(sessionId, host).delivery, featuresOn(host).has(OWNER_IDLE_BUSY_TIMELINE_FEATURE)) };
       set(state => ({ ledgerOutbox: { ...state.ledgerOutbox, [key]: (state.ledgerOutbox[key] ?? []).map(item => item.inputId === inputId ? retry : item) } }));
       await sendLedgerOwner(retry);
+      return undefined;
     },
     discardLedgerOutbox(sessionId, inputId, hostId) {
       const host = hostId ?? hostOf(sessionId), key = viewKey(host, sessionId);
+      if (!addTombstone(tombstoneKey(host, sessionId, inputId, LOCAL_SEND_WHAT))) return false;
       acknowledgeLedgerOutbox(host, sessionId, inputId);
       set(state => ({ ledgerOutbox: { ...state.ledgerOutbox, [key]: (state.ledgerOutbox[key] ?? []).filter(item => item.inputId !== inputId) } }));
+      return true;
     },
     async refreshInputs(sessionId, hostId) {
       const host = hostId ?? hostOf(sessionId);
@@ -2711,20 +2835,22 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
       const host = hostId ?? hostOf(sessionId);
       const session = ledgerSession(sessionId, host);
       const record = session.records.get(inputId);
-      if (!ledgerOn(host) || record?.kind !== "owner" || !record.actions?.includes("interruptSend")) return;
+      const refused = guardInput(sessionId, host, inputId, record, "interruptSend");
+      if (refused) return refused;
+      if (record!.kind !== "owner") return { ok: false, reason: "notOffered" };
       // Held / waiting inputs need not have a carrying turn yet. The expected active turn and
       // generation belong to SessionDelivery, exactly as required by the frozen daemon CAS.
       const expectedTurnId = session.delivery?.turn?.turnId;
       const expectedRuntimeGeneration = session.delivery?.runtimeGeneration;
       if (!expectedTurnId || expectedRuntimeGeneration == null) throw new Error(translate("queue.insert.unknown"));
-      const key = JSON.stringify([host, sessionId, inputId, session.generation, record.rev, expectedTurnId, expectedRuntimeGeneration]);
+      const key = JSON.stringify([host, sessionId, inputId, session.generation, record!.rev, expectedTurnId, expectedRuntimeGeneration]);
       const pending = ledgerInterrupts.get(key);
-      if (pending) return pending;
+      if (pending) { await pending; return { ok: true }; }
       const current = captureHostAction(host);
       const release = pinLedger(sessionId, host);
       const run = (async () => {
         try {
-          await apiOn(host).inputInterruptSend(sessionId, { inputId, expectedRev: record.rev, expectedTurnId, expectedRuntimeGeneration });
+          await apiOn(host).inputInterruptSend(sessionId, { inputId, expectedRev: record!.rev, expectedTurnId, expectedRuntimeGeneration });
         } catch (error) {
           // A lost response never permits another interrupt or a copied/new input.
           if (current()) await getLedgerInput(sessionId, host, inputId).catch(() => {});
@@ -2734,47 +2860,60 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
       })().finally(() => { if (ledgerInterrupts.get(key) === run) ledgerInterrupts.delete(key); release(); });
       ledgerInterrupts.set(key, run);
       await run;
+      return { ok: true };
     },
     async holdInput(sessionId, inputId, held, hostId) {
       const host = hostId ?? hostOf(sessionId);
       const session = ledgerSession(sessionId, host);
       const current = captureHostAction(host);
       const record = session.records.get(inputId);
-      if (!usesOwnerCarries([...featuresOn(host)]) || !record || record.surface !== "nextUp"
-        || record.kind === "owner" || record.kind === "delegationRequest"
-        || !record.actions?.includes(held ? "hold" : "releaseHold")) return;
+      if (!usesOwnerCarries([...featuresOn(host)])) return { ok: false, reason: "featureOff" };
+      const refused = guardInput(sessionId, host, inputId, record, held ? "hold" : "releaseHold");
+      if (refused) return refused;
+      if (record!.surface !== "nextUp" || record!.kind === "owner" || record!.kind === "delegationRequest") return { ok: false, reason: "notOffered" };
       const release = pinLedger(sessionId, host);
       try {
-        const result = await apiOn(host).inputHold(sessionId, { inputId, expectedRev: record.rev, held });
+        const result = await apiOn(host).inputHold(sessionId, { inputId, expectedRev: record!.rev, held });
         if (current() && ledgerSession(sessionId, host).generation === session.generation) mergeLedgerSnapshot(sessionId, host, {
           ledgerEpoch: result.ledgerEpoch, stateRevision: result.stateRevision, records: [result.record],
           coverage: { kind: "partial" }, generation: session.generation,
         });
       } finally { try { if (current()) await getLedgerInput(sessionId, host, inputId); } finally { release(); } }
+      return { ok: true };
     },
     async retryInput(sessionId, inputId, hostId) {
       const host = hostId ?? hostOf(sessionId);
       const record = ledgerSession(sessionId, host).records.get(inputId);
-      if (!ledgerOn(host) || !record?.actions?.includes("retry")) return;
+      const refusedGuard = guardInput(sessionId, host, inputId, record, "retry");
+      if (refusedGuard) return refusedGuard;
       const release = pinLedger(sessionId, host);
       let result: unknown;
-      try { result = await apiOn(host).inputRetry(sessionId, inputId, record.rev); }
+      try { result = await apiOn(host).inputRetry(sessionId, inputId, record!.rev); }
       finally { try { await getLedgerInput(sessionId, host, inputId); } finally { release(); } }
       // The call succeeds while the resend itself was refused: the owner must hear it.
       const refused = retryRefusal(result);
-      if (refused) get().notify(refused.onlyDismiss ? translate("inputLedger.retryNothingSentOnlyDismiss") : refused.offline ? translate("inputLedger.retryNothingSentOffline") : refused.nothingSent ? translate("inputLedger.retryNothingSent") : translate("inputLedger.retryFailed", { code: refused.code }), "error", { hostId: host, sessionId });
+      if (refused) get().notify(refused.onlyDismiss ? translate("inputLedger.retryNothingSentOnlyDismiss") : refused.offline ? translate("inputLedger.retryNothingSentOffline") : refused.nothingSent ? translate("inputLedger.retryNothingSent") : translate("inputLedger.retryFailed"), "error", { hostId: host, sessionId });
+      if (refused && !refused.onlyDismiss && !refused.offline && !refused.nothingSent) bridge.shell?.logError({ kind: "reported", message: `input retry refused (${inputId}): ${refused.code}` });
+      return refused ? { ok: false, reason: "refused" } : { ok: true };
     },
     async dismissInput(sessionId, inputId, hostId) {
       const host = hostId ?? hostOf(sessionId);
+      if (ledgerOn(host) && disposalOn(host)) return disposeInput(sessionId, host, inputId);
       const record = ledgerSession(sessionId, host).records.get(inputId);
-      if (!ledgerOn(host) || !record?.actions?.includes("dismiss")) return;
+      const refused = guardInput(sessionId, host, inputId, record, "dismiss");
+      if (refused) return refused;
       const release = pinLedger(sessionId, host);
       try {
-        const result = await apiOn(host).inputDismiss(sessionId, inputId, record.rev);
+        const result = await apiOn(host).inputDismiss(sessionId, inputId, record!.rev);
         const failed = result.failed?.find(item => item.inputId === inputId);
         if (failed) throw new Error(`${failed.code}: ${failed.message}`);
       }
       finally { try { await getLedgerInput(sessionId, host, inputId); } finally { release(); } }
+      return { ok: true };
+    },
+    hydrateQueue(sessionId, hostId) {
+      const host = hostId ?? hostOf(sessionId);
+      if (ledgerOn(host)) refreshQueue(sessionId, host);
     },
     async releaseInputLease(sessionId, hostId) {
       const host = hostId ?? hostOf(sessionId);
@@ -3842,8 +3981,8 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
           // The composer stays quiet about an unknown outcome only when its 接下来 row now says so itself
           // (不确定是否送达 · 重新发送 / 放弃); an unreadable record leaves the row as it was → the notice speaks.
           const held = read && current() ? ledgerSession(id, host).records.get(item.clientUserMessageId) : undefined;
-          const label = held ? inputLabel(held) : null;
-          if (label?.kind === "label" && label.id === "uncertain") markShownInRow(error);
+          const shown = held ? projectNextUp(held) : null;
+          if (shown?.kind === "state" && shown.state === "unconfirmed") markShownInRow(error);
           throw error;
         } finally { refreshQueue(id, host); release(); }
         return;

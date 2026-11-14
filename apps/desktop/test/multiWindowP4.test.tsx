@@ -52,7 +52,7 @@ function mainSide(options: { confirm?: PageChannelDeps["confirm"]; open?: Set<nu
     documents,
     placeOpen: (owner, place) => owner === MAIN && open.has(place),
     contentReader: () => ({ artifactStoreContent: async () => content }),
-    fileReader: () => ({ fsFile: async () => ({ content: "<p>file</p>", encoding: "utf8", size: 11, truncated: false }) as never, hostFile: async () => ({ content: "<p>file</p>", encoding: "utf8", size: 11, truncated: false }) as never }),
+    fileReader: () => ({ fileWindow: async () => ({ content: "<p>file</p>", encoding: "utf8", size: 11, truncated: false, offset: 0 }) as never }),
     ensureContained: async () => {},
     page: { storage: createPageStorage({ root: mkdtempSync(join(tmpdir(), "mw-p4-")) }), host: () => ({ artifactStoreGet: async () => detail, submit }), confirm, writeClipboard: vi.fn(), locale: () => "en" },
   });

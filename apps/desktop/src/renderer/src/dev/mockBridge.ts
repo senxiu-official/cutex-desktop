@@ -1299,13 +1299,13 @@ const mockInbox = new Map<string, MockInboxMessage[]>(
         ],
       ],
 );
-/** A system alarm fired while Eva is busy: no agent sender; cutex reads it only after her turn. */
+/** A system alarm fired while Eva is busy: no agent sender; it waits like other busy-wake messages (afterWork, timed). */
 const mockAlarmSnapshot = (id: string) =>
   LEGACY || id !== "eva"
     ? []
     : [{
         messageId: "alarm-mock-eva", fromCutexSessionId: null, toCutexSessionId: "eva", deliveryMode: "after_turn", content: "提醒：检查夜间构建结果。", state: "pending",
-        sender: { id: "Cutex Alarm", name: null, runtime: null }, senderKind: "alarm_service", afterTurnOnly: true, queuedAt: new Date(Date.now() - 20_000).toISOString(),
+        sender: { id: "Cutex Alarm", name: null, runtime: null }, senderKind: "alarm_service", queuedAt: new Date(Date.now() - 20_000).toISOString(),
         externalInput: { message: { id: "alarm-mock-eva", source: { kind: "service", id: "Cutex Alarm" }, type: "alarm", delivery: "after_turn" } },
       }];
 const inboxSnapshot = (id: string) => [

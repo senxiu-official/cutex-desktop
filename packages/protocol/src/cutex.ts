@@ -1091,6 +1091,8 @@ export const INPUT_LIST = "cutex/input/list";
 export const INPUT_RETRY = "cutex/input/retry";
 /** Schema only (C5): not served until cutex advertises `input-ledger-v1`. */
 export const INPUT_DISMISS = "cutex/input/dismiss";
+/** input-disposal-v1: the owner's id-only, durable decision to stop one input (any state, any kind). */
+export const INPUT_DISPOSE = "cutex/input/dispose";
 export const INPUT_HOLD = "cutex/input/hold";
 export const INPUT_INTERRUPT_SEND = "cutex/input/interruptSend";
 /** Schema only (C4): not served until cutex advertises `input-ledger-v1`. */
@@ -1113,7 +1115,7 @@ export const INPUT_WAITING_REASONS = ["explicitQueue", "afterTurn", "nextStep", 
 export const INPUT_UNCERTAIN_REASONS = ["turnInterrupted", "turnFailed", "runtimeLost", "receiptTimeout", "outcomeUnknown", "leaseReleased", "nativeConflict"] as const;
 export const INPUT_FAILED_REASONS = ["admission_timeout", "notDelivered", "runtimeRefused", "routeLost", "interrupt_timeout", "session_offline", "tooLarge"] as const;
 export const INPUT_REJECTED_REASONS = ["targetUnavailable", "quarantined", "provenance", "invalid", "askRejected", "peerRefused", "owner_required"] as const;
-export const INPUT_DISCARDED_REASONS = ["ownerRemoved", "ownerDiscarded", "settlementClosed", "askCancelled", "senderRevoked", "archived"] as const;
+export const INPUT_DISCARDED_REASONS = ["ownerRemoved", "ownerDiscarded", "settlementClosed", "askCancelled", "senderRevoked", "archived", "superseded", "historyReverted"] as const;
 export const INPUT_SUPERSEDED_REASONS = ["mergedInsert", "revised"] as const;
 /** `stalled.reason` (input-states.json `stalledReason`; the methods schema types it as a plain string). */
 export const INPUT_STALLED_REASONS = ["runtimeDisconnected", "noProgress", "leaseHeld", "hostBusy", "agentOffline"] as const;
@@ -1416,6 +1418,20 @@ export interface InputDismissResult {
   stateRevision: number;
   records: InputRecord[];
   failed: { inputId: string; code: "input_not_found" | "revision_conflict" | "input_not_dismissible" | "dismiss_failed" | "event_persistence_unavailable"; message: string; currentRev: number | null }[];
+}
+/** `cutex/input/dispose` params: exactly the input id (no revision, kind or state). */
+export interface InputDisposeParams { inputId: string }
+/**
+ * `cutex/input/dispose` receipt. Durable and self-idempotent: calling again returns the same decision. `appliedAt` null =
+ * the host accepted the decision but has not applied it yet (busy lane, source cleanup); it applies it by itself.
+ */
+export interface InputDisposeResult {
+  inputId: string;
+  cutexSessionId: string;
+  dispositionId: string;
+  requestedAt: string;
+  appliedAt: string | null;
+  effect: string;
 }
 /** Atomic queue CAS; revision is the queue revision, never the ledger head. */
 export interface UserInputQueueMergeParams {

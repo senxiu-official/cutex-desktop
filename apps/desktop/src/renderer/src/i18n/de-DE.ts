@@ -7431,7 +7431,7 @@ export const deDE: Partial<Record<keyof typeof zhCN, string>> = {
   "inputLedger.retryNothingSent": "Nichts wurde gesendet: Das vorherige Senden hat noch kein Ergebnis. Später erneut versuchen oder verwerfen",
   "inputLedger.retryNothingSentOffline": "Nichts wurde gesendet: {{Agent}} ist gerade offline. Versuche es erneut, sobald er online ist, oder verwirf es",
   "inputLedger.retryNothingSentOnlyDismiss": "Nichts wurde gesendet: Das Ergebnis des vorherigen Sendens lässt sich nicht klären, auch ein neuer Versuch hilft nicht. Du kannst es nur verwerfen",
-  "inputLedger.retryFailed": "Erneutes Senden nicht abgeschlossen: {code}",
+  "inputLedger.retryFailed": "Erneutes Senden nicht abgeschlossen",
   "inputLedger.retry": "Erneut senden",
   "inputLedger.stranded.interrupted": "Nach dem Senden unterbrochen; nicht im Verlauf",
   "inputLedger.stranded.failed": "Der Durchgang ist fehlgeschlagen; nicht im Verlauf",

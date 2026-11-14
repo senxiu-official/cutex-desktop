@@ -7432,7 +7432,7 @@ export const ruRU: Partial<Record<keyof typeof zhCN, string>> = {
   "inputLedger.retryNothingSent": "Ничего не отправлено: у предыдущей отправки ещё нет результата. Повторите позже или отмените",
   "inputLedger.retryNothingSentOffline": "Ничего не отправлено: {{agent}} сейчас не в сети. Повторите, когда он появится в сети, или отмените",
   "inputLedger.retryNothingSentOnlyDismiss": "Ничего не отправлено: предыдущую отправку нельзя проверить, повтор не поможет. Можно только отменить",
-  "inputLedger.retryFailed": "Повторная отправка не завершена: {code}",
+  "inputLedger.retryFailed": "Повторная отправка не завершена",
   "inputLedger.retry": "Отправить снова",
   "inputLedger.stranded.interrupted": "Прервано после отправки; нет в истории",
   "inputLedger.stranded.failed": "Ход завершился ошибкой; нет в истории",

@@ -87,11 +87,18 @@ export function ownerRecordFor(records: ReadonlyMap<string, InputRecord> | undef
   return undefined;
 }
 
+const WAIT_FOR_HISTORY: ReadonlySet<InputRecord["state"]> = new Set(["inContext", "discarded", "superseded"]);
+
 export interface TimelineHistoryWindow {
   /** Incremental loaded-turn membership supplied by native Timeline views. */
   hasTurn?: (turnId: string) => boolean;
   hasOlder: boolean;
   turns: readonly Pick<TurnView, "id" | "startedAt">[];
+  /** The history is still being read (opening an agent): records done with no action left (read in, discarded,
+   *  superseded) wait for it, else each shows as a placeholder until its native item lands (owner 2026-11-13: a
+   *  screen of them). In-flight and action-needing ones (uncertain / failed / rejected) still show: the history read
+   *  has no timeout, so hiding those could hide their retry / dismiss for as long as it hangs. */
+  loading?: boolean;
 }
 
 /** Join by ids only; text, native turn activity and elapsed time never prove delivery.
@@ -112,6 +119,7 @@ export function missingTimelineRecords(records: ReadonlyMap<string, InputRecord>
   const loadedTurns = oldestStart != null && !history?.hasTurn ? new Set(history!.turns.map(turn => turn.id)) : null;
   const hasTurn = history?.hasTurn ?? (loadedTurns ? (id: string) => loadedTurns.has(id) : null);
   return [...index.byInputId.values()].filter(record => !joined.has(record.inputId))
+    .filter(record => !(history?.loading && WAIT_FOR_HISTORY.has(record.state)))
     .filter(record => !(hasTurn && oldestStart != null && Number.isFinite(oldestStart)
       && record.state === "inContext" && record.timelineItemId && record.turnId
       && !hasTurn(record.turnId) && Date.parse(record.since) < (oldestStart! + 1) * 1000))

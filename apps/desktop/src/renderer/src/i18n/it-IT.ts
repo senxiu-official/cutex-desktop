@@ -7431,7 +7431,7 @@ export const itIT: Partial<Record<keyof typeof zhCN, string>> = {
   "inputLedger.retryNothingSent": "Non è stato inviato nulla: l’invio precedente non ha ancora un esito. Riprova più tardi o ignoralo",
   "inputLedger.retryNothingSentOffline": "Non è stato inviato nulla: {{agent}} offline. Riprova quando torna online o ignoralo",
   "inputLedger.retryNothingSentOnlyDismiss": "Non è stato inviato nulla: l’invio precedente non si può verificare, riprovare non serve. Puoi solo ignorarlo",
-  "inputLedger.retryFailed": "Il reinvio non è stato completato: {code}",
+  "inputLedger.retryFailed": "Il reinvio non è stato completato",
   "inputLedger.retry": "Reinvia",
   "inputLedger.stranded.interrupted": "Interrotto dopo l’invio; non è nella cronologia",
   "inputLedger.stranded.failed": "Il turno non è riuscito; non è nella cronologia",

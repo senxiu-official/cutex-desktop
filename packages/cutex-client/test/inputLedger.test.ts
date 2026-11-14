@@ -67,10 +67,13 @@ describe("input ledger methods (input-ledger-v1)", () => {
     const lease: InputLease = { holder: "event", turnId: null, since: "2026-11-01T00:00:00Z", runtimeGeneration: 7, inputIds: ["dlv-1"], reconcile: { state: "stale" } };
     await client.inputRetry("s", "cm-1", 4);
     await client.inputDismiss("s", "msg-1", 2);
+    await client.inputDispose("s", "ask-1::input-1");
     await client.inputLeaseRelease("s", lease);
     expect(calls.map(call => bodyOf(call))).toEqual([
       expect.objectContaining({ method: "cutex/input/retry", params: { inputId: "cm-1", expectedRev: 4 } }),
       expect.objectContaining({ method: "cutex/input/dismiss", params: { inputId: "msg-1", expectedRev: 2 } }),
+      // input-disposal-v1: params are exactly the input id.
+      expect.objectContaining({ method: "cutex/input/dispose", params: { inputId: "ask-1::input-1" } }),
       expect.objectContaining({ method: "cutex/input/lease/release", params: { expectedLease: lease } }),
     ]);
   });

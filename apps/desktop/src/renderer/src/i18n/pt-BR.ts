@@ -7431,7 +7431,7 @@ export const ptBR: Partial<Record<keyof typeof zhCN, string>> = {
   "inputLedger.retryNothingSent": "Nada foi enviado: o envio anterior ainda não tem resultado. Tente mais tarde ou descarte",
   "inputLedger.retryNothingSentOffline": "Nada foi enviado: o {{agent}} está off-line. Tente novamente quando ele estiver on-line ou descarte",
   "inputLedger.retryNothingSentOnlyDismiss": "Nada foi enviado: não é possível verificar o envio anterior, então tentar de novo não adianta. Você só pode descartar",
-  "inputLedger.retryFailed": "O reenvio não foi concluído: {code}",
+  "inputLedger.retryFailed": "O reenvio não foi concluído",
   "inputLedger.retry": "Reenviar",
   "inputLedger.stranded.interrupted": "Interrompida após o envio; não está no histórico",
   "inputLedger.stranded.failed": "O turno falhou; não está no histórico",

@@ -2275,6 +2275,8 @@ export interface DaemonApi extends StorageCleanupApi {
   inputHold(sessionId: string, params: import("@cutex-desktop/protocol").InputHoldParams): Promise<import("@cutex-desktop/protocol").InputHoldResult>;
   inputRetry(sessionId: string, inputId: string, expectedRev: number): Promise<unknown>;
   inputDismiss(sessionId: string, inputId: string, expectedRev: number): Promise<import("@cutex-desktop/protocol").InputDismissResult>;
+  /** input-disposal-v1 (`cutex/input/dispose`): id-only durable owner decision; returns its receipt. */
+  inputDispose(sessionId: string, inputId: string): Promise<import("@cutex-desktop/protocol").InputDisposeResult>;
   queueMerge(sessionId: string, params: import("@cutex-desktop/protocol").UserInputQueueMergeParams): Promise<import("@cutex-desktop/protocol").UserInputQueueMergeResult>;
   inputLeaseRelease(sessionId: string, expectedLease: import("@cutex-desktop/protocol").InputLease): Promise<unknown>;
   queueList(sessionId: string): Promise<QueueListResult>;

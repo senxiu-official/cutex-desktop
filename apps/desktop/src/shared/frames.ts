@@ -27,17 +27,31 @@ export interface FilePageInput {
   hostId: string;
   path: string;
   scope?: WorkspaceScope;
-  /** The owner chose to show a file over FILE_PAGE_PROMPT_BYTES. */
+  /** The owner chose to show a file over FILE_PAGE_PROMPT_BYTES (main reads it in windows, up to FILE_PAGE_MAX_BYTES). */
   large?: boolean;
 }
 /** Above this a file is shown as a page only after the owner asks for it. */
 export const FILE_PAGE_PROMPT_BYTES = 5 * 1024 * 1024;
-/** cutex reads at most this much of a file in one request (fs/file maxBytes limit): larger files stay source only. */
-export const FILE_PAGE_MAX_BYTES = 10 * 1024 * 1024;
+/** cutex reads at most this much of a file in one request (fs/file maxBytes limit): one window. */
+export const FILE_PAGE_WINDOW_BYTES = 10 * 1024 * 1024;
+/**
+ * The largest HTML file shown as a page, the same hard bound as an artifact page: main reads it in windows
+ * (cutex fs-file-window: fs/file `offset`). A host without windowed reads shows at most one window
+ * (FILE_PAGE_WINDOW_BYTES); larger files stay source only.
+ */
+export const FILE_PAGE_MAX_BYTES = ARTIFACT_PAGE_MAX_BYTES;
 export type FilePageRefusal = "not-found" | "host-offline" | "not-text" | "too-large";
 export type FilePageResult =
   | { ok: true; frame: FrameResource; /** references to files next to it / the network that the page cannot load (inline-only) */ externalRefs: number }
-  | { ok: false; reason: FilePageRefusal; totalBytes?: number; /** Metadata of the same read, for a revision-specific size decision. */ modifiedAt?: string };
+  | {
+      ok: false;
+      reason: FilePageRefusal;
+      totalBytes?: number;
+      /** Metadata of the same read, for a revision-specific size decision. */
+      modifiedAt?: string;
+      /** too-large: the largest page this host's file can be shown as (FILE_PAGE_MAX_BYTES, or one window on an older cutex). */
+      maxBytes?: number;
+    };
 export interface FrameResource {
   id: string;
   url: string;

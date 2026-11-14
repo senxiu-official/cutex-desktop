@@ -66,6 +66,12 @@ const received = (id: string, turnId: string, m: ExternalMessage): TimelineEntry
 const agentText = (id: string, turnId: string): TimelineEntry => ({ kind: "agent", id, turnId, text: "done", streaming: false });
 
 describe("delegationStatus", () => {
+  it("an unknown outcome the backend closed as stopped reads stopped; still open it stays unconfirmed", () => {
+    const unknown = { execution: "interrupted" as const, attempt: { n: 1, interruptReason: "outcomeUnknown" as const } };
+    expect(delegationStatus(ask({ ...unknown, closed: "stopped" }))).toMatchObject({ key: "stopped", tone: "neutral", glyph: "ring" });
+    expect(delegationStatus(ask(unknown))).toMatchObject({ key: "outcomeUnknown", tone: "warn", glyph: "hollow" });
+    expect(delegationStatus(ask({ execution: "interrupted", closed: "stopped", attempt: { n: 1, interruptReason: "ownerStopped" } }))).toMatchObject({ key: "stopped" });
+  });
   it("admitted work waits calmly without promising that a runtime is starting", () => {
     expect(delegationStatus(ask({ execution: "admitted" }))).toMatchObject({ key: "starting", tone: "muted", glyph: "hollow" });
     expect(zhCN["delegation.status.starting"]).toBe("等待处理");

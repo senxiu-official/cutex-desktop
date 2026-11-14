@@ -1,5 +1,5 @@
 // Final R4 captured replay. Historical C2 files require explicit trace selection.
-import type { InputRecord, InputLease, InputListParams, InputListResult, SessionDelivery, SubmitStrategy, QueueItem, UserInputQueueMergeParams, InputInterruptSendParams, InputInterruptSendResult } from "@cutex-desktop/protocol";
+import type { InputDisposeResult, InputRecord, InputLease, InputListParams, InputListResult, SessionDelivery, SubmitStrategy, QueueItem, UserInputQueueMergeParams, InputInterruptSendParams, InputInterruptSendResult } from "@cutex-desktop/protocol";
 import { capturedOperations, parseCapturedTrace, replayCapturedTrace } from "../lib/inputLedger/capturedTraces";
 import { emptyInputLedgerSession } from "../lib/inputLedger/alignment";
 import { mergeQueueInputs } from "../../../shared/queueMerge";
@@ -53,6 +53,8 @@ interface Session { epoch: string; revision: number; queueRevision: number; reco
 export function createMockInputLedger(scene: LedgerScene = "turn", emit: Emit = () => {}, clock = Date.now, capture?: { trace?: string; line?: number; sourceSessionId?: string }) {
   const sessions = new Map<string, Session>();
   const provenance = new Map<string, unknown>();
+  /** input-disposal-v1 (SYNTHETIC): durable receipts by session + input id. */
+  const dispositions = new Map<string, InputDisposeResult>();
   const iso = () => new Date(clock()).toISOString();
   const baseDelivery = (state: SessionDelivery["state"], revision: number): SessionDelivery => ({ state, reason: null, turn: null, lease: null, runtimeConnected: state !== "offline" && state !== "starting", runtimeGeneration: 1, heldCount: 0, heldUntil: null, stateRevision: revision, observedAt: iso() });
   function syntheticDelivery() {
@@ -174,6 +176,27 @@ export function createMockInputLedger(scene: LedgerScene = "turn", emit: Emit = 
       if (!r.actions?.includes("dismiss")) throw new Error("input_dismiss_refused");
       const record = put(id, inputId, { state: "discarded", reason: "ownerDiscarded", surface: "none", deadline: null, actions: [], since: iso() });
       return { ledgerEpoch: get(id).epoch, stateRevision: get(id).revision, records: [record], failed: [] };
+    },
+    /**
+     * input-disposal-v1 (SYNTHETIC, ?inputDisposal): id-only, any state / kind, idempotent. The first call is accepted but
+     * not applied (appliedAt null, as when the host is busy); the record becomes discarded ~3 s later and a repeated call
+     * then returns the same receipt with appliedAt. A finished or unknown id is applied at once.
+     */
+    async inputDispose(id: string, inputId: string): Promise<InputDisposeResult> {
+      const key = JSON.stringify([id, inputId]);
+      const known = dispositions.get(key);
+      if (known) return structuredClone(known);
+      const record = get(id).records.get(inputId);
+      const finished = !record || ["inContext", "discarded", "rejected", "superseded"].includes(record.state);
+      const receipt: InputDisposeResult = { inputId, cutexSessionId: id, dispositionId: `mock-disposition-${dispositions.size + 1}`, requestedAt: iso(), appliedAt: finished ? iso() : null,
+        effect: "Stop waiting and prevent further delivery or resend; content already in flight may still be read." };
+      dispositions.set(key, receipt);
+      if (!finished) setTimeout(() => {
+        put(id, inputId, { state: "discarded", reason: "ownerDiscarded", surface: "none", deadline: null, actions: [], stalled: null, stage: null, order: null, since: receipt.requestedAt,
+          details: { ...get(id).records.get(inputId)?.details, ownerDisposition: { dispositionId: receipt.dispositionId, requestedAt: receipt.requestedAt, effect: receipt.effect } } });
+        receipt.appliedAt = iso();
+      }, 3000);
+      return structuredClone(receipt);
     },
     async inputRetry(id: string, inputId: string, rev: number) {
       const r = cas(id, inputId, rev);

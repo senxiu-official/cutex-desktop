@@ -1,5 +1,7 @@
 import type { SessionDelivery } from "@cutex-desktop/protocol";
 import { DeliveryStatus } from "./DeliveryStatus";
+import { LocalSendStatus } from "./LocalSendStatus";
+import { NEXT_UP_EFFECTS, NEXT_UP_STATES, langOf, stateLabelKey } from "../lib/inputLedger/nextUpRegistry";
 import type { LedgerOwnerOutbox } from "../lib/inputLedger/owner";
 import type { MessageKey } from "../i18n";
 // The status line under an optimistic new-turn send (lib/outbox, placement "turn"). The bubble itself
@@ -36,7 +38,8 @@ function useSilentSeconds(sessionId: string, active: boolean): number | null {
 const OVER = "absolute inset-y-0 right-0 flex max-w-full items-center whitespace-nowrap";
 
 export function PendingStatus({ sessionId, entry }: { sessionId: string; entry: OutboxEntry }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
+  const lang = langOf(locale);
   const failed = entry.state === "failed";
   // Accepted, its entry not there yet, and the agent silent: say so instead of a bare 已送达.
   const silent = useSilentSeconds(sessionId, entry.state === "confirmed");
@@ -44,18 +47,19 @@ export function PendingStatus({ sessionId, entry }: { sessionId: string; entry: 
     const app = useApp.getState();
     return (
       <div className={`${OVER} gap-1.5 text-xs`} data-testid="outbox-status">
-        <span className="min-w-0 truncate text-danger" title={entry.error}>
-          {t("outbox.failed")}
+        {/* Old hosts too: the words and buttons of registry state 13 (发送失败 · 重新发送 / 放回输入框 / 放弃). */}
+        <span className="min-w-0 truncate text-danger" title={entry.error ?? NEXT_UP_STATES.failed.meaning[lang]} data-next-up-state="failed">
+          {t(stateLabelKey("failed") as MessageKey)}
           {entry.error ? ` · ${entry.error}` : ""}
         </span>
-        <button onClick={() => app.retrySend(sessionId, entry.id)} title={t("outbox.retryHint")} className="shrink-0 rounded-md bg-surface-2 px-2 py-0.5 hover:text-accent">
-          {t("outbox.retry")}
+        <button onClick={() => app.retrySend(sessionId, entry.id)} title={NEXT_UP_EFFECTS.retry.tip[lang]} data-effect="retry" className="shrink-0 rounded-md bg-surface-2 px-2 py-0.5 hover:text-accent">
+          {NEXT_UP_EFFECTS.retry.label[lang]}
         </button>
-        <button onClick={() => app.editSend(sessionId, entry.id)} className="shrink-0 rounded-md px-1.5 py-0.5 text-muted hover:text-foreground">
-          {t("outbox.edit")}
+        <button onClick={() => app.editSend(sessionId, entry.id)} title={NEXT_UP_EFFECTS.moveToComposer.tip[lang]} data-effect="moveToComposer" className="shrink-0 rounded-md px-1.5 py-0.5 text-muted hover:text-foreground">
+          {NEXT_UP_EFFECTS.moveToComposer.label[lang]}
         </button>
-        <button onClick={() => app.discardSend(sessionId, entry.id)} className="shrink-0 rounded-md px-1.5 py-0.5 text-muted hover:text-danger">
-          {t("outbox.discard")}
+        <button onClick={() => app.discardSend(sessionId, entry.id)} title={NEXT_UP_EFFECTS.dismiss.tip[lang]} data-effect="dismiss" className="shrink-0 rounded-md px-1.5 py-0.5 text-muted hover:text-danger">
+          {NEXT_UP_EFFECTS.dismiss.label[lang]}
         </button>
       </div>
     );
@@ -73,12 +77,8 @@ export function SessionDeliveryStatus({ delivery, sessionId, hostId }: { deliver
 }
 
 export function LedgerPendingStatus({ entry, sessionId, hostId, readOnly = false }: { entry: LedgerOwnerOutbox; sessionId: string; hostId: string; readOnly?: boolean }) {
-  const { t } = useI18n();
-  return <span className={`${OVER} gap-2 text-caption text-subtle`} data-testid="ledger-outbox-status" title={entry.error}>
-    <span>{t((entry.phase === "sending" ? "inputLedger.record.sending" : entry.error === "input_not_found" ? "outbox.failed" : "inputLedger.unconfirmed") as MessageKey)}</span>
-    {!readOnly && entry.phase === "unconfirmed" && <>
-      <button onClick={() => void useApp.getState().retryLedgerOutbox(sessionId, entry.inputId, hostId).catch(error => useApp.getState().notify(String(error), "error"))}>{t("inputLedger.retry" as MessageKey)}</button>
-      <button onClick={() => useApp.getState().discardLedgerOutbox(sessionId, entry.inputId, hostId)}>{t("inputLedger.dismiss" as MessageKey)}</button>
-    </>}
+  // Words and buttons: the Next Up registry (components/LocalSendStatus), the same as the Next Up O0 row.
+  return <span className={`${OVER} gap-2 text-caption text-subtle`} data-testid="ledger-outbox-status">
+    <LocalSendStatus entry={entry} sessionId={sessionId} hostId={hostId} readOnly={readOnly} />
   </span>;
 }

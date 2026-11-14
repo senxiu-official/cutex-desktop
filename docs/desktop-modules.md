@@ -405,3 +405,7 @@ On capable hosts, cutex can supervise a portless worker process as a background 
 It has no browser page or port. The desktop shows its status, logs and controls through
 the daemon. See [Portless services](design/portless-services-v1.md). Installing module
 background programs is a later phase and is not provided by this desktop release.
+
+## Large HTML file documents
+
+HTML files larger than a single 10 MiB read use bounded host file windows (`fs-file-window`, `offset` and `revision`), with a 256 MiB limit. The offline document store streams UTF-8 byte chunks without joining or re-encoding them. File documents retain the existing opaque origin, network-blocking CSP and absence of page channels.

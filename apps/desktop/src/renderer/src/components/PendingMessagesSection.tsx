@@ -161,18 +161,12 @@ export function LedgerPendingMessagesSection({ records, sessionId, hostId }: { r
   const { t } = useI18n();
   const byId = useAgentMessages(s => s.byId);
   const delivery = useApp(s => agentState(s.inputs, hostId, sessionId)?.delivery);
-  const [waking, setWaking] = useState(false);
+  // 「现在读取」 is each note's registry button (state passiveNote), not a section control.
+  void delivery;
   if (!records.length) return null;
-  const wake = async () => {
-    setWaking(true);
-    try { await useApp.getState().sessionAction(sessionId, MESSAGES_WAKE_METHOD, {}, hostId); }
-    catch (error) { useApp.getState().notify(String(error), "error", { hostId, sessionId }); }
-    finally { setWaking(false); }
-  };
   return <div data-testid="pending-messages" data-queue-section="">
     <div className="flex h-6 items-center gap-2 px-2 text-caption text-subtle">
       <span className="flex-1">{t("agentMsg.pending.title", { n: records.length })}</span>
-      {delivery?.state === "idle" && !deliveryBusy(delivery) && <button type="button" className="h-5 rounded px-1 hover:bg-surface-2" disabled={waking} onClick={() => void wake()}>{t("agentMsg.wake")}</button>}
     </div>
     {records.map(record => <LedgerAdmissionRow key={record.inputId} record={record} sessionId={sessionId} hostId={hostId} body={byId[record.inputId]?.body} />)}
   </div>;

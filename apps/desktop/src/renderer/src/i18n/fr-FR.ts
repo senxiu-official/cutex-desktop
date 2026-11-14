@@ -7430,7 +7430,7 @@ export const frFR: Partial<Record<keyof typeof zhCN, string>> = {
   "inputLedger.retryNothingSent": "Rien n’a été envoyé : l’envoi précédent n’a pas encore de résultat. Réessayez plus tard ou ignorez-le",
   "inputLedger.retryNothingSentOffline": "Rien n’a été envoyé : le {{agent}} est hors ligne. Réessayez quand il sera en ligne ou ignorez-le",
   "inputLedger.retryNothingSentOnlyDismiss": "Rien n’a été envoyé : l’envoi précédent ne peut pas être vérifié, réessayer ne servira à rien. Vous pouvez seulement l’ignorer",
-  "inputLedger.retryFailed": "Le nouvel envoi n’a pas abouti : {code}",
+  "inputLedger.retryFailed": "Le nouvel envoi n’a pas abouti",
   "inputLedger.retry": "Renvoyer",
   "inputLedger.stranded.interrupted": "Interrompu après l’envoi ; absent de l’historique",
   "inputLedger.stranded.failed": "Le tour a échoué ; absent de l’historique",

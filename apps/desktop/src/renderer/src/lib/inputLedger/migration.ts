@@ -1,6 +1,6 @@
 // 054 §4 / D5: only migrate the session whose host now advertises input-ledger-v1.
 // Old-host data is untouched. A failed read/write never clears its source.
-import type { InputGetResult, InputRecord } from "@cutex-desktop/protocol";
+import type { InputDisposeResult, InputGetResult, InputRecord } from "@cutex-desktop/protocol";
 import type { LedgerOwnerOutbox } from "./owner";
 import { viewKey } from "../viewKey";
 import { persistLedgerOutbox } from "./outbox";
@@ -15,13 +15,20 @@ export const LEDGER_MIGRATION_PREFIX = "cutex-desktop.inputLedger.migrated.v1:";
 export interface MigrationApi {
   inputGet(sessionId: string, inputIds: string[]): Promise<InputGetResult>;
   inputDismiss(sessionId: string, inputId: string, expectedRev: number): Promise<unknown>;
+  /** input-disposal-v1 only. */
+  inputDispose?(sessionId: string, inputId: string): Promise<InputDisposeResult>;
 }
 
 export interface MigrationResult {
   records: InputRecord[];
   /** Old steers absent from the ledger remain visible as unconfirmed drafts, never silently resent. */
   recovered: LedgerOwnerOutbox[];
+  /** Hidden rows not dismissed yet (not offered, busy, changed …): their old markers stay; the migration runs again next start. */
+  notDismissed?: string[];
 }
+
+/** States that never show again: an old hide decision for them is already satisfied. */
+const FINISHED: ReadonlySet<string> = new Set(["inContext", "discarded", "rejected", "superseded"]);
 
 function parse(target: Storage, key: string): unknown {
   const raw = target.getItem(key);
@@ -32,7 +39,7 @@ function strings(raw: unknown): string[] {
 }
 
 /** The caller fences the result to its captured host connection and refreshes the ledger afterward. */
-export async function migrateLegacyDelivery(hostId: string, sessionId: string, api: MigrationApi, target: Storage | null, memoryDrafts: readonly LedgerOwnerOutbox[] = []): Promise<MigrationResult> {
+export async function migrateLegacyDelivery(hostId: string, sessionId: string, api: MigrationApi, target: Storage | null, memoryDrafts: readonly LedgerOwnerOutbox[] = [], options: { disposal?: boolean } = {}): Promise<MigrationResult> {
   const result: MigrationResult = { records: [], recovered: [] };
   if (!target) return result;
   const suffix = JSON.stringify([hostId, sessionId]);
@@ -81,8 +88,25 @@ export async function migrateLegacyDelivery(hostId: string, sessionId: string, a
     if (!persistLedgerOutbox(draft, target)) throw new Error("input_migration_storage_full");
     result.recovered.push(draft);
   }
-  const dismissals = [...new Set([...hiddenIds, ...hiddenBus])].map(id => found.get(id)).filter((record): record is InputRecord => !!record?.actions?.includes("dismiss"));
-  for (let i = 0; i < dismissals.length; i += 4) await Promise.all(dismissals.slice(i, i + 4).map(record => api.inputDismiss(sessionId, record.inputId, record.rev)));
+  const hidden = [...new Set([...hiddenIds, ...hiddenBus])].map(id => found.get(id)).filter((record): record is InputRecord => !!record);
+  // An old "hide" decision is applied only when the host did it. Still showing and not offered dismiss (yet), or offered
+  // but refused (failed[] in an HTTP 200, busy, changed …): its old marker stays and the migration stays open, so a later
+  // start applies it once the host offers dismiss (or dispose). Finished records need nothing.
+  const notDismissed = new Set<string>();
+  const dismissals: InputRecord[] = [];
+  // input-disposal-v1: the id-only dispose works for every record; only an applied receipt counts (one accepted but not
+  // applied yet keeps the old marker, and the next start asks again — the call is idempotent).
+  const dispose = options.disposal && api.inputDispose ? api.inputDispose.bind(api) : null;
+  for (const record of hidden) {
+    if (FINISHED.has(record.state) || record.surface === "none") continue;
+    if (dispose || record.actions?.includes("dismiss")) dismissals.push(record); else notDismissed.add(record.inputId);
+  }
+  if (dispose) for (let i = 0; i < dismissals.length; i += 4) await Promise.all(dismissals.slice(i, i + 4).map(record => dispose(sessionId, record.inputId).then(
+    receipt => { if (receipt?.inputId !== record.inputId || !receipt.appliedAt) notDismissed.add(record.inputId); },
+    () => { notDismissed.add(record.inputId); })));
+  else for (let i = 0; i < dismissals.length; i += 4) await Promise.all(dismissals.slice(i, i + 4).map(record => api.inputDismiss(sessionId, record.inputId, record.rev).then(
+    response => { if ((response as { failed?: readonly { inputId: string }[] } | null)?.failed?.some(item => item.inputId === record.inputId)) notDismissed.add(record.inputId); },
+    () => { notDismissed.add(record.inputId); })));
   // Re-read before changing shared maps: another window may have added a different session.
   const latestSteers = parse(target, STEERS) as Record<string, unknown> | null;
   if (latestSteers && typeof latestSteers === "object" && !Array.isArray(latestSteers)) {
@@ -94,9 +118,10 @@ export async function migrateLegacyDelivery(hostId: string, sessionId: string, a
     if (Object.keys(latestSteers).length) target.setItem(STEERS, JSON.stringify(latestSteers)); else target.removeItem(STEERS);
   }
   // hiddenRows is global; unknown ids can belong to another recipient and stay for its migration.
-  const migratedRows = new Set(hiddenCandidates.filter(k => found.has(k.slice(k.indexOf("/") + 1))));
+  const migratedRows = new Set(hiddenCandidates.filter(k => { const id = k.slice(k.indexOf("/") + 1); return found.has(id) && !notDismissed.has(id); }));
   const remaining = strings(parse(target, HIDDEN)).filter(k => !migratedRows.has(k));
   if (remaining.length) target.setItem(HIDDEN, JSON.stringify(remaining)); else target.removeItem(HIDDEN);
+  if (notDismissed.size) { result.notDismissed = [...notDismissed]; return result; }
   target.removeItem(HIDDEN_BUS + suffix);
   target.removeItem(RESTORED_BUS + suffix);
   for (const key of opKeys) target.removeItem(key);

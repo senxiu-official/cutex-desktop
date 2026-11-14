@@ -8,13 +8,15 @@ export type { PageQuery, OwnerNotificationsPageQuery, SafetyChecksPageQuery } fr
 export type { ApprovalsPage, OwnerNotificationList, SafetyChecksPage } from "@cutex-desktop/protocol";
 import { delegationControlRoute, delegationId, requireDelegationCapability } from "./delegation";
 import { DELEGATION_CAPABILITIES, type DelegationTreeQuery, type DelegationTreePage, type DelegationAttempts, type DelegationPolicy, type DelegationGrants, type DelegationApproval, type ProjectRunControl, type DelegationControlRequest, type DelegationOperationResult, type DelegationOperationLookup, type PermanentRetirementReviewRequest, type PermanentRetirementReview, type PermanentRetirementRequest, type AgentArchiveReceipt } from "@cutex-desktop/protocol";
-import { INPUT_HOLD, INPUT_DISMISS, INPUT_GET, INPUT_GET_MAX_IDS, INPUT_LEASE_RELEASE, INPUT_LIST, INPUT_RETRY, INPUT_INTERRUPT_SEND } from "@cutex-desktop/protocol";
+import { INPUT_HOLD, INPUT_DISMISS, INPUT_DISPOSE, INPUT_GET, INPUT_GET_MAX_IDS, INPUT_LEASE_RELEASE, INPUT_LIST, INPUT_RETRY, INPUT_INTERRUPT_SEND } from "@cutex-desktop/protocol";
 import type {
   InputHoldParams,
   InputHoldResult,
   InputInterruptSendParams,
   InputInterruptSendResult,
   InputDismissParams,
+  InputDisposeParams,
+  InputDisposeResult,
   InputDismissResult,
   UserInputQueueMergeParams,
   UserInputQueueMergeResult,
@@ -714,6 +716,12 @@ export class CutexClient {
   inputDismiss(sessionId: string, inputId: string, expectedRev: number): Promise<InputDismissResult> {
     const params: InputDismissParams = { inputId, expectedRev };
     return this.cutex(sessionId, INPUT_DISMISS, params);
+  }
+
+  /** input-disposal-v1: the owner's durable decision to stop this input; a receipt, never a revision check. */
+  inputDispose(sessionId: string, inputId: string): Promise<InputDisposeResult> {
+    const params: InputDisposeParams = { inputId };
+    return this.cutex(sessionId, INPUT_DISPOSE, params);
   }
 
   /** Release a stale lease (CAS on the whole lease as last read). */

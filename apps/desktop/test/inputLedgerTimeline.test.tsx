@@ -128,7 +128,7 @@ describe("ledger bubble handoff", () => {
     expect(host.textContent).not.toContain("preview-a");
     expect(host.textContent).not.toContain("preview-b");
     expect([...host.querySelectorAll<HTMLElement>('[data-testid="input-status"]')].map(node => node.dataset.inputId)).toEqual(["result-a", "result-b"]);
-    expect(host.textContent).toContain("inputLedger.retry");
+    expect(host.querySelector('[data-effect="retry"]')).not.toBeNull();
     await act(async () => root.unmount()); host.remove();
   });
   it.each(["uncertain", "inContext"] as const)("read-only %s history exposes no mutation actions", async state => {

@@ -1652,6 +1652,15 @@ export class DaemonService implements DaemonApi {
     return this.cachedImageFile("/v2/fs/file", path, maxBytes);
   }
 
+  /**
+   * Main-only (file pages, main/frames.ts): one window of a file — the workspace route with `scope`, else
+   * fs-file-read. `offset` is always sent; a cutex with fs-file-window echoes it in the body.
+   */
+  fileWindow(scope: WorkspaceScope | undefined, path: string, offset: number, maxBytes: number): Promise<FsFile & { offset?: number; revision?: string }> {
+    const route = scope ? `${this.scopePath(scope)}/fs/file` : "/v2/fs/file";
+    return this.requireClient().request<FsFile & { offset?: number; revision?: string }>("GET", route, { query: { path, maxBytes, offset } });
+  }
+
   /** Pinned artifact versions (scope, id, version) that are not images, or too big to assemble for the cache. */
   private uncachedArtifacts = new Set<string>();
 
@@ -3891,6 +3900,7 @@ export class DaemonService implements DaemonApi {
   inputRetry(sessionId: string, inputId: string, expectedRev: number) { return this.requireClient().inputRetry(sessionId, inputId, expectedRev); }
   queueMerge(sessionId: string, params: import("@cutex-desktop/protocol").UserInputQueueMergeParams) { return this.requireClient().queueMerge(sessionId, params); }
   inputDismiss(sessionId: string, inputId: string, expectedRev: number) { return this.requireClient().inputDismiss(sessionId, inputId, expectedRev); }
+  inputDispose(sessionId: string, inputId: string) { return this.requireClient().inputDispose(sessionId, inputId); }
   inputLeaseRelease(sessionId: string, expectedLease: import("@cutex-desktop/protocol").InputLease) { return this.requireClient().inputLeaseRelease(sessionId, expectedLease); }
 
   queueList(sessionId: string) {

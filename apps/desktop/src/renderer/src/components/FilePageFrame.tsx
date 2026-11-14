@@ -25,7 +25,8 @@ export interface FilePageFrameProps {
   large?: boolean;
   /** Bump to mount a fresh document (after the page navigated itself). */
   mount?: number;
-  onProblem?(problem: FilePageProblem, totalBytes?: number, modifiedAt?: string): void;
+  /** `maxBytes` (too-large): the largest page this file can be shown as on its host. */
+  onProblem?(problem: FilePageProblem, totalBytes?: number, modifiedAt?: string, maxBytes?: number): void;
   onReady?(externalRefs: number): void;
   onNavigated?(): void;
 }
@@ -68,7 +69,7 @@ export function FilePageFrame({ hostId, path, scope, title, large = false, mount
       (result) => {
         if (result.ok) release = () => void frames.release(result.frame.id).catch(() => {});
         if (!live) return release?.();
-        if (!result.ok) return cb.current.onProblem?.(result.reason, result.totalBytes, result.modifiedAt);
+        if (!result.ok) return cb.current.onProblem?.(result.reason, result.totalBytes, result.modifiedAt, result.maxBytes);
         frame.src = result.frame.url;
         container.append(frame);
         cb.current.onReady?.(result.externalRefs);

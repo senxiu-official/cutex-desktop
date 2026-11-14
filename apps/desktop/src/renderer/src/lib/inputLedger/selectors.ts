@@ -1,11 +1,8 @@
 // 054 §3.2: what each surface shows, read straight from cutex's records. No inference: `surface` decides.
 
 import type { InputRecord } from "@cutex-desktop/protocol";
-import { isInputSettled } from "@cutex-desktop/protocol";
 import type { InputLedgerSession } from "./alignment";
-
-/** Owner decision 4 (2026-11-01): nextUp shows records settled in the last 15 minutes. */
-export const NEXT_UP_SETTLED_WINDOW_MS = 15 * 60 * 1000;
+import { projectNextUp } from "./nextUpRegistry";
 
 function byCreated(a: InputRecord, b: InputRecord): number {
   return a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : a.inputId < b.inputId ? -1 : a.inputId > b.inputId ? 1 : 0;
@@ -49,13 +46,13 @@ export function timelineRecordFor(session: InputLedgerSession, itemId: string, c
 
 /**
  * 「接下来」: records on `nextUp` (owner queued items, delegation requests and ride-alongs in one list), by
- * `order.position`, then `createdAt`. Settled ones show only within `settledWindowMs` of settling (`since`).
+ * `order.position`, then `createdAt`. Next Up registry 1.4: a read / dismissed / superseded record leaves at once (no
+ * empty line), and a failed or unconfirmed one stays until the owner handles it (no 15-minute fade; owner decision 4 of
+ * 2026-11-01 is replaced). `now` is kept for callers; membership never depends on time.
  */
-export function nextUpRecords(session: InputLedgerSession, options: { now?: number; settledWindowMs?: number } = {}): InputRecord[] {
-  const window = options.settledWindowMs ?? NEXT_UP_SETTLED_WINDOW_MS;
-  const now = options.now;
+export function nextUpRecords(session: InputLedgerSession, _options: { now?: number } = {}): InputRecord[] {
   return onSurface(session, "nextUp")
-    .filter(record => now === undefined || record.state === "uncertain" || !isInputSettled(record.state) || now - Date.parse(record.since) <= window)
+    .filter(record => projectNextUp(record).kind !== "hidden")
     .sort(compareNextUp);
 }
 

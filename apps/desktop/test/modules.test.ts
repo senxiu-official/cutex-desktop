@@ -546,6 +546,7 @@ describe("module gating snapshot (mock featureLists)", () => {
     "shell.about",
     "onboarding.newFeatures",
     "onboarding.help",
+    "onboarding.nextUpStates",
   ];
   // 访问管理 (连接 restructure 2026-10-19) is the shell's; 用户 / 接入 / 互联 are its parts (users / remote-access /
   // peers sections), no pages of their own. NCI 远程作业 (module nci) is off by default.

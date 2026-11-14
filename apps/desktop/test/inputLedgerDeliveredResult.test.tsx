@@ -226,7 +226,9 @@ describe("057 coalesced carried results", () => {
     for (const child of carried) {
       const group = host.querySelector(`[data-carried-input-id="${child.inputId}"]`);
       expect(group?.querySelector('[data-testid="input-status"]')?.getAttribute("data-state")).toBe(child.state);
-      expect(group?.textContent).toContain(child.state === "inContext" ? "inputLedger.record.inContext" : "inputLedger.record.offered");
+      // Read in, or offered to the next tool gap: the timeline row already says it arrived — only a screen-reader word.
+      expect(group?.querySelector('[data-testid="input-status"]')?.className).toBe("sr-only");
+      expect(group?.textContent).toContain(child.state === "inContext" ? "inputLedger.record.inContext" : "inputLedger.record.accepted");
       expect(host.querySelectorAll(`[data-testid="input-status"][data-input-id="${child.inputId}"]`)).toHaveLength(1);
     }
     const resultButtons = [...host.querySelectorAll<HTMLButtonElement>("button")].filter(button => button.textContent?.includes("delegation.resultFrom"));

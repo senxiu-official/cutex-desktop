@@ -88,6 +88,7 @@ export function HelpPage() {
         </Section>
       )}
       <Section title={t("onboarding.guide.help.links")}>
+        <LinkRow agents="none" source="local" label={t("nextUp.help.title")} link={t("nextUp.help.open")} onClick={() => useApp.getState().openSettings("next-up-states")} />
         <LinkRow agents="none" source="local" label={t("onboarding.features.title")} link={t("onboarding.features.open")} onClick={() => void runGuideAction(GUIDE_ACTIONS["help.features"])} />
         {HELP_LINKS.map((l) => (
           <LinkRow agents="none" source="local" key={l.id} label={t(l.label)} link={l.url.replace(/^https:\/\//, "")} onClick={() => void api.openExternal(l.url)} />

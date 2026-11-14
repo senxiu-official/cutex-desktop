@@ -406,7 +406,7 @@ const METHODS: InvokeMethod[] = [
   "putProfileImage",
   "getProfile",
   "listProfiles",
-  "inputGet", "inputList", "inputHold", "inputRetry", "inputInterruptSend", "inputDismiss", "inputLeaseRelease", "queueMerge",
+  "inputGet", "inputList", "inputHold", "inputRetry", "inputInterruptSend", "inputDismiss", "inputDispose", "inputLeaseRelease", "queueMerge",
   "queueList",
   "queueUpdate",
   "queueRemove",

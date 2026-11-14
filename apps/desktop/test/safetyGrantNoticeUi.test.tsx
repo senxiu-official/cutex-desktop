@@ -21,6 +21,7 @@ vi.mock("../src/renderer/src/store", async (importOriginal) => ({
 vi.mock("../src/renderer/src/lib/time", async (importOriginal) => ({ ...(await importOriginal<object>()), useClock: () => Date.now() }));
 vi.mock("../src/renderer/src/lib/ownerNotifyStore", async (importOriginal) => ({ ...(await importOriginal<object>()), useHostOwnerNotes: () => fx.notes, safetyCheckAct: vi.fn() }));
 import { GrantNoticeStatus } from "../src/renderer/src/components/AdmissionRows";
+import { NEXT_UP_DETAILS, fill } from "../src/renderer/src/lib/inputLedger/nextUpRegistry";
 import { SafetyBlockCard } from "../src/renderer/src/components/SafetyBlockCard";
 import { formatAbsolute, formatAt } from "../src/renderer/src/lib/time";
 
@@ -39,7 +40,8 @@ const record = (over: Partial<InputRecord> = {}) => ({ inputId: "alarm-approval-
 
 let container: HTMLDivElement;
 let root: ReturnType<typeof createRoot>;
-const row = (r = record()) => act(() => root.render(h(GrantNoticeStatus, { record: r, sessionId: "plot", hostId: "local" }, "ledger-status")));
+// Registry 1.5: the grant notice is a row-end add-on (words from NEXT_UP_DETAILS); without one the row keeps its own status.
+const row = (r = record()) => act(() => root.render(h(GrantNoticeStatus, { record: r, sessionId: "plot", hostId: "local" })));
 const card = (b: SafetyBlock) => act(() => root.render(h(SafetyBlockCard, { record: note(b), block: b, hostId: "local" })));
 const stateLine = () => container.querySelector("[data-grant-notice]")?.textContent ?? container.querySelector("[data-safety-state] .ml-auto")?.textContent;
 
@@ -64,30 +66,36 @@ describe("接下来 row of the approval notice", () => {
     for (const r of [record({ state: "accepted", stage: "registered" } as Partial<InputRecord>), record({ state: "accepted", stage: "offered" } as Partial<InputRecord>), record({ state: "waiting" })]) {
       row(r);
       expect(container.querySelector("[data-testid=grant-notice-waiting]")).not.toBeNull();
-      expect(container.textContent).toBe(`safetyBlock.notice.waiting · safetyBlock.notice.cap(time=${hhmm(119)})`);
-      expect(container.textContent).not.toContain("ledger-status");
+      expect(container.textContent).toBe(`${NEXT_UP_DETAILS.grantWaiting.en} · ${fill(NEXT_UP_DETAILS.grantCap.en, { time: hhmm(119) })}`);
     }
   });
 
+  it("r282 sends the approval notice as systemNotice: same add-on (older hosts: alarm)", () => {
+    fx.notes = { n: note(block()) };
+    row(record({ kind: "systemNotice", state: "waiting" }));
+    expect(container.querySelector("[data-testid=grant-notice-waiting]")).not.toBeNull();
+    row(record({ kind: "agentMessage", state: "waiting" }));
+    expect(container.textContent).toBe("");
+  });
   it("read: 已送达 · 有效至 HH:MM from expiresAt", () => {
     fx.notes = { n: note(block({ noticeReadAt: iso(0), expiresAt: iso(30) })) };
     row(record({ state: "inContext", evidence: "externalInputPersisted" }));
-    expect(container.textContent).toBe(`safetyBlock.notice.read(time=${hhmm(30)})`);
+    expect(container.textContent).toBe(fill(NEXT_UP_DETAILS.grantRead.en, { time: hhmm(30) }));
   });
 
   it("an older cutex (no noticeInputId), another alarm, or a notice that failed: the ledger's own status", () => {
     fx.notes = { n: note(block({ noticeInputId: undefined, hardExpiresAt: undefined, noticeReadAt: undefined })) };
     row();
-    expect(container.textContent).toBe("ledger-status");
+    expect(container.textContent).toBe("");
     fx.notes = { n: note(block()) };
     row(record({ inputId: "alarm-other" }));
-    expect(container.textContent).toBe("ledger-status");
+    expect(container.textContent).toBe("");
     row(record({ state: "uncertain" }));
-    expect(container.textContent).toBe("ledger-status");
+    expect(container.textContent).toBe("");
     // Used or expired: the grant is over, the row is not about delivery any more.
     fx.notes = { n: note(block({ state: "used" })) };
     row();
-    expect(container.textContent).toBe("ledger-status");
+    expect(container.textContent).toBe("");
   });
 });
 

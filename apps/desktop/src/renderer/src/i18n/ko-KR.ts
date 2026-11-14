@@ -7400,7 +7400,7 @@ export const koKR: Partial<Record<keyof typeof zhCN, string>> = {
   "inputLedger.retryNothingSent": "전송되지 않았습니다. 이전 전송의 결과가 아직 없습니다. 나중에 다시 시도하거나 무시하세요",
   "inputLedger.retryNothingSentOffline": "전송되지 않았습니다. {{agent}}이(가) 지금 오프라인입니다. 온라인이 되면 다시 시도하거나 무시하세요",
   "inputLedger.retryNothingSentOnlyDismiss": "전송되지 않았습니다. 이전 전송을 확인할 수 없어 다시 시도해도 소용없습니다. 무시만 할 수 있습니다",
-  "inputLedger.retryFailed": "다시 보내기를 완료하지 못했습니다: {code}",
+  "inputLedger.retryFailed": "다시 보내기를 완료하지 못했습니다",
   "inputLedger.retry": "재전송",
   "inputLedger.stranded.interrupted": "보낸 뒤 중단되어 기록에 없습니다",
   "inputLedger.stranded.failed": "이 턴이 실패해 기록에 없습니다",

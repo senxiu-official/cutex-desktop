@@ -1382,13 +1382,13 @@ export function Composer({
             // Slot 1: 待处理委托 (delegations; with admission-order only those the merged list does not have).
             !ledgerMode && otherDelegations.length > 0 ? { node: <DelegationQueueSection rows={otherDelegations} sessionId={sessionId} pauseButton={!orderedAsks} railed={!!groups} />, chip: { kind: "delegations", n: otherDelegations.length } } : null,
             // 智能体已暂停 · 继续 (agent-pause): before everything else that waits, since it holds all of it.
-            agentPause ? { node: <AgentPausedSection hostId={hostId} sessionId={sessionId} railed={!!groups} />, chip: { kind: "agentPaused", warn: true } } : null,
+            agentPause ? { node: <AgentPausedSection hostId={hostId} sessionId={sessionId} railed={!!groups} />, chip: { kind: "agentPaused", warn: true }, control: "agentPaused" } : null,
             // Slot 2: 委托已暂停 · 继续 (asks-pause-v2).
             !ledgerMode && showAsksPaused ? { node: <AsksPausedSection sessionId={sessionId} railed={!!groups} />, chip: { kind: "asksPaused", warn: true } } : null,
             // Slot 3: 额度用完 · HH:MM 自动继续 · 取消 (claude-quota-auto-continue).
-            quotaView?.pending ? { node: <QuotaContinueSection hostId={hostId} sessionId={sessionId} view={quotaView} />, chip: { kind: "quota", warn: true } } : null,
+            quotaView?.pending ? { node: <QuotaContinueSection hostId={hostId} sessionId={sessionId} view={quotaView} />, chip: { kind: "quota", warn: true }, control: "scheduledContinue" } : null,
             // Slot 4: 额度用完 · 有 N 张重置券 · 用一张 (profile-reset-credits; confirm dialog first).
-            showResetOffer && profile ? { node: <ResetOfferSection hostId={hostId} profile={profile} afterReset={() => void loadComposerQuota(profile, true)} />, chip: { kind: "quota", warn: true } } : null,
+            showResetOffer && profile ? { node: <ResetOfferSection hostId={hostId} profile={profile} afterReset={() => void loadComposerQuota(profile, true)} />, chip: { kind: "quota", warn: true }, control: "resetCredit" } : null,
           ]}
         />
         <div

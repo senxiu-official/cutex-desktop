@@ -2,7 +2,7 @@ import { Script } from "node:vm";
 import { describe, expect, it, vi } from "vitest";
 import { applyOpaqueFrame, buildOfflinePageDocument, OFFLINE_PAGE_CSP, OFFLINE_PAGE_MAX_BYTES, onFrameNavigatedAway, OPAQUE_FRAME_SANDBOX } from "../src/index";
 import { createFrameDocumentStore } from "../src/documents";
-import { PAGE_API_SCRIPT, PAGE_API_TAG } from "../src/page";
+import { buildOfflinePageChunks, PAGE_API_SCRIPT, PAGE_API_TAG } from "../src/page";
 
 describe("opaque frame attributes", () => {
   it("allows scripts only: no same-origin, popups, forms, top navigation; no device / clipboard access", () => {
@@ -55,6 +55,24 @@ describe("offline agent page", () => {
   it("refuses pages over the size limit", () => {
     expect(() => buildOfflinePageDocument("x".repeat(OFFLINE_PAGE_MAX_BYTES + 1))).toThrow("too large");
   });
+  it("as byte chunks: the same document bytes as the string form, the page's own chunks kept, the bound checked", () => {
+    const enc = new TextEncoder();
+    const join = (parts: Uint8Array[]) => Buffer.concat(parts).toString("utf8");
+    for (const page of ["<p>é</p>", "﻿ \n<!DOCTYPE html><p>x</p>", "  <!doctype html", "<!doctypeX><p>y</p>", "", "<p>中文 𝄞</p>"]) {
+      for (const pageApi of [false, true]) {
+        // A second chunk cut off near the end (a window edge; the lead is in the first one, as a 10 MiB window holds it).
+        const bytes = enc.encode(page);
+        const cut = Math.max(0, bytes.length - 2);
+        const chunks = buildOfflinePageChunks([bytes.subarray(0, cut), bytes.subarray(cut)], 1024, { pageApi });
+        expect(join(chunks.html), JSON.stringify(page)).toBe(buildOfflinePageDocument(page, 1024, { pageApi }).html);
+        expect(chunks.csp).toBe(OFFLINE_PAGE_CSP);
+      }
+    }
+    const body = enc.encode("<p>kept as is</p>");
+    expect(buildOfflinePageChunks([body], 1024).html[1]!.buffer).toBe(body.buffer);
+    expect(() => buildOfflinePageChunks([new Uint8Array(6)], 5)).toThrow("too large");
+    expect(() => buildOfflinePageChunks(["x" as unknown as Uint8Array], 5)).toThrow("bytes");
+  });
 });
 
 describe("one-use frame documents", () => {
@@ -89,6 +107,21 @@ describe("one-use frame documents", () => {
     now += 30_001;
     expect(store.respond(new Request(first.url)).status).toBe(404);
     expect(() => store.add(1, doc)).not.toThrow();
+  });
+  it("streams a chunked document once, chunk by chunk, and refuses chunks that are not bytes", async () => {
+    const store = createFrameDocumentStore({ scheme: "cutex-plugin" });
+    const enc = new TextEncoder();
+    const parts = [enc.encode("<p>a"), enc.encode("b</p>")];
+    const prepared = store.add(1, { html: parts, csp: OFFLINE_PAGE_CSP });
+    parts.length = 0; // the store keeps its own list
+    const response = store.respond(new Request(prepared.url));
+    expect(response.headers.get("content-security-policy")).toBe(`${OFFLINE_PAGE_CSP}; sandbox allow-scripts`);
+    const reader = response.body!.getReader();
+    const got: string[] = [];
+    for (let x = await reader.read(); !x.done; x = await reader.read()) got.push(new TextDecoder().decode(x.value));
+    expect(got).toEqual(["<p>a", "b</p>"]);
+    expect(store.respond(new Request(prepared.url)).status).toBe(404);
+    expect(() => store.add(1, { html: ["<p>" as unknown as Uint8Array], csp: OFFLINE_PAGE_CSP })).toThrow("Invalid frame document");
   });
 });
 

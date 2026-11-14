@@ -66,7 +66,7 @@ describe("the user bubble's status never moves the row (owner 2026-10-24)", () =
     const failed = render([earlier], { state: "failed", error: "ssh tunnel closed" });
     const done = render([earlier, recorded], null);
     expect(sending.querySelector('[data-testid="outbox-status"]')!.textContent).toContain("outbox.sending");
-    expect(failed.querySelector('[data-testid="outbox-status"]')!.textContent).toContain("outbox.failed");
+    expect(failed.querySelector('[data-testid="outbox-status"]')!.textContent).toContain("nextUp.state.failed"); // registry state 13 words (old hosts too)
     expect(done.querySelector('[data-testid="outbox-status"]')).toBeNull();
     expect(done.querySelector("[data-user-bar]")).not.toBeNull();
     // Bubble + slot in every state; the slot is the same fixed height.

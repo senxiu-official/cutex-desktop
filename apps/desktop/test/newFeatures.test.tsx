@@ -9,7 +9,7 @@ vi.mock("../src/renderer/src/components/settings/Form", () => ({ Button: (props:
 const { NEW_FEATURES, supportsFeature } = await import("../src/renderer/src/modules/onboarding/features");
 const { NewFeaturesPage } = await import("../src/renderer/src/modules/onboarding/NewFeaturesPage");
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-afterEach(() => { fx.state.features = new Set(); });
+afterEach(() => { fx.state.features = new Set(); vi.clearAllTimers(); vi.useRealTimers(); });
 describe("new feature capability coverage", () => {
   it("requires every fork capability, and treats Director capabilities independently", () => {
     const fork = NEW_FEATURES.find((v) => v.id === "fork")!;
@@ -24,6 +24,7 @@ describe("new feature capability coverage", () => {
     expect(NEW_FEATURES.find((v) => v.id === "html")!.capabilities).toEqual(["workspace-fs"]);
   });
   it("marks legacy-host features and never offers unavailable settings; follows host capability changes", () => {
+    vi.useFakeTimers();
     const node = document.createElement("div"); const root = createRoot(node);
     act(() => root.render(h(NewFeaturesPage)));
     const storage = () => node.querySelector('[data-new-feature="storage"]')!;

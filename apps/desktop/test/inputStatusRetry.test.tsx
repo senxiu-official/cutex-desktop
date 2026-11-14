@@ -7,7 +7,8 @@ import type { InputRecord } from "@cutex-desktop/protocol";
 import { InputStatus } from "../src/renderer/src/components/InputStatus";
 import { bridge } from "../src/renderer/src/bridge";
 import { emptyInputLedgerSession } from "../src/renderer/src/lib/inputLedger/alignment";
-import { inputLabel, stalledMinutes } from "../src/renderer/src/lib/inputLedger/labels";
+import { stalledMinutes } from "../src/renderer/src/lib/inputLedger/labels";
+import { projectNextUp } from "../src/renderer/src/lib/inputLedger/nextUpRegistry";
 import { retryRefusal } from "../src/renderer/src/lib/inputLedger/owner";
 import { iso, record, T0 } from "../src/renderer/src/lib/inputLedger/testkit";
 import { viewKey } from "../src/renderer/src/lib/viewKey";
@@ -56,24 +57,22 @@ const stranded = (patch: Partial<InputRecord> = {}) => record("m1", {
 
 it("nativeHeld{interrupted} does not claim the recipient temporarily cannot receive", () => {
   const note = record("n1", { kind: "agentMessage", state: "waiting", reason: "nativeHeld", surface: "nextUp", actions: ["dismiss"], details: { nativeReason: "interrupted" } });
-  expect(inputLabel(note)).toMatchObject({ kind: "label", id: "uncertain" });
+  expect(projectNextUp(note)).toMatchObject({ kind: "state", state: "unconfirmed" });
   const host = render(note);
-  expect(host.textContent).not.toContain(zhCN["inputLedger.record.nativeHeld"]);
-  expect(host.querySelector("[data-testid=input-status]")?.textContent).toContain(zhCN["inputLedger.record.uncertain"]);
-  // A real hold (plan mode) still says so.
-  expect(inputLabel(record("n2", { kind: "agentMessage", state: "waiting", reason: "nativeHeld", details: { nativeReason: "plan_mode" } }))).toMatchObject({ id: "nativeHeld" });
+  expect(host.querySelector("[data-testid=input-status]")?.textContent).toContain(zhCN["nextUp.state.unconfirmed"]);
+  // A real hold (plan mode) needs the owner.
+  expect(projectNextUp(record("n2", { kind: "agentMessage", state: "waiting", reason: "nativeHeld", details: { nativeReason: "plan_mode" } }))).toMatchObject({ state: "needsAction" });
 });
 
 it("a stranded resend says it is unsure, not waiting to send, and the wait is the whole wait without repeating the label", () => {
   vi.useFakeTimers({ now: T0 + 8 * 60_000 + 5_000 });
   const row = stranded();
-  expect(inputLabel(row)).toMatchObject({ kind: "label", id: "uncertain" });
-  expect(inputLabel(stranded({ stalled: null, actions: [] }))).toMatchObject({ id: "ownerRetry" });
+  expect(projectNextUp(row)).toMatchObject({ kind: "state", state: "unconfirmed" });
+  expect(projectNextUp(stranded({ stalled: null, actions: [] }))).toMatchObject({ state: "sending" });
   expect(stalledMinutes(row, Date.now())).toBe(8);
   const text = render(row).textContent ?? "";
   expect(text).toContain("已等 8 分钟");
-  expect(text).not.toContain(zhCN["inputLedger.record.ownerRetry"]);
-  expect(text.split(zhCN["inputLedger.record.uncertain"]).length, text).toBe(2);
+  expect(text.split(zhCN["nextUp.state.unconfirmed"]).length, text).toBe(2);
 });
 
 it("retryRefusal reads the redelivery the call answered with", () => {

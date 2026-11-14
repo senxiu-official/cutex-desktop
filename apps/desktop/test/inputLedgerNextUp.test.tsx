@@ -12,12 +12,13 @@ vi.mock("../src/renderer/src/i18n", () => ({ useI18n: () => ({ locale: "en", t: 
 vi.mock("../src/renderer/src/lib/delegationOpen", () => ({ openDelegationDetail: calls.open }));
 vi.mock("../src/renderer/src/lib/contextMenu", () => ({ contextMenu: () => () => {}, openMenuFrom: vi.fn(), openMenuAt: vi.fn() }));
 vi.mock("../src/renderer/src/components/Avatar", () => ({ Avatar: ({ name, seed, size, agent }: { name: string; seed: string; size: number; agent: unknown }) => h("span", { "data-agent-avatar": seed, "data-size": size, "data-agent": !!agent }, name) }));
+const LEDGER_ON = new Set(["input-ledger-v1"]); const LEDGER_OFF = new Set<string>();
 vi.mock("../src/renderer/src/store", async () => {
   const { create } = await import("zustand");
   const useApp = create(() => ({ inputs: {}, ledgerOutbox: {}, sessions: {}, byHost: {}, selectedId: null, hosts: { active: "old-focus" },
-    retryInput: calls.retry, dismissInput: calls.dismiss, releaseInputLease: calls.release, resumePaused: calls.resume, notify: calls.notify }));
+    retryInput: calls.retry, dismissInput: calls.dismiss, releaseInputLease: calls.release, resumePaused: calls.resume, notify: calls.notify, hydrateQueue: () => {} }));
   return { useApp, agentState: (map: Record<string, unknown>, host: string, session: string) => map?.[host+"\n"+session],
-    featuresOf: (_s: unknown, host: string) => new Set(host === "new-host" ? ["input-ledger-v1"] : []),
+    featuresOf: (_s: unknown, host: string) => host === "new-host" ? LEDGER_ON : LEDGER_OFF,
     selectedFeatures: () => new Set(), agentHost: () => "old-focus", sidebarOf: (s: unknown, host: string) => calls.sidebar(s, host) ?? null, viewOf: () => null,
     queueItemText: (item: QueueItem) => (item.input as { text?: string }[]).map(p => p.text ?? "").join("") };
 });
@@ -77,7 +78,7 @@ describe("D4 ledger surfaces", () => {
     for (const rule of ["h-6", "min-h-6", "max-h-6", "shrink-0", "overflow-hidden"]) expect(row.classList.contains(rule)).toBe(true);
     const actions = [...row.querySelectorAll<HTMLElement>("span")].find(s => s.className.includes("group-hover/row:opacity-100"))!;
     expect(actions.classList.contains("h-5")).toBe(true); expect(actions.classList.contains("max-h-5")).toBe(true);
-    expect([...actions.querySelectorAll("button")].map(b => b.textContent)).toEqual(["queue.sendNow", "queue.edit", "queue.delete"]);
+    expect([...actions.querySelectorAll("button")].map(b => b.textContent)).toEqual(["Insert", "Edit", "Delete"]); // registry state queued, owner, turn running
     for (const button of actions.querySelectorAll("button")) expect(button.classList.contains("h-5")).toBe(true);
     // Hover may only show / hide / recolour: no hover rule anywhere in the row sets a height, padding, margin-block or display.
     for (const node of [row, ...row.querySelectorAll<HTMLElement>("*")]) expect(String(node.className)).not.toMatch(/(?:^|\s)group-hover\/row:(?:h-|min-h-|max-h-|p[ytb]?-|m[ytb]-|block|flex|grid)/);
@@ -127,8 +128,8 @@ describe("D4 ledger surfaces", () => {
     act(() => useDelegations.setState({ byKey: { [hostKey("new-host", "ask-b0")]: summary("Publish public desktop 0.2.1", { execution: "answered", closed: "accepted" }) } }));
     expect(ids()).toEqual(["delivery-held"]);
     expect(el.querySelector('[data-testid="input-status"]')?.getAttribute("data-state")).toBe("waiting");
-    expect(el.textContent).toContain("inputLedger.record.passive");
-    expect(el.textContent).toContain("inputLedger.ignoreNotification");
+    expect(el.textContent).toContain("nextUp.state.passiveNote");
+    expect(el.textContent).toContain("Ignore this notice");
   });
   it("a missing summary keeps the status row, tag, safe fallback and only its ledger dismiss action", async () => {
     useAgentMessages.setState({ byId: { "delivery-held": { body: "held@2: internal bus body" } as never } });
@@ -138,32 +139,37 @@ describe("D4 ledger surfaces", () => {
     expect(row.textContent).toContain("inputLedger.statusNotification");
     expect(row.querySelector("[data-delegation-tag]")).toBeTruthy();
     expect(row.innerHTML).not.toMatch(/held@2|internal bus body|Wrong host title/);
-    await click("inputLedger.ignoreNotification");
+    await click("Ignore this notice");
     expect(calls.dismiss).toHaveBeenCalledExactlyOnceWith("cutex.s1", "delivery-held", "new-host");
     expect(calls.retry).not.toHaveBeenCalled();
     expect(ids()).toEqual(["delivery-held", "other-input"]);
     seed([statusNotice({ actions: [] })]);
-    expect(el.textContent).not.toContain("inputLedger.ignoreNotification");
+    // Not offered by the host: the disposal stays visible but grey with its reason (registry: never a row without an exit).
+    const ignore = [...el.querySelectorAll("button")].find(b => b.textContent === "Ignore this notice")!;
+    expect(ignore.disabled).toBe(true); expect(ignore.dataset.disabledReason).toBe("notOffered");
   });
   it("other input kinds retain unknown raw prose without interpreting its prefix", () => {
     seed([statusNotice({ kind: "delegationResult", preview: "held@2: unstructured result prose" })]); panel();
     expect(el.textContent).toContain("held@2: unstructured result prose");
     expect(el.querySelector('[title="held@2: unstructured result prose"]')).toBeTruthy();
-    expect(el.textContent).toContain("inputLedger.dismiss");
-    expect(el.querySelector("[data-delegation-tag]")).toBeNull();
+    expect(el.textContent).toContain("Dismiss");
+    // Registry 1.4: a result row keeps its delegation link.
+    expect(el.querySelector("[data-delegation-tag]")).toBeTruthy();
   });
   it("shows owner restart recovery actions in NextUp only as offered by cutex", async () => {
     const owner = record("restart-owner", { kind: "owner", surface: "nextUp", state: "uncertain", reason: "runtimeLost", actions: ["retry", "dismiss"] });
     seed([owner]); panel();
     const row = el.querySelector<HTMLElement>('[data-input-id="restart-owner"]')!;
     expect(row.dataset.surface).toBe("nextUp");
-    expect([...row.querySelectorAll("button")].map(b => b.textContent)).toEqual(["inputLedger.retry", "inputLedger.dismiss"]);
-    await click("inputLedger.retry"); await click("inputLedger.dismiss");
+    expect([...row.querySelectorAll("button")].map(b => b.textContent)).toEqual(["Resend", "Dismiss", "View reason"]);
+    await click("Resend"); await click("Dismiss");
     expect(calls.retry).toHaveBeenCalledExactlyOnceWith("cutex.s1", "restart-owner", "new-host");
     expect(calls.dismiss).toHaveBeenCalledExactlyOnceWith("cutex.s1", "restart-owner", "new-host");
     expect(useApp.getState().inputs[key]!.records.get("restart-owner")).toBe(owner);
     seed([{ ...owner, actions: [] }]);
-    expect(el.querySelector('[data-input-id="restart-owner"]')!.querySelector("button")).toBeNull();
+    const left = [...el.querySelector('[data-input-id="restart-owner"]')!.querySelectorAll("button")];
+    expect(left.filter(b => !b.disabled).map(b => b.textContent)).toEqual(["View reason"]);
+    expect(left.find(b => b.textContent === "Dismiss")?.dataset.disabledReason).toBe("notOffered");
   });
   it("reads bus body without using its delivered/dismissed state", () => {
     seed([record("note", { surface: "pendingNotes", kind: "agentMessage", state: "waiting", reason: "passive" })]);
@@ -172,7 +178,7 @@ describe("D4 ledger surfaces", () => {
   });
   it("routes single retry and dismiss to the record's host; keeps the row pending authoritative update", async () => {
     seed([record("a", { surface: "nextUp", state: "uncertain", reason: "receiptTimeout", actions: ["retry","dismiss"] })]); panel();
-    await click("inputLedger.retry"); await click("inputLedger.dismiss");
+    await click("Resend"); await click("Dismiss");
     expect(calls.retry).toHaveBeenCalledWith("cutex.s1","a","new-host"); expect(calls.dismiss).toHaveBeenCalledWith("cutex.s1","a","new-host");
     expect(ids()).toEqual(["a"]);
   });
@@ -186,7 +192,7 @@ describe("D4 ledger surfaces", () => {
     for (const id of ["local-note", "peer-note"]) {
       const row = el.querySelector(`[data-testid="ledger-queue-row"][data-input-id="${id}"]`)!;
       expect(row.querySelector('[data-agent-avatar][data-size="16"][data-agent="true"]')).not.toBeNull();
-      expect(row.querySelector("svg")).toBeNull();
+      expect(row.querySelector("svg:not(.lucide-info)")).toBeNull(); // no kind icon (the ⓘ of 待读留言 is not one)
     }
     const system = el.querySelector('[data-testid="ledger-queue-row"][data-input-id="system-note"]')!;
     expect(system.querySelector("[data-agent-avatar]")).toBeNull();
@@ -206,10 +212,26 @@ describe("D4 ledger surfaces", () => {
     seed([record("a", { surface: "timeline", state: "uncertain", reason: "outcomeUnknown", actions: ["dismiss"] }),
       record("b", { surface: "pendingNotes", state: "uncertain", reason: "outcomeUnknown", actions: ["dismiss"] }),
       record("c", { surface: "nextUp", state: "uncertain", reason: "outcomeUnknown", actions: [] })]); panel();
-    await click("inputLedger.cleanup(2)"); expect(calls.dismiss).not.toHaveBeenCalled(); await click("inputLedger.cleanupAgain(2)");
+    await click("Clear all unconfirmed (2)"); expect(calls.dismiss).not.toHaveBeenCalled(); await click("Click again to clear (2)");
     expect(calls.dismiss.mock.calls.map(c => c[1])).toEqual(["a","b"]);
     expect(calls.notify).toHaveBeenCalledWith("inputLedger.cleanupFailed(1)","error",{ hostId: "new-host", sessionId: "cutex.s1" });
     expect(ids()).toEqual(["c","b"]);
+  });
+  it("bulk cleanup counts an explicit refusal ({ok:false}) as a failure and says so", async () => {
+    calls.dismiss.mockImplementation((_s, id) => Promise.resolve(id === "b" ? { ok: false, reason: "notOffered" } : { ok: true }));
+    seed([record("a", { surface: "nextUp", state: "uncertain", reason: "outcomeUnknown", actions: ["dismiss"] }),
+      record("b", { surface: "nextUp", state: "uncertain", reason: "outcomeUnknown", actions: ["dismiss"] })]); panel();
+    await click("Clear all unconfirmed (2)"); await click("Click again to clear (2)");
+    expect(calls.notify).toHaveBeenCalledWith("inputLedger.cleanupFailed(1)", "error", { hostId: "new-host", sessionId: "cutex.s1" });
+  });
+  it("renders only registered panel controls (registry §三), never a free section", () => {
+    seed([record("a", { surface: "nextUp", state: "uncertain", reason: "outcomeUnknown", actions: ["dismiss"] })]);
+    panel({ sections: [{ node: h("span", null, "free-section") }, { node: h("span", null, "reset-credit"), control: "resetCredit" },
+      { node: h("span", null, "agent-paused"), control: "agentPaused" }, { node: h("span", null, "legacy-paused"), control: "legacyPausedQueue" }] });
+    expect(el.textContent).not.toContain("free-section");
+    expect(el.textContent).toContain("reset-credit");
+    expect(el.textContent).toContain("agent-paused"); // 1.8: kept in Next Up
+    expect(el.textContent).not.toContain("legacy-paused"); // 1.8: old hosts only
   });
   it("shows offline O0 once and replaces it with the first server record", () => {
     seed([],delivery("offline",1)); act(() => useApp.setState({ ledgerOutbox: { [key]: [{ inputId: "o0", hostId: "new-host", sessionId: "cutex.s1", text: "offline", extra: [], strategy: "auto", phase: "sending", createdAt: iso(T0) }] } })); panel();
@@ -264,7 +286,10 @@ describe("shared ledger statuses", () => {
   });
   it("displays and reports unknown reason codes", () => {
     act(()=>root.render(h(InputStatus,{record:record("u",{state:"waiting",reason:"futureReason"}),sessionId:"cutex.s1"})));
-    expect(el.textContent).toContain("futureReason"); expect(calls.log).toHaveBeenCalledOnce(); expect(el.textContent).not.toContain("inputLedger.record.queued");
+    // State unknown: plain words as the main text, the raw code only in the details and the diagnostic log.
+    expect(el.textContent).toContain("nextUp.state.unknown"); expect(el.textContent).not.toContain("futureReason");
+    expect(calls.log).toHaveBeenCalledOnce(); expect(String(calls.log.mock.calls[0]![0].message)).toContain("futureReason");
+    expect([...el.querySelectorAll("button")].map(b => b.dataset.effect)).toEqual(["refresh", "viewDetails", "clearNotice"]);
   });
   it("counts down only the host deadline and never infers a new state at zero", () => {
     act(()=>root.render(h(DeliveryStatus,{delivery:delivery("held",1,{reason:"hostBusy",heldUntil:iso(Date.now()+3000)}),sessionId:"cutex.s1"})));
