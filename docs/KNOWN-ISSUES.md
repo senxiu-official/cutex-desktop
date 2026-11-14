@@ -61,3 +61,10 @@ recovery fixes do not establish or resolve the cause of DNS, TLS, proxy or provi
 
 - Workaround: check the host's connectivity and provider status, then retry the request.
 - Fix schedule: not scheduled; investigation continues.
+
+## claude-r46 direct stdio on non-UTF-8 locales
+
+Claude claude-r46 direct stdio uses Python stdout encoding. Under a non-UTF-8 locale, non-ASCII JSON may not be readable by UTF-8 clients. This is fixed in claude-r48. Existing agents retain their selected runtime; updating the desktop does not replace a pinned runtime. Normal cutex-managed sessions use a loopback WebSocket and do not use this stdio writer.
+
+- Workaround: use claude-r48 for new direct-stdio launches, or set `PYTHONIOENCODING=utf-8` for the existing direct-stdio process.
+- Fix schedule: not scheduled for the immutable claude-r46 release; fixed in claude-r48.

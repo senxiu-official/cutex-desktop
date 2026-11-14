@@ -133,6 +133,24 @@
         "zh-Hant-CN": "檢查主機連線和供應商狀態後重試。",
         "en": "Check host connectivity and provider status, then retry."
       }
+    },
+    {
+      "id": "claudeStdioLocale",
+      "title": {
+        "zh-CN": "claude-r46 直接 stdio 在非 UTF-8 区域设置下的限制",
+        "zh-Hant-CN": "claude-r46 直接 stdio 在非 UTF-8 區域設定下的限制",
+        "en": "claude-r46 direct stdio on non-UTF-8 locales"
+      },
+      "body": {
+        "zh-CN": "claude-r46 的直接 stdio 使用 Python 标准输出编码，非 UTF-8 编码下的中文 JSON 可能无法读取。此问题已在 claude-r48 修复；已有智能体仍保留所选运行时，桌面更新不会替换它。cutex 管理的会话使用本地 WebSocket，不经过此输出路径。",
+        "zh-Hant-CN": "claude-r46 的直接 stdio 使用 Python 標準輸出編碼，非 UTF-8 編碼下的中文 JSON 可能無法讀取。此問題已在 claude-r48 修復；已有智慧體仍保留所選執行階段，桌面更新不會取代它。cutex 管理的會話使用本機 WebSocket，不經過此輸出路徑。",
+        "en": "Claude claude-r46 direct stdio uses Python stdout encoding, which can produce non-UTF-8 JSON. This is fixed in claude-r48. Existing agents retain their selected runtime; a desktop update does not replace it. Normal cutex-managed sessions use a loopback WebSocket and do not use this writer."
+      },
+      "workaround": {
+        "zh-CN": "直接启动 stdio 时，为该进程设置 PYTHONIOENCODING=utf-8。",
+        "zh-Hant-CN": "直接啟動 stdio 時，為該程序設定 PYTHONIOENCODING=utf-8。",
+        "en": "Set PYTHONIOENCODING=utf-8 when launching direct stdio."
+      }
     }
   ]
 }

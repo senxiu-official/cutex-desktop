@@ -15874,8 +15874,8 @@
     },
     {
       "path": "apps/desktop/src/renderer/src/modules/about/known-issues.bundled.json",
-      "sha256": "7d69b896e336b447c1012f7021c7cf0dec18208479a259294a1568e9e1c57ac0",
-      "size": 10359
+      "sha256": "53580aebb0c9d9b53aca91779d2a5a394389ef3c5854ab454a9a2c6fbef5747e",
+      "size": 11926
     },
     {
       "path": "apps/desktop/src/renderer/src/modules/about/knownIssues.ts",
@@ -26189,8 +26189,8 @@
     },
     {
       "path": "docs/KNOWN-ISSUES.md",
-      "sha256": "52f7886b08d77a71fe502eb21164dc4af9a134c07508ab27b09c33acd45cc80d",
-      "size": 3749
+      "sha256": "4f557ee4ff7e301bb28c92567dcdb091f0e4ee511a504d23ae87943975655f9a",
+      "size": 4380
     },
     {
       "path": "docs/QUICKSTART.md",
@@ -26529,8 +26529,8 @@
     },
     {
       "path": "docs/known-issues.json",
-      "sha256": "7d69b896e336b447c1012f7021c7cf0dec18208479a259294a1568e9e1c57ac0",
-      "size": 10359
+      "sha256": "53580aebb0c9d9b53aca91779d2a5a394389ef3c5854ab454a9a2c6fbef5747e",
+      "size": 11926
     },
     {
       "path": "docs/launch-options.md",
