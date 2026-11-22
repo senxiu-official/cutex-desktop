@@ -1,3 +1,4 @@
+import { useSettingsCard } from "../../lib/settingsDrafts";
 import { useEffect, useRef, useState } from "react";
 import type { ProfileItem } from "../../../../shared/ipc";
 import { useI18n } from "../../i18n";
@@ -14,6 +15,8 @@ export function ProfileAccountLinkDialog({ hostId, profile, unlink = false, onCl
   const manualUnlink = unlink && profile.link?.source === "manual";
   const { self, targets } = useProfileAccountLinks(hostId, profile);
   const [selected, setSelected] = useState<string[]>([]);
+  // The ticks are unsaved until 应用 succeeds, which hides them (lib/settingsDrafts).
+  const card = useSettingsCard();
   const [armed, setArmed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [changes, setChanges] = useState<AccountLinkChange[]>([]);
@@ -59,7 +62,7 @@ export function ProfileAccountLinkDialog({ hostId, profile, unlink = false, onCl
     }}>
       <h2 id="profile-link-title" className="font-semibold">{t(restoringAuto ? "settings.profile.link.restoreAuto" : unlink ? "settings.profile.link.unlink" : "settings.profile.link.mark")}</h2>
       <p className="mt-2 text-xs text-muted">{t(restoringAuto ? "settings.profile.link.restoreAutoHint" : manualUnlink ? "settings.profile.link.manualUnlinkHint" : unlink ? "settings.profile.link.unlinkHint" : "settings.profile.link.hint", { name: profile.name })}</p>
-      {!unlink && !done && <FormFields><SettingsGroup agents="none" source="host" allHosts><div className="my-4 max-h-64 space-y-2 overflow-auto">
+      {!unlink && !done && <FormFields><SettingsGroup agents="none" source="host" allHosts><div ref={card.ref} className="my-4 max-h-64 space-y-2 overflow-auto">
         {targets.map((ref) => <div key={keyOf(ref)} className="flex items-center gap-2 text-sm"><Checkbox label={`${ref.hostName} · ${ref.profile.name}`} checked={selected.includes(keyOf(ref))} disabled={busy} onChange={(checked) => { setSelected((old) => checked ? [...old, keyOf(ref)] : old.filter((key) => key !== keyOf(ref))); setArmed(false); }} /><span>{ref.hostName} · {ref.profile.name}</span></div>)}
         {!targets.length && <p className="text-xs text-subtle">{t(accountLinkHostReady(hostId) ? "settings.profile.link.noTargets" : "settings.profile.link.notReady")}</p>}
       </div></SettingsGroup></FormFields>}

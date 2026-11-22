@@ -14,6 +14,7 @@ import { sharedResizeObserver } from "../../lib/resizeHub";
 import { useI18n } from "../../i18n";
 import { contextMenu, openMenuFrom } from "../../lib/contextMenu";
 import { ARMED_BUTTON, ARMED_COUNTDOWN, useArmed } from "../../lib/armedConfirm";
+import { PRESS_ICON, PRESS_ROW, PRESS_SOLID, REVEAL_ON_FOCUS } from "../Button";
 import { cardCloseWarnings, closeCard, closeTab, joinWarnings, toggleMode } from "../../lib/sideActions";
 import { toggleExclusive, toggleMaximize } from "../../lib/paneActions";
 import { useGrow } from "../../lib/panelGrow";
@@ -33,7 +34,7 @@ import { CountBadge } from "../../components/Tag";
 import { keyVar } from "../../lib/keybindings";
 import { isElement } from "../../lib/ownerWindow";
 
-const ICON_BTN = "flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-subtle hover:bg-hover hover:text-foreground";
+const ICON_BTN = `flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-subtle hover:bg-hover hover:text-foreground ${PRESS_ICON}`;
 
 function Actions({ entry, id, card, page }: { entry: SideComponentEntry; id: string; card: string; page: string }) {
   const inst = useShelfLayout().instances[id];
@@ -92,7 +93,7 @@ function Tab({ id, active, title, transient, info }: { id: string; active: boole
       // Full width when there is room; short of it, every tab gives way evenly down to TAB_MIN (equal bases shrink evenly),
       // the active one from a larger base and to a larger minimum (lib/tabFit).
       style={{ flex: `0 1 ${active ? TAB_ACTIVE_MAX : TAB_MAX}px`, minWidth: active ? TAB_ACTIVE_MIN : TAB_MIN }}
-      className={`group/tab flex h-6 items-center gap-1 overflow-hidden rounded-md pr-0.5 pl-1.5 text-xs ${armed ? "bg-danger/15 text-danger ring-1 ring-danger/70" : active ? "bg-surface-2 text-foreground" : "text-muted hover:bg-hover hover:text-foreground"} ${dragged ? "opacity-45" : ""}`}
+      className={`group/tab flex h-6 items-center gap-1 overflow-hidden rounded-md pr-0.5 pl-1.5 text-xs ${armed ? "bg-danger/15 text-danger ring-1 ring-danger/70" : active ? `bg-surface-2 text-foreground ${PRESS_ROW}` : `text-muted hover:bg-hover hover:text-foreground ${PRESS_ROW}`} ${dragged ? "opacity-45" : ""}`}
     >
       {tabFavicon(info) && <img src={tabFavicon(info)!} alt="" width={12} height={12} referrerPolicy="no-referrer" className="size-3 shrink-0 rounded-sm" />}
       {info?.audio && (
@@ -103,7 +104,7 @@ function Tab({ id, active, title, transient, info }: { id: string; active: boole
           onClick={() => info.audio!.toggleMute()}
           aria-label={t(info.audio.muted ? "side.tabUnmute" : "side.tabMute")}
           title={t(info.audio.muted ? "side.tabUnmute" : "side.tabMute")}
-          className="shrink-0 rounded p-0.5 text-subtle hover:bg-surface hover:text-foreground"
+          className={`shrink-0 rounded p-0.5 text-subtle hover:bg-surface hover:text-foreground ${PRESS_ICON}`}
         >
           {info.audio.muted ? <VolumeX size={11} /> : <Volume2 size={11} />}
         </button>
@@ -124,7 +125,7 @@ function Tab({ id, active, title, transient, info }: { id: string; active: boole
         onClick={pressClose}
         aria-label={armed ? warning : t("side.close")}
         title={armed ? warning : t("side.close")}
-        className={armed ? `${ARMED_COUNTDOWN} shrink-0 rounded bg-danger-solid p-0.5 text-white` : `shrink-0 rounded p-0.5 text-subtle hover:bg-surface hover:text-foreground ${active ? "opacity-70" : "opacity-0 group-hover/tab:opacity-70"}`}
+        className={armed ? `${ARMED_COUNTDOWN} shrink-0 rounded bg-danger-solid p-0.5 text-white ${PRESS_SOLID}` : `shrink-0 rounded p-0.5 text-subtle hover:bg-surface hover:text-foreground ${PRESS_ICON} ${REVEAL_ON_FOCUS} ${active ? "opacity-70" : "opacity-0 group-hover/tab:opacity-70 group-focus-within/tab:opacity-70"}`}
       >
         <X size={11} />
       </button>
@@ -177,7 +178,7 @@ function TabRow({ tabs, shown, label, transient, tabInfo, newTab, cardId }: { ta
           data-tip={t("side.moreTabs", { n: hidden.length })}
           aria-label={t("side.moreTabs", { n: hidden.length })}
           aria-haspopup="menu"
-          className="flex h-6 shrink-0 items-center gap-0.5 rounded-md px-1.5 text-xs text-muted hover:bg-hover hover:text-foreground"
+          className={`flex h-6 shrink-0 items-center gap-0.5 rounded-md px-1.5 text-xs text-muted hover:bg-hover hover:text-foreground ${PRESS_ROW}`}
         >
           <ChevronDown size={12} />
           {hidden.length}
@@ -345,7 +346,7 @@ export function SideCardView({
           {...sideDragHandle(() => ({ type: "card", cardId: card.id }))}
           onClick={() => setFocusedCard(card.id)}
           onContextMenu={contextMenu(() => cardMenu(card.id))}
-          className="flex h-[26px] w-[26px] shrink-0 cursor-grab items-center justify-center rounded-lg text-muted hover:bg-hover hover:text-foreground"
+          className={`flex h-[26px] w-[26px] shrink-0 cursor-grab items-center justify-center rounded-lg text-muted hover:bg-hover hover:text-foreground ${PRESS_ICON}`}
         >
           <Icon size={15} />
         </button>
@@ -400,7 +401,7 @@ export function SideCardView({
             title={closeWarning}
             aria-label={closeWarning}
             data-armed
-            className={`${ARMED_BUTTON} flex h-6 max-w-[60%] min-w-0 shrink items-center gap-1`}
+            className={`${ARMED_BUTTON} ${PRESS_SOLID} flex h-6 max-w-[60%] min-w-0 shrink items-center gap-1`}
           >
             <X size={12} className="shrink-0" />
             <span className="min-w-0 truncate" role="alert">

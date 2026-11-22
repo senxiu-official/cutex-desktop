@@ -43,14 +43,14 @@ export function FolderLookDialog({ id, name, initial, resolve }: { id: string; n
   const save = () => done({ look: color || icon ? { ...(color && { color }), ...(icon && { icon }) } : null });
   const autoChip = (on: boolean, onClick: () => void, mark: ReactNode) => (
     <button type="button" onClick={onClick} aria-pressed={on} data-tip={t("section.lookAutoHint")}
-      className={`flex h-7 shrink-0 items-center gap-1.5 rounded-full border border-border px-2 text-xs ${on ? `${SELECTED} text-foreground` : "text-muted hover:text-foreground"}`}>
+      className={`press flex h-7 shrink-0 items-center gap-1.5 rounded-full border border-border px-2 text-xs ${on ? `${SELECTED} text-foreground` : "text-muted hover:text-foreground"}`}>
       {mark}
       {t("section.lookAuto")}
     </button>
   );
   const swatch = (c: string, label: string) => (
     <button key={c} type="button" onClick={() => pick(c)} aria-pressed={color === c} aria-label={label} data-tip={label}
-      className={`h-5 w-5 shrink-0 rounded-full border border-foreground/20 ${color === c ? SELECTED : ""}`} style={{ background: c }} />
+      className={`press-solid h-5 w-5 shrink-0 rounded-full border border-foreground/20 hover:brightness-110 ${color === c ? SELECTED : ""}`} style={{ background: c }} />
   );
   return (
     <div
@@ -68,7 +68,7 @@ export function FolderLookDialog({ id, name, initial, resolve }: { id: string; n
       <div className="flex min-w-0 items-center gap-1.5 rounded-md border border-border bg-background px-2 py-1.5" style={folderStyle(look)} data-folder-look-preview="">
         <span className="folder-ink flex h-5 w-[18px] shrink-0 items-center justify-center"><look.icon size={14} strokeWidth={2.2} aria-hidden /></span>
         <span className="folder-ink min-w-[2.5em] truncate text-ui font-semibold">{name}</span>
-        <span className="folder-line h-[3px] min-w-2 flex-1 rounded-full" />
+        <span className="min-w-2 flex-1" aria-hidden />
       </div>
       <div>
         <p className={LABEL}>{t("section.lookColor")}</p>
@@ -107,7 +107,7 @@ export function FolderLookDialog({ id, name, initial, resolve }: { id: string; n
               <div className="flex flex-wrap gap-0.5">
                 {g.icons.map((i) => (
                   <button key={i.id} type="button" onClick={() => setIcon(i.id)} aria-pressed={icon === i.id} aria-label={i.id} data-tip={i.id}
-                    className={`flex h-7 w-7 items-center justify-center rounded-md hover:bg-surface-2 ${icon === i.id ? "folder-ink bg-surface-2 ring-1 ring-accent" : "text-muted hover:text-foreground"}`}>
+                    className={`press flex h-7 w-7 items-center justify-center rounded-md hover:bg-surface-2 ${icon === i.id ? "folder-ink bg-surface-2 ring-1 ring-accent" : "text-muted hover:text-foreground"}`}>
                     <i.Icon size={16} strokeWidth={2} />
                   </button>
                 ))}

@@ -10,6 +10,8 @@ export const en: Record<keyof typeof zhCN, string> = {
   "diff.turnBadge": "Changes in this turn",
   "diff.staged": "staged",
   "diff.noDiff": "No differences",
+  "diff.retrying": "The diff can’t be read right now; retrying…",
+  "diff.failed": "The diff could not be read",
   "diff.noScope": "This {{agent}} has no working directory; no git diff.",
   "diff.noWorkspaceFs": "This host's cutex has no workspace routes (needs workspace-fs); upgrade cutex",
   "diff.turnGone": "A turn's change text is kept only for the run that opened it. Go back to that turn and click View changes again.",

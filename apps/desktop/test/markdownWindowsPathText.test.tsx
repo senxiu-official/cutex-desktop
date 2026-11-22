@@ -94,8 +94,6 @@ vi.mock("../src/renderer/src/bridge", () => ({ api: { openExternal: vi.fn() }, a
 vi.mock("../src/renderer/src/components/CutexLink", () => ({ CutexLink: ({ children }: { children: unknown }) => h("span", null, children as string), CutexImage: () => null }));
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const { Markdown } = await import("../src/renderer/src/components/Markdown");
-const { Streamdown } = await import("streamdown");
-const { BARE_STREAMDOWN_REHYPE } = await import("../src/renderer/src/lib/markdownPathText");
 
 let host: HTMLDivElement, root: Root;
 beforeEach(() => {
@@ -144,8 +142,8 @@ describe("Markdown: Windows paths in prose", () => {
     expect(host.textContent).toContain(line);
   });
 
-  it("in a bare Streamdown (notes, side chat) too", async () => {
-    await act(async () => root.render(h(Streamdown, { mode: "static", rehypePlugins: BARE_STREAMDOWN_REHYPE }, TEXT)));
+  it("in compact Markdown (notes, side chat reasoning) too", async () => {
+    await act(async () => root.render(h(Markdown, { text: TEXT, compact: true })));
     expectWritten(host.textContent ?? "");
   });
 });

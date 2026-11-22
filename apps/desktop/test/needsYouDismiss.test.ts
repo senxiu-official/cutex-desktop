@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { NeedsYou } from "../src/renderer/src/lib/agentAttention";
-import { chipDismissed, DISMISS_TTL_MS, errorKey, isDismissed, needFingerprint, pruneDismissals, runtimeErrorFingerprint, type Dismissals } from "../src/renderer/src/lib/needsYouDismiss";
+import { hostKey } from "../src/renderer/src/lib/hostKeys";
+import { chipDismissed, DISMISS_TTL_MS, errorKey, isDismissed, knownAgents, needFingerprint, pruneDismissals, runtimeErrorFingerprint, type Dismissals } from "../src/renderer/src/lib/needsYouDismiss";
 
 const need = (over: Partial<NeedsYou> = {}): NeedsYou => ({ count: 1, reasons: ["approval"], askIds: [], ...over });
 
@@ -22,7 +23,7 @@ describe("needs-you chip dismissal", () => {
     expect(isDismissed(d, "k", { signal: "done" }, need())).toBe(false);
   });
 
-  it("prunes dismissals whose need in view is gone or changed, and old ones", () => {
+  it("prunes dismissals whose need in view is gone or changed", () => {
     const fp = needFingerprint(need());
     const d: Dismissals = { same: { fp, at: 100 }, changed: { fp, at: 100 }, gone: { fp, at: 100 }, away: { fp, at: 100 }, old: { fp, at: 0 } };
     const current = new Map([
@@ -30,9 +31,43 @@ describe("needs-you chip dismissal", () => {
       ["changed", needFingerprint(need({ count: 3 }))],
     ]);
     const inView = new Set(["same", "changed", "gone"]);
-    expect(Object.keys(pruneDismissals(d, current, inView, DISMISS_TTL_MS + 50)).sort()).toEqual(["away", "same"]);
+    // Without host snapshots nothing goes by age.
+    expect(Object.keys(pruneDismissals(d, current, inView, DISMISS_TTL_MS + 50)).sort()).toEqual(["away", "old", "same"]);
     const kept: Dismissals = { same: { fp, at: 100 } };
     expect(pruneDismissals(kept, current, inView, 200)).toBe(kept);
+  });
+
+  // L1 (owner decision D5, 2026-11-17): a dismissed chip came back after 7 days with nothing changed.
+  it("never drops by age a dismissal whose agent a host still lists; collects old ones of agents no host lists", () => {
+    const fp = needFingerprint(need());
+    const snap = (ids: string[], retired: string[] = [], over: object = {}) => ({ active: ids.map((cutexSessionId) => ({ cutexSessionId })), retired: retired.map((cutexSessionId) => ({ cutexSessionId })), projects: null, hostRows: {}, ...over }) as never;
+    const k = (host: string, id: string) => hostKey(host, id);
+    const known = knownAgents(["h1", "h2", "h3"], (h) => (h === "h1" ? snap(["a"], ["arch"]) : h === "h2" ? snap([], [], { partial: true }) : null));
+    const old = 0;
+    const d: Dismissals = {
+      [k("h1", "a")]: { fp, at: old }, // listed, same need, in view
+      [k("h1", "arch")]: { fp, at: old }, // archived but listed: kept
+      [errorKey(k("h1", "a"))]: { fp: "e", at: old },
+      [k("h1", "deleted")]: { fp, at: old }, // h1's full list has no such agent: collected
+      [k("h1", "fresh")]: { fp, at: DISMISS_TTL_MS * 9 + 1 }, // gone but not old yet
+      [k("h2", "x")]: { fp, at: old }, // h2's list is partial: can't tell
+      [k("h3", "y")]: { fp, at: old }, // h3 not read: can't tell
+      [k("removed", "z")]: { fp, at: old }, // host no longer configured
+      legacyBare: { fp, at: old },
+    };
+    const current = new Map([[k("h1", "a"), fp], [errorKey(k("h1", "a")), "e"]]);
+    const now = DISMISS_TTL_MS * 10;
+    const left = Object.keys(pruneDismissals(d, current, new Set([k("h1", "a")]), now, known));
+    expect(left.sort()).toEqual([k("h1", "a"), k("h1", "arch"), errorKey(k("h1", "a")), k("h1", "fresh"), k("h2", "x"), k("h3", "y")].sort());
+    // Out of view but still listed (another scope): kept however old.
+    expect(Object.keys(pruneDismissals({ [k("h1", "a")]: { fp, at: old } }, new Map(), new Set(), now, known))).toEqual([k("h1", "a")]);
+  });
+
+  it("knownAgents: active and archived agents of each host; unread, partial, cached or loading hosts are unsure", () => {
+    const base = { active: [{ cutexSessionId: "a" }], retired: [{ cutexSessionId: "r" }], projects: null, hostRows: {} };
+    const known = knownAgents(["h1", "h2", "h3", "h4", "h5"], (h) => ({ h1: base, h2: { ...base, cached: true }, h3: { ...base, loading: { loaded: 1, total: 2 } }, h4: { ...base, partial: true }, h5: null })[h] as never);
+    expect(known.keys.has(hostKey("h1", "a")) && known.keys.has(hostKey("h1", "r"))).toBe(true);
+    expect([...known.unsure].sort()).toEqual(["h2", "h3", "h4", "h5"]);
   });
 });
 

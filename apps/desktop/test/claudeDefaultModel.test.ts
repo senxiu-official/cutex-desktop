@@ -1,7 +1,7 @@
 // cutex claude-profile-default-model: a Claude profile's default model / effort are set with the
 // same PATCH fields as a Codex profile's (Profile → 模型, and the Settings → Profiles card's 模型
 // value via lib/profileDefaultModel); older cutex keeps them read-only.
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { PreloadBridge, ProfileModelsView, ProfilePatch } from "../src/shared/ipc";
 import type { MenuAction, MenuEntry } from "../src/renderer/src/lib/contextMenu";
 
@@ -34,6 +34,13 @@ afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
+// Warm-up: the first load of the mock bridge transforms its whole graph (every module's mock.ts); under the full
+// suite's load that alone crossed the first test's 5 s. Each test still installs fresh modules from the cache.
+beforeAll(async () => {
+  await install();
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+}, 60_000);
 
 const actions = (entries: MenuEntry[]) => entries.filter((e): e is MenuAction => typeof e === "object" && !!e);
 const labels = { current: "✓", effort: "Effort", effortDefault: "Model default", effortName: (e: string) => e };
@@ -94,8 +101,9 @@ describe("defaultModelMenu", () => {
   it("lists the models by display name with the current one ticked and disabled", () => {
     const entries = actions(defaultModelMenu({ view: claudeView, profileId: "c", claude: true, model: "sonnet", effort: null, modelName: named, labels, onPick: () => {} }));
     expect(entries.slice(0, 3).map((e) => [e.label, e.hint ?? null, !!e.disabled])).toEqual([
-      ["sonnet", "✓", true],
-      ["opus", null, false],
+      // alias rows by the 11-23 rule: the family (no handshake version in this view), never the raw id
+      ["Sonnet", "✓", true],
+      ["Opus", null, false],
       ["Claude Opus 5.5", null, false],
     ]);
     expect(entries[2]!.title).toBe("claude-opus-5-5");
@@ -134,7 +142,7 @@ describe("defaultModelMenu", () => {
 
 describe("locales", () => {
   it("has the new strings in every maintained catalog", () => {
-    const keys = ["agent-config.profile.claudeModelHint", "agent-config.profile.claudeModelOverrideHint", "settings.profile.card.modelPick", "settings.profile.card.effortDefault", "settings.profile.card.modelSaved"] as const;
+    const keys = ["agent-config.profile.claudeModelOverrideHint", "settings.profile.card.modelPick", "settings.profile.card.effortDefault", "settings.profile.card.modelSaved"] as const;
     for (const catalog of [zhCN, en, enAU, zhHantCN]) for (const key of keys) expect(catalog[key]).toBeTruthy();
     for (const catalog of [zhCN, en, enAU, zhHantCN]) {
       expect(catalog["agent-config.profile.claudeModelOverrideHint"]).toContain("{model}");

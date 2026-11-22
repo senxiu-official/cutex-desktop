@@ -349,13 +349,14 @@ export function parseExternalInput(item: RawItem): ExternalMessage | null {
   };
 }
 
-const IMAGE_PARTS = new Set(["image", "localImage"]);
 
 export function userText(item: RawItem): string {
   const content = (item.content as { type: string; text?: string }[] | undefined) ?? [];
   return content
-    .filter((part) => !IMAGE_PARTS.has(part.type) && part.type !== "skill" && part.type !== "mention")
-    .map((part) => (part.type === "text" ? part.text ?? "" : `[${part.type}]`))
+    // Only the text: images and skills show as thumbnails / chips, and an unknown item type is never shown as
+    // 「[type]」 (this text is what 编辑并重发 sends again).
+    .filter((part) => part.type === "text")
+    .map((part) => part.text ?? "")
     .join("\n");
 }
 
@@ -443,6 +444,16 @@ export function turnErrorText(error: RawTurn["error"]): string | null {
   return parts.length ? [...new Set(parts)].join("\n") : null;
 }
 
+/** A bootstrap turn's `claudeRetry`, when it is a well-formed willRetry for this very turn; else null. */
+function bootstrapRetry(turn: RawTurn & { claudeRetry?: unknown }): RetryNotice | null {
+  const ext = turn.claudeRetry;
+  if (!ext || typeof ext !== "object" || Array.isArray(ext)) return null;
+  const params = ext as { willRetry?: unknown; turnId?: unknown; error?: unknown };
+  if (params.willRetry !== true) return null;
+  if (params.turnId !== undefined && params.turnId !== turn.id) return null;
+  return retryNoticeOf(params.error, params);
+}
+
 /**
  * Build initial state from bootstrap `native.result` (thread/read) and
  * `cutexState.pendingServerRequests` (each `{runtimeGeneration, native: {id, method, params}}`).
@@ -460,6 +471,14 @@ export function timelineFromThreadRead(result: unknown, pending: readonly Pendin
     view.completedAt = turn.completedAt ?? null;
     view.error = turnErrorText(turn.error);
     view.errorCode = turnErrorCode(turn.error);
+    // A running turn the Claude runtime keeps retrying (its optional `claudeRetry`, the same fields as an `error`
+    // notification with willRetry): the retry notice after a reopen / restart, not a failure.
+    const retry = turn.status === "inProgress" ? bootstrapRetry(turn as RawTurn & { claudeRetry?: unknown }) : null;
+    if (retry) {
+      view.retry = retry;
+      view.error = null;
+      view.errorCode = null;
+    }
     for (const item of turn.items ?? []) upsert(state, entryFromItem(item, turn.id));
     if (turn.status === "inProgress") state.activeTurnId = turn.id;
   }
@@ -730,7 +749,7 @@ export function applyEvent(state: TimelineState, envelope: EventEnvelope, liveDe
         if (!turnId) return false;
         const view = ensureTurn(state, turnId);
         if (params.willRetry === true) {
-          view.retry = retryNoticeOf(params.error);
+          view.retry = retryNoticeOf(params.error, params);
           return true;
         }
         view.retry = null;

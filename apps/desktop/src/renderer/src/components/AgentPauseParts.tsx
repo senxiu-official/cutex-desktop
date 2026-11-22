@@ -2,7 +2,6 @@
 // composer's queue-card row with 继续, and the note under the composer with 继续并发送. Nothing when the agent is
 // running or the host lacks the capability. Wording stays apart from 暂停新委托 (delegations only).
 import { agentPauseHint } from "../lib/agentPausePresentation";
-import { NEXT_UP_PANEL_CONTROLS, langOf } from "../lib/inputLedger/nextUpRegistry";
 import { useClock } from "../lib/time";
 import { useState } from "react";
 import { useI18n } from "../i18n";
@@ -34,8 +33,8 @@ export function AgentPauseTag({ hostId, sessionId }: { hostId: string | null | u
 
 /** The queue card's row (like 新委托已暂停): ❚❚ 已暂停 · what waits, and 继续. */
 export function AgentPausedSection({ hostId, sessionId, railed = false }: { hostId: string; sessionId: string; railed?: boolean }) {
-  // Next Up registry 1.8 panel control `agentPaused` (继续 = resume the whole agent).
-  const { t, locale } = useI18n();
+  // Next Up registry panel control `agentPaused` (1.8; 2.0 button 继续这个{{agent}} = resume the whole agent).
+  const { t } = useI18n();
   const pause = useAgentPause(hostId, sessionId);
   const hint = useAgentPauseHint(hostId, pause);
   const [busy, setBusy] = useState(false);
@@ -59,7 +58,8 @@ export function AgentPausedSection({ hostId, sessionId, railed = false }: { host
           className="rounded-md bg-surface-2 px-2 py-0.5 text-xs text-foreground hover:text-accent disabled:opacity-50"
           data-testid="agent-resume"
         >
-          {NEXT_UP_PANEL_CONTROLS.agentPaused.buttons[0][langOf(locale)]}
+          {/* Registry 2.0 agentPaused button; the catalog fills the display term ({{agent}}). */}
+          {t("agentPause.resumeButton")}
         </button>
       </div>
     </div>

@@ -206,9 +206,9 @@ function isOlder(l: Omit<GroupLayout, "mode">, ctx: LayoutContext): boolean {
 /**
  * The sidebar's groups (already in display order) laid out. Starred groups move to the top (in
  * their order) and never collapse. 全部分组: a project quiet for `olderAfter` goes into 「更早的项目」;
- * a group without online agents collapses to one row (unless 无在线项目 = 始终展开, or it holds the
- * open agent / an agent that wants the owner). 星标展开: starred groups in full, every other group one
- * row under 其他项目.
+ * a project without online agents collapses to one row (unless 无在线项目 = 始终展开, or it holds the
+ * open agent / an agent that wants the owner). 星标展开: starred groups in full, every other project one
+ * row under 其他项目. 独立智能体 is always in full (a 系统行).
  */
 export function layoutSidebar(groups: readonly SidebarGroup[], ctx: LayoutContext): SidebarLayout {
   const starredFirst = [...groups.filter((g) => ctx.starred.has(groupKey(g))), ...groups.filter((g) => !ctx.starred.has(groupKey(g)))];
@@ -218,7 +218,10 @@ export function layoutSidebar(groups: readonly SidebarGroup[], ctx: LayoutContex
   for (const g of starredFirst) {
     const starred = ctx.starred.has(groupKey(g));
     const base = layoutGroup(g, ctx, starred);
-    if (starred || ctx.searching) {
+    // 独立智能体 is a 系统行 (a title that stacks at the edges, its fold the owner's), like 未分组 / 工作 in every
+    // grouping: never a one-row project, nor under 其他项目 in 星标展开. A host's with nobody online showed as a project
+    // row — no title band, last activity instead of its counts (owner 2026-11-19; review: 星标展开 too).
+    if (starred || ctx.searching || g.kind === "independent") {
       main.push({ ...base, mode: "full" });
     } else if (ctx.prefs.grouping === "starred") {
       others.push({ ...base, mode: "collapsed" });

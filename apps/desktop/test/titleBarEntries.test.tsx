@@ -21,7 +21,8 @@ vi.mock("../src/renderer/src/lib/contextMenu", () => ({
   openMenuFrom: (_el: unknown, entries: (string | { label: string })[], o?: { owner?: string }) => data.menus.push({ owner: o?.owner, labels: entries.map((r) => (typeof r === "string" ? r : r.label)) }),
   useMenuOwner: () => null,
 }));
-vi.mock("../src/renderer/src/lib/navEntries", () => ({ runNav: (item: { id: string }) => data.runs.push(item.id), useNavActive: () => false }));
+// The bar runs its entries through runBarEntry (Settings in front leaves first: test/pagesOwnPane.test.tsx).
+vi.mock("../src/renderer/src/lib/navEntries", () => ({ runBarEntry: (item: { id: string }) => data.runs.push(item.id), useNavActive: () => false }));
 vi.mock("../src/renderer/src/lib/prefs", () => ({ useUiPrefs: () => ({ navPins: null }), getUiPrefs: () => ({ navPins: null }), setUiPref: () => {} }));
 vi.mock("../src/renderer/src/lib/workspaces", () => ({ watchWindow: () => {}, useWsUi: (sel: (s: unknown) => unknown) => sel({ windowWidth: data.width }) }));
 vi.mock("../src/renderer/src/lib/paneStore", () => ({ usePanes: () => data.panes }));
@@ -32,7 +33,7 @@ vi.mock("../src/renderer/src/components/ShowDesktopButton", () => ({
 }));
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-const { TitleBarEntries, entriesCompact, badgeCount } = await import("../src/renderer/src/components/SidebarNav");
+const { TitleBarEntries, entriesCompact, badgeCount, unavailableWhy } = await import("../src/renderer/src/components/SidebarNav");
 
 const Icon = () => h("svg");
 const entry = (id: string, extra: Record<string, unknown> = {}) => ({ moduleId: id.split(".")[0], mode: "show", missing: [], waiting: false, item: { id, icon: Icon, titleKey: id, target: { page: `${id}.page` }, ...extra } });
@@ -123,6 +124,27 @@ describe("wide window bar", () => {
   });
 });
 
+// Owner 2026-11-18: never a silent no-op — a greyed-out entry says why (tooltip, menu row title).
+describe("an unavailable entry", () => {
+  it("waiting for the host: disabled, its tooltip says it works once the host is connected; a click does nothing", () => {
+    data.entries = ENTRIES.map((e) => (e.item.id === "approvals.nav" ? { ...e, mode: "disable", waiting: true, missing: ["approvals"] } : e));
+    mount();
+    const b = q('[data-titlebar-entry="approvals.nav"]') as HTMLButtonElement;
+    expect(b.disabled).toBe(true);
+    expect(b.dataset.tip).toBe("approvals.nav\nmodules.waitingHost");
+    expect(b.querySelector("[data-count-badge]")).toBeNull();
+    act(() => b.click());
+    expect(data.runs).toEqual([]);
+  });
+
+  it("missing a capability: the tooltip names it", () => {
+    data.entries = ENTRIES.map((e) => (e.item.id === "delegations.nav" ? { ...e, mode: "disable", missing: ["cap.x"] } : e));
+    mount();
+    expect(q('[data-titlebar-entry="delegations.nav"]')!.dataset.tip).toBe('delegations.nav\nmodules.needsCapability:{"list":"cap.x"}');
+    expect(unavailableWhy((k) => k, { waiting: true, missing: [] })).toBe("modules.waitingHost");
+  });
+});
+
 describe("narrow window bar", () => {
   it("keeps 新建, folds the rest into one ⋯ with the 委托 + 审批 total; its list is flat (显示桌面 after the entries), 「更多 ›」 last", () => {
     data.width = 860;
@@ -144,6 +166,14 @@ describe("narrow window bar", () => {
 
 describe("wiring (source)", () => {
   const src = (rel: string) => readFileSync(`src/renderer/src/${rel}`, "utf8");
+  it("the bar's buttons press visibly (owner 2026-11-18): the shared icon-button shape (focus ring, disabled), a deeper pressed fill and a press-in, no-drag", () => {
+    const bar = src("components/TitleBar.tsx");
+    const line = bar.split("\n").find((l) => l.startsWith("const ICON_BTN = "))!;
+    expect(line).toContain("${NO_DRAG} ${ICON_GHOST}");
+    // The shared bar icon button: the Button shape (focus ring, disabled) with the press-icon utility (styles.css).
+    expect(src("components/Button.tsx")).toContain("export const ICON_GHOST = `${btnShape({ icon: true })} text-muted hover:bg-hover hover:text-foreground ${PRESS_ICON}`;");
+    expect(src("components/Button.tsx")).toMatch(/focus-visible:outline-2[^"]*disabled:opacity-40/);
+  });
   it("the window bar draws the group right after the host picker", () => {
     expect(src("components/TitleBar.tsx")).toMatch(/<HostSwitcher \/>\s*<TitleBarEntries btn=\{ICON_BTN\} \/>/);
   });

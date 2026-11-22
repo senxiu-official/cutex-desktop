@@ -77,6 +77,7 @@ import { RuntimeTag } from "./RuntimeTag";
 import { bindingLabel, keyVar } from "../lib/keybindings";
 import { InfoMark } from "./InfoMark";
 import { isElement } from "../lib/ownerWindow";
+import { PRESS_ICON } from "./Button";
 
 /** Quiet pass: a control in its default state shows on hover / keyboard focus of the header. */
 /** Status items that show on hover / focus of the header only (在线 when idle, the bell when plain on). */
@@ -182,7 +183,7 @@ function OnlineState({ session, hostId, info, compact = false }: { session: Sess
         aria-label={armed && item.armed ? item.armed : tip}
         disabled={item.disabled}
         // Online and idle: shows on hover / focus of the header (the avatar's dot says 在线); offline, starting or armed: always.
-        className={`flex h-6 shrink-0 items-center gap-1 rounded-ctl ${compact ? "px-0.5" : "px-1.5"} text-meta ${armed ? `${ARMED_COUNTDOWN} bg-danger-solid text-white` : `text-subtle hover:bg-hover ${online ? `hover:text-danger ${starting ? "" : HOVER_ONLY}` : "hover:text-accent"}`}`}
+        className={`flex h-6 shrink-0 items-center gap-1 rounded-ctl ${compact ? "px-0.5" : "px-1.5"} text-meta ${armed ? `${ARMED_COUNTDOWN} press-solid bg-danger-solid text-white` : `press text-subtle hover:bg-hover ${online ? `hover:text-danger ${starting ? "" : HOVER_ONLY}` : "hover:text-accent"}`}`}
       >
         {starting && !online ? <Loader2 size={11} className="animate-spin text-accent" /> : dot}
         {!compact && label}
@@ -211,7 +212,7 @@ function ProjectChip({ project, hostId }: { project: NonNullable<ConvHeaderInfo[
           data-side-nodrag
           onClick={() => appServices.ui.openPage("projects.page", { project: projectId, ...hostPageParam(hostId) })}
           data-tip={t("titlebar.openProject", { name })}
-          className="flex min-w-0 items-center gap-1 rounded-chip px-0.5 hover:bg-hover hover:text-foreground"
+          className="press flex min-w-0 items-center gap-1 rounded-chip px-0.5 hover:bg-hover hover:text-foreground"
         >
           {presentation && <ProjectBadge icon={projectIcon(projectIcons, hostId, projectId)} badge={presentation.badge_label || name.slice(0, 1)} color={presentation.color} />}
           <span className="truncate">
@@ -231,7 +232,7 @@ function ProjectChip({ project, hostId }: { project: NonNullable<ConvHeaderInfo[
         data-tip={t(projectId ? (starred ? "titlebar.unstar" : "titlebar.star") : starred ? "titlebar.unstarIndependent" : "titlebar.starIndependent")} aria-label={t(projectId ? (starred ? "titlebar.unstar" : "titlebar.star") : starred ? "titlebar.unstarIndependent" : "titlebar.starIndependent")}
         aria-pressed={starred}
         // Unstarred: takes no room until the header is hovered / focused (like the branch's +/−), so line 2 has no gap.
-        className={`shrink-0 rounded-chip p-0.5 hover:bg-hover ${starred ? "text-warn" : "hidden text-subtle hover:text-foreground group-hover/phead:inline-flex group-focus-within/phead:inline-flex"}`}
+        className={`press-icon shrink-0 rounded-chip p-0.5 hover:bg-hover ${starred ? "text-warn" : "hidden text-subtle hover:text-foreground group-hover/phead:inline-flex group-focus-within/phead:inline-flex"}`}
       >
         <Star size={13} className={starred ? "fill-warn" : ""} />
       </button>
@@ -274,7 +275,7 @@ function LocationLine({ hostId, sessionId, cwd, note, project, services }: { hos
     );
   if (git?.isRepo)
     parts.push(
-      <button key="branch" data-side-nodrag data-conv-item="branch" onClick={() => void openChanges()} data-tip={t("pane.changes")} className="flex min-w-0 shrink-[8] items-center gap-1.5 rounded-chip px-0.5 hover:bg-hover hover:text-foreground">
+      <button key="branch" data-side-nodrag data-conv-item="branch" onClick={() => void openChanges()} data-tip={t("pane.changes")} className="press flex min-w-0 shrink-[8] items-center gap-1.5 rounded-chip px-0.5 hover:bg-hover hover:text-foreground">
         <span className="flex min-w-0 items-center gap-0.5">
           <GitBranch size={11} className="shrink-0" />
           <span className="truncate">{git.branch ?? "HEAD"}</span>
@@ -363,7 +364,7 @@ function AgentActions({ paneId, session, hostId, info, folded, compactServices, 
 type FoldedRow = { item: ConvHeaderFold; label: string; entries: MenuEntry[] };
 
 /** One square button of line 1's right side (the bell, the pane's controls): the 24 px ghost icon button (design 040 §2). */
-const CTRL_BASE = "relative inline-flex size-6 shrink-0 items-center justify-center rounded-ctl transition-colors hover:bg-hover hover:text-foreground active:bg-pressed focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent disabled:opacity-40 disabled:hover:bg-transparent";
+const CTRL_BASE = `relative inline-flex size-6 shrink-0 items-center justify-center rounded-ctl transition-colors hover:bg-hover hover:text-foreground ${PRESS_ICON} focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent disabled:opacity-40 disabled:hover:bg-transparent`;
 /** `tone`: the text colour (one class, so it never fights the default). */
 const ctrlBtn = (tone = "text-muted") => `${CTRL_BASE} ${tone}`;
 const CTRL_BTN = ctrlBtn();
@@ -640,7 +641,7 @@ function ConversationHeaderImpl({ paneId, hostId, sessionId, focused, closable, 
       {session && (
         // 会话头 (design 040 §3.1): 40 px, the biggest avatar in the conversation, with two lines; 28 px with one line so the
         // header stays compact (owner 2026-10-23, 「会话顶栏显示两行」 off).
-        <button data-side-nodrag data-conv-avatar="" onClick={menu} className="shrink-0 rounded-full" data-tip={t("menu.more")} aria-label={t("menu.more")}>
+        <button data-side-nodrag data-conv-avatar="" onClick={menu} className="press-avatar shrink-0 rounded-full" data-tip={t("menu.more")} aria-label={t("menu.more")}>
           <Avatar name={session.displayName} avatar={session.avatar} seed={session.cutexSessionId} size={twoLines ? 40 : 28} status={avatarStatus} />
         </button>
       )}
@@ -659,7 +660,7 @@ function ConversationHeaderImpl({ paneId, hostId, sessionId, focused, closable, 
               data-side-nodrag
               data-conv-item="name"
               onClick={menu}
-              className="flex min-w-0 shrink items-center gap-1 rounded-ctl px-0.5 hover:bg-hover"
+              className="press flex min-w-0 shrink items-center gap-1 rounded-ctl px-0.5 hover:bg-hover"
               data-tip={realNameTip(session) ? `${session.displayName}\n${t("info.realNameTip", { name: realAgentName(session) })}` : session.displayName}
             >
               <span className="truncate text-title">

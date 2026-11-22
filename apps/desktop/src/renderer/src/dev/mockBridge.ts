@@ -1,10 +1,13 @@
+import { ownerDispositionSupport } from "../../../shared/ownerDispositions";
 import type { BrowserSitePermissionForget } from "../../../shared/browser";
 import { mockLayoutInstance, mockUserLayoutApi, prepareMockLayout } from "./mockUserLayout";
 import { mockNotificationPage, mockNotificationRows, registerMockOwnerNotes } from "./mockNotificationPages";
 import { createMockInputLedger, inputLedgerMockEnabled, LEDGER_SCENES, type LedgerScene } from "./mockInputLedger";
 import { mockDebug } from "./mockDebug";
+import { EFFORT_SETTINGS, effortModelOption, effortModelsView, effortObserved, effortRuntimeDefaults } from "./mockEffort";
 import { mockImageCache } from "./mockImageCache";
 import { IMAGE_HEAVY, IMAGE_HEAVY_SESSION, prepareImageHeavy, imageHeavyThread, imageHeavyResponse, imageHeavyMedia, imageHeavyFile, imageHeavyDelay } from "./devImageHeavy";
+import { mockQuotaAttribution, mockQuotaHistory, QUOTA_BURN } from "./mockQuotaHistory";
 import { OVERLOAD_RETRY_SCENE, OVERLOAD_RETRY_SESSION, overloadRetryResource, overloadRetryThread, overloadRetryAdmission } from "./mockOverloadRetry";
 import { TURN_ERROR_SCENE, TURN_ERROR_SESSIONS, turnErrorResource, turnErrorThread } from "./mockTurnError";
 import { installSteerPreflightMock } from "./mockSteerPreflight";
@@ -34,12 +37,15 @@ import { presetById } from "../lib/profilePresets";
 import { familyOfModel } from "../../../shared/portraitPacks";
 import type { ProfileTransferWarning } from "../../../shared/profileTransfer";
 import { classifySshPrompt, type SshPromptAnswer, type SshPromptView } from "../../../shared/sshPrompt";
+import { fileNameType } from "../../../shared/localFiles";
 import { MOCK_BASE_FEATURES, MOCK_NEW_FEATURES, mockScenarioFeatures } from "./mockFeatures";
 import { mockNameHistory, mockRename, mockRestoreRefusal, seedMockNames } from "./mockAgentRename";
 import { mockCreatorPathsRefusal, mockReapprovePaths } from "./mockCreatorPaths";
 import { mockPromote } from "./mockQuickChatPromote";
 import { mockProjectColor } from "./mockProjectColor";
 import { bindNewSession, variantApi, variantCreate, variantFields, variantPatch, VARIANTS_SCENE } from "./mockProfileVariants";
+import { applyExclusive, MODEL_CONTEXT_V1_SCENE, v1Effective, v1ItemFields, v1ModelsFields } from "./mockModelContextV1";
+import { bApplyModelPatch, bProfileDefaults, bReset, bRowFields, bSeed, MODEL_CONTEXT_B_SCENE, type BRow } from "./mockModelContextB";
 import type { ResetCredit, ResetCreditsView } from "../../../shared/resetCredits";
 import { MODULE_MOCKS } from "./mockModules";
 import { mockClaudeRules, mockRememberClaudeRules, mockSetClaudeRules, soraPendingApproval } from "./mockClaudePermissions";
@@ -85,6 +91,8 @@ const MOCK_PRESETS: ProfilePreset[] = [
 /** r260 streaming is explicitly opt-in and never enabled for legacy mocks. */
 const LIVE_DELTAS = typeof location !== "undefined" && mockScenarioFeatures(location.search).includes("live-text-deltas");
 /** `?legacy` in the preview URL: behave like a cutex without quick chats / new-thread defaults. */
+/** `?gitBusy=N`: git status reads answered busy so far. */
+let gitBusyReads = 0;
 const LEGACY = typeof location !== "undefined" && new URLSearchParams(location.search).has("legacy");
 /** `?tellRevision`: Eva's demo sends come from agent_tell calls, one a delegation revision (lib/sentToolPairs). */
 const TELL_REVISION_SCENE = typeof location !== "undefined" && new URLSearchParams(location.search).has("tellRevision");
@@ -186,7 +194,7 @@ const MOCK_SETTINGS: Record<string, Record<string, unknown>> = {
   omega: { model: "deepseek-v4-flash", modelProvider: "deepseek", effort: "high", ...full },
   gamma: { model: "gpt-5.5", modelProvider: "openai", effort: "medium", approvalPolicy: "on-request", approvalsReviewer: "auto_review", sandboxPolicy: { type: "workspaceWrite", writableRoots: [], networkAccess: true, excludeTmpdirEnvVar: false, excludeSlashTmp: false } },
   GLM: { model: "glm-5.3", modelProvider: "zai", effort: "high", ...full },
-  claude: { model: "sonnet", modelProvider: "anthropic", effort: "high", ...full },
+  claude: { model: "sonnet", modelProvider: "anthropic", effort: "high", ...full, ...EFFORT_SETTINGS },
   // A DSH chat whose model was changed after creation (created on deepseek-flash): threadSettings is the live one.
   dsh: { model: "deepseek-v4-pro", modelProvider: "dsh", effort: "high" },
 };
@@ -252,6 +260,8 @@ const RAW_MODELS: Record<string, Omit<ModelOption, "inputModalities">[]> = {
 const MOCK_MODELS: Record<string, ModelOption[]> = Object.fromEntries(
   Object.entries(RAW_MODELS).map(([p, list]) => [p, list.map((m) => ({ ...m, inputModalities: p === "gamma" || p === "claude" || m.id === "deepseek-flash" ? ["text", "image"] : ["text"] }))]),
 );
+/** Agents whose (mock) runtime predates deepseek-v4-pro: `listModels` leaves it out (批量换模型 greys them). */
+const MOCK_OLDER_RUNTIME: ReadonlySet<string> = new Set(["helper", "scratch"]);
 const inHours = (h: number) => Math.round(Date.now() / 1000 + h * 3600);
 // codex-native rate limits (ChatGPT account: weekly window only, no 5h).
 const MOCK_LIMITS: Record<string, unknown> = {
@@ -281,11 +291,12 @@ const MOCK_QUOTA: Record<string, QuotaGauge[]> = {
   ],
   // cutex profile-quota-claude: `claude-<n>`, label Claude, captions from the usage `limits` rows; the weekly and the
   // model-scoped weekly window share one reset.
+  // `?quota=burn` (dev/mockQuotaHistory): the 5h window runs out in under 30 minutes, the weekly one before its reset.
   // `?quota5h=<percent>` overrides the 5h window (quota-per-gauge screenshots: a hidden gauge
   // dropping under 15 % comes back in red until it recovers).
   claude: [
-    gauge("claude-0", "Claude", { windowLabel: "5h", remainingPercent: QUOTA_5H ?? 88, resetAt: inHours(3.72), observedAt: Date.now() / 1000 - 120 }),
-    gauge("claude-1", "Claude", { windowLabel: "7d", remainingPercent: 31, resetAt: inHours(48), observedAt: Date.now() / 1000 - 120 }),
+    gauge("claude-0", "Claude", { windowLabel: "5h", remainingPercent: QUOTA_5H ?? (QUOTA_BURN ? 16 : 88), resetAt: inHours(3.72), observedAt: Date.now() / 1000 - 120 }),
+    gauge("claude-1", "Claude", { windowLabel: "7d", remainingPercent: QUOTA_BURN ? 18 : 31, resetAt: inHours(48), observedAt: Date.now() / 1000 - 120 }),
     gauge("claude-2", "Claude", { windowLabel: "Fable 7d", remainingPercent: 79, resetAt: inHours(48), observedAt: Date.now() / 1000 - 120 }),
   ],
   "claude-work": [gauge("primary", "5h", { windowLabel: "5h", remainingPercent: 100, resetAt: inHours(5) }), gauge("extra-0", "7d", { windowLabel: "7d", remainingPercent: 96, resetAt: inHours(150) })],
@@ -330,7 +341,7 @@ const REVIEW_TEXT = `**1 个问题**
 const PNG_1PX = "data:image/svg+xml;base64," + btoa('<svg xmlns="http://www.w3.org/2000/svg" width="96" height="64"><rect width="96" height="64" fill="#6c8cff"/><circle cx="30" cy="28" r="10" fill="#fff"/></svg>');
 
 // Profiles / model catalogs / global settings / user instructions (cutex settings routes).
-type MockModel = { id: string; requestModel?: string | null; displayName: string | null; contextWindow: number | null; maxContextWindow: number | null; autoCompactTokenLimit: number | null; inputModalities: string[]; supportedReasoningEfforts: string[]; defaultReasoningEffort: string | null; /** Claude reference rows */ kind?: string; effortSupportKnown?: boolean };
+type MockModel = { id: string; requestModel?: string | null; displayName: string | null; contextWindow: number | null; maxContextWindow: number | null; autoCompactTokenLimit: number | null; autoCompactPercent?: number | null; inputModalities: string[]; supportedReasoningEfforts: string[]; defaultReasoningEffort: string | null; /** Claude reference rows */ kind?: string; effortSupportKnown?: boolean };
 const mockModel = (id: string, contextWindow: number, over: Partial<MockModel> = {}): MockModel => ({
   id, displayName: null, contextWindow, maxContextWindow: contextWindow, autoCompactTokenLimit: null, inputModalities: ["text"], supportedReasoningEfforts: ["low", "medium", "high", "max"], defaultReasoningEffort: "high", ...over,
 });
@@ -525,6 +536,10 @@ const mockProfileItem = (name: string, hostId = "local") => {
     id: MOCK_PROFILE_IDS[name] ?? name, name, ...(p.options ? { options: p.options } : {}), ...mockLinkFields(name, hostId), cliKind: p.cliKind ?? "codex", source: null, provider: (c.modelProvider as string) ?? null, model: (c.model as string) ?? (p.cliKind === "claude" ? "sonnet" : null), modelProvider: (c.modelProvider as string) ?? null,
     baseUrl: (c.providerBaseUrl as string) ?? null, modelReasoningEffort: (c.modelReasoningEffort as string) ?? null,
     modelContextWindow: (c.modelContextWindow as number) ?? null, modelAutoCompactTokenLimit: (c.modelAutoCompactTokenLimit as number) ?? null,
+    // profile-model-context-v1 (?mcv1, dev/mockModelContextV1.ts).
+    ...(MODEL_CONTEXT_V1_SCENE ? v1ItemFields(p.cliKind, c) : {}),
+    // ?mcb: an API-key Profile without a catalog is not migrated yet (the first model edit creates the catalog).
+    ...(MODEL_CONTEXT_B_SCENE && p.authKind === "apiKey" && p.models.length === 0 ? { modelContextSettingsV1: false } : {}),
     authPresent: p.authKind === "apiKey" ? p.apiKeyPresent : p.authKind === "chatgpt", authKind: p.authKind, ...mockPlanLabel(p), isDefault: name === mockSettings.defaultProfile,
     appearance: { color: p.color, effectiveColor: p.color, providerCategory: null, ...mockLookAppearance(name), ...mockLinkedLook(name, hostId).patch }, quotaEnabled: p.authKind === "apiKey", ...mockLookFields(name),
     ...(Object.prototype.hasOwnProperty.call(mockLinkedLook(name, hostId).images, "avatar") ? { avatarEtag: mockLinkedLook(name, hostId).images.avatar?.etag ?? null } : {}),
@@ -572,7 +587,7 @@ const mockQuotaConfigs: Record<string, { preset: string; primary: QuotaReaderCon
 const mockProfileRef = (name: string): MockProfileRef => ({ id: name, name, cliKind: mockProfiles[name]!.cliKind ?? "codex" });
 const mockProfileDetail = (name: string, hostId = "local") => {
   const p = mockProfiles[name]!;
-  const keys = ["model", "modelProvider", "forcedLoginMethod", "modelReasoningEffort", "modelReasoningSummary", "updatePlanEnabled", "webSearch", "modelCatalogJson", "modelContextWindow", "modelAutoCompactTokenLimit", "providerName", "providerBaseUrl", "providerEnvKey", "providerWireApi", "requestMaxRetries", "streamMaxRetries", "streamIdleTimeoutMs", "websocketConnectTimeoutMs", "requiresOpenaiAuth", "supportsWebsockets"];
+  const keys = ["model", "modelProvider", "forcedLoginMethod", "modelReasoningEffort", "modelReasoningSummary", "updatePlanEnabled", "webSearch", "modelCatalogJson", "modelContextWindow", "modelAutoCompactTokenLimit", ...(MODEL_CONTEXT_V1_SCENE ? ["modelAutoCompactPercent"] : []), "providerName", "providerBaseUrl", "providerEnvKey", "providerWireApi", "requestMaxRetries", "streamMaxRetries", "streamIdleTimeoutMs", "websocketConnectTimeoutMs", "requiresOpenaiAuth", "supportsWebsockets"];
   const claude = p.cliKind === "claude";
   const config = claude ? null : Object.fromEntries(keys.map((k) => [k, p.config[k] ?? null]));
   // Like cutex: Claude profiles only edit colour / switching; nothing advertises `name` (rename) yet.
@@ -585,12 +600,13 @@ const mockProfileDetail = (name: string, hostId = "local") => {
         claudeAllowWriteExplicit: claude ? (p.claudeWrite ?? null) : null, claudeAllowWriteDefault: claude ? true : null, claudeAllowExecExplicit: claude ? (p.claudeExec ?? null) : null, claudeAllowExecDefault: claude ? true : null, claudeFileCheckpointingExplicit: claude ? (p.claudeCheckpoints ?? null) : null, claudeFileCheckpointingDefault: claude ? false : null };
   const agentEditable = LEGACY ? {} : { nativeSubagents: !claude, agentUseRequiresApproval: true, delegationWait: true, ...(claude ? { agentTurnQuestions: true, claudeTools: true, claudeFileCheckpointing: true } : {}), planLabel: true, privateChatgptAuthFile: !claude, toolSchemaCompat: !claude, imageHistoryTrim: !claude };
   // profile-reasoning-summary: OpenAI-family Codex profiles only (DeepSeek-style ones strip the key).
-  const summaryEditable = LEGACY ? {} : { modelReasoningSummary: !claude && p.config.modelProvider === "openai", updatePlanEnabled: !claude, webSearch: !claude, searchTool: !claude && p.authKind === "apiKey" };
+  const summaryEditable = LEGACY ? {} : { modelReasoningSummary: !claude && p.config.modelProvider === "openai", updatePlanEnabled: !claude, webSearch: !claude, searchTool: !claude && p.authKind === "apiKey", ...(MODEL_CONTEXT_V1_SCENE ? { modelAutoCompactPercent: !claude } : {}) };
   // claude-profile-default-model: the Claude default (built-in sonnet) is editable; no newSessionDefaults override in the mock.
   const claudeModel = LEGACY || !claude ? {} : { claudeProfileModel: (p.config.model as string) ?? "sonnet", claudeNewSessionModel: null, claudeBuiltinDefaultModel: "sonnet" };
   if (claude && !LEGACY) (agentEditable as Record<string, boolean>).claudeDefaultModel = true;
   return { ...mockProfileItem(name, hostId), ...(!Object.prototype.hasOwnProperty.call(mockLinkFields(name, hostId), "accountLinkState") ? {} : { accountLink: mockAccountLinks.get(`${hostId}/${name}`) ?? null }), model: (p.config.model as string) ?? (claude ? "sonnet" : null), detail: { ...claudeModel, config, apiKeyPresent: p.apiKeyPresent, allowSessionSwitchExplicit: p.allowSwitch, allowSessionSwitchDefault: p.authKind === "apiKey", catalogEditable: p.authKind === "apiKey" || (!LEGACY && !claude), editable: { ...editable, ...agentEditable, ...summaryEditable }, ...agentOptions } } as never;
 };
+if (MODEL_CONTEXT_B_SCENE) bSeed(mockProfiles as unknown as Record<string, { config: Record<string, unknown>; models: BRow[] }>);
 const mockModelsView = (ref: string) => {
   const name = mockProfileName(ref);
   const p = mockProfiles[name]!;
@@ -614,17 +630,20 @@ const mockModelsView = (ref: string) => {
     modelsSource, modelsUnavailableReason: null, ...(!LEGACY ? { modelVariantsSupported: variants, discoverySupported: p.authKind === "apiKey" } : {}),
     ...(!LEGACY ? { followsUpstream, catalogOverlay: modelsSource.kind === "overlay" ? { entries: p.models.filter((m) => m.requestModel).length, migratedFrom: null } : null, unavailableModels: p.unavailable ?? [] } : {}),
     profileOverrides: { modelContextWindow: profileWindow, modelAutoCompactTokenLimit: profileCompact },
+    ...(MODEL_CONTEXT_V1_SCENE ? v1ModelsFields(p.cliKind) : {}),
+    ...(MODEL_CONTEXT_B_SCENE && p.authKind === "apiKey" && p.models.length === 0 ? { modelContextSettingsV1: false } : {}),
+    ...(MODEL_CONTEXT_B_SCENE && p.cliKind !== "claude" && p.cliKind !== "dsh" && p.cliKind !== "kimi" ? { profileDefaultValues: bProfileDefaults(p.models as BRow[], p.config, (p.config.model as string) ?? null) } : {}),
     discovery: p.authKind === "apiKey" ? { sourceUrl: `${String(p.config.providerBaseUrl)}/models`, fetchedAt: "2026-10-06T08:12:00Z", models: p.models.map((m) => m.id) } : null,
     unsupportedModelFields: ["maxOutputTokens"], precedence: null,
     models: p.models.map((m) => {
       const window = profileWindow ? Math.min(profileWindow, m.maxContextWindow ?? profileWindow) : m.contextWindow;
       const compactRaw = profileCompact ?? m.autoCompactTokenLimit;
       return {
-        ...m, effectiveContextWindowPercent: null, isDefault: m.id === ((p.config.model as string) ?? (p.cliKind === "claude" ? "sonnet" : null)), discovered: true, ...(LEGACY ? {} : { entryDisplayName: p.modelNames?.[m.id] ?? null }),
+        ...(({ ctxOwner: _o, ctxPreserved: _p, ...wire }) => wire)(m as BRow & MockModel), ...(MODEL_CONTEXT_B_SCENE && p.cliKind !== "claude" && p.cliKind !== "dsh" && p.cliKind !== "kimi" ? (({ effective: _e, ...b }) => b)(bRowFields(m as BRow, p.config)) : {}), effectiveContextWindowPercent: null, isDefault: m.id === ((p.config.model as string) ?? (p.cliKind === "claude" ? "sonnet" : null)), discovered: true, ...(LEGACY ? {} : { entryDisplayName: p.modelNames?.[m.id] ?? null }),
         effective: p.cliKind === "claude" ? {
           contextWindow: LEGACY ? null : m.contextWindow, contextWindowSource: !LEGACY && m.contextWindow ? "reference" : "unknown",
           autoCompactTokenLimit: null, autoCompactTokenLimitSource: "notApplicable",
-        } : {
+        } : MODEL_CONTEXT_B_SCENE && p.cliKind !== "dsh" && p.cliKind !== "kimi" ? bRowFields(m as BRow, p.config).effective : MODEL_CONTEXT_V1_SCENE ? v1Effective(m, p.config) : {
           contextWindow: window, contextWindowSource: profileWindow ? "profile" : m.contextWindow ? "catalog" : "unknown",
           autoCompactTokenLimit: window ? Math.min(compactRaw ?? Infinity, Math.round(window * 0.9)) : compactRaw,
           autoCompactTokenLimitSource: profileCompact ? "profile" : m.autoCompactTokenLimit ? "catalog" : "default90Percent",
@@ -784,7 +803,7 @@ function claudeSession(id: string, name: string, output: string, features: Recor
     ...s,
     native: { threadId: `thread-${id}`, schema: { protocol: "claude-app-server-subset", majorVersion: 1, version: "0.3.0+cutex", sha256: "", channel: "experimental", capabilities: { experimentalApi: true, features: LEGACY ? null : { ...features, ...(IMAGE_STEER ? { imageInputSteering: imageInputCap(features === CLAUDE_R21_FEATURES && IMAGE_Q.get("imgsteer") !== "unsupported" ? "pathText" : "unsupported") } : {}) } }, extensions: ["claude-runtime-v1"] } },
     runtime: { ...s.runtime, backend: "claude_subscription" },
-    runtimeDefaults: LEGACY ? null : { claudeAllowWrite: false, claudeAllowExec: false },
+    runtimeDefaults: effortRuntimeDefaults(LEGACY ? null : { claudeAllowWrite: false, claudeAllowExec: false }),
   };
 }
 /** A Codex agent whose session declares image-input-steering `nativeImage` (only with IMAGE_STEER). */
@@ -1454,6 +1473,10 @@ const threadRead = {
           // Refused / uncertain / awaiting-approval cutex tool results (failed task rows).
           { type: "mcpToolCall", id: "m31c", server: "cutex", tool: "agent_delegate", status: "completed", arguments: { target: "Mika", title: "补 flush 并发测试", text: "给 dispatch_queue_flush 加一个并发测试" }, result: { content: [{ type: "text", text: JSON.stringify({ ok: false, status: "no_write", code: "busy", detail: "Mika already has an open delegation from you (d-7); close or wait for it first" }) }], structuredContent: null, isError: true } },
           { type: "mcpToolCall", id: "m31d", server: "cutex", tool: "agent_ask", status: "failed", arguments: { target: "Mika", text: "ping" }, result: { content: [{ type: "text", text: JSON.stringify({ ok: false, status: "no_write", code: "tool_removed", detail: "agent_ask was removed; use agent_delegate for work or agent_tell for a note" }) }], structuredContent: null, isError: true } },
+          // Delegation tool rows name the delegation by title → handler (owner 2026-11-18); an unknown id stays the id.
+          { type: "mcpToolCall", id: "m31dx1", server: "cutex", tool: "delegation_close", status: "completed", arguments: { delegation: "ask-run", outcome: "abandoned" }, result: { content: [{ type: "text", text: JSON.stringify({ ok: true }) }], structuredContent: { ok: true } } },
+          { type: "mcpToolCall", id: "m31dx2", server: "cutex", tool: "delegation_reopen", status: "completed", arguments: { delegation: "ask-run", note: "CAS 冲突时的重试还没覆盖" }, result: { content: [{ type: "text", text: JSON.stringify({ ok: true }) }], structuredContent: { ok: true } } },
+          { type: "mcpToolCall", id: "m31dx3", server: "cutex", tool: "delegation_close", status: "completed", arguments: { delegation: "delegation-536a74", outcome: "abandoned" }, result: { content: [{ type: "text", text: JSON.stringify({ ok: true }) }], structuredContent: { ok: true } } },
           { type: "mcpToolCall", id: "m31e", server: "cutex", tool: "agent_tell", status: "completed", arguments: { to: "Alden", text: "release 构建好了，可以 smoke test" }, result: { content: [{ type: "text", text: JSON.stringify({ ok: false, status: "response_uncertain", code: "bus_timeout", detail: "agent bus did not confirm delivery within 10s; the note may or may not have arrived" }) }], structuredContent: null } },
           { type: "mcpToolCall", id: "m31f", server: "cutex", tool: "agent_create", status: "completed", arguments: { name: "release-checker" }, result: { content: [], structuredContent: { ok: false, status: "approval_required", state: "pendingReview", code: "approval_required", detail: "creating an agent needs the owner's approval" } } },
           // Failed agent_create, Management envelope: Codex shape (status failed, no item error) and Claude-adapter shape (generic item error).
@@ -1484,6 +1507,8 @@ const threadRead = {
           { type: "userMessage", id: "u4", content: [{ type: "text", text: "再把整个 management::v2 跑一遍。" }] },
           { type: "commandExecution", id: "c41", command: "cargo fmt --check", status: "completed", exitCode: 0, durationMs: 2100 },
           { type: "commandExecution", id: "c42", command: "cargo clippy --lib -q", status: "completed", exitCode: 0, durationMs: 9000 },
+          // A failure earlier in the running group: it stays folded into the header's 「· 1 失败」 (owner 2026-11-14).
+          { type: "commandExecution", id: "c42f", command: "cargo test --lib maid::list", status: "failed", exitCode: 101, durationMs: 3200, aggregatedOutput: "test maid::list::lists_all ... FAILED\n\nfailures:\n    assertion failed: maids.len() == 3" },
           { type: "commandExecution", id: "c43", command: "git diff --stat", status: "completed", exitCode: 0, durationMs: 90, aggregatedOutput: " 2 files changed, 29 insertions(+), 1 deletion(-)" },
           { type: "commandExecution", id: "c44", command: "cargo build --locked --bin cutex", status: "completed", exitCode: 0, durationMs: 21000 },
           { type: "commandExecution", id: "c45", command: "cargo test --lib management::v2", status: "inProgress", aggregatedOutput: "test management::v2::usage::tests::groups_by_day ... ok\ntest management::v2::workspace_fs::tests::dir_lists_entries ... ok\ntest management::v2::user_input::flush_respects_revision ... ok" },
@@ -2482,8 +2507,11 @@ const DELIVERY_TURNS = typeof location !== "undefined" && new URLSearchParams(lo
 /** admission-owner-yield: one-shot, consumed when the session's turn ends (mock: on going idle). */
 const ownerYields = new Set<string>();
 /** stop-holds-ridealongs: a stop hold holds every ride-along; an explicit 暂停委托 only ask results. */
+const STOP_ANSWER = typeof location !== "undefined" && new URLSearchParams(location.search).has("stopanswer");
 function heldNextStep(sessionId: string, item: MockNextStep): MockNextStep {
   const p = LEGACY ? undefined : asksPauses.get(sessionId);
+  // ?stopanswer (cutex stop-answer-admission-v1): per-item admission; a delegation result is not held by a stop (N10).
+  if (p?.stopHold && STOP_ANSWER) return item.deliveryKind === "answer" && p.origin === "ownerStop" ? { ...item, eligible: true, held: null } : { ...item, eligible: false, held: "ownerStop" };
   if (p?.stopHold) return { ...item, held: "ownerStop" };
   if (p && (item.deliveryKind === "answer" || item.deliveryKind === "question")) return { ...item, held: "ownerPause" };
   return item;
@@ -3479,7 +3507,8 @@ export function installMockBridge(): void {
     shell: {
       async setMemoryHost(value) { shellState.prefs.memoryHost = value; return structuredClone(shellState); },
       remoteCopies: (request) => import("../modules/remote-copies/mock").then(m => m.mockCopyRequest(request)),
-      async filePathInfo() { return { canOpen: true }; },
+      // By name, as main decides for a file without the executable bit (main/localFiles.ts).
+      async filePathInfo(_hostId, path) { const type = fileNameType(path); return type === "script" || type === "program" ? { canOpen: false, runnable: type } : { canOpen: true }; },
       async filePath(hostId, path, action) { console.info("[mock local file]", hostId, action, path); },
       ...remoteCloseShell,
       async state() {
@@ -3901,7 +3930,7 @@ export function installMockBridge(): void {
       },
       async unsubscribe() {},
       async submit(sessionId, text, strategy, _startIfOffline, options) {
-        if (INPUT_LEDGER) return mockInputLedger.submit(sessionId, text, strategy, options?.clientUserMessageId ?? crypto.randomUUID());
+        if (INPUT_LEDGER) return mockInputLedger.submit(sessionId, text, strategy, options?.clientUserMessageId ?? crypto.randomUUID(), options?.extra ?? []);
         emptyChats.delete(sessionId);
         // A message that is only queued (busy, strategy queue) releases no stop hold.
         if (!(asksPauses.get(sessionId)?.stopHold && busy.has(sessionId) && strategy === "queue")) setAsksPause(sessionId, false, "ownerMessage");
@@ -4133,7 +4162,10 @@ export function installMockBridge(): void {
         flushQueue(sessionId);
       },
       async listModels(sessionId) {
-        return MOCK_MODELS[profileOf(sessionId)] ?? [];
+        const list = (MOCK_MODELS[profileOf(sessionId)] ?? []).map(effortModelOption);
+        // 批量换模型 (lib/batchModel): two agents run an older native that does not list the newest omega model, so the
+        // dialog greys them with 「它的运行时不提供这个模型」.
+        return MOCK_OLDER_RUNTIME.has(sessionId) ? list.filter((m) => m.id !== "deepseek-v4-pro") : list;
       },
       // session-sandbox-extras: network / extra writable roots of a workspace-write agent, pushed to the
       // live thread (thread/settings/updated) like cutex does.
@@ -4246,6 +4278,12 @@ export function installMockBridge(): void {
       },
       async gitStatus() {
         broadRootRefusal();
+        // `?gitBusy`: the host answers git_status_busy (owner 2026-11-16); `?gitBusy=N`: only the first N reads.
+        const busy = new URLSearchParams(location.search).get("gitBusy");
+        if (busy !== null && (busy === "" || gitBusyReads++ < Number(busy))) {
+          await new Promise((r) => setTimeout(r, 200));
+          throw new Error("Error invoking remote method 'cutex-desktop:invoke': CutexApiError: git_status_busy: git status is busy; retry shortly");
+        }
         return {
           isRepo: true, branch: "main", upstream: null, ahead: 0, behind: 0, head: { sha: "6b1d8bd0", subject: "Usage page" },
           files: [
@@ -4502,13 +4540,15 @@ export function installMockBridge(): void {
         if (apiKey) p.apiKeyPresent = true;
         if (color !== undefined) p.color = color;
         if (allowSessionSwitch !== undefined) p.allowSwitch = allowSessionSwitch;
+        if (MODEL_CONTEXT_V1_SCENE) applyExclusive(p.config, cfg, "modelAutoCompactPercent", "modelAutoCompactTokenLimit");
+        else if ("modelAutoCompactPercent" in cfg) throw new Error("invalid_request: unsupported field modelAutoCompactPercent");
         Object.assign(p.config, cfg);
         if (accountLink !== undefined) mockAccountLinks.set(`local/${name}`, accountLink);
         mockLookRevisionPatch(name, "local", rawPatch);
         return mockProfileDetail(name);
       },
       async profileModels(name) {
-        return mockModelsView(name);
+        return effortModelsView(mockModelsView(name));
       },
       async discoverModels(name) {
         return mockModelsView(name);
@@ -4519,6 +4559,15 @@ export function installMockBridge(): void {
         if (patch.requestModel && (LEGACY || mockProfiles[name]!.cliKind === "claude")) throw new Error("Model configurations are not supported");
         const source = patch.requestModel ? list.find((m) => m.id === patch.requestModel && !m.requestModel) : null;
         if (patch.requestModel && !source) throw new Error("Base model not found");
+        if (MODEL_CONTEXT_B_SCENE) {
+          // P13 B: context fields are the owner layer; the flat numbers stay the catalog built-ins.
+          const row = existing ?? (list.push({ displayName: null, contextWindow: null, maxContextWindow: null, autoCompactTokenLimit: null, inputModalities: ["text"], supportedReasoningEfforts: ["low", "medium", "high"], defaultReasoningEffort: "medium", ...structuredClone(source), id: modelId }), list[list.length - 1]!);
+          Object.assign(row, bApplyModelPatch(row as BRow, patch as Record<string, unknown>));
+          if (!existing && mockProfiles[name]!.authKind === "apiKey") (mockProfiles[name]!.config as Record<string, unknown>).modelCatalogJson = "catalog.json";
+          return mockModelsView(name);
+        }
+        if (MODEL_CONTEXT_V1_SCENE) { if (existing) applyExclusive(existing, patch, "autoCompactPercent", "autoCompactTokenLimit"); }
+        else if ("autoCompactPercent" in patch) throw new Error("invalid_request: unsupported field autoCompactPercent");
         if (existing) Object.assign(existing, patch);
         else list.push({ displayName: null, contextWindow: null, maxContextWindow: null, autoCompactTokenLimit: null, inputModalities: ["text"], supportedReasoningEfforts: ["low", "medium", "high"], defaultReasoningEffort: "medium", ...structuredClone(source), ...patch, id: modelId });
         return mockModelsView(name);
@@ -4533,6 +4582,7 @@ export function installMockBridge(): void {
         const row = list.find((m) => m.id === modelId);
         const base = row?.requestModel ? list.find((m) => m.id === row.requestModel) : null;
         if (row && base) Object.assign(row, structuredClone(base), { id: row.id, requestModel: row.requestModel, displayName: row.displayName });
+        if (row && MODEL_CONTEXT_B_SCENE) bReset(row as BRow);
         return mockModelsView(name);
       },
       async getSettings() {
@@ -4700,6 +4750,9 @@ export function installMockBridge(): void {
         // The selection (alias) and the pinned model that actually answered.
         const model = (MOCK_SETTINGS[profileOf(sessionId)]?.model as string | undefined) ?? "sonnet";
         const answered: Record<string, string> = { sonnet: "claude-sonnet-5-5", opus: "claude-opus-5-5" };
+        const scene = effortObserved(model);
+        if (scene === null) return { requestedModel: model, observedForRequestedModel: null, observedModels: [], lastObservedModel: null };
+        if (scene) return { requestedModel: model, observedForRequestedModel: model, observedModels: [scene], lastObservedModel: scene };
         return { requestedModel: model, observedForRequestedModel: model, observedModels: [answered[model] ?? model], lastObservedModel: answered[model] ?? model };
       },
       async projectMutation(projectId, _expected, op) {
@@ -4845,6 +4898,9 @@ export function installMockBridge(): void {
         mockGuidesPrefs = { schema: 1, skippedThrough, updatedAt: new Date().toISOString() };
         return { ...mockGuidesPrefs };
       },
+      async ownerDispositionSupport() {
+        return ownerDispositionSupport(await this.capabilities());
+      },
       async capabilities() {
         const remoteFeatures = mockRemote() ? (OLD_REMOTE ? ["management-client-tokens"] : ["management-client-tokens", "session-attachments", "fs-dir-browse"]) : ["management-client-tokens", "session-attachments", "fs-dir-browse"];
         return {
@@ -4865,6 +4921,13 @@ export function installMockBridge(): void {
       },
       // profile-reset-credits (fakes only: nothing here touches a real account). gamma: 2 Codex credits,
       // claude: one grant with 2 resets; ?resets=none → none left; GLM: ZCode only.
+      // Quota curve + 「谁在用」 (design 052; dev/mockQuotaHistory).
+      async quotaHistory(query) {
+        return mockQuotaHistory(query.profile, MOCK_QUOTA[query.profile] ?? [], query);
+      },
+      async quotaAttribution(query) {
+        return mockQuotaAttribution(query.profile, query.window, MOCK_QUOTA[query.profile] ?? []);
+      },
       async profileResetCredits(profile) {
         if (LEGACY) return null;
         return mockResetCredits(profile);
@@ -5078,6 +5141,7 @@ export function installMockBridge(): void {
     let sites = Array.from({ length: 12 }, (_, i) => ({ pool: i % 4 === 3 ? "agent" as const : "owner" as const, origin: `https://site-${String(i + 1).padStart(2, "0")}.example`, permission: i % 2 ? "camera" as const : "notifications" as const, allow: i % 3 !== 0, updatedAt: 0 }));
     const known: Record<string, unknown> = {
       externalPages: async () => ({ stored: true, forced: false }),
+      systemProxy: async () => ({ enabled: false }),
       carrierFrameRate: async (frameRate?: 15 | 30) => ({ frameRate: carrierFrameRate = frameRate ?? carrierFrameRate }),
       sitePermissions: async (forget?: BrowserSitePermissionForget) => {
         sites = forget === "all" ? [] : forget ? sites.filter((s) => s.pool !== forget.pool || s.origin !== forget.origin) : sites;

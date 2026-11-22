@@ -23,6 +23,7 @@ export const en: Record<keyof typeof zhCN, string> = {
   "modules.reloadWindow": "Reload window",
   "modules.needsUpgrade": "This host's cutex does not support it (needs {feature}); please upgrade cutex",
   "modules.needsCapability": "Needs cutex capability: {list}",
+  "modules.waitingHost": "Available once the host is connected",
   "modules.pageOff": "The module of this page is off or unavailable on this host.",
   "modules.openModules": "Open Modules",
   "modules.section.sources": "Installation and sources",

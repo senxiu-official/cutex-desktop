@@ -1,30 +1,28 @@
 // 备忘 · 要处理: list, shared by the side card, the desktop widget and the conversation's tool strip: open pins by kind
 // (要你定 → 要你做 → 记一下), each with the agent, its age, its links and one-click 完成; 不用了 / 重新钉上 / 删除 in ⋯;
-// 回到原处 jumps to the turn it was pinned in. Resolved pins fold under 「已处理 · N」.
+// the title opens the memo's detail (Detail.tsx; 2026-11-19: a click no longer jumps, the jump's flash read as a stray
+// blue frame); 回到原处 in ⋯ jumps to the turn it was pinned in. The preview is plain selectable text, outside any button.
+// Resolved pins fold under 「已处理 · N」.
 import { useMemo, useState } from "react";
 import { Check, ChevronDown, ChevronRight, CornerUpLeft, Link2, MoreHorizontal, Pin } from "lucide-react";
+import { AgentMarkdownScope } from "../../../components/AgentMarkdownScope";
 import { Avatar } from "../../../components/Avatar";
 import { Markdown } from "../../../components/Markdown";
 import { CountBadge } from "../../../components/Tag";
 import { useI18n, type MessageKey } from "../../../i18n";
 import { openMenuFrom, contextMenu, type MenuEntry } from "../../../lib/contextMenu";
-import { turnRef } from "../../../lib/refs";
+import { RefOpenVia } from "../../../lib/refOpenVia";
 import { formatAbsolute, formatWhen, useClock } from "../../../lib/time";
 import { useApp } from "../../../store";
-import { services } from "../../app";
-import { KIND_ICON, KIND_TONE } from "./calls";
+import { KIND_ICON, KIND_TONE, linkText } from "./calls";
 import { openByKind, pinRows, resolvedRows, rowKey, type PinRow } from "./model";
+import { jumpToPin, openPinDetail, pinRefOpener } from "./open";
 import { changePin, usePins } from "./store";
 
+type OnOpen = (row: PinRow) => void;
+const openDetail: OnOpen = (row) => openPinDetail(row.hostId, row.pin.pinId);
 
-function jump(row: PinRow) {
-  const { hostId, pin } = row;
-  const name = pin.agentName ?? pin.agentId;
-  if (pin.turnId) void services.refs.open(turnRef({ hostId, sessionId: pin.agentId, turnId: pin.turnId, agentName: name }), { how: "jump" });
-  else services.agents.open(pin.agentId);
-}
-
-function PinRowView({ row, compact }: { row: PinRow; compact?: boolean }) {
+function PinRowView({ row, compact, onOpen }: { row: PinRow; compact?: boolean; onOpen: OnOpen }) {
   const { t, locale } = useI18n();
   const now = useClock();
   const { hostId, pin } = row;
@@ -34,7 +32,8 @@ function PinRowView({ row, compact }: { row: PinRow; compact?: boolean }) {
   const Icon = KIND_ICON[pin.kind];
   const created = Date.parse(pin.createdAt) / 1000;
   const menu = (): MenuEntry[] => [
-    { label: t("bookmarks.memo.jump"), onSelect: () => jump(row) },
+    { label: t("bookmarks.memo.open"), onSelect: () => onOpen(row) },
+    { label: t("bookmarks.memo.jump"), onSelect: () => void jumpToPin(hostId, pin) },
     "separator",
     open ? { label: t("bookmarks.memo.drop"), onSelect: () => void changePin(hostId, pin.pinId, { state: "dropped" }) } : { label: t("bookmarks.memo.reopen"), onSelect: () => void changePin(hostId, pin.pinId, { state: "open" }) },
     { label: t("bookmarks.memo.remove"), danger: true, armed: t("bookmarks.memo.removeArmed"), onSelect: () => void changePin(hostId, pin.pinId, { delete: true }) },
@@ -42,9 +41,9 @@ function PinRowView({ row, compact }: { row: PinRow; compact?: boolean }) {
   return (
     <div className="group flex min-w-0 items-start gap-2 rounded-lg px-2 py-1.5 hover:bg-hover" onContextMenu={contextMenu(menu)} data-owner-pin={pin.pinId}>
       <Icon size={14} className={`mt-0.5 shrink-0 ${open ? KIND_TONE[pin.kind] : "text-subtle opacity-60"}`} aria-label={t(`bookmarks.memo.kind.${pin.kind}` as MessageKey)} />
-      <button type="button" className="flex min-w-0 flex-1 flex-col gap-0.5 text-left" onClick={() => jump(row)} title={t("bookmarks.memo.jump")}>
-        <span className={`line-clamp-2 break-words text-xs ${open ? "text-foreground" : "text-subtle line-through decoration-subtle/50"}`}>{pin.title}</span>
-        {!compact && pin.detail && open && <span className="line-clamp-3 break-words whitespace-pre-wrap text-caption/[inherit] text-muted">{pin.detail}</span>}
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <button type="button" className={`line-clamp-2 text-left break-words text-xs hover:underline hover:decoration-subtle/60 ${open ? "text-foreground" : "text-subtle line-through decoration-subtle/50"}`} onClick={() => onOpen(row)} title={t("bookmarks.memo.open")} data-owner-pin-open="">{pin.title}</button>
+        {!compact && pin.detail && open && <p className="line-clamp-2 cursor-text break-words whitespace-pre-wrap text-caption/[inherit] text-muted select-text" data-owner-pin-preview="">{pin.detail}</p>}
         <span className="flex min-w-0 items-center gap-1 text-caption/[inherit] text-subtle">
           <Avatar name={pin.agentName ?? pin.agentId} seed={pin.agentId} size={16} />
           <span className="min-w-0 truncate">{pin.agentName ?? pin.agentId}</span>
@@ -52,8 +51,8 @@ function PinRowView({ row, compact }: { row: PinRow; compact?: boolean }) {
           <span className="shrink-0" title={Number.isFinite(created) ? formatAbsolute(created) : undefined}>· {Number.isFinite(created) ? formatWhen(created, now, locale) : ""}</span>
           {!open && <span className="shrink-0">· {t(`bookmarks.memo.state.${pin.state}` as MessageKey)}{pin.resolvedBy === "agent" ? ` (${t("bookmarks.memo.by.agent")})` : ""}</span>}
         </span>
-        {!open && pin.resolution && !compact && <span className="line-clamp-2 text-caption/[inherit] text-subtle">「{pin.resolution}」</span>}
-      </button>
+        {!open && pin.resolution && !compact && <span className="line-clamp-2 text-caption/[inherit] text-subtle select-text">「{pin.resolution}」</span>}
+      </div>
       <span className="flex shrink-0 items-center gap-0.5">
         {open && (
           <button type="button" className="rounded p-1 text-subtle hover:bg-surface-2 hover:text-ok" aria-label={t("bookmarks.memo.done")} title={t("bookmarks.memo.done")} onClick={() => void changePin(hostId, pin.pinId, { state: "done" })} data-owner-pin-done="">
@@ -73,20 +72,27 @@ function PinRowView({ row, compact }: { row: PinRow; compact?: boolean }) {
   );
 }
 
-/** Links go through the app's Markdown (artifacts, files on the agent's host, web pages open the usual way). */
+/** Links go through the app's Markdown, scoped to the memo's agent and host like the detail: files resolve in its
+ *  workspace and are never read by themselves; `cutex:` links bring the memo's host into view first. */
 function Links({ row }: { row: PinRow }) {
-  if (row.pin.state !== "open" || row.pin.links.length === 0) return null;
-  const text = row.pin.links.map((l) => `[${(l.label ?? l.target).replace(/[[]]/g, "")}](<${l.target.replace(/[<>]/g, "")}>)`).join(" · ");
+  const { hostId, pin } = row;
+  if (pin.state !== "open" || pin.links.length === 0) return null;
+  const text = pin.links.map(linkText).join(" · ");
   return (
     <div className="-mt-1 mb-1 ml-8 flex min-w-0 items-start gap-1 text-caption/[inherit] text-muted" data-owner-pin-links="">
       <Link2 size={11} className="mt-1 shrink-0" />
-      <div className="min-w-0 flex-1 [&_p]:my-0"><Markdown text={text} compact /></div>
+      <div className="min-w-0 flex-1 [&_p]:my-0">
+        <RefOpenVia.Provider value={pinRefOpener(hostId, pin)}>
+          <AgentMarkdownScope paneId={`owner-pin:${hostId}:${pin.pinId}`} hostId={hostId} sessionId={pin.agentId}><Markdown text={text} compact fileReads="scoped" /></AgentMarkdownScope>
+        </RefOpenVia.Provider>
+      </div>
     </div>
   );
 }
 
 /** The board: `agentId` limits it to one agent; `max` caps the open rows (the widget); `compact` hides details and links. */
-export function PinBoard({ agentId, max, compact, showResolved = true }: { agentId?: string | null; max?: number; compact?: boolean; showResolved?: boolean }) {
+/** `onOpen`: the card shows the detail in place; elsewhere it opens in the 备忘 card. */
+export function PinBoard({ agentId, max, compact, showResolved = true, onOpen = openDetail }: { agentId?: string | null; max?: number; compact?: boolean; showResolved?: boolean; onOpen?: OnOpen }) {
   const { t } = useI18n();
   const byHost = usePins((s) => s.byHost);
   const rows = useMemo(() => pinRows(byHost, agentId), [byHost, agentId]);
@@ -118,7 +124,7 @@ export function PinBoard({ agentId, max, compact, showResolved = true }: { agent
             </h3>
             {shown.map((r) => (
               <div key={rowKey(r)}>
-                <PinRowView row={r} compact={compact} />
+                <PinRowView row={r} compact={compact} onOpen={onOpen} />
                 {!compact && <Links row={r} />}
               </div>
             ))}
@@ -132,7 +138,7 @@ export function PinBoard({ agentId, max, compact, showResolved = true }: { agent
             {showDone ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
             {t("bookmarks.memo.resolved", { n: resolved.length })}
           </button>
-          {showDone && resolved.slice(0, 50).map((r) => <PinRowView key={rowKey(r)} row={r} compact={compact} />)}
+          {showDone && resolved.slice(0, 50).map((r) => <PinRowView key={rowKey(r)} row={r} compact={compact} onOpen={onOpen} />)}
         </section>
       )}
     </div>

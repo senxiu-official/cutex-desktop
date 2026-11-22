@@ -4,10 +4,11 @@
 // Two rows: the card header carries only the file name (full width); the path row below is a breadcrumb
 // back to the 文件 explorer (docs/design/019 §3: each folder opens there, ◎ shows the file in it) and ends
 // with 源码 / 复制绝对路径.
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { LocateFixed, MoreHorizontal } from "lucide-react";
 import { useI18n } from "../../i18n";
-import { openFolder, openHostFolder, revealHostInTree, revealInTree } from "../../lib/sideOpen";
+import { openFolder, openHostFolder, otherSource, revealHostInTree, revealInTree, type OpenSource } from "../../lib/sideOpen";
+import { AgentMarkdownScope } from "../../components/AgentMarkdownScope";
 import { HOST_FILE_READ_FEATURE, rootFor } from "../../lib/workspace";
 import { useSelectedWorkspace, WorkspaceContext } from "../../lib/workspaceView";
 import { apiFor } from "../../bridge";
@@ -28,11 +29,26 @@ export function PreviewBody(props: SideBodyProps<PreviewState>) {
   const workspace = useSelectedWorkspace();
   const scope = props.instance.state.scope;
   if (scope && props.hostId) return <WorkspaceContext.Provider value={{ ...workspace, hostId: props.hostId, api: apiFor(props.hostId), scope }}><PreviewContent {...props} /></WorkspaceContext.Provider>;
+  // A host file opened for an agent on another host (a side chat / note link, lib/sideOpen OpenSource): read it there.
+  if (props.instance.state.host && props.hostId && props.hostId !== workspace.hostId) return <WorkspaceContext.Provider value={{ ...workspace, hostId: props.hostId, api: apiFor(props.hostId), scope: null }}><PreviewContent {...props} /></WorkspaceContext.Provider>;
   return <PreviewContent {...props} />;
+}
+
+/**
+ * The agent this card belongs to when it is not the selected one (opened from a side chat / note link, lib/sideOpen
+ * OpenSource): every action here targets it. The 文件 tree shows the selected workspace only, so its folders give the
+ * established notice and ◎ is left out.
+ */
+function useOtherSource({ hostId, sessionId }: SideBodyProps<PreviewState>): OpenSource | undefined {
+  // Re-evaluated when the selection changes (the same agent selected later is no longer "other").
+  useApp((s) => s.selectedId);
+  useApp((s) => s.selectedHost);
+  return otherSource(hostId ? { hostId, sessionId: sessionId ?? null } : undefined);
 }
 
 function PreviewContent(props: SideBodyProps<PreviewState>) {
   const { instance } = props;
+  const other = useOtherSource(props);
   const close = useRef(props.close);
   close.current = props.close;
   const { t } = useI18n();
@@ -49,9 +65,11 @@ function PreviewContent(props: SideBodyProps<PreviewState>) {
             {t("workspace.hostFile")}
           </Tag>
         )}
-        <PathCrumbs path={path} line={line} host={host} />
-        <PathActions {...props} />
+        <PathCrumbs path={path} line={line} host={host} other={other} />
+        <PathActions {...props} other={other} />
       </div>
+      {/* A Markdown file's links resolve and open in that agent's workspace too. */}
+      <MaybeAgentScope other={other} id={instance.id}>
       <FileView
         api={api}
         hostId={hostId}
@@ -68,19 +86,25 @@ function PreviewContent(props: SideBodyProps<PreviewState>) {
         // A folder that got here without the openers (a restored tab, a bookmark): the 文件 tree shows it.
         onFolder={() => {
           close.current();
-          if (host) openHostFolder(path);
-          else openFolder(path);
+          if (host) openHostFolder(path, undefined, other);
+          else openFolder(path, other);
         }}
       />
+      </MaybeAgentScope>
     </div>
   );
+}
+
+function MaybeAgentScope({ other, id, children }: { other: OpenSource | undefined; id: string; children: ReactNode }) {
+  if (!other) return <>{children}</>;
+  return <AgentMarkdownScope paneId={`preview:${id}`} hostId={other.hostId} sessionId={other.sessionId}>{children}</AgentMarkdownScope>;
 }
 
 /**
  * The path as a breadcrumb (019 §3, rule 19 of the audit): each folder opens in the 文件 explorer; a host
  * path outside the workspace stays plain text. Long paths keep their end visible.
  */
-function PathCrumbs({ path, line, host }: { path: string; line: number | null; host: boolean }) {
+function PathCrumbs({ path, line, host, other }: { path: string; line: number | null; host: boolean; other: OpenSource | undefined }) {
   const { t } = useI18n();
   const { scope, hostId } = useSelectedWorkspace();
   const root = useApp((s) => (scope ? rootFor(sidebarOf(s, hostId), scope) : null));
@@ -100,7 +124,7 @@ function PathCrumbs({ path, line, host }: { path: string; line: number | null; h
             <span key={i} className="inline-flex items-center">
               {i > 0 && <span className="px-0.5 text-subtle/70">/</span>}
               {folder !== null ? (
-                <button onClick={() => openFolder(folder)} title={t("workspace.crumbOpen")} className="rounded px-0.5 hover:bg-hover hover:text-foreground">
+                <button onClick={() => openFolder(folder, other)} title={t("workspace.crumbOpen")} className="rounded px-0.5 hover:bg-hover hover:text-foreground">
                   <span className="selectable">{name}</span>
                 </button>
               ) : (
@@ -116,7 +140,7 @@ function PathCrumbs({ path, line, host }: { path: string; line: number | null; h
 }
 
 /** End of the path row: ◎ 在文件树中显示, 源码 / 预览 (Markdown, SVG, HTML; remembered per kind) and 复制绝对路径. */
-function PathActions({ instance, setState }: SideBodyProps<PreviewState>) {
+function PathActions({ instance, setState, other }: SideBodyProps<PreviewState> & { other: OpenSource | undefined }) {
   const { t } = useI18n();
   const { scope, hostId } = useSelectedWorkspace();
   const hostLabel = useApp((state) => state.hosts?.hosts.find((item) => item.id === hostId)?.label) ?? hostId;
@@ -128,14 +152,14 @@ function PathActions({ instance, setState }: SideBodyProps<PreviewState>) {
   const button = "shrink-0 rounded px-1.5 py-0.5 text-meta/[inherit] text-subtle hover:bg-hover hover:text-foreground";
   return (
     <>
-      <button
+      {!other && <button
         onClick={() => (host ? revealHostInTree(path) : revealInTree(path))}
         className="shrink-0 rounded p-1 text-subtle hover:bg-hover hover:text-foreground"
         title={withKey(t("workspace.revealInTreeKey"), bindingLabel("revealInTree"))}
         aria-label={t("workspace.revealInTree")}
       >
         <LocateFixed size={13} />
-      </button>
+      </button>}
       {isSourceToggleable(path) && (
         <button
           onClick={() => {

@@ -1,6 +1,7 @@
 export const zhCN = {
   "settingsRisk.hostVisibility": "扩大主机可见范围",
   "settingsRisk.hostVisibilityHint": "主机 · {host}：所有项目与独立{{agent}}将可以互相发现和通信。输入主机名称「{target}」确认。",
+  "settingsRisk.hostVisibilityArmed": "主机 · {host}：所有项目与独立{{agent}}将可以互相发现和通信。随时可以改回「隔离」。",
   "settingsRisk.listen": "扩大主机监听范围",
   "settingsRisk.listenHint": "主机 · {host}：新增可监听地址：{targets}。可从这些网络访问主机管理接口；仍需身份验证。监听变更重启后生效。输入主机名称「{target}」确认。",
   "settingsRisk.cors": "扩大网页来源范围",
@@ -20,6 +21,7 @@ export const zhCN = {
 export const en: Record<keyof typeof zhCN, string> = {
   "settingsRisk.hostVisibility": "Expand host visibility",
   "settingsRisk.hostVisibilityHint": "Host · {host}: all projects and independent {{agents}} will be able to discover and communicate with each other. Type the host name “{target}” to confirm.",
+  "settingsRisk.hostVisibilityArmed": "Host · {host}: all projects and independent {{agents}} will be able to discover and communicate with each other. You can switch back to “Isolated” at any time.",
   "settingsRisk.listen": "Expand host listening scope",
   "settingsRisk.listenHint": "Host · {host}: new listening addresses: {targets}. The host management interface will be reachable from these networks; authentication is still required. Listening changes apply after restart. Type the host name “{target}” to confirm.",
   "settingsRisk.cors": "Expand allowed web origins",

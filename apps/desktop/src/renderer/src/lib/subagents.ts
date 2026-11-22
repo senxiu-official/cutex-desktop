@@ -256,6 +256,17 @@ export function activeSubAgents(timeline: TimelineState | null, parentOnline: bo
   return [...subAgentsOf(timeline, live, meta).values()].filter((a) => ACTIVE_SUBAGENT.has(a.status));
 }
 
+/**
+ * Sub-agents whose parent went offline while they were last heard working (state surfaces S12): a native sub-agent
+ * runs inside its parent's runtime and is only reported on its feed, so with the parent offline nothing can confirm
+ * whether it still runs or how it ended. Only those the child's own events (`live`) said were starting / working:
+ * the parent's call-time snapshots of older spawns are not evidence of anything running. Empty while online.
+ */
+export function unconfirmedSubAgents(timeline: TimelineState | null, parentOnline: boolean, live: SubAgentLive = {}, meta: SubAgentMetaMap = {}): SubAgentInfo[] {
+  if (parentOnline) return [];
+  return [...subAgentsOf(timeline, live, meta).values()].filter((a) => ACTIVE_SUBAGENT.has(a.status) && ACTIVE_SUBAGENT.has(live[a.threadId] ?? ""));
+}
+
 /** A failed name read may be retried after this long, at most `NAME_READ_TRIES` reads in all. */
 export const NAME_READ_RETRY_MS = 60_000;
 export const NAME_READ_TRIES = 3;

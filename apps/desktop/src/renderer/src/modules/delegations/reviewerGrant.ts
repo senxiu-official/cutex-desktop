@@ -9,7 +9,7 @@ import { hostApi } from "../../lib/hostLists";
 import { captureHostAction, onHostReset } from "../../lib/hostSwitch";
 import { refreshDelegation, refreshOpenDelegations } from "../../lib/delegationStore";
 import { beginRoutingWrite, endRoutingWrite, readRoutingReview, refreshRoutingReviews, routingActionScope, useRoutingRevision } from "../../lib/routingReviews";
-import { isConfirmedUpgradeResult, isKnownNoneUpgradeResult, isUpgradePreconditionFailure, unresolvedUpgradeActions as unresolved } from "../../lib/delegationOperations";
+import { blockingOperation, isConfirmedUpgradeResult, isKnownNoneUpgradeResult, isUpgradePreconditionFailure, unresolvedUpgradeActions as unresolved } from "../../lib/delegationOperations";
 
 const CAPS = { treeStop: true, routing: true, runControl: false, continuation: false, activity: false, retirement: false };
 const MAX_PAGES = 8;
@@ -155,10 +155,13 @@ async function refreshAfterGrant(host: string, record: UpgradeApprovalRead): Pro
   await Promise.allSettled([refreshOpenDelegations(host), refreshDelegation(host, record.delegationRef.id)]);
 }
 
+/** Grants share the project routing table: one fence entity (lib/delegationOperations operationEntity). */
+const GRANT_ENTITY = "routing";
+
 /** The armed scope is re-read and compared before creating exactly one durable action. */
 export async function createReviewerGrant(host: string, record: UpgradeApprovalRead, shown: ReviewerGrantScope): Promise<"created" | "available"> {
-  const scope = routingActionScope(host, record.projectId);
-  if (!canCreateReviewerGrant(host) || committed.has(approvalKey(host, record)) || !beginRoutingWrite(host, record.projectId)) throw Error("grant_not_allowed");
+  const scope = routingActionScope(host, record.projectId, GRANT_ENTITY);
+  if (!canCreateReviewerGrant(host) || committed.has(approvalKey(host, record)) || !beginRoutingWrite(host, record.projectId, GRANT_ENTITY)) throw Error("grant_not_allowed");
   const current = captureHostAction(host), access = authority(host);
   let action: Extract<UpgradeAction, { kind: "grant" }> | null = null;
   const valid = () => current() && access === authority(host) && canCreateReviewerGrant(host);
@@ -173,7 +176,7 @@ export async function createReviewerGrant(host: string, record: UpgradeApprovalR
     const selection = reviewerGrantState(snapshot, latest);
     if ((selection.kind !== "needed" && selection.kind !== "available") || selection.scope.key !== shown.key) throw Error("grant_scope_changed");
     if (selection.kind === "available") { await refreshAfterGrant(host, record); return "available"; }
-    if (unresolved.has(scope)) throw Error("outcome_unknown");
+    if (blockingOperation(host, record.projectId, GRANT_ENTITY)) throw Error("outcome_unknown");
     action = { ...selection.scope.intent, actionId: crypto.randomUUID() };
     unresolved.set(scope, action);
     submitted.set(action.actionId, approvalKey(host, record));
@@ -195,8 +198,9 @@ export async function createReviewerGrant(host: string, record: UpgradeApprovalR
 
 /** Lookup only the original durable operation; unknown/notFound never permits a replacement write. */
 export async function checkReviewerGrantOutcome(host: string, record: UpgradeApprovalRead): Promise<void> {
-  const scope = routingActionScope(host, record.projectId), action = unresolved.get(scope);
-  if (!action || action.kind !== "grant" || !canCreateReviewerGrant(host)) return;
+  const blocking = blockingOperation(host, record.projectId, GRANT_ENTITY);
+  if (!blocking || blocking.action.kind !== "grant" || !canCreateReviewerGrant(host)) return;
+  const { scope, action } = blocking;
   const current = captureHostAction(host), access = authority(host);
   const result = await hostApi(host).delegationUpgradeOperation(action.actionId);
   if (!current() || access !== authority(host) || !canCreateReviewerGrant(host)) throw Error("context_changed");

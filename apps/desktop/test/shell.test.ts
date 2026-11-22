@@ -79,7 +79,7 @@ describe("desktop shell logic", () => {
     expect(trayTooltip(2, "zh-CN")).toBe("Cutex — 2 个智能体等待处理");
     expect(trayTooltip(1, "en")).toBe("Cutex — 1 agent waiting");
     expect(trayTooltip(3, "en")).toBe("Cutex — 3 agents waiting");
-    expect(trayMenuLabels("zh-CN")).toEqual({ show: "显示窗口", newChat: "快速启动", quit: "退出" });
+    expect(trayMenuLabels("zh-CN")).toEqual({ show: "显示窗口", newChat: "快速启动", board: "项目看板", quit: "退出" });
     expect(trayMenuLabels("en").quit).toBe("Quit");
   });
 

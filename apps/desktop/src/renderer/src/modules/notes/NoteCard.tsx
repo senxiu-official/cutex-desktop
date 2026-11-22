@@ -1,11 +1,10 @@
 import { useState } from "react";
 import { ArrowUpRight, Eye, Pencil, Pin, Quote } from "lucide-react";
-import { Streamdown } from "streamdown";
-import { BARE_STREAMDOWN_REHYPE } from "../../lib/markdownPathText";
+import { Markdown } from "../../components/Markdown";
+import { AgentMarkdownScope } from "../../components/AgentMarkdownScope";
 import type { Note, NoteScope } from "../../../../shared/notes";
 import { ArmedRemove, Button, IconButton } from "../../components/settings/Form";
 import { useI18n } from "../../i18n";
-import { useStreamdownTranslations } from "../../lib/streamdownTranslations";
 import { formatAbsolute, formatWhen, useClock } from "../../lib/time";
 import { agentHost, useApp, viewOf } from "../../store";
 import { anchorStatus, hasPin, noteQuote, togglePin } from "./model";
@@ -16,7 +15,6 @@ import { noteErrorText } from "./errors";
 
 export function NoteCard({ hostId, note, projectId, readOnly = false, onDismissEditor }: { hostId: string; note: Note; projectId?: string; readOnly?: boolean; onDismissEditor?(): void }) {
   const { t, locale } = useI18n();
-  const translations = useStreamdownTranslations();
   const now = useClock();
   const updated = Date.parse(note.updatedAt) / 1000;
   const draftKey = JSON.stringify([hostId, "edit", note.id]);
@@ -52,7 +50,9 @@ export function NoteCard({ hostId, note, projectId, readOnly = false, onDismissE
       <ArmedRemove title={t("notes.delete")} disabled={busy} armedLabel={t("notes.deleteConfirm")} onRemove={() => void run(() => notesCache.remove(hostId, note))} /></>}
     </div>
     {/* Wraps like a notification (styles.css .wrap-all): code and tables too, never a sideways scrollbar. */}
-    <div className="wrap-all min-w-0 break-words text-ui/[inherit] leading-relaxed"><Streamdown mode="static" className="markdown" rehypePlugins={BARE_STREAMDOWN_REHYPE} translations={translations}>{note.body}</Streamdown></div>
+    {/* The conversation renderer (math, code, links); file links resolve in the source agent's workspace, relative ones
+        only when the note has one. */}
+    <div className="wrap-all min-w-0 break-words" data-note-body=""><AgentMarkdownScope paneId={`note:${note.id}`} hostId={hostId} sessionId={sourceSession ?? null}><Markdown text={note.body} compact relativeFiles={!!sourceSession} /></AgentMarkdownScope></div>
     {unavailable && <p className="text-xs text-warn" title={note.anchorStateAt ?? undefined}>{t(status === "sessionDeleted" ? "notes.sessionDeleted" : "notes.reverted")}</p>}
     {status === "unknown" && <p className="text-xs text-subtle">{t("notes.sourceUnknown")}</p>}
     {error && <p role="alert" className="text-xs text-danger">{noteErrorText(error, t)}</p>}
@@ -63,7 +63,7 @@ export function NoteCard({ hostId, note, projectId, readOnly = false, onDismissE
         const s = useApp.getState();
         if (s.selectedId && agentHost(s) === hostId) s.insertIntoComposer(s.selectedId, noteQuote(note), "append");
       }}><Quote size={12} className="mr-1 inline" />{t("notes.quote")}</Button>
-      {[{ kind: "host" as const }, ...(project ? [project] : [])].map((scope) => <button key={scope.kind} disabled={busy} aria-pressed={hasPin(note.pins, scope)} title={t("notes.pinHint")} className={`rounded px-1 py-1 text-xs hover:bg-hover ${hasPin(note.pins, scope) ? "text-accent" : "text-subtle"}`} onClick={() => pin(scope)}><Pin size={11} className="mr-1 inline" />{t(scope.kind === "host" ? "notes.scope.host" : "notes.scope.project")}</button>)}</>}
+      {[{ kind: "host" as const }, ...(project ? [project] : [])].map((scope) => <button key={scope.kind} disabled={busy} aria-pressed={hasPin(note.pins, scope)} title={t("notes.pinHint")} className={`press rounded px-1 py-1 text-xs hover:bg-hover disabled:opacity-50 disabled:hover:bg-transparent ${hasPin(note.pins, scope) ? "text-accent" : "text-subtle"}`} onClick={() => pin(scope)}><Pin size={11} className="mr-1 inline" />{t(scope.kind === "host" ? "notes.scope.host" : "notes.scope.project")}</button>)}</>}
     </div>
     <p className="text-caption/[inherit] text-subtle" title={Number.isFinite(updated) ? formatAbsolute(updated) : undefined}>{sourceName ? `${sourceName} · ` : ""}{t("notes.savedAt", { time: Number.isFinite(updated) ? formatWhen(updated, now, locale) : note.updatedAt })}</p>
   </article>;

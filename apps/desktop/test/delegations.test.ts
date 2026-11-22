@@ -74,8 +74,8 @@ describe("delegationStatus", () => {
   });
   it("admitted work waits calmly without promising that a runtime is starting", () => {
     expect(delegationStatus(ask({ execution: "admitted" }))).toMatchObject({ key: "starting", tone: "muted", glyph: "hollow" });
-    expect(zhCN["delegation.status.starting"]).toBe("等待处理");
-    expect(en["delegation.status.starting"]).toBe("Waiting for processing");
+    expect(zhCN["delegation.status.starting"]).toBe("已接收，未开始");
+    expect(en["delegation.status.starting"]).toBe("Accepted, not started");
   });
   it("names holds and positions", () => {
     expect(delegationStatus(ask({ execution: "queued", queuePosition: 2, hold: { reason: "targetBusy" } as never }))).toMatchObject({ key: "queuedAt", n: 2 });
@@ -95,7 +95,8 @@ describe("delegationStatus", () => {
     const gated = delegationStatus(ask({ execution: "queued", hold: { reason: "heldByRuntime", native: "gate_closed" } }));
     expect(gated.key).toBe("waitingResume");
     expect(gated.dangerText).toBeFalsy();
-    expect(delegationStatus(ask({ execution: "queued", hold: { reason: "heldByRuntime", native: "unsupported" } })).key).toBe("blocked");
+    // W6a: no 受阻 — an unsupported runtime will not clear by itself (需要你处理).
+    expect(delegationStatus(ask({ execution: "queued", hold: { reason: "heldByRuntime", native: "unsupported" } })).key).toBe("needsAction");
     expect(delegationStatus(ask({ execution: "answered", closed: "completed", hold: { reason: "heldByRuntime", native: "gate_closed" } })).key).toBe("answered");
   });
 
@@ -113,13 +114,13 @@ describe("stop pending and offline targets", () => {
   const offline = { targetOffline: true };
   const word = (catalog: Record<string, string>, key: DelegationStatusKey, name = "proj-glm-research-r1") => catalog[`delegation.status.${key}`]!.replace("{name}", name);
 
-  it("an abandoned delegation still open in cutex is 放弃中: not running, no 停止, not finished", () => {
+  it("an abandoned delegation still open in cutex is 已请求放弃: not running, no 停止 (结束跟进 instead), not finished", () => {
     expect(stopPending(abandoning)).toBe("abandon");
     expect(delegationStatus(abandoning)).toMatchObject({ key: "abandoning", glyph: "hollow" });
     expect(delegationStatus(abandoning, offline)).toMatchObject({ key: "abandoningOffline", dangerText: true });
     expect(isDelegationRunning(abandoning)).toBe(false);
     expect(isDelegationRunning(abandoning, offline)).toBe(false);
-    expect(delegationActions(abandoning)).toEqual({ stop: false, retry: false, accept: false, abandon: false });
+    expect(delegationActions(abandoning)).toEqual({ stop: false, retry: false, accept: false, abandon: false, endFollowUp: true });
     expect(delegationBucket(abandoning)).toBe("waiting");
     expect(isUnfinished(abandoning)).toBe(true);
     // Header 「委托 · 我发出的 1」 and the row agree: listed, nothing counted as running.
@@ -168,15 +169,16 @@ describe("stop pending and offline targets", () => {
   });
 
   it("has the words in zh-CN and en", () => {
-    expect(word(zhCN, "abandoning")).toBe("放弃中");
-    expect(word(zhCN, "abandoningOffline")).toBe("放弃中 · proj-glm-research-r1 离线");
-    expect(word(zhCN, "stopping")).toBe("停止中");
-    expect(word(zhCN, "stoppingOffline")).toBe("停止中 · proj-glm-research-r1 离线");
+    // W8 (owner-approved 2026-11-17): only the known fact, a stop / abandon was requested.
+    expect(word(zhCN, "abandoning")).toBe("已请求放弃");
+    expect(word(zhCN, "abandoningOffline")).toBe("已请求放弃 · proj-glm-research-r1 离线");
+    expect(word(zhCN, "stopping")).toBe("已请求停止");
+    expect(word(zhCN, "stoppingOffline")).toBe("已请求停止 · proj-glm-research-r1 离线");
     expect(word(zhCN, "offline")).toBe("proj-glm-research-r1 离线");
-    expect(word(en, "abandoning")).toBe("Abandoning");
-    expect(word(en, "abandoningOffline")).toBe("Abandoning · proj-glm-research-r1 is offline");
-    expect(word(en, "stopping")).toBe("Stopping");
-    expect(word(en, "stoppingOffline")).toBe("Stopping · proj-glm-research-r1 is offline");
+    expect(word(en, "abandoning")).toBe("Abandon requested");
+    expect(word(en, "abandoningOffline")).toBe("Abandon requested · proj-glm-research-r1 is offline");
+    expect(word(en, "stopping")).toBe("Stop requested");
+    expect(word(en, "stoppingOffline")).toBe("Stop requested · proj-glm-research-r1 is offline");
     expect(word(en, "offline")).toBe("proj-glm-research-r1 is offline");
   });
 });
@@ -201,7 +203,7 @@ describe("closed events before the summary refresh", () => {
       expect(isDelegationRunning(next, ctx)).toBe(false);
       expect(delegationBucket(next, ctx)).toBe("done");
     }
-    expect(delegationActions(next)).toEqual({ stop: false, retry: false, accept: false, abandon: false });
+    expect(delegationActions(next)).toEqual({ stop: false, retry: false, accept: false, abandon: false, endFollowUp: false });
     expect(agentDelegations({ [next.askId]: next }, "cutex.lead")).toMatchObject({ mine: [], toMe: [], finished: 1 });
   });
 
@@ -218,7 +220,7 @@ describe("closed events before the summary refresh", () => {
     const d = ask({ execution: "answered", review: "changesRequested", closed: "superseded" });
     expect(delegationStatus(d).key).toBe("changesRequested");
     expect(delegationBucket(d)).toBe("done");
-    expect(delegationActions(d)).toEqual({ stop: false, retry: false, accept: false, abandon: false });
+    expect(delegationActions(d)).toEqual({ stop: false, retry: false, accept: false, abandon: false, endFollowUp: false });
   });
 });
 
@@ -259,10 +261,10 @@ describe("buckets", () => {
   });
 
   it("offers only the commands that apply", () => {
-    expect(delegationActions(ask())).toEqual({ stop: true, retry: false, accept: false, abandon: false });
-    expect(delegationActions(ask({ execution: "interrupted" }))).toEqual({ stop: false, retry: true, accept: false, abandon: true });
+    expect(delegationActions(ask())).toEqual({ stop: true, retry: false, accept: false, abandon: false, endFollowUp: false });
+    expect(delegationActions(ask({ execution: "interrupted" }))).toEqual({ stop: false, retry: true, accept: false, abandon: true, endFollowUp: false });
     expect(delegationActions(ask({ execution: "answered", review: "awaitingAcceptance" }))).toMatchObject({ accept: true, abandon: true });
-    expect(delegationActions(ask({ closed: "accepted" }))).toEqual({ stop: false, retry: false, accept: false, abandon: false });
+    expect(delegationActions(ask({ closed: "accepted" }))).toEqual({ stop: false, retry: false, accept: false, abandon: false, endFollowUp: false });
   });
 });
 

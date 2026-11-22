@@ -7,8 +7,21 @@ export interface RuntimePruneVersion {
   release: string;
   version?: string;
   bytes: number;
+  /** cutex B1 (2026-11-15): the size was not computed (`bytes` is then 0, not a size). */
+  bytesEstimated?: boolean;
   canPrune: boolean;
   blockedReasons: string[];
+  /** cutex after r288: on a Claude item blocked by `claude_process_unresolved`, the host-wide summary of Claude
+   *  processes whose runtime could not be resolved (the same copy on every such item; not mapped to versions). */
+  claudeProcessInspection?: RuntimePruneClaudeProcesses;
+}
+export interface RuntimePruneClaudeProcesses {
+  /** At least 1. */
+  unresolvedProcessCount: number;
+  /** At most 20; `sessionId` (`cutex.<uuid>`) is observed from the process, not authenticated. */
+  processes: { pid?: number; sessionId?: string }[];
+  /** cutex's English diagnostic; the desktop shows its own words. */
+  message: string;
 }
 export interface RuntimePrunePlan { versions: RuntimePruneVersion[] }
 export interface RuntimePruneResult {

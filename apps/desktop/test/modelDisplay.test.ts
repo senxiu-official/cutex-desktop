@@ -110,8 +110,8 @@ describe("helpers", () => {
     expect(rawIdTitle(null, "x")).toBeUndefined();
   });
 
-  it("modelControlTitle adds the raw id only when the shown name differs", () => {
-    expect(modelControlTitle("模型", "m-flash", "M Flash")).toBe("模型 · m-flash");
+  it("modelControlTitle never shows an alias or raw id on the chips (owner 2026-11-18)", () => {
+    expect(modelControlTitle("模型", "m-flash", "M Flash")).toBe("模型");
     expect(modelControlTitle("模型", "m-raw", "m-raw")).toBe("模型");
   });
 

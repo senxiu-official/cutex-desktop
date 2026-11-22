@@ -9,6 +9,7 @@ import { isImeComposing } from "../lib/ime";
 import { useTrackOverlay } from "../lib/openOverlays";
 import { useOwnerWindow } from "../lib/ownerContext";
 import { resizeObserverFor } from "../lib/ownerWindow";
+import { OWNED_POPOVER, ownPopover } from "../lib/ownedPopover";
 
 export function AnchoredPanel({
   anchor,
@@ -52,6 +53,9 @@ export function AnchoredPanel({
     };
   }, [anchor, side, win]);
 
+  // Owned by its anchor: a container closing on focus-out / an outside press keeps it as its own (lib/ownedPopover).
+  useEffect(() => (panel.current && anchor.current ? ownPopover(panel.current, anchor.current) : undefined), [anchor]);
+
   useEffect(() => {
     const doc = win.document;
     (panel.current?.querySelector<HTMLElement>("[data-panel-row]") ?? panel.current)?.focus();
@@ -93,6 +97,7 @@ export function AnchoredPanel({
       ref={panel}
       role="dialog"
       aria-label={label}
+      {...{ [OWNED_POPOVER]: "" }}
       tabIndex={-1}
       data-side={side}
       style={{ left: pos?.left ?? -9999, top: pos?.top ?? -9999, maxHeight: "calc(100dvh - 32px)" }}

@@ -3,7 +3,7 @@
 // `cutex/ask/*` events, and what a transcript alone tells (the `agent_delegate` call, wait results,
 // close rows) for delegations cutex no longer has. Pure, so it is unit-tested; the live records are
 // kept by lib/delegationStore. Wire names (askId, AskSummary, …) are kept as cutex sends them.
-import type { AskAttemptView, AskClosed, AskDetail, AskExecution, AskHold, AskLateAnswer, AskQuestion, AskRemote, AskRequester, AskReview, AskSummary } from "../../../shared/ipc";
+import type { AskAttemptView, AskClosed, AskDetail, AskExecution, AskHold, AskLateAnswer, AskQuestion, AskRemote, AskRequester, AskReview, AskSummary, ContinuationWait } from "../../../shared/ipc";
 import { askReviewFields } from "../../../shared/delegationReviews";
 import { isSessionRef, parseIdRef, sameId } from "./shortIds";
 import { resultDelegationId, toolArgs, toolResult } from "./taskRows";
@@ -87,14 +87,14 @@ export function peerStateKey(state: string): DelegationStatusKey | null {
   const aliases: Record<string, DelegationStatusKey> = {
     admitted: "starting", completed: "answered", targetBusy: "waitTurn",
     waitingForApproval: "pendingReview", waitingForInput: "question",
-    heldByRuntime: "blocked", runtimeUnsupported: "blocked", profileSwitchPending: "blocked",
+    heldByRuntime: "waiting", runtimeUnsupported: "needsAction", profileSwitchPending: "waiting", blocked: "needsAction",
     waitingForEvent: "waitingForEvent",
   };
   if (Object.hasOwn(aliases, state)) return aliases[state]!;
   const known: readonly DelegationStatusKey[] = [
     "pendingReview", "queued", "running", "question", "answered", "interrupted",
     "failed", "rejected", "cancelled", "awaitingAcceptance", "accepted", "changesRequested",
-    "abandoned", "stopped", "superseded", "paused", "blocked", "peerUnreachable",
+    "abandoned", "stopped", "superseded", "paused", "waiting", "needsAction", "peerUnreachable",
     "peerIdentityChanged", "peerVersionMismatch", "peerUnknown",
   ];
   return known.includes(state as DelegationStatusKey) ? state as DelegationStatusKey : null;
@@ -106,6 +106,10 @@ export type DelegationStatusKey =
   | "interrupted"
   | "superseded"
   | "waitingForEvent"
+  // r290 P14: the handler yielded and continues this delegation later (continuationWait); never 运行中
+  | "continuationWait"
+  | "continuationReady"
+  | "continuationLimited"
   | "pendingReview"
   // peers-v2: an outgoing mirror whose destination waits for its own owner's review (「等 <host> 的主人审核」)
   | "remoteReview"
@@ -115,7 +119,11 @@ export type DelegationStatusKey =
   | "paused"
   | "planMode"
   | "offline"
-  | "blocked"
+  // state surfaces 4.1 (owner-approved wording 2026-11-17, W6a): no 受阻 any more. `waiting` (等待继续) resumes by itself
+  // (a runtime hold, a profile switch, a turn that ended and waits for its next step); `needsAction` (需要你处理) does not
+  // (unsupported, login, budget, an approval). The reason is the hover (`hint`).
+  | "waiting"
+  | "needsAction"
   | "waitingResume"
   // blocked(quota): the target's usage limit is used up; cutex redelivers it after the reset
   | "quota"
@@ -131,12 +139,15 @@ export type DelegationStatusKey =
   | "abandoningOffline"
   | "stopping"
   | "stoppingOffline"
+  // ask-stop-settlement-v1: the absolute stop deadline passed and the attempt is still not proven ended (N4).
+  | "stopUnconfirmed"
+  // closed by the owner's 结束跟进 (closed = stopped, outcome unconfirmed; N3).
+  | "followUpEnded"
   | "abandoned"
   | "failed"
   | "rejected"
   | "cancelled"
   | "stopped"
-  | "ownerStopped"
   | "runtimeRestart"
   | "outcomeUnknown"
   // peers-v2: an outgoing mirror held by its peer, or interrupted by the peer relationship
@@ -148,7 +159,9 @@ export type DelegationStatusKey =
   | "peerDisabled"
   | "peersDisabled"
   | "removedByPeer"
-  | "peerStripped";
+  | "peerStripped"
+  // an execution value this desktop does not know (newer cutex): 状态无法识别; the raw value is the hover.
+  | "unknown";
 
 export type StatusTone = "warn" | "muted" | "accent" | "green" | "danger" | "neutral";
 /** hollow = waiting on someone; ring = stopped but can resume; pulse = running. */
@@ -166,6 +179,18 @@ export interface DelegationStatus {
   dangerText?: boolean;
   /** `waitingForEvent`: what the handler waits for (delegation_await), shown instead of a run time. */
   wait?: DelegationWait;
+  /** `continuation*`: the yielded wait (r290 P14), shown instead of a run time. */
+  cont?: ContinuationWait;
+  /** The hover explanation (a `delegation.statusHint.*` key and its values): why it waits, what it needs, its deadline. */
+  hint?: StatusHint;
+}
+
+/** A hover explanation of a status; `at` values are ISO times the view formats. */
+export interface StatusHint {
+  key: string;
+  vars?: Record<string, string>;
+  /** Vars that hold ISO times (formatted as clock times by the view). */
+  at?: Record<string, string>;
 }
 
 /** A handler's delegation_await as the status shows it. */
@@ -187,7 +212,34 @@ export function delegationWait(d: Pick<StatusInput, "hold" | "await" | "jobs">):
   return { jobs: ids && ids.length ? open : null, timeoutAt: d.await?.timeoutAt ?? hold?.timeout_at ?? null, note: d.await?.note?.trim() || null };
 }
 
-export type StatusInput = Pick<AskSummary, "execution"> & Partial<Pick<AskSummary, "hold" | "review" | "closed" | "queuePosition" | "attempt" | "remote" | "await" | "jobs">>;
+export type StatusInput = Pick<AskSummary, "execution"> & Partial<Pick<AskSummary, "hold" | "review" | "closed" | "queuePosition" | "attempt" | "remote" | "await" | "jobs" | "requester" | "followUpEnded" | "continuationWait">>;
+
+/** Executions a yielded wait can stand for (the record stays running / admitted / queued while it waits). */
+const CONTINUING: ReadonlySet<AskExecution> = new Set(["running", "admitted", "queued"]);
+
+/** The open delegation's yielded wait (r290 P14), else null: hosts without the field, closed or finished delegations,
+ *  a pending question, a hold that reads 需要你处理, a stop or abandon cutex accepted (the wait may still be on the
+ *  record until the close lands). Every consumer (status, bucket, the handler's composer) goes through this one selector. */
+export function openContinuationWait(d: Pick<StatusInput, "execution" | "closed" | "continuationWait" | "hold" | "review" | "attempt" | "queuePosition">): ContinuationWait | null {
+  const w = d.continuationWait;
+  if (!w || d.closed || !CONTINUING.has(d.execution) || stopPending(d)) return null;
+  // A question to the requester (hold waitingForInput) still reads 有提问: it needs someone, the wait does not.
+  if (d.hold?.reason === "waitingForInput") return null;
+  // A hold that will not clear by itself (W6a 需要你处理) wins too — the continuation cannot run until someone acts.
+  if (continuationOwnerHold(d)) return null;
+  return w;
+}
+
+/**
+ * The 需要你处理 status of a hold on a delegation with a yielded wait (login, budget, approval, unsupported runtime, an
+ * unknown hold), else null. Any execution: cutex keeps a resume-pending continuation `running` while admission is
+ * blocked (scheduler target_plan / plan_target write the hold, not the execution), so the hold must show there too.
+ */
+function continuationOwnerHold(d: Pick<StatusInput, "continuationWait" | "hold" | "queuePosition">): DelegationStatus | null {
+  if (!d.continuationWait || !d.hold || d.hold.reason === "waitingForInput") return null;
+  const s = holdStatus(d.hold, d.queuePosition);
+  return s.key === "needsAction" ? s : null;
+}
 
 /**
  * What the desktop knows besides the ask record: the target agent's runtime (sidebar). cutex keeps
@@ -230,9 +282,19 @@ function holdStatus(hold: AskHold | null | undefined, queuePosition: number | nu
       return s(hold.by === "planMode" ? "planMode" : "paused");
     case "blocked":
       if (hold.by === "quota") return s("quota");
-      return hold.by === "runtimeDown" ? s("offline", { dangerText: true }) : s("blocked", { dangerText: true });
+      if (hold.by === "runtimeDown") return s("offline", { dangerText: true });
+      return needsAction(hold.by === "login" || hold.by === "budget" ? `blocked.${hold.by}` : "blocked.other", { by: String(hold.by ?? "") });
     case "heldByRuntime":
-      return hold.native === "gate_closed" ? s("waitingResume") : s("blocked", { dangerText: true });
+      if (hold.native === "gate_closed") return s("waitingResume");
+      // The runtime cannot take it at all: that will not clear by itself.
+      if (hold.native === "unsupported") return needsAction("runtimeUnsupported", { missing: "" });
+      return s("waiting", { hint: { key: "delegation.statusHint.heldByRuntime" } });
+    case "profileSwitchPending":
+      return s("waiting", { hint: { key: "delegation.statusHint.profileSwitchPending" } });
+    case "runtimeUnsupported":
+      return needsAction("runtimeUnsupported", { missing: hold.missing ?? "" });
+    case "waitingForApproval":
+      return needsAction("waitingForApproval");
     case "waitingForInput":
       return { key: "question", tone: "warn", glyph: "pulse" };
     case "waitingForEvent":
@@ -244,9 +306,38 @@ function holdStatus(hold: AskHold | null | undefined, queuePosition: number | nu
     case "peerUnknown":
       return s("peerUnknown");
     default:
-      // runtimeUnsupported / profileSwitchPending / waitingForApproval: one word.
-      return s("blocked", { dangerText: true });
+      // A hold this desktop does not know (newer cutex): it may not clear by itself.
+      return needsAction("other", { reason: String((hold as { reason?: unknown }).reason ?? "") });
   }
+}
+
+/** 需要你处理 with its reason as the hover (`delegation.statusHint.<reason>`). */
+function needsAction(reason: string, vars: Record<string, string> = {}): DelegationStatus {
+  return { key: "needsAction", tone: "warn", glyph: "hollow", dangerText: true, hint: { key: `delegation.statusHint.${reason}`, vars } };
+}
+
+/** Whether `d` is held in a way that will not clear by itself (its status reads 需要你处理). */
+export function holdNeedsAction(d: StatusInput): boolean {
+  return !d.closed && !!d.hold && delegationStatus(d).key === "needsAction";
+}
+
+/** The attempt's own stop deadline (ask-stop-settlement-v1), if any. */
+function stopHint(d: StatusInput): StatusHint | undefined {
+  const deadline = d.attempt?.stopDeadline ?? null;
+  if (!deadline) return undefined;
+  return d.attempt?.stopUnconfirmed === true ? { key: "delegation.statusHint.stopUnconfirmed", at: { time: deadline } } : { key: "delegation.statusHint.stopping", at: { time: deadline } };
+}
+
+/** 本轮已结束: the attempt yielded (bounded continuation) and execution stays running; nothing runs until it continues. */
+function turnEnded(d: StatusInput): boolean {
+  return d.attempt?.state === "yielded";
+}
+
+/** What a yielded attempt waits for: its stage note when it left one, else the next continuation. */
+function yieldedHint(d: StatusInput): StatusHint {
+  const note = (d.attempt as { stageNote?: unknown } | null | undefined)?.stageNote;
+  const text = typeof note === "string" ? note.trim().replace(/\s+/g, " ") : "";
+  return text ? { key: "delegation.statusHint.yieldedNote", vars: { condition: text.length > 80 ? `${text.slice(0, 79)}…` : text } } : { key: "delegation.statusHint.yielded" };
 }
 
 /**
@@ -273,20 +364,38 @@ export function delegationStatus(d: StatusInput, ctx: DelegationContext = {}): D
   if (d.closed === "accepted") return { key: "accepted", tone: "green", glyph: "check" };
   const stop = stopPending(d);
   if (stop) {
+    const hint = stopHint(d);
+    if (stop === "stop" && d.attempt?.stopUnconfirmed === true) return { key: "stopUnconfirmed", tone: "warn", glyph: "hollow", ...(hint ? { hint } : {}) };
     const key = stop === "abandon" ? (ctx.targetOffline ? "abandoningOffline" : "abandoning") : ctx.targetOffline ? "stoppingOffline" : "stopping";
-    return { key, tone: "muted", glyph: "hollow", ...(ctx.targetOffline ? { dangerText: true } : {}) };
+    return { key, tone: "muted", glyph: "hollow", ...(ctx.targetOffline ? { dangerText: true } : {}), ...(hint ? { hint } : {}) };
   }
+  if (d.closed === "stopped" && d.followUpEnded === true) return { key: "followUpEnded", tone: "neutral", glyph: "ring", hint: { key: "delegation.statusHint.followUpEnded" } };
   if (d.closed === "abandoned" || d.review === "abandoned") return { key: "abandoned", tone: "muted", glyph: "cross" };
   if (d.closed === "cancelled" && d.execution !== "failed" && d.execution !== "rejected") return { key: "cancelled", tone: "muted", glyph: "cross" };
   if (d.closed === "stopped" && d.execution !== "interrupted") {
     const reason = interruptReasonOf(d);
-    return reason && PEER_INTERRUPTS.has(reason) ? { key: reason as DelegationStatusKey, tone: "neutral", glyph: "cross" } : { key: "stopped", tone: "neutral", glyph: "ring" };
+    return reason && PEER_INTERRUPTS.has(reason) ? { key: reason as DelegationStatusKey, tone: "neutral", glyph: "cross" } : stoppedStatus(d);
   }
   // A close event can precede the refreshed execution snapshot. completed includes failures too:
   // show a neutral end until the outcome is known, never the stale running / queued state.
   if (d.closed && (d.execution === "pendingReview" || d.execution === "queued" || d.execution === "admitted" || d.execution === "running"))
     return { key: "ended", tone: "neutral", glyph: "dot" };
   if (awaitsRemoteReview(d)) return { key: "remoteReview", tone: "muted", glyph: "hollow", host: d.remote!.label };
+  // r290 P14: a yielded wait wins over the execution (nothing runs; the finished attempt's time is not a run time) —
+  // unless a hold needs someone first: 需要你处理 even while the record stays running.
+  if (!d.closed && CONTINUING.has(d.execution)) {
+    const owner = continuationOwnerHold(d);
+    if (owner) return owner;
+  }
+  const cont = openContinuationWait(d);
+  if (cont) {
+    // A job await (hold waitingForEvent) keeps its own facts beside the P14 form: its time limit (最晚 HH:MM) and the
+    // handler's note — the limit may resume it before the jobs end (nextWakeAt is not that limit).
+    const legacy = d.hold?.reason === "waitingForEvent" ? { wait: delegationWait(d) } : {};
+    if (cont.state === "limited") return { key: "continuationLimited", tone: "warn", glyph: "hollow", cont, ...legacy };
+    if (cont.state === "ready") return { key: "continuationReady", tone: "muted", glyph: "hollow", cont, ...legacy };
+    return { key: "continuationWait", tone: "muted", glyph: "hollow", cont, ...legacy };
+  }
   switch (d.execution) {
     case "pendingReview":
       // A mirror held by a local overlay (peer unreachable, …): that hold, not the remote review.
@@ -302,7 +411,10 @@ export function delegationStatus(d: StatusInput, ctx: DelegationContext = {}): D
       // not (no lease, no turn); the attempt's start / end belong to the turn that set the wait.
       if (d.hold?.reason === "waitingForEvent") return { key: "waitingForEvent", tone: "muted", glyph: "hollow", wait: delegationWait(d) };
       // Nothing runs while the target is offline; cutex owns reconciliation / stop settlement.
-      return ctx.targetOffline ? { key: "offline", tone: "muted", glyph: "hollow", dangerText: true } : { key: "running", tone: "accent", glyph: "pulse" };
+      if (ctx.targetOffline) return { key: "offline", tone: "muted", glyph: "hollow", dangerText: true };
+      // W6c: 运行中 only while a turn runs; a turn that ended (bounded continuation) waits for its next step.
+      if (turnEnded(d)) return { key: "waiting", tone: "muted", glyph: "hollow", hint: yieldedHint(d) };
+      return { key: "running", tone: "accent", glyph: "pulse" };
     case "answered":
       if (d.review === "changesRequested") return { key: "changesRequested", tone: "muted", glyph: "ring" };
       if (d.closed) return { key: "answered", tone: "green", glyph: "check" };
@@ -320,10 +432,40 @@ export function delegationStatus(d: StatusInput, ctx: DelegationContext = {}): D
       // Owner decision 9: dismissing an unknown outcome closes the delegation as stopped; once closed it reads stopped.
       if (reason === "outcomeUnknown" && d.closed !== "stopped") return { key: "outcomeUnknown", tone: "warn", glyph: "hollow" };
       if (reason && PEER_INTERRUPTS.has(reason)) return { key: reason as DelegationStatusKey, tone: "neutral", glyph: "cross" };
-      if (d.closed === "stopped") return { key: "stopped", tone: "neutral", glyph: "ring" };
-      return { key: reason === "ownerStopped" ? "ownerStopped" : reason === "runtimeRestart" ? "runtimeRestart" : "stopped", tone: "neutral", glyph: "ring" };
+      if (d.closed === "stopped") return stoppedStatus(d);
+      // W7: who stopped it is not on the record; ownerStopped only narrows the cause (you, or a host upgrade).
+      if (reason === "ownerStopped") return { key: "stopped", tone: "neutral", glyph: "ring", hint: { key: "delegation.statusHint.ownerStopped" } };
+      if (reason === "runtimeRestart") return { key: reason, tone: "neutral", glyph: "ring" };
+      return stoppedStatus(d);
     }
+    default:
+      // A newer cutex's execution value: say so, keep the raw value for the hover.
+      return { key: "unknown", tone: "warn", glyph: "hollow", hint: { key: "delegation.statusHint.unknown", vars: { raw: String(d.execution ?? "") } } };
   }
+}
+
+/**
+ * 已停止 (W7). The record does not say who stopped it: `interruptReason: stopped` is written for the owner's stop and the
+ * requester's alike, and `requester` is who delegated, not who stopped. So no name is guessed.
+ */
+function stoppedStatus(_d: StatusInput): DelegationStatus {
+  return { key: "stopped", tone: "neutral", glyph: "ring" };
+}
+
+// ---------- attempts (state surfaces 4.2: the detail's per-run table) ----------
+
+/** The attempt states cutex sends (AttemptState); anything else reads 状态无法识别 with its raw value. */
+export const ATTEMPT_STATES = ["submitting", "admitted", "running", "answered", "failed", "interrupted", "refused", "yielded"] as const;
+export type AttemptStateKey = (typeof ATTEMPT_STATES)[number] | "unknown" | "unconfirmed";
+
+/**
+ * The `delegation.attempt.*` word of one attempt (W10: `answered` is 已有结果 here, not 已完成). A run the record still
+ * calls submitting / admitted / running after the delegation closed (a stop or 结束跟进 that never saw it end) is
+ * 结果未确认, never 运行中.
+ */
+export function attemptStateKey(state: string | null | undefined, delegationClosed = false): AttemptStateKey {
+  const key = (ATTEMPT_STATES as readonly string[]).includes(state ?? "") ? (state as AttemptStateKey) : "unknown";
+  return delegationClosed && (key === "running" || key === "admitted" || key === "submitting") ? "unconfirmed" : key;
 }
 
 // ---------- buckets ----------
@@ -350,7 +492,8 @@ export function delegationBucket(d: BucketInput, ctx: DelegationContext = {}): D
     if (d.review === "awaitingAcceptance") return isOwnerRequest(d.requester) ? "needsYou" : "waiting";
     return "done";
   }
-  if (d.hold) return "waiting";
+  if (d.hold) return holdNeedsAction(d) ? "needsYou" : "waiting";
+  if (openContinuationWait(d)) return "waiting";
   if (d.execution === "queued") return "waiting";
   if (stopPending(d) || (d.execution === "running" && ctx.targetOffline)) return "waiting";
   return "active";
@@ -455,13 +598,31 @@ export function pendingForAgent(byId: Record<string, AskSummary>, sessionId: str
     .sort((a, b) => (a.queuePosition ?? Infinity) - (b.queuePosition ?? Infinity) || ms(a.createdAt) - ms(b.createdAt));
 }
 
+export interface DelegationActions {
+  stop: boolean;
+  retry: boolean;
+  accept: boolean;
+  abandon: boolean;
+  /** 结束跟进 (owner-ask-disposition-v1 `followUpEnded`; older hosts show it greyed). */
+  endFollowUp: boolean;
+}
+/** One 结束跟进 per delegation attempt (the host replays an identical body; any other body with it is a conflict). */
+export function followUpActionId(d: Pick<AskSummary, "askId" | "attempts"> & { attempt?: { n?: number } | null }): string {
+  return `followup-${d.askId}-${d.attempt?.n ?? d.attempts ?? 0}`;
+}
+
+export const NO_DELEGATION_ACTIONS: DelegationActions = { stop: false, retry: false, accept: false, abandon: false, endFollowUp: false };
+
 /**
  * The owner's commands that apply now (cutex/ask/stop | retry | close). No 停止 while a stop is
  * pending: cutex already queued it (another only queues the same stop again).
  */
-export function delegationActions(d: StatusInput & { closed?: AskClosed | null }): { stop: boolean; retry: boolean; accept: boolean; abandon: boolean } {
+export function delegationActions(d: StatusInput & { closed?: AskClosed | null }): DelegationActions {
   const open = !d.closed && !TERMINAL.has(d.execution);
+  const key = open ? delegationStatus(d).key : null;
   return {
+    // 结束跟进 (N1): where nothing else ends the wait: a stop not confirmed yet, accepted but not started, unknown.
+    endFollowUp: open && !d.remote && (!!stopPending(d) || key === "stopUnconfirmed" || key === "starting" || key === "unknown"),
     stop: open && !stopPending(d) && (d.execution === "pendingReview" || d.execution === "queued" || d.execution === "admitted" || d.execution === "running"),
     // A mirror cannot be retried across hosts (cutex remote_unsupported).
     retry: open && d.execution === "interrupted" && !d.remote,
@@ -507,6 +668,14 @@ const obj = (v: unknown): Record<string, unknown> | null => (v && typeof v === "
 const str = (v: unknown): string | null => (typeof v === "string" && v ? v : null);
 const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
 
+/** A wire `continuationWait` (r290 P14): null for anything that is not one. */
+export function continuationWaitOf(raw: unknown): ContinuationWait | null {
+  const w = obj(raw);
+  const state = str(w?.state), kind = str(w?.kind);
+  if (!w || !state || !kind) return null;
+  return { state, kind, since: str(w.since), nextWakeAt: str(w.nextWakeAt) };
+}
+
 /** A stored ask record (`cutex/ask/created`, `GET /v2/asks/{id}`) as a list row. */
 export function summaryFromRecord(raw: unknown): AskSummary | null {
   const r = obj(raw);
@@ -525,9 +694,11 @@ export function summaryFromRecord(raw: unknown): AskSummary | null {
     execution: (str(r.execution) as AskExecution | null) ?? "queued",
     hold: (obj(r.hold) as AskHold | null) ?? null,
     holdSince: str(r.holdSince),
+    ...("continuationWait" in r ? { continuationWait: continuationWaitOf(r.continuationWait) } : {}),
     review: (str(r.review) as AskReview | null) ?? null,
     ...askReviewFields(r),
     closed: (str(r.closed) as AskClosed | null) ?? null,
+    ...(r.followUpEnded === true ? { followUpEnded: true } : {}),
     queuePosition: num(r.queuePosition),
     attempts: typeof r.attempts === "number" ? r.attempts : attempts.length,
     answerId: str(r.answerId),
@@ -578,6 +749,8 @@ export function applyAskEvent(records: DelegationRecords, method: string, rawPar
         hold: (obj(p.hold) as AskHold | null) ?? null,
         review: (str(p.review) as AskReview | null) ?? null,
         ...askReviewFields(p),
+        // r290 P14: stateChanged carries the same wait projection (absent on older hosts: unchanged).
+        ...("continuationWait" in p ? { continuationWait: continuationWaitOf(p.continuationWait) } : {}),
         revision: revision ?? current.revision,
         ...(attempt ? { attempt: { ...(current.attempt ?? { n: attempt.n ?? current.attempts }), ...attempt } as AskAttemptView } : {}),
       });
@@ -912,12 +1085,15 @@ export function askRowTurnOf(entries: Iterable<TimelineEntry>, askId: string): s
 
 /**
  * The open delegation this agent (`sessionId`, the handler) waits on after ending its turn with delegation_await
- * (hold waitingForEvent): no turn, no lease, so the session's delivery is idle. The latest one when several wait.
+ * (hold waitingForEvent) or a yielded continuation (r290 P14 continuationWait): no turn, no lease, so the session's
+ * delivery is idle. The latest one when several wait.
  */
 export function awaitingDelegation(byId: Record<string, AskSummary>, sessionId: string): AskSummary | null {
   let best: AskSummary | null = null;
   for (const d of Object.values(byId)) {
-    if (d.target !== sessionId || d.closed || d.execution !== "running" || d.hold?.reason !== "waitingForEvent") continue;
+    // A stop / abandon cutex accepted wins on this path too (the handler is not waiting any more).
+    if (d.target !== sessionId || d.closed || stopPending(d)) continue;
+    if (!openContinuationWait(d) && (d.execution !== "running" || d.hold?.reason !== "waitingForEvent")) continue;
     if (!best || Date.parse(d.updatedAt) > Date.parse(best.updatedAt)) best = d;
   }
   return best;

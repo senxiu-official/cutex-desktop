@@ -5,7 +5,7 @@
 import { useState } from "react";
 import { ArrowLeftRight } from "lucide-react";
 import type { AskSummary } from "../../../../shared/ipc";
-import { DelegationStatusMark, DelegationTag, useWaitText } from "../../components/DelegationParts";
+import { DelegationStatusMark, DelegationTag, useContinuationText, useWaitText } from "../../components/DelegationParts";
 import { FinishedFold } from "../../components/FinishedFold";
 import { StatusChip, StatusChipWords } from "../../components/StatusChip";
 import { useI18n, type Locale } from "../../i18n";
@@ -169,12 +169,14 @@ export function DelegationLine({ data }: { data: AgentDelegations }) {
   const ctxOf = useDelegationContext();
   const [first] = data.mine;
   const now = useNow(!!first);
+  const firstStatus = first ? delegationStatus(first, ctxOf(first)) : null;
+  const cont = useContinuationText(firstStatus?.cont, firstStatus?.wait);
   if (first) {
     const name = first.targetName ?? nameOf(first.target);
     const ctx = ctxOf(first);
     const status = delegationStatus(first, ctx);
-    // delegation_await: what it waits for, never a run time.
-    const time = status.wait ? waitText(status.wait) : rowTime(first, ctx, now);
+    // delegation_await / a yielded wait: what it waits for, never a run time.
+    const time = status.cont ? cont.trailing : status.wait ? waitText(status.wait) : rowTime(first, ctx, now);
     return (
       <>
         <span className="text-subtle">{t("delegations.statusTitle")} ·</span> <span className="font-medium">{name}</span>{" "}

@@ -27,7 +27,7 @@ vi.mock("../src/renderer/src/lib/delegationStore", () => ({
   useDelegations: (select: (s: unknown) => unknown) => select({ progress: {}, questions: {}, details: {} }),
 }));
 vi.mock("../src/renderer/src/lib/p2Access", () => ({ useP2Access: () => ({ files: true, attachments: true, delegations: true, owner: true }) }));
-vi.mock("../src/renderer/src/lib/delegationMenu", () => ({ delegationMenu: vi.fn(() => []), runDelegationCommand: run }));
+vi.mock("../src/renderer/src/lib/delegationMenu", () => ({ delegationMenu: vi.fn(() => []), runDelegationCommand: run, canEndDelegationFollowUp: () => true, endFollowUpShown: () => true, runEndFollowUp: vi.fn() }));
 vi.mock("../src/renderer/src/lib/focusRequest", () => ({ focusDelegation: vi.fn(), focusTurn: vi.fn() }));
 vi.mock("../src/renderer/src/lib/modelDisplay", () => ({ useModelName: () => (id: string) => id, rawIdTitle: () => "" }));
 vi.mock("../src/renderer/src/components/Markdown", () => ({ Markdown: () => null }));
@@ -126,7 +126,7 @@ describe("delegation 放弃 confirms in place (DelegationDetailBody)", () => {
     expect(run).toHaveBeenCalledWith("remote", expect.objectContaining({ askId: "ask-1" }), "cutex/ask/close", t, "abandoned");
   });
 
-  it("结束等待 shows only when the requester's result offered it, arms in place and sends resume", async () => {
+  it("结束等待 shows only when the requester's result offered it and resumes on one click (confirm by risk: low)", async () => {
     const waiting = { execution: "running", review: null, hold: { reason: "waitingForEvent", jobs: ["j"], until: "all" }, attempt: { n: 1, state: "yielded", turnId: "t1", startedAt: "2026-10-28T00:00:00Z" } } as Partial<AskSummary>;
     act(() => root.render(h(DelegationDetailBody, { d: ask(waiting), brief: null, here: null, host: "local", layout: "side" })));
     await flush();
@@ -134,10 +134,10 @@ describe("delegation 放弃 confirms in place (DelegationDetailBody)", () => {
     act(() => root.render(h(DelegationDetailBody, { d: ask({ ...waiting, canResume: true }), brief: null, here: null, host: "local", layout: "side" })));
     await flush();
     const resume = byTestId("delegation-resume")!;
+    expect(resume.title).toBe("delegation.resumeWaitHint");
     act(() => resume.click());
-    expect(hint()).toContain("delegation.resumeWaitConfirm delegation.again");
-    expect(run).not.toHaveBeenCalled();
-    act(() => resume.click());
+    expect(resume.dataset.armed).toBeUndefined();
+    expect(run).toHaveBeenCalledTimes(1);
     expect(run).toHaveBeenCalledWith("local", expect.objectContaining({ askId: "ask-1" }), "cutex/ask/resume", t);
   });
 

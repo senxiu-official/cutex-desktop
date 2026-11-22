@@ -86,7 +86,7 @@ function PageToggle({ code, setCode, labels }: { code: boolean; setCode(code: bo
       role="radio"
       aria-checked={code === value}
       onClick={() => setCode(value)}
-      className={`rounded px-1.5 py-px text-caption/[inherit] ${code === value ? "bg-surface-2 font-medium text-foreground" : "text-muted hover:bg-hover"}`}
+      className={`press rounded px-1.5 py-px text-caption/[inherit] ${code === value ? "bg-surface-2 font-medium text-foreground" : "text-muted hover:bg-hover"}`}
     >
       {label}
     </button>
@@ -177,7 +177,7 @@ function Preview({ hostId, name, version, code = false }: { hostId: string; name
         <div className="m-2 flex flex-wrap items-center gap-2 rounded-md border border-border bg-surface-2 px-3 py-2 text-xs text-subtle">
           <span className="min-w-0 flex-1">{t(version.bytes > ARTIFACT_PAGE_MAX_BYTES ? "artifacts.page.overMax" : "artifacts.page.largePrompt", { size, max: formatBytes(ARTIFACT_PAGE_MAX_BYTES) })}</span>
           {version.bytes <= ARTIFACT_PAGE_MAX_BYTES && (
-            <button onClick={() => { largeRenderChoices.set(decisionKey, "page"); setDecision({ key: decisionKey, page: true }); }} className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-foreground hover:bg-hover">
+            <button onClick={() => { largeRenderChoices.set(decisionKey, "page"); setDecision({ key: decisionKey, page: true }); }} className="press inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-foreground hover:bg-hover">
               <Play size={12} />
               {t("artifacts.page.showLarge")}
             </button>
@@ -237,7 +237,7 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-const LINK = "text-accent hover:underline";
+const LINK = "press rounded-sm text-accent hover:underline";
 
 function TurnLink({ hostId, sessionId, turnId, label }: { hostId: string; sessionId: string; turnId: string; label: string }) {
   const { t } = useI18n();
@@ -314,7 +314,7 @@ function Source({ hostId, version }: { hostId: string; version: ArtifactVersion 
       <Field label={t("artifacts.src.path")}>
         <span className="inline-flex max-w-full items-start gap-1">
           <code className="min-w-0 font-mono break-all">{version.sourcePath}</code>
-          <button title={t("artifacts.src.copy")} aria-label={t("artifacts.src.copy")} onClick={() => copyText(version.sourcePath)} className="shrink-0 text-subtle hover:text-foreground">
+          <button title={t("artifacts.src.copy")} aria-label={t("artifacts.src.copy")} onClick={() => copyText(version.sourcePath)} className="press-icon shrink-0 rounded-sm text-subtle hover:text-foreground">
             <Copy size={11} />
           </button>
         </span>
@@ -378,7 +378,7 @@ function Compare({ hostId, detail, version, open }: { hostId: string; detail: Ar
         {pick(from, setFrom, t("artifacts.cmp.from"))}
         {pick(to, setTo, t("artifacts.cmp.to"))}
         {text && (
-          <button onClick={openCard} className="ml-auto inline-flex items-center gap-1 text-caption/[inherit] text-accent hover:underline">
+          <button onClick={openCard} className="press ml-auto inline-flex items-center gap-1 rounded-sm text-caption/[inherit] text-accent hover:underline">
             <ExternalLink size={11} />
             {t("artifacts.cmp.openCard")}
           </button>
@@ -465,7 +465,7 @@ export function ViewBody({ instance, hostId, setState, open }: SideBodyProps<Vie
         <div className="flex shrink-0 items-center gap-1.5 border-b border-warn/30 bg-warn/10 px-2 py-1 text-caption/[inherit] text-warn-text">
           <History size={12} className="shrink-0" />
           <span className="min-w-0 flex-1">{t("artifacts.oldBanner", { n: parts.version as number, latest: a.latestVersion })}</span>
-          <button onClick={() => pickVersion("latest")} className="shrink-0 font-medium hover:underline">
+          <button onClick={() => pickVersion("latest")} className="press shrink-0 rounded-sm font-medium hover:underline">
             {t("artifacts.showLatest")}
           </button>
         </div>
@@ -486,7 +486,7 @@ export function ViewBody({ instance, hostId, setState, open }: SideBodyProps<Vie
                 aria-selected={selected === tab}
                 title={tab === "origin" ? t("artifacts.pane.originHint") : undefined}
                 onClick={() => setState(withTab(state, tab))}
-                className={`shrink-0 rounded-md px-2 py-0.5 text-meta/[inherit] whitespace-nowrap ${selected === tab ? "bg-surface-2 font-medium text-foreground" : "text-muted hover:bg-hover"}`}
+                className={`press shrink-0 rounded-md px-2 py-0.5 text-meta/[inherit] whitespace-nowrap ${selected === tab ? "bg-surface-2 font-medium text-foreground" : "text-muted hover:bg-hover"}`}
               >
                 {t(TAB_LABEL[tab])}
               </button>

@@ -67,12 +67,17 @@
   border-top-left-radius: 0;
   border-top-right-radius: 0;
 }
-.shelf-card[data-shelf-card="rail-top"] [data-shelf-body] > :is(.shell-card, div > .contents:first-child > .shell-card) {
+/* Two plain selectors, not `> :is(.shell-card, div > … > .shell-card)`: a complex selector inside :is() does not extend
+   the `>` before it (the pane also had to be the body's own child), so a page's pane never matched and kept its rounded,
+   bordered top under the rail's square edge (owner 2026-11-17: the portrait Rail's corners looked wrong). */
+.shelf-card[data-shelf-card="rail-top"] [data-shelf-body] > .shell-card,
+.shelf-card[data-shelf-card="rail-top"] [data-shelf-body] > div > .contents:first-child > .shell-card {
   border-top: 0;
   border-top-left-radius: 0;
   border-top-right-radius: 0;
 }
-.shelf-card[data-shelf-card="rail-bottom"] [data-shelf-body] > :is(.shell-card, div > .contents:last-child > .shell-card) {
+.shelf-card[data-shelf-card="rail-bottom"] [data-shelf-body] > .shell-card,
+.shelf-card[data-shelf-card="rail-bottom"] [data-shelf-body] > div > .contents:last-child > .shell-card {
   border-bottom: 0;
   border-bottom-left-radius: 0;
   border-bottom-right-radius: 0;

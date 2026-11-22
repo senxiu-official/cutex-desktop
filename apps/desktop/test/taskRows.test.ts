@@ -44,8 +44,8 @@ describe("delegation rows", () => {
       text: "Parser review\n\nReview the parser",
     });
     expect(taskToolRow(call("agent_ask", { target: "cutex.mika", text: "Run the tests" }))).toMatchObject({ verb: "delegate", counterpartId: "cutex.mika", counterpartName: null, text: "Run the tests" });
-    expect(taskToolRow(call("delegation_stop", { delegation: "d-1" }))).toMatchObject({ verb: "delegationStop", text: "Parser review" });
-    expect(taskToolRow(call("delegation_read", { delegation_id: "d-unknown" }))).toMatchObject({ verb: "delegationRead", text: "d-unknown" });
+    expect(taskToolRow(call("delegation_stop", { delegation: "d-1" }))).toMatchObject({ verb: "delegationStop", text: null, delegation: { id: "d-1", title: "Parser review", label: true } });
+    expect(taskToolRow(call("delegation_read", { delegation_id: "d-unknown" }))).toMatchObject({ verb: "delegationRead", delegation: { id: "d-unknown", title: null } });
   });
 
   it("labels read_overlength_content (and its r214 name document_read)", () => {
@@ -57,7 +57,7 @@ describe("delegation rows", () => {
   it("picks close verbs from the outcome for delegation_close and ask_close", () => {
     expect(taskToolRow(call("delegation_close", { delegation: "d-1", outcome: "accepted" }))?.verb).toBe("delegationAccept");
     expect(taskToolRow(call("delegation_close", { delegation: "d-1", outcome: "abandoned" }))?.verb).toBe("delegationAbandon");
-    expect(taskToolRow(call("ask_close", { ask: "a-1", outcome: "stop" }))).toMatchObject({ verb: "delegationStop", text: "a-1" });
+    expect(taskToolRow(call("ask_close", { ask: "a-1", outcome: "stop" }))).toMatchObject({ verb: "delegationStop", delegation: { id: "a-1" } });
     expect(taskToolRow(call("delegation_close", { delegation: "d-1" }))?.verb).toBe("delegationClose");
   });
 
@@ -80,7 +80,7 @@ describe("delegation rows", () => {
     // agent-create-task-delegation: the task is the row text, and later delegation rows name it.
     const created = { outcome: { status: "complete", receipt: { result: { agent: { cutex_session_id: "cutex.worker" }, task_mode: "delegation", delegation: { ok: true, delegation: "delegation-abc123" } } } } };
     expect(taskToolRow(done("agent_create", { name: "worker", task: "Port the parser" }, created))).toMatchObject({ verb: "agentCreate", counterpartId: "cutex.worker", text: "Port the parser" });
-    expect(taskToolRow(call("delegation_stop", { delegation: "delegation-abc123" }))?.text).toBe("Port the parser");
+    expect(taskToolRow(call("delegation_stop", { delegation: "delegation-abc123" }))?.delegation).toMatchObject({ title: "Port the parser", target: "worker" });
     expect(taskToolRow(call("agent_archive", { agent: "cutex.worker" }))).toMatchObject({ verb: "agentArchive", counterpartId: "cutex.worker" });
     expect(taskToolRow(call("cutex_agent_management", { operation: "create", spec: { name: "worker" } }))).toMatchObject({ verb: "agentCreate", counterpartName: "worker" });
     expect(taskToolRow(call("cutex_agent_management", { operation: "restart", cutex_session_id: "cutex.w" }))).toBeNull();

@@ -1054,3 +1054,38 @@
   padding: 4px 3px;
 }
 
+
+/* ── Press feedback (owner 2026-11-18, press-feedback audit) ─────────────────────────────────────────────────
+   The tray keeps its hover lift and focus rings; a press settles the lift a little (a held press that turns into a
+   reorder / grip drag only looks settled: the drag draws its own ghost and drop zones). Plain buttons take the
+   shared pressed fill (--pressed, styles.css). */
+.tray-item:active {
+  transform: translateY(-1px) scale(1.02);
+}
+.tray-item[data-has-note]:active {
+  transform: none;
+  background: var(--pressed);
+}
+.tray-back:active {
+  transform: none;
+  background: var(--pressed);
+}
+.tray-m:active {
+  transform: scale(0.94);
+}
+.tray-grip:active,
+.tray-pin-wide:active,
+.tray-more:active,
+.tray-operations:active,
+.tray-needs[data-empty]:active {
+  background: var(--pressed);
+}
+.tray-needs:active {
+  background: color-mix(in oklab, var(--attention) 34%, transparent);
+}
+.tray-x:active {
+  background: color-mix(in srgb, var(--danger) 26%, var(--bg));
+}
+.pane-tray-handle:active .pane-tray-pill {
+  background: color-mix(in srgb, var(--fg) 66%, transparent);
+}

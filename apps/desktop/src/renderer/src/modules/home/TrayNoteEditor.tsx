@@ -115,11 +115,11 @@ function Editor({ edit }: { edit: NoteEdit }) {
           {t("tray.note.firstLine")} · <span data-note-count="">{text.length} / {edit.max}</span>
         </span>
         {(edit.initial || text) && (
-          <button type="button" data-note-clear="" disabled={busy} onClick={() => void save(null)} className="rounded-md px-2 py-0.5 text-foreground hover:bg-hover">
+          <button type="button" data-note-clear="" disabled={busy} onClick={() => void save(null)} className="press rounded-md px-2 py-0.5 text-foreground hover:bg-hover disabled:opacity-50">
             {t("tray.note.clear")}
           </button>
         )}
-        <button type="button" data-note-save="" disabled={busy || !dirty || text.length > edit.max} onClick={() => void save(text)} className="rounded-md bg-accent px-2.5 py-0.5 font-medium text-white hover:opacity-90 disabled:opacity-50">
+        <button type="button" data-note-save="" disabled={busy || !dirty || text.length > edit.max} onClick={() => void save(text)} className="press-solid rounded-md bg-accent px-2.5 py-0.5 font-medium text-white hover:opacity-90 disabled:opacity-50">
           {t("tray.note.save")}
         </button>
       </div>

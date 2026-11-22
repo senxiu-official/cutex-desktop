@@ -402,7 +402,8 @@
   --av-72: 72px;
   /* Colour roles. */
   --fg-disabled: color-mix(in oklab, var(--fg-subtle) 60%, transparent);
-  --pressed: color-mix(in oklab, var(--fg) 9%, transparent);
+  /* The pressed fill (:active), clearly deeper than --hover (6 %): at 9 % a press looked like a hover (owner 2026-11-18). */
+  --pressed: color-mix(in oklab, var(--fg) 14%, transparent);
   --accent-soft: color-mix(in oklab, var(--accent) 12%, transparent);
   --selected: var(--accent-soft);
   --on-accent: #ffffff;
@@ -524,21 +525,16 @@
   color: color-mix(in oklab, var(--project-icon-color) var(--project-icon-ink), var(--project-icon-ink-toward));
 }
 /* Folders (lib/folderLook, components/Sidebar FolderHeader; owner folders and 更早的项目): the name and icon in
-   the folder colour's ink (the project icon rule, so it passes in light and dark), the trailing line in the same
-   colour at a lower strength. A colour outside the palette brings its own ink per theme (lib/folderInk,
-   `--folder-ink-light` / `--folder-ink-dark`, set by lib/folderLook folderStyle), and its line follows that ink. */
+   the folder colour's ink (the project icon rule, so it passes in light and dark). No trailing line since
+   2026-11-18 (the header looks the same in place and stuck). A colour outside the palette brings its own ink per
+   theme (lib/folderInk, `--folder-ink-light` / `--folder-ink-dark`, set by lib/folderLook folderStyle). */
 .folder-ink {
   color: var(--folder-ink-light, color-mix(in oklab, var(--folder-color) var(--project-icon-ink), var(--project-icon-ink-toward)));
 }
-.folder-line {
-  background: color-mix(in oklab, var(--folder-ink-light, var(--folder-color)) 40%, transparent);
-}
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) .folder-ink { color: var(--folder-ink-dark, color-mix(in oklab, var(--folder-color) var(--project-icon-ink), var(--project-icon-ink-toward))); }
-  :root:not([data-theme="light"]) .folder-line { background: color-mix(in oklab, var(--folder-ink-dark, var(--folder-color)) 40%, transparent); }
 }
 :root[data-theme="dark"] .folder-ink { color: var(--folder-ink-dark, color-mix(in oklab, var(--folder-color) var(--project-icon-ink), var(--project-icon-ink-toward))); }
-:root[data-theme="dark"] .folder-line { background: color-mix(in oklab, var(--folder-ink-dark, var(--folder-color)) 40%, transparent); }
 /* 线条 (项目图标样式 = line): the same ink, no tile. */
 .project-icon.project-icon-line {
   background: transparent;
@@ -1034,6 +1030,56 @@ body {
 @utility trim-cap {
   text-box: trim-both cap alphabetic;
   padding-block: 0.3em;
+}
+
+/* ── Press feedback (owner 2026-11-18; components/Button PRESS_* names them) ──────────────────────────────
+   One set of transient states for every control that is not a components/Button: added to the control's own
+   classes, its size, colours, selected / armed / drop states stay. A disabled control (disabled or
+   aria-disabled) never looks pressable. Persistent states (aria-pressed, the current page) are not presses.
+   press        rows, menu items, tabs, chips, links: the pressed fill.
+   press-icon   icon buttons: the pressed fill, a slight press-in, the accent focus ring, no hover face disabled.
+   press-solid  filled buttons (accent, a colour swatch): slightly darker while pressed.
+   press-avatar avatars / tiles: a slight press-in and the accent focus ring; no fill (the picture stays).
+   reveal-focus an action shown on hover (opacity-0 until the row is hovered) shows on keyboard focus too. */
+@utility press {
+  &:active:not(:disabled, [aria-disabled="true"]) {
+    background-color: var(--pressed);
+  }
+}
+@utility press-icon {
+  &:active:not(:disabled, [aria-disabled="true"]) {
+    background-color: var(--pressed);
+    transform: scale(0.92);
+  }
+  &:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+  &:is(:disabled, [aria-disabled="true"]) {
+    cursor: default;
+  }
+  &:is(:disabled, [aria-disabled="true"]):hover {
+    background-color: transparent;
+  }
+}
+@utility press-solid {
+  &:active:not(:disabled, [aria-disabled="true"]) {
+    filter: brightness(0.92);
+  }
+}
+@utility press-avatar {
+  &:active:not(:disabled, [aria-disabled="true"]) {
+    transform: scale(0.94);
+  }
+  &:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+}
+@utility reveal-focus {
+  &:focus-visible {
+    opacity: 1;
+  }
 }
 
 /* Composer settings row on a narrow pane (lib/toolbarFit): with the right group on its own row and still too
@@ -1730,6 +1776,11 @@ body {
   background-color: var(--sidebar-active);
   box-shadow: none;
 }
+/* Press feedback on the selected row: this unlayered rule outranks the layered `press` utility, so the press is
+   repeated here, deepening the selected fill rather than replacing it. */
+.sidebar-card :is([data-row-selected], [data-nav-active]).press:active:not(:disabled, [aria-disabled="true"]) {
+  background-color: color-mix(in oklab, var(--fg) 10%, var(--sidebar-active));
+}
 /* The hidden sidebar popped over the content (components/SidebarPeek): the same card, a deeper edge and a
    short slide so it reads as appearing, not resizing anything under it. */
 .sidebar-card[data-sidebar-mode="pop"] {
@@ -1764,7 +1815,8 @@ body {
   border-radius: 10px;
   color: var(--titlebar-ink);
 }
-:root:not([data-edge-to-edge]) .window-desk ~ * .titlebar-capsule :is(button, .text-muted, .text-subtle):not([role="menu"] *) {
+/* The left group's hovered, pressed or keyboard-focused button keeps its full text colour (owner 2026-11-18: press feedback). */
+:root:not([data-edge-to-edge]) .window-desk ~ * .titlebar-capsule :is(button, .text-muted, .text-subtle):not([role="menu"] *):not([data-window-bar="scope"] button:is(:hover, :active, :focus-visible)) {
   color: var(--titlebar-ink);
 }
 /* Every Shelf Rail (expanded or collapsed) is a card of its own in the card colour (owner 2026-10-21: rails are
@@ -2081,24 +2133,31 @@ body {
    and the 「在线空闲 +N」/「离线 +N」 lines follow each other with no gap (their own heights carry the padding). Blocks set no
    margins of their own; 项目颜色 (lib/projectSeparation) only changes the values below. */
 [data-sidebar-roster] {
-  --roster-gap-section: 12px; /* before a folder or system row, and after one, whatever comes next */
+  --roster-gap-section: 12px; /* before a folder or system row, and after an open one, whatever comes next */
   --roster-gap-project: 6px; /* after an open project */
-  --roster-gap-row: 0px; /* after a one-row (folded) project */
-  --roster-gap-child: 2px; /* a folder / 更早的项目 header → its first project */
+  --roster-gap-child: 0px; /* a folder / 更早的项目 header → its first project (title on title: they touch, owner 2026-11-19) */
 }
 [data-sidebar-roster][data-separation="header"] { --roster-gap-project: 4px; }
-[data-sidebar-roster]:is([data-separation="tint"], [data-separation="rail"]) { --roster-gap-project: 8px; --roster-gap-row: 2px; }
+[data-sidebar-roster]:is([data-separation="tint"], [data-separation="rail"]) { --roster-gap-project: 8px; }
 [data-sidebar-roster] :where([data-roster-kind]) { margin-top: 0; margin-bottom: 0; }
 [data-sidebar-roster] :where([data-roster-kind]) + :where([data-roster-kind]) { margin-top: var(--roster-gap-project); }
-[data-sidebar-roster] :where([data-roster-kind][data-folded]) + :where([data-roster-kind]) { margin-top: var(--roster-gap-row); }
 [data-sidebar-roster] :where([data-roster-kind]) + :where([data-roster-kind="folder"], [data-roster-kind="system"]),
 [data-sidebar-roster] :where([data-roster-kind="folder"], [data-roster-kind="system"]) + :where([data-roster-kind]) { margin-top: var(--roster-gap-section); }
+/* Owner 2026-11-19 (zero gap between titles): where a block ends with a title and the next one (every block starts with
+   its title) follows, they touch, as in the stuck stacks: 生活 / 不重要 / 游戏 Game, 更早的项目 / 工作, folded one-row
+   projects — in every 项目颜色 separation. Decided by what the block ends with, not by its fold (cross-review
+   2026-11-19): [data-ends-title] marks a block with nothing under its title (Sidebar endsTitle); a folder / 更早的项目 /
+   其他项目 ends with a title when the last block of its list does (one or two levels down: a folder's open 更早的项目).
+   Wherever rows end — an open project, pinned rows, a folded folder's attention projects — the gaps above stay.
+   After the section rule, so it wins over --roster-gap-section. */
+[data-sidebar-roster] :where([data-roster-kind]:is([data-ends-title], :has(> [data-roster-body]:last-child > [data-roster-kind]:last-child[data-ends-title], > [data-roster-body]:last-child > [data-roster-kind]:last-child > [data-roster-body]:last-child > [data-roster-kind]:last-child[data-ends-title]))) + :where([data-roster-kind]) { margin-top: 0; }
 [data-sidebar-roster] :where([data-roster-body]) { margin-top: var(--roster-gap-child); }
 
 /* ── 系统行样式 (Settings → 左侧栏, owner 2026-11-06; prefs systemRows) ─────────────────────────────────────────────
    System rows ([data-system-row]: 独立智能体, 快速会话, top-level 更早的项目) vs the owner's folders (coloured icon and
    name, thick coloured line). Grey icon and name in both styles; 「更早的项目」 inside a folder keeps the folder look.
-   虚线 (line): a thin grey dashed line where a folder has its thick coloured one.
+   无线 (plain, default): nothing between the name and the meta, like a folder header (owner 2026-11-18).
+   虚线 (line): a thin grey dashed line there.
    灰底条 (band): the row on a grey band, no line. Selected (a folded row holding the open agent) takes the selected
    rows' accent tint and hover goes a step darker, so neither looks like the band; the text there turns foreground. Every
    text on the band is the muted ink or stronger (≥ 4.5:1 on the band in every theme; the subtle grey is not). */
@@ -2123,6 +2182,88 @@ body {
   --system-band-accent: color-mix(in oklab, var(--accent) 72%, var(--fg));
 }
 
+/* ── 花名册 sticky headers (owner 2026-11-17 / 11-18; lib/rosterStick, components/RosterStick) ─────────────────────
+   The real headers stick; nothing is drawn twice. Every 文件夹 / 系统行 header ([data-stick="edge"]) stays on screen:
+   RosterStick stacks the headers of the groups above the view at the top edge and those below at the bottom edge
+   (scroll-linked animations, [data-stick-js]); without ScrollTimeline they fall back to CSS sticky at the top while you
+   are inside their group. A 项目分组 header ([data-stick="project"]) sticks just under the top stack of its group
+   (--stick-top on its group, set by RosterStick). Off while searching ([data-stick-off]) and in 现在·全部. A stuck header covers the rows under it: the
+   sidebar's own background goes under its own, and a tinted header keeps its tint on top of that. */
+nav[data-sidebar-roster="roster"]:not([data-stick-off]) [data-stick] { position: sticky; }
+/* The list has no padding of its own (its box has: Sidebar data-roster-box), so a stuck header sits exactly where it rests at
+   scroll 0 and reaching the top moves nothing (owner 2026-11-19). */
+nav[data-sidebar-roster="roster"]:not([data-stick-off]) [data-stick="edge"] { top: var(--stick-top, 0px); z-index: 3; }
+nav[data-sidebar-roster="roster"]:not([data-stick-off]) [data-stick="project"] { top: var(--stick-top, 0px); z-index: 2; }
+/* Both stacks (owner 2026-11-18, every title always visible): with ScrollTimeline RosterStick moves the 文件夹 / 系统行
+   headers to the top and bottom stacks itself ([data-stick-js]), so they are not CSS sticky; a stacking header
+   ([data-stacked]) paints over the ones left out for space, which only scroll.
+   The list must scroll on the compositor, or the scroll-linked animations read the previous frame's position and the
+   stacks trail the rows by a frame (at 100% / 125% Chrome keeps a list with see-through contents on the main thread
+   to keep LCD text). The card's own opaque colour painted with the scrolled contents (background-attachment: local)
+   lets Chrome composite it and keep LCD text; will-change: scroll-position would turn the text grayscale (review
+   2026-11-18). An acrylic card is see-through: no opaque colour there, so it keeps its LCD text where Chrome can. */
+nav[data-sidebar-roster="roster"][data-stick-js]:not([data-stick-off]) { background: var(--bg) local; }
+:root[data-card-material="acrylic"]:not([data-edge-to-edge]) nav[data-sidebar-roster="roster"][data-stick-js] { background: none; }
+nav[data-sidebar-roster="roster"][data-stick-js]:not([data-stick-off]) [data-stick="edge"] { position: relative; top: auto; z-index: 3; }
+/* Stacked titles paint over the 「+N」 row (z 4, components/RosterStick), which paints over titles in their place (z 3):
+   a title rising out of the bottom stack slides over 「+N」 as 「+N」 slides down into its place (lib/rosterStick moreKeys). */
+nav[data-sidebar-roster="roster"][data-stick-js]:not([data-stick-off]) [data-stick="edge"][data-stacked] { z-index: 5; }
+@layer base {
+  nav[data-sidebar-roster="roster"] [data-stick] { background-color: var(--bg); }
+}
+/* One seamless band (owner 2026-11-19 「这个黑块有缝隙」): every group title's background spans the list edge to edge
+   — past the list's padding and its own indent (--stick-left / --stick-right, lib/rosterStick spanStickHeaders) — with
+   square corners, and reaches 1px over its neighbours: stacked headers are separate layers whose edges fall on
+   fractional device pixels (125% / 150%), which left hairline seams the rows showed through. The extension is the
+   header's own background (inherit: its tint included), under its content (z-index -1 inside the header's own
+   stacking context). */
+nav[data-sidebar-roster="roster"]:not([data-stick-off]) [data-stick] { border-radius: 0; }
+/* The band is rounded outward to the edges (lib/rosterStick spanStickHeaders): a sub-pixel overshoot is clipped, never
+   a sideways scroll. */
+nav[data-sidebar-roster="roster"] { overflow-x: hidden; }
+nav[data-sidebar-roster="roster"]:not([data-stick-off]) [data-stick]::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  pointer-events: none;
+  top: -1px;
+  bottom: -1px;
+  left: calc(-1 * var(--stick-left, 0px));
+  right: calc(-1 * var(--stick-right, 0px));
+  background: inherit;
+}
+/* A drop target's ring is a shadow just outside the header: the extension would paint over it while dragging. */
+nav[data-sidebar-roster="roster"] [data-stick][data-section-drop-over]::before { content: none; }
+nav[data-sidebar-roster="roster"] .project-band[data-stick] {
+  background:
+    linear-gradient(color-mix(in oklab, var(--project-color) var(--project-band), transparent), color-mix(in oklab, var(--project-color) var(--project-band), transparent)),
+    var(--bg);
+}
+nav[data-sidebar-roster="roster"] .project-band[data-stick][data-highlight] {
+  background:
+    linear-gradient(color-mix(in oklab, var(--project-color) var(--project-active), transparent), color-mix(in oklab, var(--project-color) var(--project-active), transparent)),
+    linear-gradient(color-mix(in oklab, var(--project-color) var(--project-band), transparent), color-mix(in oklab, var(--project-color) var(--project-band), transparent)),
+    var(--bg);
+}
+/* Tint: the header's tint over the group's, as where it sits (a folded group has only the header's). */
+nav[data-sidebar-roster="roster"] .project-block-tint > .project-block-header[data-stick] {
+  background:
+    linear-gradient(color-mix(in oklab, var(--project-color) var(--project-tint-header), transparent), color-mix(in oklab, var(--project-color) var(--project-tint-header), transparent)),
+    linear-gradient(color-mix(in oklab, var(--project-color) var(--project-tint), transparent), color-mix(in oklab, var(--project-color) var(--project-tint), transparent)),
+    var(--bg);
+}
+nav[data-sidebar-roster="roster"] .project-block-tint[data-folded] > .project-block-header[data-stick] {
+  background:
+    linear-gradient(color-mix(in oklab, var(--project-color) var(--project-tint-header), transparent), color-mix(in oklab, var(--project-color) var(--project-tint-header), transparent)),
+    var(--bg);
+}
+nav[data-sidebar-roster="roster"] .project-block-tint > .project-block-header[data-stick][data-highlight] {
+  background:
+    linear-gradient(color-mix(in oklab, var(--project-color) var(--project-active), transparent), color-mix(in oklab, var(--project-color) var(--project-active), transparent)),
+    linear-gradient(color-mix(in oklab, var(--project-color) var(--project-tint-header), transparent), color-mix(in oklab, var(--project-color) var(--project-tint-header), transparent)),
+    var(--bg);
+}
+
 /* A native <details> inside a Settings card reads like every other disclosure in Settings: a chevron that turns, not
    the browser's ▶ (运行时's 旧版本 / 清理计划, 主机's 详细信息…). Summaries that draw their own marker use list-none. */
 .group\/card details > summary:not(.list-none) { list-style: none; display: flex; align-items: center; gap: 0.25rem; }
@@ -2132,3 +2273,11 @@ body {
   mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m9 18 6-6-6-6'/%3E%3C/svg%3E") center / contain no-repeat;
 }
 .group\/card details[open] > summary:not(.list-none)::before { transform: rotate(90deg); }
+
+/* Callout cards (教学模式, components/MarkdownCallout): the marker line shows in the card's head, not in the text; a
+   marker-only first paragraph leaves no gap. The plain quote (pref off) keeps both. */
+.markdown-callout [data-callout-head] { display: none; }
+.markdown-callout > p[data-callout-head-only] { display: none; }
+.markdown-callout > :is(p, ul, ol):first-of-type { margin-top: 0; }
+.markdown-callout > :last-child { margin-bottom: 0; }
+.markdown-callout [data-callout-head] + br { display: none; }

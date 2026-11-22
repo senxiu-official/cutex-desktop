@@ -27,7 +27,7 @@ function ReviewerGrantActions({ host, record, dense = false }: Props) {
   const { t } = useI18n();
   const allowed = canCreateReviewerGrant(host);
   const read = useReviewerGrant(host, record, allowed);
-  const operation = useRoutingOperation(host, record.projectId);
+  const operation = useRoutingOperation(host, record.projectId, "routing");
   const identity = JSON.stringify([host, record.projectId, record.id, record.revision, record.requestDigest]);
   const [operationState, setOperationState] = useState<{ identity: string; busy: boolean; error: "failed" | "changed" | "unknown" | null } | null>(null);
   const busy = operationState?.identity === identity && operationState.busy;

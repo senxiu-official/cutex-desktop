@@ -14,6 +14,7 @@ export const locales = { "zh-Hant-CN": {
   "remote-copies.start": "開始下載",
   "remote-copies.cancel": "取消",
   "remote-copies.open": "打開副本",
+  "remote-copies.openRefused": "腳本和可執行程序不從這裏打開（打開可能會運行它）；可以在文件夾中顯示。",
   "remote-copies.reveal": "在文件夾中顯示",
   "remote-copies.original": "打開遠程原件",
   "remote-copies.refresh": "重新下載",

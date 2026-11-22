@@ -111,7 +111,7 @@ describe("文件 tree reveal", { timeout: 20_000 }, () => {
     Element.prototype.scrollIntoView = scrolled;
     const { FilesBody } = await import("../src/renderer/src/modules/workspace/Files");
     const { WorkspaceContext, NO_DIR_VERSIONS } = await import("../src/renderer/src/lib/workspaceView");
-    const ctx = { hostId: "local", api: fx.api as never, scope: { kind: "session" as const, id: "eva" }, revision: 0, git: null, error: null, dirs: NO_DIR_VERSIONS };
+    const ctx = { hostId: "local", api: fx.api as never, scope: { kind: "session" as const, id: "eva" }, revision: 0, git: null, gitIssue: null, reloadGit: () => {}, dirs: NO_DIR_VERSIONS };
     const props = { instance: { state: { q: "", reveal: "image-references/cafe-stile", revealSeq: 1 } }, setState: () => {} } as never;
     await act(async () => {
       root.render(h(WorkspaceContext.Provider, { value: ctx }, h(FilesBody, props)));

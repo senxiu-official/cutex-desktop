@@ -22,6 +22,10 @@ import { openDelegationDetail } from "../lib/delegationOpen";
 import { MESSAGES_WAKE_METHOD } from "../../../shared/ipc";
 import { decisionInput } from "../lib/approvals";
 import { AnchoredPanel } from "./AnchoredPanel";
+import { hasNoteDiagnostics, noteActionCode, readNowParams, readNowResult, readsSelectedNotes, releaseLiftsPauseOnly, reportsPreTurnNotes } from "../lib/inputLedger/noteDelivery";
+import { reportLines, useNoteDeliveryLines } from "../lib/inputLedger/noteDeliveryView";
+import { INTERRUPT_SEND_MAX, TooManyToInterrupt, interruptSelection, sendsManyAtOnce } from "../lib/inputLedger/interruptSelection";
+import { batchRetryTip, interruptBatchLines } from "../lib/inputLedger/interruptBatchView";
 
 /** Row parts the queue sets: the state shown instead (countdown read point / admission hold), add-ons, own handlers. */
 export interface NextUpOverride {
@@ -40,7 +44,7 @@ export interface NextUpOverride {
 const ACTION_FAILED = { zh: "没能完成，这一行还在；「查看详情」/「查看原因」里有原因", en: "Could not complete; the row stays. “View details” / “View reason” has the cause" } as const;
 
 const TONE: Record<string, string> = { neutral: "", warn: "text-warn-text", danger: "text-danger-text" };
-const BUTTON = "h-5 shrink-0 rounded px-1 hover:bg-surface-2 disabled:cursor-default disabled:opacity-50 disabled:hover:bg-transparent";
+const BUTTON = "press h-5 shrink-0 rounded px-1 hover:bg-surface-2 disabled:cursor-default disabled:opacity-50 disabled:hover:bg-transparent";
 
 /** The record's tombstone for 「清除此提示」 (state 14), if any. */
 export function useClearedUnknown(record: InputRecord, sessionId: string, hostId: string): boolean {
@@ -79,6 +83,20 @@ export function InputStatus({ record, sessionId, hostId, readOnly = false, timel
   const disposal = useApp(s => usesInputDisposal(featuresOf(s, host)));
   const disposing = useApp(s => !!agentState(s.inputDisposals ?? {}, host, sessionId)?.[record.inputId]);
   const ownerDraft = useApp(s => record.kind === "owner" ? agentState(s.ledgerOwnerDrafts, host, sessionId)?.[record.inputId] : undefined);
+  // Note delivery (owner 2026-11-19): where it is, what it waits for, what blocks it — hover and details lines only.
+  const noteLines = useNoteDeliveryLines(record, host, sessionId);
+  const selectedRead = useApp(s => readsSelectedNotes(featuresOf(s, host)));
+  const diagnosticsOn = useApp(s => hasNoteDiagnostics(featuresOf(s, host)));
+  // interrupt-send-many-v1: 打断并发送 takes every unread 插话 of the turn along; its tip says how many go.
+  const manyOn = useApp(s => sendsManyAtOnce(featuresOf(s, host)));
+  // A batch member's own words (why the batch was not sent / may have been taken), on a host with that contract.
+  const deliveryLines = manyOn ? [...noteLines, ...interruptBatchLines(t, record)] : noteLines;
+  const sendsTogether = useApp(s => {
+    if (!manyOn || record.kind !== "owner" || !record.actions?.includes("interruptSend")) return 0;
+    const ledger = agentState(s.inputs, host, sessionId);
+    return ledger ? interruptSelection(ledger.records.values(), ledger.delivery, record.inputId).length : 0;
+  });
+  const notesReportOn = useApp(s => reportsPreTurnNotes(featuresOf(s, host)));
   const ask = useDelegation(host, record.askId);
   const shownState = projection.kind === "state" ? overlay?.state ?? projection.state : null;
   const reviewing = shownState === "review" && !!ask && awaitsOwnerReview(ask);
@@ -124,6 +142,23 @@ export function InputStatus({ record, sessionId, hostId, readOnly = false, timel
     const raw = error instanceof Error ? error.message : String(error);
     setLastError(raw);
     bridge.shell?.logError({ kind: "reported", message: `next-up action failed (${record.inputId}): ${raw}` });
+    // Codes the note-delivery contract answers in its own words: never retried here, the row is re-read instead. Only
+    // on a host with that contract (现在读取 codes: agent-bus-read-notes-v1; release / revision codes:
+    // passive-note-diagnostics-v1); an older host keeps the one plain failure notice below.
+    const found = noteActionCode(error);
+    const readCode = found === "read_notes_unsupported" || found === "read_notes_unavailable" || found === "request_outcome_unknown";
+    // A host that interrupts several at once answers its revision / gone refusals the same way (re-read, no retry).
+    const code = found && (readCode ? selectedRead : diagnosticsOn || manyOn) ? found : null;
+    const say = (key: MessageKey, tone: "error" | "info") => useApp.getState().notify(t(key), tone, { hostId: host, sessionId });
+    // More unread 插话 than one interrupt takes: refused whole before any request (the rest would be dropped).
+    if (error instanceof TooManyToInterrupt) { useApp.getState().notify(error.message, "error", { hostId: host, sessionId }); return; }
+    // An older runtime pin refuses a batch before interrupting: nothing happened, and no one-at-a-time fallback.
+    if (manyOn && /(^|[^_\w])interrupt_send_many_unsupported\b/.test(raw)) { say("interruptSend.manyUnsupported", "error"); return; }
+    if (code === "bus_redrive_failed") { say("noteDelivery.release.recorded", "info"); void app().refreshInputs(sessionId, host); return; }
+    if (code === "read_notes_unsupported") { say("noteDelivery.readNow.unsupported", "error"); return; }
+    if (code === "read_notes_unavailable") { say("noteDelivery.readNow.unavailable", "info"); void app().refreshInputs(sessionId, host); return; }
+    if (code === "request_outcome_unknown") { say("noteDelivery.readNow.outcomeUnknown", "error"); void app().refreshInputs(sessionId, host); return; }
+    if (code === "revision_conflict" || code === "input_not_holdable" || code === "input_not_found") { tell(REFUSAL_TEXT[code === "input_not_found" ? "gone" : "changed"]); void app().refreshInputs(sessionId, host); return; }
     tell(ACTION_FAILED, "error");
   };
   const app = () => useApp.getState();
@@ -138,7 +173,19 @@ export function InputStatus({ record, sessionId, hostId, readOnly = false, timel
     viewDelegation: () => record.askId && openDelegationDetail(host, record.askId, { title: ask?.title }),
     resume: () => app().resumePaused(sessionId, host),
     start: () => app().sessionAction(sessionId, "cutex/runtime/online", {}, host),
-    readNow: () => app().sessionAction(sessionId, MESSAGES_WAKE_METHOD, {}, host),
+    // 现在读取: the clicked note as a fixed set when the host takes one (carried with the owner input atomically); an
+    // older host keeps the capture-what-is-pending call. The answer's counts are not read receipts: the row stays until
+    // the ledger says the note is in context. Notes the turn did not carry are said, never resent from here.
+    readNow: async () => {
+      const result = readNowResult(await app().sessionAction(sessionId, MESSAGES_WAKE_METHOD, readNowParams([record.inputId], selectedRead), host));
+      // Not confirmed carried (skipped may include notes whose admission answer was lost) and whole-report errors, said
+      // as they are; a carried count is not news here (the row itself goes once the ledger says it is in context).
+      const report = notesReportOn ? result.passiveNotes : null;
+      if (report && (report.skipped.length || report.errors.length)) {
+        const lines = reportLines(t, { ...report, admitted: [] });
+        app().notify(lines.join(" · "), report.errors.length ? "error" : "info", { hostId: host, sessionId });
+      }
+    },
     refresh: () => app().refreshInputs(sessionId, host),
     viewDetails: () => setDetails(open => !open),
     viewReason: () => setDetails(open => !open),
@@ -169,32 +216,40 @@ export function InputStatus({ record, sessionId, hostId, readOnly = false, timel
   // Registry 1.6: ⓘ only on passiveNote, afterWork timed, unconfirmed and needsAction.
   const info = def.info && (state !== "afterWork" || variant === "timed") ? def.info[lang] : null;
   const silentLabel = timeline && (state === "awaitingRead" || state === "sending");
+  const detailLines = deliveryLines.length ? `\n${deliveryLines.join("\n")}` : "";
   const diagnostics = [`${record.kind} · ${record.state}${record.reason ? ` · ${record.reason}` : ""}${record.stage ? ` · ${record.stage}` : ""}`,
     record.error?.code, record.error ? JSON.stringify(record.error.details) : null, record.details.nativeReason ? String(record.details.nativeReason) : null, record.stalled ? `stalled: ${record.stalled.reason}` : null,
     lastError ? `last action: ${lastError}` : null, `inputId ${record.inputId}`, `registry ${REGISTRY_VERSION}`].filter(Boolean).join("\n");
   return <span className="inline-flex h-5 min-w-0 max-w-full items-center gap-1 text-caption text-subtle" data-testid="input-status" data-state={record.state} data-next-up-state={state} data-input-id={record.inputId}>
-    {!silentLabel && <span className={`flex min-w-0 items-center gap-1 ${TONE[def.tone]}`} data-tip={def.meaning[lang]} data-testid="next-up-label" data-variant={variant}>{overlay?.symbol}<span className="min-w-0 truncate tabular-nums">{label}</span></span>}
-    {!silentLabel && info && <span className="inline-flex shrink-0 cursor-help text-subtle" data-tip={info} aria-label={info} role="img" data-testid="next-up-info"><Info aria-hidden className="size-3" /></span>}
+    {!silentLabel && <span className={`flex min-w-0 items-center gap-1 ${TONE[def.tone]}`} data-tip={def.meaning[lang] + detailLines} data-testid="next-up-label" data-variant={variant}>{overlay?.symbol}<span className="min-w-0 truncate tabular-nums">{label}</span></span>}
+    {!silentLabel && info && <span className="inline-flex shrink-0 cursor-help text-subtle" data-tip={info + detailLines} aria-label={info + detailLines} role="img" data-testid="next-up-info"><Info aria-hidden className="size-3" /></span>}
     {overlay?.addOn}
     {Number.isFinite(coalescing) && <span className="shrink-0 tabular-nums" data-testid="next-up-coalescing">{fill(NEXT_UP_DETAILS.coalescing[lang], { n: Math.max(0, Math.ceil((coalescing - now) / 1000)) })}</span>}
     {record.stalled && <span className="shrink-0 truncate text-warn-text" data-testid="next-up-stalled">{fill(NEXT_UP_DETAILS.stalled[lang], { n: minutes })}</span>}
     {(() => {
-      const list = buttons.map(button => <EffectButton key={button.effect} button={button} lang={lang} pending={pending} onRun={run} anchor={button.effect === "viewDetails" || button.effect === "viewReason" ? detailsAnchor : undefined} />);
+      // 允许发送 on a note both paused by you and held at an old send point: say that this click lifts only your pause.
+      const extraTip = (effect: NextUpEffectId) => effect === "releaseHold" && releaseLiftsPauseOnly(record) ? t("noteDelivery.release.pauseOnly") : undefined;
+      const tipFor = (effect: NextUpEffectId) => effect === "interruptSend" && sendsTogether > INTERRUPT_SEND_MAX ? t("interruptSend.tooMany", { max: INTERRUPT_SEND_MAX })
+        : effect === "interruptSend" && sendsTogether > 1 ? t("interruptSend.manyTip", { n: sendsTogether })
+        : effect === "retry" && manyOn ? batchRetryTip(t, record) : undefined;
+      const list = buttons.map(button => <EffectButton key={button.effect} button={button} lang={lang} pending={pending} onRun={run} extraTip={extraTip(button.effect)} tipOverride={tipFor(button.effect)} anchor={button.effect === "viewDetails" || button.effect === "viewReason" ? detailsAnchor : undefined} />);
       return buttonsClassName && list.length ? <span className={buttonsClassName} data-next-up-buttons="">{list}</span> : list;
     })()}
     {details && <AnchoredPanel anchor={detailsAnchor} side="above" label={label} onClose={() => setDetails(false)} className="w-80" data-next-up-details="">
       <div className="space-y-1 p-3 text-caption">
         <div className="font-medium text-foreground">{label}</div>
         <div className="text-muted">{def.meaning[lang]}</div>
+        {deliveryLines.length > 0 && <div className="space-y-0.5 text-foreground" data-testid="next-up-delivery-lines">{deliveryLines.map((line, i) => <div key={i}>{line}</div>)}</div>}
         <pre className="selectable whitespace-pre-wrap break-all text-subtle">{diagnostics}</pre>
       </div>
     </AnchoredPanel>}
   </span>;
 }
 
-function EffectButton({ button, lang, pending, onRun, anchor }: { button: NextUpButton; lang: Lang; pending: NextUpEffectId | null; onRun(effect: NextUpEffectId, event: React.MouseEvent): void; anchor?: React.RefObject<HTMLButtonElement | null> }) {
+function EffectButton({ button, lang, pending, onRun, anchor, extraTip, tipOverride }: { button: NextUpButton; lang: Lang; pending: NextUpEffectId | null; onRun(effect: NextUpEffectId, event: React.MouseEvent): void; anchor?: React.RefObject<HTMLButtonElement | null>; extraTip?: string; tipOverride?: string }) {
   const def = NEXT_UP_EFFECTS[button.effect];
-  const tip = !button.enabled && button.reason ? DISABLED_REASONS[button.reason][lang] : "tip" in def ? def.tip[lang] : undefined;
+  const base = !button.enabled && button.reason ? DISABLED_REASONS[button.reason][lang] : tipOverride ?? ("tip" in def ? def.tip[lang] : undefined);
+  const tip = button.enabled && extraTip ? [base, extraTip].filter(Boolean).join("\n") : base;
   return <button ref={anchor} type="button" disabled={!button.enabled || pending !== null} onClick={event => onRun(button.effect, event)} data-tip={tip} aria-label={tip ? `${def.label[lang]} — ${tip}` : undefined}
     className={BUTTON} data-effect={button.effect} data-enabled={button.enabled ? "" : undefined} data-disabled-reason={button.reason}>{def.label[lang]}</button>;
 }

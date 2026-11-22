@@ -156,7 +156,7 @@ export function Popover({
           if (!open) onOpen?.();
           setOpen(!open);
         }}
-        className={triggerClassName ?? `flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-muted hover:bg-surface-2 hover:text-foreground ${open ? "bg-surface-2 text-foreground" : ""}`}
+        className={triggerClassName ?? `press flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-muted hover:bg-surface-2 hover:text-foreground ${open ? "bg-surface-2 text-foreground" : ""}`}
       >
         {trigger}
       </button>
@@ -220,7 +220,7 @@ export function Menu<T>({
               disabled={item.disabled}
               data-tip={item.title}
               onClick={() => pick(item, close)}
-              className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left hover:bg-surface-2 disabled:opacity-40 disabled:hover:bg-transparent"
+              className="press flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left hover:bg-surface-2 disabled:opacity-40 disabled:hover:bg-transparent"
             >
               {item.icon && <span className="w-4 text-center text-muted">{item.icon}</span>}
               <span className="min-w-0 flex-1">

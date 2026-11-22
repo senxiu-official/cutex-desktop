@@ -5,6 +5,7 @@
 // the status. The desktop never runs the login. A typed key is write-only (owner 2026-10-27, docs/design/042):
 // it lives only in this form's state until it is sent (renderer → preload → main → cutex), is cleared right
 // after, and never goes to drafts, notices or error text; cutex answers only `apiKeyPresent`.
+import { useSettingsCard } from "../../lib/settingsDrafts";
 import { isImeComposing } from "../../lib/ime";
 import { useEffect, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
@@ -280,6 +281,8 @@ export function AddForm({ kind, onCancel, onCreated, dialog }: { kind: ClaudeAcc
   const [apiKey, setApiKey] = useState("");
   const [problem, setProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Unsaved from the first change (its key variable too) until the account is created, which closes it (lib/settingsDrafts).
+  const card = useSettingsCard();
   const submit = async () => {
     const r = accountCreateRequest(kind, { label, baseUrl, keyEnv, envText, apiKey });
     if ("error" in r) return setProblem(r.error === "badLabel" ? t("claude-accounts.form.badLabel") : t("claude-accounts.form.envBad", { lines: r.lines.join(", ") }));
@@ -299,7 +302,7 @@ export function AddForm({ kind, onCancel, onCreated, dialog }: { kind: ClaudeAcc
   };
   const keyEnvLabel: Record<ClaudeKeyEnv, MessageKey> = { ANTHROPIC_API_KEY: "claude-accounts.form.keyEnvApiKey", ANTHROPIC_AUTH_TOKEN: "claude-accounts.form.keyEnvAuthToken" };
   return (
-    <FormFields><Card className={dialog ? "px-5 pt-1" : "-mx-4 border-b border-border bg-surface-2/40 px-4 pt-1"}>
+    <div ref={card.ref} className="contents"><FormFields><Card className={dialog ? "px-5 pt-1" : "-mx-4 border-b border-border bg-surface-2/40 px-4 pt-1"}>
       <SettingRow agents="none" source="host" label={t("claude-accounts.form.label")} hint={t(kind === "api" ? "claude-accounts.form.apiKeyNote" : "claude-accounts.form.subscriptionNote")}>
         <TextInput
           autoFocus
@@ -340,7 +343,7 @@ export function AddForm({ kind, onCancel, onCreated, dialog }: { kind: ClaudeAcc
         </Button>
         {!dialog && <Button onClick={onCancel}>{t("dialog.cancel")}</Button>}
       </div>
-    </Card></FormFields>
+    </Card></FormFields></div>
   );
 }
 

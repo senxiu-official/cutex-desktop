@@ -11,16 +11,17 @@ import { isBrowserKind } from "./browserState";
 
 export const MEDIA_GRACE_MS = 10 * 60_000;
 
-type HoldReason = "lease" | "media";
+type HoldReason = "lease" | "media" | "cache";
 
-/** The Body's one shell hold for two reasons: the agent lease (counted) and media (uncapped). Returns held-after. */
+/** The Body's one shell hold for three reasons: the agent lease (counted), media and the service view cache (uncapped;
+ * viewCache.ts keeps its own limit). Returns held-after. */
 export function createHoldReasons(keepMounted: (hold: boolean) => boolean, markUncapped: (on: boolean) => void) {
-  const on: Record<HoldReason, boolean> = { lease: false, media: false };
+  const on: Record<HoldReason, boolean> = { lease: false, media: false, cache: false };
   return {
     set(reason: HoldReason, hold: boolean): boolean {
       on[reason] = hold;
-      markUncapped(on.media);
-      return keepMounted(on.lease || on.media);
+      markUncapped(on.media || on.cache);
+      return keepMounted(on.lease || on.media || on.cache);
     },
   };
 }

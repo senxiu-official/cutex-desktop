@@ -152,7 +152,7 @@ function NoteJump({ agentId, hostId, children }: { agentId: string; hostId: stri
         focusOwnerNote(agentId, target.notificationId, hostId);
       }}
       onKeyDown={(e) => e.stopPropagation()}
-      className="flex shrink-0 rounded-full hover:brightness-95 focus-visible:outline-2 focus-visible:outline-accent"
+      className="press-avatar flex shrink-0 rounded-full hover:brightness-95 focus-visible:outline-2 focus-visible:outline-accent"
     >
       {children}
     </button>
@@ -268,7 +268,7 @@ export const AgentRowButton = memo(function AgentRowButton({ row, compact: compa
           e.stopPropagation();
           openMenuFrom(e.currentTarget, menu());
         }}
-        className="hidden shrink-0 rounded px-0.5 text-subtle group-hover:block hover:bg-surface hover:text-foreground"
+        className="press-icon hidden shrink-0 rounded px-0.5 text-subtle group-hover:block hover:bg-surface hover:text-foreground"
       >
         <MoreHorizontal size={14} />
       </button>
@@ -296,7 +296,7 @@ export const AgentRowButton = memo(function AgentRowButton({ row, compact: compa
       data-row-compact={compact ? "" : undefined}
       data-row-im={twoLines ? "" : undefined}
       data-tip={offlineTitle ?? (twoLines ? undefined : [labelOf(row), preview?.text].filter(Boolean).join("\n"))}
-      className={`density-row group flex w-full cursor-default items-center rounded-md px-1.5 text-left ${twoLines ? "gap-2.5 rounded-lg py-1.5" : compact ? "gap-2 py-px" : "gap-2 py-[3px]"} ${
+      className={`density-row press group flex w-full cursor-default items-center rounded-md px-1.5 text-left ${twoLines ? "gap-2.5 rounded-lg py-1.5" : compact ? "gap-2 py-px" : "gap-2 py-[3px]"} ${
         selected ? "bg-selected" : "hover:bg-hover"
       } ${unavailable ? "opacity-50 grayscale" : ""}`}
     >
@@ -409,7 +409,7 @@ export const OfflineRow = memo(function OfflineRow({ row }: { row: AgentRow }) {
       onContextMenu={contextMenu(menu)}
       data-row-selectable=""
       data-row-selected={selected ? "" : undefined}
-      className={`group flex w-full cursor-default items-center gap-2 rounded-md px-1.5 py-px text-left ${selected ? "bg-background shadow-e1" : "hover:bg-hover"} ${unavailable ? "opacity-50" : ""}`}
+      className={`press group flex w-full cursor-default items-center gap-2 rounded-md px-1.5 py-px text-left ${selected ? "bg-background shadow-e1" : "hover:bg-hover"} ${unavailable ? "opacity-50" : ""}`}
     >
       <AvatarCell>
         <span className={`flex grayscale ${selected ? "" : "opacity-55 group-hover:opacity-90"}`}>
@@ -435,7 +435,7 @@ export const OfflineRow = memo(function OfflineRow({ row }: { row: AgentRow }) {
             e.stopPropagation();
             openMenuFrom(e.currentTarget, menu());
           }}
-          className="hidden shrink-0 rounded px-0.5 text-subtle group-hover:block hover:bg-surface hover:text-foreground"
+          className="press-icon hidden shrink-0 rounded px-0.5 text-subtle group-hover:block hover:bg-surface hover:text-foreground"
         >
           <MoreHorizontal size={13} />
         </button>

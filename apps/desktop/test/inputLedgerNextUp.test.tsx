@@ -6,7 +6,7 @@ import type { AskSummary } from "../src/shared/ipc";
 import type { InputRecord, QueueItem } from "@cutex-desktop/protocol";
 import { record, delivery, T0, iso } from "../src/renderer/src/lib/inputLedger/testkit";
 import { emptyInputLedgerSession } from "../src/renderer/src/lib/inputLedger/alignment";
-const calls = vi.hoisted(() => ({ retry: vi.fn(), dismiss: vi.fn(), release: vi.fn(), resume: vi.fn(), notify: vi.fn(), log: vi.fn(), open: vi.fn(), sidebar: vi.fn() }));
+const calls = vi.hoisted(() => ({ zoom: vi.fn(), retry: vi.fn(), dismiss: vi.fn(), release: vi.fn(), resume: vi.fn(), notify: vi.fn(), log: vi.fn(), open: vi.fn(), sidebar: vi.fn() }));
 vi.mock("../src/renderer/src/bridge", () => ({ api: {}, apiFor: () => ({}), bridge: { shell: { logError: calls.log } }, onEvent: () => () => {} }));
 vi.mock("../src/renderer/src/i18n", () => ({ useI18n: () => ({ locale: "en", t: (key: string, vars?: Record<string, unknown>) => vars?.n === undefined ? key : key + "(" + vars.n + ")" }) }));
 vi.mock("../src/renderer/src/lib/delegationOpen", () => ({ openDelegationDetail: calls.open }));
@@ -22,6 +22,7 @@ vi.mock("../src/renderer/src/store", async () => {
     selectedFeatures: () => new Set(), agentHost: () => "old-focus", sidebarOf: (s: unknown, host: string) => calls.sidebar(s, host) ?? null, viewOf: () => null,
     queueItemText: (item: QueueItem) => (item.input as { text?: string }[]).map(p => p.text ?? "").join("") };
 });
+vi.mock("../src/renderer/src/components/ImageThumbs", async (importOriginal) => ({ ...(await importOriginal<object>()), ImageThumb: ({ title }: { title?: string }) => h("button", { type: "button", "data-thumb-button": title ?? "", onClick: calls.zoom }, "img") }));
 vi.mock("../src/renderer/src/lib/legacyDelivery/consumedBusReceipts", () => ({ useUnsettledBusReceipts: () => { throw Error("legacy receipt inference"); } }));
 import { QueuePanel } from "../src/renderer/src/components/QueuePanel";
 import { InputStatus } from "../src/renderer/src/components/InputStatus";
@@ -34,6 +35,9 @@ import { ledgerQueue, deliveryBusy } from "../src/renderer/src/lib/inputLedger/n
 import { hostKey } from "../src/renderer/src/lib/hostKeys";
 import { useDelegations } from "../src/renderer/src/lib/delegationStore";
 import { useAgentMessages } from "../src/renderer/src/lib/agentMessageStore";
+import { installTips, TIP_DELAY } from "../src/renderer/src/lib/tips";
+import { createShortPaneStore, ShortPaneContext } from "../src/renderer/src/lib/shortPane";
+import { ROW_TIP_MAX } from "../src/renderer/src/lib/queueRowTime";
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let root: ReturnType<typeof createRoot>;
 let el: HTMLDivElement;
@@ -151,7 +155,7 @@ describe("D4 ledger surfaces", () => {
   it("other input kinds retain unknown raw prose without interpreting its prefix", () => {
     seed([statusNotice({ kind: "delegationResult", preview: "held@2: unstructured result prose" })]); panel();
     expect(el.textContent).toContain("held@2: unstructured result prose");
-    expect(el.querySelector('[title="held@2: unstructured result prose"]')).toBeTruthy();
+    expect(el.querySelector('[data-tip-overflow][data-tip^="held@2: unstructured result prose"]')).toBeTruthy();
     expect(el.textContent).toContain("Dismiss");
     // Registry 1.4: a result row keeps its delegation link.
     expect(el.querySelector("[data-delegation-tag]")).toBeTruthy();
@@ -161,13 +165,13 @@ describe("D4 ledger surfaces", () => {
     seed([owner]); panel();
     const row = el.querySelector<HTMLElement>('[data-input-id="restart-owner"]')!;
     expect(row.dataset.surface).toBe("nextUp");
-    expect([...row.querySelectorAll("button")].map(b => b.textContent)).toEqual(["Resend", "Dismiss", "View reason"]);
+    expect([...row.querySelectorAll("button:not([data-testid=row-text])")].map(b => b.textContent)).toEqual(["Resend", "Dismiss", "View reason"]);
     await click("Resend"); await click("Dismiss");
     expect(calls.retry).toHaveBeenCalledExactlyOnceWith("cutex.s1", "restart-owner", "new-host");
     expect(calls.dismiss).toHaveBeenCalledExactlyOnceWith("cutex.s1", "restart-owner", "new-host");
     expect(useApp.getState().inputs[key]!.records.get("restart-owner")).toBe(owner);
     seed([{ ...owner, actions: [] }]);
-    const left = [...el.querySelector('[data-input-id="restart-owner"]')!.querySelectorAll("button")];
+    const left = [...el.querySelector('[data-input-id="restart-owner"]')!.querySelectorAll<HTMLButtonElement>("button:not([data-testid=row-text])")];
     expect(left.filter(b => !b.disabled).map(b => b.textContent)).toEqual(["View reason"]);
     expect(left.find(b => b.textContent === "Dismiss")?.dataset.disabledReason).toBe("notOffered");
   });
@@ -175,6 +179,154 @@ describe("D4 ledger surfaces", () => {
     seed([record("note", { surface: "pendingNotes", kind: "agentMessage", state: "waiting", reason: "passive" })]);
     useAgentMessages.setState({ byId: { note: { messageId: "note", body: "full bus body", state: "delivered", to: "cutex.s1" } as never }, dismissed: new Set(["note"]) });
     panel(); expect(ids()).toEqual(["note"]); expect(el.textContent).toContain("full bus body");
+  });
+  // Owner report 2026-11-19: a 待读留言 row's full text showed in a native title, and the row did not say how old it is.
+  // Owner report 2026-11-19 + cross-review of 040eefe42 (P3): the age is the message's confirmed time (the note's Agent
+  // Bus queuedAt / sentAt), never the ledger record's createdAt — a backfilled record is created long after the note.
+  it("a note's age is its Agent Bus time, not a backfilled record's createdAt; the text is the app tip, never a native title", () => {
+    const now = T0 + 20*86400000;
+    const body = "feat/mobile-approvals 52af1b280 merged to main — a long note the row cuts off";
+    seed([record("note", { surface: "pendingNotes", kind: "agentMessage", state: "uncertain", reason: "receiptTimeout", actions: ["retry", "dismiss"], createdAt: iso(now - 5_000) })]);
+    useAgentMessages.setState({ byId: { note: { messageId: "note", body, state: "pending", to: "cutex.s1", sentAt: (now - 3*3600_000 - 60_000) / 1000 } as never } });
+    panel();
+    const row = el.querySelector('[data-testid="ledger-queue-row"][data-input-id="note"]')!;
+    expect(row.querySelector('[data-testid="row-age"]')?.textContent).toBe("queue.row.hoursAgo(3)");
+    expect(row.querySelector('[data-testid="row-age"]')?.getAttribute("data-tip")).toBe("queue.row.sentAt");
+    const text = row.querySelector('[data-testid="row-text"]')!;
+    expect(text.hasAttribute("data-tip-overflow")).toBe(true);
+    expect(text.getAttribute("data-tip")).toBe(body + "\nqueue.row.sentAt");
+    expect([...row.querySelectorAll("[title]")].map(n => n.getAttribute("title"))).not.toContain(body);
+  });
+  it("without a message time: no age on the row, and the tip says only 记录于 (the record's createdAt)", () => {
+    seed([record("orphan", { surface: "pendingNotes", kind: "agentMessage", state: "waiting", reason: "passive", createdAt: iso(T0) })]); panel();
+    const row = el.querySelector('[data-testid="ledger-queue-row"][data-input-id="orphan"]')!;
+    expect(row.querySelector('[data-testid="row-age"]')).toBeNull();
+    expect(row.querySelector('[data-testid="row-text"]')?.getAttribute("data-tip")).toMatch(/\nqueue\.row\.recordedAt$/);
+  });
+  it("the owner's own queued message: no age on the row; its queue item time (else 记录于) in the tip", () => {
+    seed([record("mine", { surface: "nextUp", state: "waiting", reason: "explicitQueue", actions: [], createdAt: iso(T0) })]); panel();
+    const row = el.querySelector('[data-testid="ledger-queue-row"][data-input-id="mine"]')!;
+    expect(row.querySelector('[data-testid="row-age"]')).toBeNull();
+    expect(row.querySelector('[data-testid="row-text"]')?.getAttribute("data-tip")).toMatch(/\nqueue\.row\.recordedAt$/);
+  });
+  // Cross-review of 040eefe42 (P1, P2): the text and the age are keyboard-focusable tip anchors; text past the tip's cap
+  // opens whole (selectable, with 复制) on click.
+  it("keyboard focus on the row text shows the app tip; the age is focusable too", () => {
+    const now = T0 + 20*86400000;
+    seed([record("note", { surface: "pendingNotes", kind: "agentMessage", state: "waiting", reason: "passive", createdAt: iso(now) })]);
+    useAgentMessages.setState({ byId: { note: { messageId: "note", body: "a note cut off in its row", state: "pending", to: "cutex.s1", sentAt: (now - 120_000) / 1000 } as never } });
+    panel();
+    const detach = installTips(window);
+    try {
+      const text = el.querySelector<HTMLElement>('[data-input-id="note"] [data-testid="row-text"]')!;
+      Object.defineProperty(text, "scrollWidth", { configurable: true, value: 400 });
+      Object.defineProperty(text, "clientWidth", { configurable: true, value: 120 });
+      // jsdom has no keyboard-modality heuristic: the focused element counts as :focus-visible (as after Tab).
+      const original = Element.prototype.matches;
+      const visible = vi.spyOn(Element.prototype, "matches").mockImplementation(function (this: Element, selector: string) { return selector === ":focus-visible" ? this === document.activeElement : original.call(this, selector); });
+      act(() => text.focus());
+      expect(document.activeElement).toBe(text);
+      act(() => { vi.advanceTimersByTime(TIP_DELAY + 20); });
+      expect(document.querySelector('[role="tooltip"]')?.textContent).toBe("a note cut off in its row\nqueue.row.sentAt");
+      visible.mockRestore();
+      const age = el.querySelector<HTMLElement>('[data-input-id="note"] [data-testid="row-age"]')!;
+      expect(age.tabIndex).toBe(0);
+      expect(age.getAttribute("data-tip")).toBe("queue.row.sentAt");
+    } finally { detach(); }
+  });
+  it("text past the tip's cap: the tip is a preview, a click opens the whole text, selectable and copyable", async () => {
+    const now = T0 + 20*86400000;
+    const body = "start " + "x".repeat(1400) + " END";
+    seed([record("long", { surface: "pendingNotes", kind: "agentMessage", state: "waiting", reason: "passive", createdAt: iso(now) })]);
+    useAgentMessages.setState({ byId: { long: { messageId: "long", body, state: "pending", to: "cutex.s1", sentAt: (now - 60_000) / 1000 } as never } });
+    panel();
+    const text = el.querySelector<HTMLElement>('[data-input-id="long"] [data-testid="row-text"]')!;
+    expect(text.getAttribute("data-tip")).not.toContain("END");
+    expect(text.getAttribute("data-tip")!.split("\n")[0]).toHaveLength(ROW_TIP_MAX);
+    await act(async () => text.click());
+    expect(text.getAttribute("aria-expanded")).toBe("true");
+    const full = document.querySelector('[data-row-full-text] [data-testid="row-full-text"]')!;
+    expect(full.textContent).toBe(body);
+    expect(full.className).toContain("selectable");
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    await act(async () => document.querySelector<HTMLButtonElement>('[data-testid="row-full-copy"]')!.click());
+    expect(writeText).toHaveBeenCalledWith(body);
+  });
+  // Re-review of b8d26c931 (P2): a loaded thumbnail is a button, so it sits beside the full-text trigger, never in it.
+  it("a queued message with an image: the thumbnail button is the trigger's sibling; each opens its own thing", async () => {
+    const item = { ...queued("img"), input: [{ type: "text", text: "look at this" }, { type: "localImage", path: "C:\\shots\\a.png" }] } as QueueItem;
+    seed([mergeable("img", 1)]); panel({ items: [item] });
+    const row = el.querySelector<HTMLElement>('[data-testid="ledger-queue-row"][data-input-id="img"]')!;
+    expect(row.querySelector("button button")).toBeNull();
+    const trigger = row.querySelector<HTMLButtonElement>('[data-testid="row-text"]')!;
+    const thumb = row.querySelector<HTMLButtonElement>("[data-thumb-button]")!;
+    expect(thumb).not.toBeNull();
+    expect(trigger.contains(thumb)).toBe(false);
+    expect(trigger.parentElement).toBe(thumb.parentElement);
+    expect(trigger.textContent).toContain("look at this");
+    await act(async () => thumb.click());
+    expect(calls.zoom).toHaveBeenCalledTimes(1);
+    expect(document.querySelector("[data-row-full-text]")).toBeNull();
+    await act(async () => trigger.click());
+    expect(document.querySelector('[data-row-full-text] [data-testid="row-full-text"]')?.textContent).toBe("look at this");
+    expect(calls.zoom).toHaveBeenCalledTimes(1);
+  });
+  // Third review of c10c1720d (P2): text A → image → text B keeps its order; each text run is its own trigger.
+  it("text, image, text: order kept, no nested buttons, both text runs and the image respond to clicks", async () => {
+    const item = { ...queued("mix"), input: [{ type: "text", text: "before" }, { type: "localImage", path: "C:\\shots\\m.png" }, { type: "text", text: "after" }] } as QueueItem;
+    seed([mergeable("mix", 1)]); panel({ items: [item] });
+    const row = el.querySelector<HTMLElement>('[data-testid="ledger-queue-row"][data-input-id="mix"]')!;
+    expect(row.querySelector("button button")).toBeNull();
+    const inline = row.querySelector('[data-testid="queued-message-inline"]')!;
+    expect([...inline.children].map(c => c.matches('[data-testid="row-text"]') ? "text:" + c.textContent : c.matches("[data-thumb-button]") ? "image" : "?")).toEqual(["text:before", "image", "text:after"]);
+    const [first, second] = [...inline.querySelectorAll<HTMLButtonElement>('[data-testid="row-text"]')];
+    calls.zoom.mockClear();
+    await act(async () => inline.querySelector<HTMLButtonElement>("[data-thumb-button]")!.click());
+    expect(calls.zoom).toHaveBeenCalledTimes(1);
+    expect(document.querySelector("[data-row-full-text]")).toBeNull();
+    for (const trigger of [first!, second!]) {
+      await act(async () => trigger.click());
+      expect(document.querySelector('[data-row-full-text] [data-testid="row-full-text"]')?.textContent).toBe("before\nafter");
+      await act(async () => trigger.click()); // closes again
+      expect(document.querySelector("[data-row-full-text]")).toBeNull();
+    }
+    expect(calls.zoom).toHaveBeenCalledTimes(1);
+  });
+  it("an image-only queued message has no empty text trigger", () => {
+    const item = { ...queued("pic"), input: [{ type: "localImage", path: "C:\\shots\\p.png" }] } as QueueItem;
+    seed([mergeable("pic", 1)]); panel({ items: [item] });
+    const row = el.querySelector<HTMLElement>('[data-testid="ledger-queue-row"][data-input-id="pic"]')!;
+    expect(row.querySelector('[data-testid="row-text"]')).toBeNull();
+    expect(row.querySelector("[data-thumb-button]")).not.toBeNull();
+  });
+  // Re-review of b8d26c931 (P2): in a short window the list is an overlay that closes on focus leaving it or a press
+  // elsewhere; the full-text panel (portaled to body, focusing 复制) is the overlay's own, not "elsewhere".
+  it("short window: the expanded overlay stays open while a row's full-text panel opens and is used", async () => {
+    const now = T0 + 20*86400000;
+    seed([record("note", { surface: "pendingNotes", kind: "agentMessage", state: "waiting", reason: "passive", createdAt: iso(now) })]);
+    useAgentMessages.setState({ byId: { note: { messageId: "note", body: "the whole note", state: "pending", to: "cutex.s1", sentAt: (now - 60_000) / 1000 } as never } });
+    const store = createShortPaneStore(); store.set(true);
+    act(() => root.render(h(ShortPaneContext.Provider, { value: store }, h(QueuePanel, panelProps()))));
+    const overlay = () => el.querySelector<HTMLElement>('[data-testid="queue-overlay"]')!;
+    expect(overlay().getAttribute("aria-hidden")).toBe("true");
+    await act(async () => el.querySelector<HTMLButtonElement>('[data-testid="queue-collapse"]')!.click());
+    expect(overlay().hasAttribute("aria-hidden")).toBe(false);
+    const trigger = overlay().querySelector<HTMLButtonElement>('[data-testid="row-text"]')!;
+    act(() => trigger.focus());
+    await act(async () => trigger.click());
+    const copy = document.querySelector<HTMLButtonElement>('[data-row-full-text] [data-testid="row-full-copy"]')!;
+    expect(document.activeElement).toBe(copy); // the panel took the focus (out of the tray's DOM)
+    expect(overlay().hasAttribute("aria-hidden")).toBe(false);
+    expect(document.querySelector('[data-row-full-text] [data-testid="row-full-text"]')?.textContent).toBe("the whole note");
+    await act(async () => { copy.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true })); copy.click(); });
+    expect(overlay().hasAttribute("aria-hidden")).toBe(false);
+    expect(document.querySelector("[data-row-full-text]")).not.toBeNull();
+    // A press really elsewhere still closes the overlay.
+    const elsewhere = document.createElement("button"); document.body.append(elsewhere);
+    await act(async () => { elsewhere.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true })); });
+    expect(overlay().getAttribute("aria-hidden")).toBe("true");
+    elsewhere.remove();
   });
   it("routes single retry and dismiss to the record's host; keeps the row pending authoritative update", async () => {
     seed([record("a", { surface: "nextUp", state: "uncertain", reason: "receiptTimeout", actions: ["retry","dismiss"] })]); panel();
@@ -249,7 +401,7 @@ describe("D4 ledger surfaces", () => {
     const row = el.querySelector<HTMLElement>('[data-testid="ledger-queue-row"]')!;
     expect(row.classList.contains("h-6")).toBe(true); expect(row.classList.contains("max-h-6")).toBe(true);
     expect(row.className).not.toMatch(/hover[^ ]*:h-/);
-    for (const button of row.querySelectorAll("button")) expect(button.classList.contains("h-5")).toBe(true);
+    for (const button of row.querySelectorAll("button:not([data-testid=row-text])")) expect(button.classList.contains("h-5")).toBe(true);
   });
 });
 describe("shared ledger statuses", () => {

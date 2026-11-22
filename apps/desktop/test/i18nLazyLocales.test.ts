@@ -52,5 +52,5 @@ describe("lazy locale catalogs", () => {
     const staticImport = new RegExp(`^\\s*(import|export)\\b[^;]*?from\\s+["'][^"']*/i18n/(${names})["']`, "m");
     const offenders = sources(RENDERER).filter((file) => staticImport.test(readFileSync(file, "utf8")));
     expect(offenders).toEqual([]);
-  });
+  }, 30_000); // Reads every renderer source: past 5 s on a busy machine.
 });

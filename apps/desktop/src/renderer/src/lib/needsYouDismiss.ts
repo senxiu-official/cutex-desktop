@@ -6,8 +6,14 @@
 // An 出错 chip of a runtime error (cutex runtime.status "error", owner 2026-10-26: members stopped normally
 // kept a red 出错 that could not be closed) is remembered by member + runtimeGeneration + that lastError:
 // the same error stays hidden, a later one (or a failed turn) shows the chip again.
+// No age limit while the agent is anywhere (state surfaces L1, owner decision D5, 2026-11-17: a dismissed chip came
+// back after 7 days with nothing changed): the 7-day age clause only collects dismissals of agents that are in no
+// host snapshot any more (archived away, deleted, host removed).
 import { useSyncExternalStore } from "react";
 import type { SessionRuntime } from "@cutex-desktop/protocol";
+import { LOCAL_HOST_ID } from "../../../shared/hosts";
+import type { SidebarSnapshot } from "../../../shared/ipc";
+import { hostKey, parseHostKey } from "./hostKeys";
 import type { AttentionChip, NeedsYou } from "./agentAttention";
 import type { AgentRow } from "./sidebar";
 
@@ -21,7 +27,7 @@ export interface Dismissal {
 /** By host key (`hostKey(host, agentId)`). */
 export type Dismissals = Readonly<Record<string, Dismissal>>;
 
-/** Dismissals older than this go even when the agent is out of view. */
+/** Dismissals older than this go once their agent is in no host snapshot (garbage collection; never for an agent still listed). */
 export const DISMISS_TTL_MS = 7 * 24 * 3600 * 1000;
 
 /** What the needs-you chip stands for; any change (new approval, message, delegation…) changes it. */
@@ -59,13 +65,46 @@ export function chipDismissed(dismissals: Dismissals, key: string, chip: Pick<At
 }
 
 /**
+ * Which agents the hosts know: `keys` = host keys of every agent in a host's snapshot (active and archived);
+ * `unsure` = hosts whose list can't say an agent is gone (configured but not read, partial, cached, loading).
+ */
+export interface KnownAgents {
+  keys: ReadonlySet<string>;
+  unsure: ReadonlySet<string>;
+}
+
+/** KnownAgents of the configured hosts (`hostIds`) from their sidebar snapshots (null: not read). */
+export function knownAgents(hostIds: readonly string[], snapshotOf: (hostId: string) => SidebarSnapshot | null | undefined): KnownAgents {
+  const keys = new Set<string>();
+  const unsure = new Set<string>();
+  for (const hostId of hostIds) {
+    const snap = snapshotOf(hostId);
+    if (!snap || snap.partial || snap.cached || snap.loading) unsure.add(hostId);
+    for (const s of [...(snap?.active ?? []), ...(snap?.retired ?? [])]) keys.add(hostKey(hostId, s.cutexSessionId));
+  }
+  return { keys, unsure };
+}
+
+/** Whether the dismissal of `key` (a host key, or a legacy bare id) belongs to an agent no host lists any more. */
+function agentGone(key: string, known: KnownAgents | undefined): boolean {
+  if (!known || known.keys.has(key)) return false;
+  const host = parseHostKey(key)?.[0];
+  return !host || !known.unsure.has(host);
+}
+
+/**
  * Drop stale dismissals: those of agents in view (`current`: host key → the need's fingerprint of
  * every needs-you chip, and errorKey(host key) → the runtime error's; `inView`: host keys of all rows in
- * view) whose need or error is gone or changed, and any older than the TTL. The same object when nothing goes.
+ * view) whose need or error is gone or changed, and those older than the TTL whose agent is in no host
+ * snapshot (`known`; without it nothing goes by age). The same object when nothing goes.
  */
-export function pruneDismissals(dismissals: Dismissals, current: ReadonlyMap<string, string>, inView: ReadonlySet<string>, now: number): Dismissals {
+export function pruneDismissals(dismissals: Dismissals, current: ReadonlyMap<string, string>, inView: ReadonlySet<string>, now: number, known?: KnownAgents): Dismissals {
   const rowOf = (key: string) => (key.startsWith("error|") ? key.slice(6) : key);
-  const stale = Object.entries(dismissals).filter(([key, d]) => now - d.at > DISMISS_TTL_MS || (inView.has(rowOf(key)) && current.get(key) !== d.fp));
+  const stale = Object.entries(dismissals).filter(([key, d]) => {
+    const row = rowOf(key);
+    if (inView.has(row)) return current.get(key) !== d.fp;
+    return now - d.at > DISMISS_TTL_MS && agentGone(row, known);
+  });
   if (stale.length === 0) return dismissals;
   const next = { ...dismissals };
   for (const [key] of stale) delete next[key];
@@ -114,8 +153,24 @@ export function dismissRuntimeError(key: string, fingerprint: string, now = Date
   save({ ...current, [errorKey(key)]: { fp: fingerprint, at: now } });
 }
 
+// The store is loaded lazily: this module is imported by node-side tests that have no window (the store's bridge needs one).
+let store: typeof import("../store") | null = null;
+
+/** The agents every configured host lists now (the focus host's own fields, the others' slices). */
+function knownAgentsNow(app: typeof import("../store")): KnownAgents {
+  const s = app.useApp.getState();
+  const focus = s.hosts?.active ?? LOCAL_HOST_ID;
+  const ids = s.hosts?.hosts.map((h) => h.id) ?? [focus];
+  return knownAgents(ids.includes(focus) ? ids : [...ids, focus], (id) => (id === focus ? s.sidebar : s.byHost[id]?.sidebar));
+}
+
 export function pruneStoredDismissals(currentNeeds: ReadonlyMap<string, string>, inView: ReadonlySet<string>, now = Date.now()): void {
-  save(pruneDismissals(current, currentNeeds, inView, now));
+  if (store) return save(pruneDismissals(current, currentNeeds, inView, now, knownAgentsNow(store)));
+  save(pruneDismissals(current, currentNeeds, inView, now)); // nothing goes by age until the hosts' lists are at hand
+  void import("../store").then((app) => {
+    store = app;
+    save(pruneDismissals(current, currentNeeds, inView, now, knownAgentsNow(app)));
+  });
 }
 
 export function useDismissals(): Dismissals {

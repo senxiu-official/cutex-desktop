@@ -98,7 +98,7 @@ export interface DialogCheck {
 
 type Dialog =
   | { kind: "confirm"; message: string; danger: boolean; /** Only an OK button (refusal reasons). */ notice?: boolean; /** Button texts instead of 确定 / 取消 (a choice between two actions). */ labels?: ConfirmLabels; check?: DialogCheck; resolve(ok: boolean): void }
-  | { kind: "prompt"; title: string; initial: string; placeholder?: string; multiline?: boolean; maxLength?: number; hint?: string; check?: DialogCheck; resolve(value: string | null): void }
+  | { kind: "prompt"; title: string; initial: string; placeholder?: string; multiline?: boolean; maxLength?: number; hint?: string; check?: DialogCheck; expect?: string; mismatch?: string; resolve(value: string | null): void }
   /** In-app folder browser over a host's daemon (`fs-dir-browse`; remote hosts; null host = the focus host). */
   | { kind: "folder"; start: string | null; hostId: string | null; resolve(value: string | null): void }
   | { kind: "forkProfile"; sessionId: string; hostId: string; afterTurnId: string | null; resolve(value: null): void }
@@ -300,8 +300,11 @@ export function noticeDialog(message: string): Promise<void> {
   return new Promise((resolve) => showDialog({ kind: "confirm", message, danger: false, notice: true, resolve: () => resolve() }));
 }
 
-/** Electron has no window.prompt — this is the replacement. Resolves null on cancel. */
-export function promptDialog(title: string, initial = "", options: { placeholder?: string; multiline?: boolean; maxLength?: number; hint?: string; check?: DialogCheck } = {}): Promise<string | null> {
+/**
+ * Electron has no window.prompt — this is the replacement. Resolves null on cancel. `expect`: a typed confirmation —
+ * OK with any other text keeps the dialog open and shows `mismatch` (exact equality, spaces included).
+ */
+export function promptDialog(title: string, initial = "", options: { placeholder?: string; multiline?: boolean; maxLength?: number; hint?: string; check?: DialogCheck; expect?: string; mismatch?: string } = {}): Promise<string | null> {
   return new Promise((resolve) => showDialog({ kind: "prompt", title, initial, ...options, resolve }));
 }
 

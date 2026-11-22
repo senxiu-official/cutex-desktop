@@ -70,7 +70,7 @@ export function NoteEditor({ hostId, draftKey, currentNote, onSaved, onCancel, o
         </div>}
         <div className="flex flex-wrap gap-1">
           {draft.pins.filter((pin): pin is NoteScope & { kind: "project"; id: string } => pin.kind === "project").map((pin) => <button key={pin.id} disabled={busy}
-            className="rounded bg-accent/10 px-2 py-1 text-accent hover:bg-accent/20" title={t("notes.unpin")}
+            className="press rounded bg-accent/10 px-2 py-1 text-accent hover:bg-accent/20 disabled:opacity-50" title={t("notes.unpin")}
             onClick={() => patch({ pins: draft.pins.filter((other) => !sameScope(pin, other)) })}>
             {projects?.find((project) => project.project_id === pin.id)?.presentation.display_name || pin.id} ×
           </button>)}
@@ -79,7 +79,7 @@ export function NoteEditor({ hostId, draftKey, currentNote, onSaved, onCancel, o
       {conflict && currentNote && <div className="space-y-2 rounded border border-warn/30 p-2 text-xs">
         <p className="text-warn">{t("notes.conflict")}</p>
         <details><summary className="cursor-pointer text-accent">{t("notes.latestVersion")}</summary><pre className="mt-2 whitespace-pre-wrap break-words">{currentNote.title}{"\n\n"}{currentNote.body}</pre></details>
-        <button disabled={busy} className="text-accent hover:underline" onClick={() => { patch({ revision: currentNote.revision }); setError(null); }}>{t("notes.useLatestRevision")}</button>
+        <button disabled={busy} className="press rounded-sm text-accent hover:underline disabled:cursor-default disabled:opacity-50 disabled:no-underline" onClick={() => { patch({ revision: currentNote.revision }); setError(null); }}>{t("notes.useLatestRevision")}</button>
       </div>}
       {error && <div role="alert" className="space-y-1 text-xs text-danger"><p>{noteErrorText(error, t)}</p><p>{t("notes.conflictHint")}</p></div>}
       <div className="flex flex-wrap justify-end gap-2">

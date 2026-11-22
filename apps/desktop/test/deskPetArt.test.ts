@@ -44,7 +44,8 @@ beforeEach(() => {
   art = join(root, "art");
   mkdirSync(art);
 });
-afterEach(() => rmSync(root, { recursive: true, force: true }));
+// Windows: a just-written file can still be open (Defender, the indexer); rm retries EBUSY / EPERM / ENOTEMPTY.
+afterEach(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
 
 describe("art files", () => {
   it("accepts whole images and layers", async () => {
@@ -108,7 +109,9 @@ describe("art files", () => {
     const { listed, problems } = await listCharacters(art, null);
     expect(listed.size).toBe(DESK_PET_ART.maxCharacters);
     expect(problems.map((p) => p.code)).toEqual(["tooMany", "tooMany"]);
-  });
+    // Real files: 258 sets (1,000+ writes) and 256 of them checked one by one (~5,000 fs calls), ~1 s alone on
+    // Windows; under the full suite's load that crossed 5 s. The work, not a wait.
+  }, 30_000);
 
   it("pack art lists after the folder; the folder wins an id; a pack read is what it is", async () => {
     set("same");

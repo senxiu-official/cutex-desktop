@@ -48,14 +48,15 @@ export function ClaudeSciencePage() {
   const [logs, setLogs] = useState<ReadonlySet<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
 
+  // The picked host's services (it need not be the focus host).
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    void refresh(hostId);
+  }, [refresh, hostId]);
 
   const run = (fn: () => Promise<unknown>) => {
     setError(null);
     void fn()
-      .then(() => refresh())
+      .then(() => refresh(hostId))
       .catch((e: unknown) => setError(t("claude-science.failed", { error: e instanceof Error ? e.message : String(e) })));
   };
   const open = (a: Account) => {

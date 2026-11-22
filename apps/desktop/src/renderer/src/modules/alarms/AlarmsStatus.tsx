@@ -1,7 +1,9 @@
 // The 闹钟 status category: alarm_set reminders of one agent — ones it set (for itself or another
 // agent) and ones that will wake it. Rows: time · text · who → whom · relative time; a row expands to
 // the whole preview; 取消 (armed two-click, the owner's cancel) while scheduled. 已响 / 已取消 · N
-// folds the recent sent / cancelled ones. Live from `cutex/alarms/changed` (store.ts).
+// folds the recent sent / cancelled ones. Live from `cutex/alarms/changed` (store.ts). A queued one reads
+// 已交给消息队列 (state surfaces W5: only handed to the bus, maybe not received or read) and its expanded part links
+// to the message (openMessage.ts).
 import { useState } from "react";
 import { AlarmClock, ChevronDown, ChevronRight, TriangleAlert } from "lucide-react";
 import type { AlarmView } from "../../../../shared/alarms";
@@ -13,6 +15,7 @@ import { services } from "../app";
 import type { StatusBarProps } from "../slots";
 import { CAPSULE_LINE, CAPSULE_ROW_ACTION, CAPSULE_ROW_MAIN, capsuleRowActions } from "../../lib/capsuleRows";
 import { alarmClock, alarmParties, atMs, relativeParts } from "./model";
+import { openAlarmMessage } from "./openMessage";
 import { patchAlarm, useAgentAlarms } from "./store";
 import type { AlarmsData } from "./useAlarmsStatus";
 
@@ -60,6 +63,7 @@ function Row({ alarm, hostId }: { alarm: AlarmView; hostId: string }) {
     p.self ? t("alarms.self") : `${p.from ?? t("alarms.owner")} → ${p.to}`,
     alarm.alarmId,
     alarm.lastError ? t("alarms.retrying", { error: alarm.lastError }) : null,
+    alarm.state === "queued" ? t("alarms.queuedHint") : null,
   ]
     .filter(Boolean)
     .join("\n");
@@ -99,6 +103,11 @@ function Row({ alarm, hostId }: { alarm: AlarmView; hostId: string }) {
             {alarm.messageTruncated && "…"}
           </p>
           {alarm.lastError && <span className="mt-0.5 block text-warn">{t("alarms.retrying", { error: alarm.lastError })}</span>}
+          {alarm.state === "queued" && (
+            <button data-alarm-view-message="" data-tip={t("alarms.queuedHint")} onClick={() => void openAlarmMessage(hostId, alarm, t("alarms.messageNotFound"))} className="mt-0.5 block text-accent hover:underline">
+              {t("alarms.viewMessage")}
+            </button>
+          )}
         </div>
       )}
     </li>

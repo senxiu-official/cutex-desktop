@@ -102,7 +102,7 @@ describe("operation tool projections", () => {
  });
  it("artifact pages retain ref/version, zero offsets and continuation metadata with text", () => {
   const m = standardToolRow(operation("artifact_read", { ref: "af-test@latest", cursor: 0 }, { ok: true, name: "Design", ref: "af-test@2", version: 2, media_type: "text/markdown", cursor: 0, next_cursor: 8192, text: "page text" }))!;
-  expect(m.summary).toBe("af-test@latest · cursor=0"); expect(m.body).toBe("page text"); expect(m.resultFields).toContainEqual({ name: "next_cursor", value: "8192" });
+  expect(m.summary).toBe("Design · cursor=0"); // the name, not the ref (owner 2026-11-18) expect(m.body).toBe("page text"); expect(m.resultFields).toContainEqual({ name: "next_cursor", value: "8192" });
   const binary = standardToolRow(operation("artifact_read", { ref: "af-test@2" }, { ok: true, binary: true, text: null, detail: "metadata only", next_cursor: null }))!;
   expect(binary.body).toBeNull(); expect(binary.resultFields).toContainEqual({ name: "next_cursor", value: "null" });
   expect(standardToolRow(operation("artifact_read", { cursor: 0 }))).toBeNull();

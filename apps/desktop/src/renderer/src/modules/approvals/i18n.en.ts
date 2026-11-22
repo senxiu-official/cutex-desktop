@@ -120,7 +120,7 @@ export const en: Record<keyof typeof zhCN, string> = {
   "approvals.state.pending": "Pending",
   "approvals.state.approved": "Approved",
   "approvals.state.denied": "Denied",
-  "approvals.state.consumed": "Used",
+  "approvals.state.consumed": "Approval used",
   "approvals.state.expired": "Expired",
   "approvals.kind.workflow_run": "Run workflows",
   "approvals.reason.workflow_run": "An {{agent}} wants to run a workflow; its run plan needs your approval first",

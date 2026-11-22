@@ -56,7 +56,8 @@ describe.each(["zh-CN", "en"])("delegation presentation (%s)", (locale) => {
     state.offline = offline;
     state.record = ask({ execution: "interrupted", review: null, attempt: { n: 1, state: "interrupted", interruptReason: "ownerStopped" } });
     const text = card();
-    expect(text).toContain(t("delegation.status.ownerStopped"));
+    // W7: 已停止, the cause (you, or a host upgrade) on its own line in the hover; no actor is guessed.
+    expect(text).toContain(t("delegation.status.stopped"));
     expect(text).toContain(locale === "en" ? "host upgrade" : "主机升级");
     expect(text).not.toContain(t("delegation.status.runtimeRestart"));
   });

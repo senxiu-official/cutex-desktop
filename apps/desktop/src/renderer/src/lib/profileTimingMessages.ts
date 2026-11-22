@@ -34,7 +34,6 @@ export const zhCN = {
   "settings.profileTiming.compaction": "会话里单独切换模型是另一项操作：Claude Code 2.1.295 起可从下一次模型请求生效；较旧版本需要重启",
   "settings.profileTiming.names": "名称保存后界面立即更新，不改变模型请求或运行时能力",
   "settings.profileTiming.autoPick": "只影响之后新建时的账号选择，不给已有会话换 Profile",
-  "settings.profileTiming.modelCompaction": "{source}：约 {at} token 时压缩。已加载的设置在会话切换模型时可从下一次请求生效（Claude Code 2.1.295 起），旧版本需重启",
 } as const;
 export const en: Record<keyof typeof zhCN, string> = {
   "settings.scope.agents.hostRestart": "After the host service restarts",
@@ -72,5 +71,4 @@ export const en: Record<keyof typeof zhCN, string> = {
   "settings.profileTiming.compaction": "Explicit session model switching is separate: Claude Code 2.1.295+ can apply it from the next model request; older versions need a restart",
   "settings.profileTiming.names": "Names update in the UI after saving, without changing model requests or runtime capabilities",
   "settings.profileTiming.autoPick": "Only affects account selection for future creations; existing conversations keep their Profile",
-  "settings.profileTiming.modelCompaction": "{source}: compacts at about {at} tokens. Already loaded settings can apply from the next request when a chat switches model (Claude Code 2.1.295+); older versions need a restart",
 };

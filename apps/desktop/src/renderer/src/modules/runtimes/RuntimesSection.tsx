@@ -8,6 +8,7 @@ import { CLAUDE_RUNTIME_COMPONENT } from "../../lib/componentCard";
 import { ComponentCard } from "../../components/ComponentCard";
 import { ComponentIndexPanel } from "../../components/ComponentIndexPanel";
 import { Tag } from "../../components/Tag";
+import { mergeInstalledVersions } from "../../lib/runtimePruneView";
 
 export function RuntimesSection() {
   const { t } = useI18n();
@@ -26,9 +27,11 @@ export function RuntimesSection() {
     <RuntimeGroup kind="native" title="cute-codex" list={view?.native ?? []} status={view ? ready(view.native.some(r => r.selected && !r.missing)) : undefined} dependencies={<p>{t("runtimes.nativeDependency")}</p>}>
       {!view && (error ? <ErrorNote>{error}</ErrorNote> : <Loading rows={2} />)}
     </RuntimeGroup>
-    <RuntimeGroup kind="claude" title="Claude" list={view?.claude ?? []} status={view && state.kind === "body" ? ready(view.claude.some(r => r.selected && !r.missing)) : undefined} dependencies={<>
+    <RuntimeGroup kind="claude" title="Claude" list={view ? mergeInstalledVersions(view.claude, component?.versions) : []} status={view && state.kind === "body" ? ready(view.claude.some(r => r.selected && !r.missing)) : undefined} dependencies={<>
       <p>{t(bundledPython ? "runtimes.bundledPython" : "runtimes.pythonUnknown")}</p>
-      <p>{cli ? t("runtimes.cli", { source: t(cli.selected === "bundled" ? "runtimes.bundled" : "runtimes.system"), version: cliVersion ?? "—" }) : t("runtimes.cliUnknown")}</p>
+      {/* Kit-installed runtimes (claude-rNN-source-…) carry no prepared/claude-cli.json, so cutex reports no CLI; from
+          claude-r28 on the runtime ships its own CLI, which is the one in use. */}
+      <p>{cli ? t("runtimes.cli", { source: t(cli.selected === "bundled" ? "runtimes.bundled" : "runtimes.system"), version: cliVersion ?? "—" }) : t(bundledPython ? "runtimes.cliBundledUnregistered" : "runtimes.cliUnknown")}</p>
     </>}>
       {!view && (error ? <ErrorNote>{error}</ErrorNote> : <Loading rows={2} />)}
       <ComponentIndexPanel name={CLAUDE_RUNTIME_COMPONENT} hostId={hostId} component={component} entry={entry} title="Claude Code" />

@@ -53,7 +53,7 @@ function pin(agentId: string, kind: OwnerPin["kind"], title: string, ago: number
 const local: OwnerPin[] = [
   pin("alden", "decide", "the next release 要不要带上 heavy-read 默认值 4？", 3 * 3600, {
     key: "the next release-heavy-read",
-    detail: "实测 2/4/6/8：4 在 EVA 上最稳（p95 −38%），6 在 Remote 更快但偶发卡顿。选 4 还是按机器自动？",
+    detail: "实测 2/4/6/8：4 在 EVA 上最稳（p95 −38%），6 在 Remote 更快但偶发卡顿。选 4 还是按机器自动？\n\n| 并发 | p95 | 卡顿 |\n| --- | --- | --- |\n| 2 | 1830 ms | 0 |\n| 4 | 1135 ms | 0 |\n| 6 | 990 ms | 2 |\n| 8 | 1410 ms | 7 |\n\n- **选 4**：两台机器都不卡，Remote 慢一点\n- **按机器自动**：多一条探测，第一次启动慢约 3 s\n\n原始数据在 `D:/Work/builds/demo-release/bench/heavy-read.csv`。",
     links: [{ target: "cutex:artifact/af-3f9a1c2e7b8d4e05a1c2d3e4f5a6b7c8@2", label: "heavy-read 实测 v3" }],
     turnId: "alden-t2",
   }),
@@ -80,7 +80,9 @@ function remoteOf(hostId: string): OwnerPin[] {
 
 function api(list: OwnerPin[], hostId: string, emitHost: (method: string, params: Record<string, unknown>) => void) {
   return {
-    async ownerPins(query: { state?: "open" | "all"; agentId?: string }): Promise<OwnerPinList> {
+    async ownerPins(query: { state?: "open" | "all"; agentId?: string; limit?: number }): Promise<OwnerPinList> {
+      // cutex r289+: limit defaults to and is capped at 200; more is refused with 400.
+      if (query.limit !== undefined && (query.limit < 1 || query.limit > 200)) throw new Error("invalid_request: limit must be 1..200");
       const pins = list.filter((p) => (!query.agentId || p.agentId === query.agentId) && (query.state === "all" || p.state === "open"));
       return { hostId, pins: structuredClone(pins), openCount: list.filter((p) => p.state === "open").length };
     },
@@ -93,6 +95,8 @@ function api(list: OwnerPin[], hostId: string, emitHost: (method: string, params
         return { ok: true, pin: null };
       }
       const p = list[i]!;
+      if (change.expectedRevision !== undefined && change.expectedRevision !== p.revision)
+        return { ok: false, error: { code: "pin_revision_conflict", message: `the pin changed (revision ${p.revision}); reload first` } };
       const at = new Date().toISOString();
       Object.assign(p, { state: change.state, updatedAt: at, revision: p.revision + 1, ...(change.state === "open" ? { resolvedBy: null, resolvedAt: null, resolution: null } : { resolvedBy: "owner", resolvedAt: at }) });
       emitHost("cutex/ownerPin/changed", { pin: structuredClone(p) });

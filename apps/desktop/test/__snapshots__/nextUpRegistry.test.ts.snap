@@ -1,7 +1,73 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`registry snapshot ↔ docs change log > the table matches its snapshot and REGISTRY_VERSION is the doc's newest change-log entry > registry 1.9 1`] = `
+exports[`registry snapshot ↔ docs change log > the table matches its snapshot and REGISTRY_VERSION is the doc's newest change-log entry > registry 2.5 1`] = `
 {
+  "delegationWaits": {
+    "approval": {
+      "by": "Cutex maintainers",
+      "date": "2026-11-18",
+      "why": "owner saw a waiting delegation as 运行中; sub-forms of the approved 「等待中 · 约{时间}继续」",
+    },
+    "forms": {
+      "children": {
+        "status": "delegation.status.continuationWait",
+        "text": {
+          "en": "Waiting · until its delegations finish",
+          "zh": "等待中 · 等子委托完成",
+        },
+        "trailing": [
+          "delegation.cont.children",
+        ],
+      },
+      "due": {
+        "status": "delegation.status.continuationWait",
+        "text": {
+          "en": "Waiting · continues shortly",
+          "zh": "等待中 · 即将继续",
+        },
+        "trailing": [
+          "delegation.cont.soon",
+        ],
+      },
+      "jobs": {
+        "status": "delegation.status.continuationWait",
+        "text": {
+          "en": "Waiting · until its jobs finish",
+          "zh": "等待中 · 等作业完成",
+        },
+        "trailing": [
+          "delegation.cont.jobs",
+        ],
+      },
+      "plain": {
+        "status": "delegation.status.continuationWait",
+        "text": {
+          "en": "Waiting",
+          "zh": "等待中",
+        },
+        "trailing": null,
+      },
+      "ready": {
+        "status": "delegation.status.continuationReady",
+        "text": {
+          "en": "Ready to continue",
+          "zh": "等待继续",
+        },
+        "trailing": null,
+      },
+      "timed": {
+        "status": "delegation.status.continuationWait",
+        "text": {
+          "en": "Waiting · continues ~{time}",
+          "zh": "等待中 · 约{时间}继续",
+        },
+        "trailing": [
+          "delegation.cont.inMinutes",
+          "delegation.cont.at",
+        ],
+      },
+    },
+  },
   "effects": {
     "approve": {
       "action": null,
@@ -254,13 +320,25 @@ exports[`registry snapshot ↔ docs change log > the table matches its snapshot 
     "agentPaused": {
       "buttons": [
         {
-          "en": "Resume",
-          "zh": "继续",
+          "en": "Resume this {{agent}}",
+          "zh": "继续这个{{agent}}",
         },
       ],
       "label": {
         "en": "Agent paused",
         "zh": "智能体已暂停",
+      },
+    },
+    "asksPaused": {
+      "buttons": [
+        {
+          "en": "Release new delegations",
+          "zh": "放行新委托",
+        },
+      ],
+      "label": {
+        "en": "New delegations paused",
+        "zh": "新委托已暂停",
       },
     },
     "cleanupUnconfirmed": {
@@ -453,6 +531,7 @@ exports[`registry snapshot ↔ docs change log > the table matches its snapshot 
     "needsAction": {
       "buttons": [
         "releaseHold",
+        "retry",
         "viewReason",
         "dismiss",
         "ignoreNotice",
@@ -580,6 +659,6 @@ exports[`registry snapshot ↔ docs change log > the table matches its snapshot 
       "tone": "warn",
     },
   },
-  "version": "1.9",
+  "version": "2.5",
 }
 `;

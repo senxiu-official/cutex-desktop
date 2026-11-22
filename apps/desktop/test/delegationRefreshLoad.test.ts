@@ -215,7 +215,9 @@ describe("delegation refresh load and lifecycle", () => {
     await vi.advanceTimersByTimeAsync(1000);
     await retry;
     expect(rows().unresolved!.closed).toBe("completed");
-    expect(mocks.ask).not.toHaveBeenCalled();
+    // L4 (state surfaces): a row missing from both a read open list and a read closed list is re-read by id once; a
+    // record that does not say closed keeps the row. Without a closed list (missing / failure) nothing is read by id.
+    expect(mocks.ask).toHaveBeenCalledTimes(mode === "empty" ? 1 : 0);
   });
 
   it("shares inflight and collapses a burst to one trailing refresh with no overlap", async () => {

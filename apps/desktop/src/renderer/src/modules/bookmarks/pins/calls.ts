@@ -24,3 +24,6 @@ export function pinCallOf(item: RawItem): PinCall | null {
   return { status: running ? "running" : refused ? "failed" : "done", action, pinId, title, kind };
 }
 
+
+/** A pin link as Markdown (label or target; brackets in the label and angle brackets in the target dropped). */
+export const linkText = (l: { target: string; label?: string | null }): string => `[${(l.label ?? l.target).replace(/[[]]/g, "")}](<${l.target.replace(/[<>]/g, "")}>)`;

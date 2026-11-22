@@ -17,6 +17,7 @@ import { ARMED_FORM_BUTTON, useArmed } from "../../lib/armedConfirm";
 import { formatWhen, useClock } from "../../lib/time";
 import { useTargetApi, useTargetHostId } from "../../lib/targetHost";
 import { useKimiAccountList } from "../../lib/kimiAccounts";
+import { useSettingsCard } from "../../lib/settingsDrafts";
 import { services } from "../app";
 import { useApp } from "../../store";
 import { activeLogin, kimiAccountState, sortKimiAccounts, STATE_TONE, type KimiAccountState, type StateTone } from "./accountView";
@@ -86,7 +87,7 @@ function AccountsSection({ hostId, all = false }: { hostId: string; all?: boolea
       hint={all ? undefined : t("kimi-accounts.sectionHint")}
       actions={
         <>
-          <RefreshButton onClick={() => void accounts.load()} />
+          <RefreshButton onClick={() => accounts.load()} />
           <AddButton primary disabled={adding || !list} onClick={() => setAdding(true)}>{t("kimi-accounts.add")}</AddButton>
         </>
       }
@@ -117,6 +118,8 @@ function AddForm({ onCancel, onCreated }: { onCancel(): void; onCreated(a: KimiA
   const [label, setLabel] = useState("");
   const [region, setRegion] = useState<KimiRegion>("mainland-cn");
   const [busy, setBusy] = useState(false);
+  // Unsaved from the first change (its region too) until the account is created, which closes it (lib/settingsDrafts).
+  const card = useSettingsCard();
   const [problem, setProblem] = useState<string | null>(null);
   const create = async () => {
     const clean = kimiAccountLabel(label);
@@ -134,7 +137,7 @@ function AddForm({ onCancel, onCreated }: { onCancel(): void; onCreated(a: KimiA
     }
   };
   return (
-    <div className="mb-2 rounded-lg border border-border px-3 py-1" data-kimi-account-add="">
+    <div ref={card.ref} className="mb-2 rounded-lg border border-border px-3 py-1" data-kimi-account-add="">
       <SettingRow agents="none" source="host" label={t("kimi-accounts.form.label")}>
         <TextInput autoFocus width="w-48" value={label} maxLength={64} placeholder={t("kimi-accounts.form.labelPlaceholder")} disabled={busy} onChange={(v) => (setLabel(v), setProblem(null))}
           onKeyDown={(e) => { if (!isImeComposing(e) && e.key === "Enter") void create(); }} />

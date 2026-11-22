@@ -24,7 +24,7 @@ import type { AskCommandMethod, AskDetail, AskQuestion, AskSummary, DaemonApi, M
 import { hostEpoch, type HostsState } from "../../../shared/hosts";
 import { api, apiFor, bridge } from "../bridge";
 import { translate } from "../i18n";
-import { applyAskEvent, ASKS_FEATURE, DELEGATION_VIEWS_FEATURE, mergeSummaries, summaryFromRecord, type DelegationRecords, type ProgressNote } from "./delegations";
+import { applyAskEvent, ASKS_FEATURE, DELEGATION_VIEWS_FEATURE, followUpActionId, mergeSummaries, summaryFromRecord, type DelegationRecords, type ProgressNote } from "./delegations";
 import { delegationRefresh } from "./delegationRefresh";
 import { focusHostId, hostKey, parseHostKey, type HostKey } from "./hostKeys";
 import { onEveryAppWindow } from "./appWindowSet";
@@ -312,9 +312,27 @@ async function readOpenDelegations(hostId: string, token: HostGeneration): Promi
     // DaemonApi / cutex-client). Until then, closures outside this 1000-row window cannot be fully
     // reconciled by list reads; retain them rather than infer cancellation/deletion from absence.
     const closed = await daemon.asks({ state: "closed", limit: 1000, background: true });
-    if (closed && currentRead(hostId, token)) mergeRows(hostId, closed);
+    if (!closed || !currentRead(hostId, token)) return;
+    mergeRows(hostId, closed);
+    // L4: a row that left the open list and is not in the closed window is read by id (`GET /v2/asks/{id}`), a few at a
+    // time, so an old closure outside the window stops looking open. A missing record keeps the row (absence is not proof).
+    const closedIds = new Set(closed.map((r) => r.askId));
+    const stale = Object.values(hostDelegations(useDelegations.getState().byKey, hostId)).filter((d) => !d.closed && !open.has(d.askId) && !closedIds.has(d.askId) && !isShortId(d.askId)).map((d) => d.askId);
+    await reconcileById(hostId, token, stale);
   } catch {
     // Transient: retain known rows; a subsequent event or panel resync retries.
+  }
+}
+
+/** How many vanished rows one resync re-reads by id, and how many at once. */
+export const RECONCILE_BY_ID_MAX = 24;
+const RECONCILE_BY_ID_BATCH = 4;
+
+async function reconcileById(hostId: string, token: HostGeneration, askIds: readonly string[]): Promise<void> {
+  const todo = askIds.slice(0, RECONCILE_BY_ID_MAX);
+  for (let i = 0; i < todo.length; i += RECONCILE_BY_ID_BATCH) {
+    if (!currentRead(hostId, token)) return;
+    await Promise.all(todo.slice(i, i + RECONCILE_BY_ID_BATCH).map((askId) => refreshDelegation(hostId, askId).catch(() => null)));
   }
 }
 
@@ -480,9 +498,12 @@ export function loadDelegationDetail(hostId: string, askId: string): Promise<Ask
  */
 export function withDetailState(row: AskSummary, detail: AskDetail): AskSummary {
   const fresh = summaryFromRecord({ ...detail, answerId: typeof detail.answerId === "string" ? detail.answerId : (detail.answer?.answerId ?? null) });
-  if (!fresh || fresh.askId !== row.askId || fresh.revision <= row.revision) return row;
+  if (!fresh || fresh.askId !== row.askId) return row;
+  // 结束跟进 is only on the record: cutex's `closed` event (same revision) says `stopped` without it.
+  if (fresh.revision === row.revision && fresh.followUpEnded && !row.followUpEnded && row.closed) return { ...row, followUpEnded: true };
+  if (fresh.revision <= row.revision) return row;
   const { execution, hold, holdSince, review, closed, closedAt, revision, updatedAt, attempt, attempts } = fresh;
-  return { ...row, execution, hold, holdSince, review, closed, closedAt, revision, updatedAt, attempt: attempt ?? row.attempt, attempts, answerId: fresh.answerId ?? row.answerId };
+  return { ...row, execution, hold, holdSince, review, closed, closedAt, revision, updatedAt, attempt: attempt ?? row.attempt, attempts, answerId: fresh.answerId ?? row.answerId, ...(fresh.followUpEnded ? { followUpEnded: true } : {}), ...("continuationWait" in fresh ? { continuationWait: fresh.continuationWait } : {}) };
 }
 
 /**
@@ -508,12 +529,35 @@ export function refreshDelegation(hostId: string, askId: string): Promise<AskDet
  */
 export async function delegationCommand(hostId: string, d: Pick<AskSummary, "askId" | "target">, method: AskCommandMethod, outcome?: "accepted" | "abandoned"): Promise<MutationResult> {
   try {
+    // Stop / accept / abandon go through the owner's ask route (r289 owner-ask-disposition-v1: works for an archived or
+    // deleted target); main keeps the target-session path on older hosts. Resume / retry stay session commands.
+    const disposal = method === "cutex/ask/stop" ? "stop" : method === "cutex/ask/close" && outcome ? outcome : null;
+    if (disposal) {
+      const r = await daemonOf(hostId).askDispose(d.target, d.askId, disposal, `owner-${disposal}-${crypto.randomUUID()}`);
+      return r.ok ? { ok: true } : r;
+    }
     return await daemonOf(hostId).askCommand(d.target, method, outcome ? { askId: d.askId, outcome } : { askId: d.askId });
   } finally {
     if (supported(hostId) && followed(hostId)) void refreshDelegation(hostId, d.askId);
     scheduleRefresh(hostId);
   }
 }
+
+/**
+ * 结束跟进 of a delegation (r289 `POST /v2/asks/{id}/close {outcome: followUpEnded}`): closed as stopped, outcome
+ * unconfirmed; nothing is interrupted. The action id is fixed per (delegation, attempt), so a repeated click replays the
+ * first answer instead of sending a second disposal. Older hosts refuse (owner_disposition_unsupported).
+ */
+export async function endDelegationFollowUp(hostId: string, d: Pick<AskSummary, "askId" | "target" | "attempts"> & { attempt?: { n?: number } | null }): Promise<MutationResult> {
+  try {
+    const r = await daemonOf(hostId).askDispose(d.target, d.askId, "followUpEnded", followUpActionId(d));
+    return r.ok ? { ok: true } : r;
+  } finally {
+    if (supported(hostId) && followed(hostId)) void refreshDelegation(hostId, d.askId);
+    scheduleRefresh(hostId);
+  }
+}
+
 
 /**
  * `cutex/ask/deliveryFailed` (published once, on the host feed): cutex could not fit a delegation or
@@ -558,6 +602,8 @@ export function startDelegationSync(handle: AppHandle): () => void {
     // The focus host's delegations, and the open agent's host's (cutex keeps them per daemon).
     if (!followed(hostId)) return;
     const method = envelope.cutex?.method;
+    // r290 P14: a yielded wait changed (also announced as cutex/ask/updated with changed continuationWait): re-read.
+    if (method === "cutex/delegation/continuationChanged" && supported(hostId)) return scheduleRefresh(hostId);
     if (!method?.startsWith("cutex/ask/") || !supported(hostId)) return;
     if (method === "cutex/ask/deliveryFailed") app?.getState().notify(deliveryFailedText(envelope.cutex?.params), "error");
     // The event's host's records only (the other side of a peers delegation has its own).

@@ -6,7 +6,7 @@ import type { ServiceView } from "../src/shared/ipc";
 import type { ServiceCardRow } from "../src/renderer/src/modules/services/ServiceCards";
 const fx = vi.hoisted(() => ({ patch: vi.fn(), refresh: vi.fn(), error: vi.fn(), disabled: new Set<string>(), stale: new Set<string>() }));
 vi.mock("../src/renderer/src/bridge", () => ({ apiFor: (host: string) => ({ patchService: (slug: string, patch: unknown) => fx.patch(host, slug, patch) }) }));
-vi.mock("../src/renderer/src/lib/services", () => ({ openService: vi.fn() }));
+vi.mock("../src/renderer/src/lib/services", () => ({ openService: vi.fn(), serviceHealthTitle: (word: string) => word }));
 vi.mock("../src/renderer/src/lib/contextMenu", () => ({ openMenuFrom: vi.fn() }));
 vi.mock("../src/renderer/src/i18n", async () => {
   const { zhCN } = await import("../src/renderer/src/modules/services/i18n");

@@ -25,6 +25,10 @@ export function parseBrowserRequest(raw: unknown): BrowserRequest {
     if (Object.keys(value).some(k => !["op", "enabled"].includes(k)) || (value.enabled !== undefined && typeof value.enabled !== "boolean")) throw Error("invalid_browser_request");
     return value.enabled === undefined ? { op: "externalPages" } : { op: "externalPages", enabled: value.enabled };
   }
+  if (value.op === "systemProxy") {
+    if (Object.keys(value).some(k => !["op", "enabled"].includes(k)) || (value.enabled !== undefined && typeof value.enabled !== "boolean")) throw Error("invalid_browser_request");
+    return value.enabled === undefined ? { op: "systemProxy" } : { op: "systemProxy", enabled: value.enabled };
+  }
   if (value.op === "desktopLoopback") {
     if (Object.keys(value).some(k => !["op", "enabled"].includes(k)) || (value.enabled !== undefined && typeof value.enabled !== "boolean")) throw Error("invalid_browser_request");
     return value.enabled === undefined ? { op: "desktopLoopback" } : { op: "desktopLoopback", enabled: value.enabled };
@@ -42,6 +46,10 @@ export function parseBrowserRequest(raw: unknown): BrowserRequest {
   if (value.op === "openBlockedNavigation") {
     if (Object.keys(value).sort().join() !== "id,op,tabKey" || !validId(value.tabKey) || !validId(value.id)) throw Error("invalid_browser_request");
     return { op: "openBlockedNavigation", tabKey: value.tabKey, id: value.id };
+  }
+  if (value.op === "openOwnerNotice") {
+    if (Object.keys(value).sort().join() !== "id,op,tabKey" || !validId(value.tabKey) || !validId(value.id)) throw Error("invalid_browser_request");
+    return { op: "openOwnerNotice", tabKey: value.tabKey, id: value.id };
   }
   if (value.op === "desktopLoopbackChallenge") {
     if (Object.keys(value).some(k => !["op", "tabKey", "url"].includes(k)) || !validId(value.tabKey)
@@ -133,6 +141,7 @@ export function parseBrowserRequest(raw: unknown): BrowserRequest {
     return { op: "setMuted", tabKey, muted: value.muted };
   }
   if (value.op === "pauseMedia") return { op: "pauseMedia", tabKey };
+  if (value.op === "rememberView" || value.op === "restoreView" || value.op === "viewMemory") return { op: value.op, tabKey };
   if (value.op === "open" || value.op === "navigate") {
     if (typeof value.url !== "string" || value.url.length > 8000 || !value.url || /[\x00-\x1f\x7f]/.test(value.url)) throw new Error("invalid_browser_url");
     let identity: Extract<BrowserRequest, {op:"open"}>["identity"];
@@ -170,11 +179,13 @@ export function createBrowserChannel<E, D extends { readonly generation: number 
   /** Owner switch, host-independent and reachable while the module is off (it only narrows or
    * widens what a later browser tab may reach; main enforces it on every request). */
   externalPages?(enabled?: boolean): unknown;
+  /** 「浏览器通过系统代理上网」: host-independent like externalPages; main stores and enforces it. */
+  systemProxy?(enabled?: boolean): unknown;
   cursorColor?(color?: string | null): unknown;
   carrierFrameRate?(frameRate?: BrowserCarrierFrameRate): unknown;
   /** Remembered site permissions (host-independent, owner UI only). */
   sitePermissions?(forget?: Extract<BrowserRequest, { op: "sitePermissions" }>["forget"]): unknown;
-  execute(request: Exclude<BrowserRequest, { op: "setEnabled" | "resetOrigins" | "externalPages" | "sitePermissions" | "cursorColor" | "carrierFrameRate" }>, hostId: string, fence?: HostFence<D>): Promise<unknown>;
+  execute(request: Exclude<BrowserRequest, { op: "setEnabled" | "resetOrigins" | "externalPages" | "systemProxy" | "sitePermissions" | "cursorColor" | "carrierFrameRate" }>, hostId: string, fence?: HostFence<D>): Promise<unknown>;
 }) {
   return async (event: E, raw: unknown, binding: HostBinding | null | undefined): Promise<unknown> => {
     if (!options.isAppSender(event)) throw new Error("untrusted_sender");
@@ -187,6 +198,10 @@ export function createBrowserChannel<E, D extends { readonly generation: number 
     if (request.op === "carrierFrameRate") {
       if (!options.carrierFrameRate) throw Error("unsupported_operation");
       return options.carrierFrameRate(request.frameRate);
+    }
+    if (request.op === "systemProxy") {
+      if (!options.systemProxy) throw Error("unsupported_operation");
+      return options.systemProxy(request.enabled);
     }
     if (request.op === "externalPages") {
       if (!options.externalPages) throw Error("unsupported_operation");
@@ -206,7 +221,7 @@ export function createBrowserChannel<E, D extends { readonly generation: number 
       throw new Error("invalid_browser_binding");
     const cleanup = request.op === "close" || request.op === "stop" || request.op === "ownerInput" || request.op === "releaseLease" || request.op === "openRefused" || (request.op === "holdReady" && !request.held);
     // Owner page lifetimes follow the host connection, not its agent daemon's restart counter.
-    const ownerPage = ["reserveOwnerTab", "navigate", "reload", "back", "forward", "openBlockedNavigation"].includes(request.op)
+    const ownerPage = ["reserveOwnerTab", "navigate", "reload", "back", "forward", "openBlockedNavigation", "openOwnerNotice"].includes(request.op)
       || request.op === "open" && !request.identity?.agentOpened && !request.identity?.pendingOpen;
     const fence = cleanup ? undefined : admitHostBinding(options.getHosts, binding, { daemonGeneration: !ownerPage });
     const result = await options.execute(request, binding.hostId, fence);

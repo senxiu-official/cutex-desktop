@@ -16,6 +16,7 @@ import { bridge } from "../../bridge";
 import { useApp } from "../../store";
 import { useI18n, type MessageKey } from "../../i18n";
 import { ARMED_FORM_BUTTON, ARMED_FRAME, useArmed } from "../../lib/armedConfirm";
+import { useSettingsDraft } from "../../lib/settingsDrafts";
 import { claudeAccountPatch, claudeAccountRowShown, storedClaudeAccount } from "../../lib/claudeAccounts";
 import { openMenuFrom } from "../../lib/contextMenu";
 import { PROFILE_FAMILY_FEATURE, refusalText } from "../../lib/profileCreate";
@@ -29,6 +30,9 @@ import { useProfileLooksSynced } from "../../lib/profileLooks";
 import { ProfileProviderSummary } from "./ProfileProviderSummary";
 import { useUiPrefs } from "../../lib/prefs";
 import { noteProfileAvatarStyleSaved, setProfileAvatarStyle, type AvatarStyle } from "../../lib/avatarStyle";
+import { prepareProfilePortraitPatch, profilePortraitThemeProblem, type ProfilePortraitThemeProblem } from "../../../../shared/profilePortraitThemes";
+import { heldBlockedStyle, holdBlockedStyle, portraitProblemText, releaseBlockedStyle, styleDraftRevision } from "../../lib/portraitThemeDraft";
+import { usePortraitThemes } from "../../lib/portraitThemes";
 import { setProfileAvatar, useHostKey } from "../../lib/profileAvatar";
 import { INTRO_PORTRAIT_TOO_LARGE, introPortraitProblem, prepareIntroPortrait, setIntroAppearance, type IntroDraft } from "../../lib/introAppearance";
 import { headerExtras, profileKindLabel } from "../../lib/profileCards";
@@ -46,9 +50,9 @@ import { ClaudeAccountRow } from "./ProfileClaudeAccount";
 import { ComponentNotice } from "../ComponentCard";
 import { CLAUDE_RUNTIME_COMPONENT } from "../../lib/componentCard";
 import { ModelList } from "./ProfileModels";
-import { ProfileModelFields } from "./ProfileModelFields";
+import { MODELS_ON_PAGE } from "../../lib/profileModels";
+import { ProfileContextRows, ProfileModelFields, SummaryUnsupportedRow } from "./ProfileModelFields";
 import { ProfileToolFields } from "./ProfileToolFields";
-import { ClaudeCompactionRow } from "./ClaudeCompactionRow";
 import { CLAUDE_COMPACTION_MODELS_FEATURE } from "../../../../shared/claudeCompaction";
 import { ImageHistoryTrimRow } from "./ImageHistoryTrimRow";
 import { IMAGE_HISTORY_TRIM_FEATURE, sameImageHistoryTrim } from "../../../../shared/imageHistoryTrim";
@@ -434,12 +438,28 @@ export function ProfileEditor({ profile, item, isDefault, refusal, onChanged, on
   /** Opening draft (portrait + greeting, lib/introAppearance): saved with the sticky bar like the picture. */
   const [intro, setIntroState] = useState<IntroDraft>({ portrait: undefined, greeting: undefined });
   const [introError, setIntroError] = useState<"type" | "tooLarge" | "bad" | "full" | null>(null);
-  /** Full avatar style: undefined unchanged, null inherit app; saved locally with the sticky bar. */
-  const [avatarTheme, setAvatarTheme] = useState<AvatarStyle | null | undefined>(undefined);
+  /** Full avatar style: undefined unchanged, null inherit app; saved locally with the sticky bar. A draft this host could not
+   *  store (lib/portraitThemeDraft) comes back after a rename remounted the editor. */
+  const [avatarTheme, setAvatarThemeState] = useState<AvatarStyle | null | undefined>(() => heldBlockedStyle(targetHost, item.id)?.style);
+  /** What the host's own save said about the style (its capabilities changed after the check here); null: nothing. */
+  const [hostThemeProblem, setHostThemeProblem] = useState<ProfilePortraitThemeProblem | null>(() => heldBlockedStyle(targetHost, item.id)?.problem ?? null);
+  // Before the loading return below: a hook must run on every render.
+  const { themes: portraitThemes } = usePortraitThemes();
+  /** The style draft now (a save that ran while the owner changed it reads this, not what it captured). */
+  const latestTheme = useRef(avatarTheme);
+  latestTheme.current = avatarTheme;
+  /** The owner changed, reverted or saved the style: a held draft is let go. */
+  const setAvatarTheme = (next: AvatarStyle | null | undefined) => {
+    releaseBlockedStyle(targetHost, item.id);
+    setHostThemeProblem(null);
+    setAvatarThemeState(next);
+  };
   const introFile = useRef<HTMLInputElement>(null);
   /** Picture drafts save under the focus host's daemon key (lib/profileAvatar); the opening under the edited host (targetHost). */
   const host = useHostKey();
   const [saving, setSaving] = useState(false);
+  /** 上下文与压缩: false while a typed 自定义 value is invalid (the draft holds the last valid one). */
+  const [contextValid, setContextValid] = useState(true);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   /** The last save failed with a Claude account in the draft (shown under the 账户 select too). */
@@ -501,6 +521,8 @@ export function ProfileEditor({ profile, item, isDefault, refusal, onChanged, on
     [profile],
   );
 
+  // Unsaved edits, for a window-bar entry that would close a covering Settings (lib/settingsDrafts); set below once known.
+  const leaveDraft = useSettingsDraft();
   if (error && !detail) return <p className="text-sm text-danger">{error}</p>;
   if (!detail || !ready)
     return (
@@ -529,6 +551,15 @@ export function ProfileEditor({ profile, item, isDefault, refusal, onChanged, on
   /** API-key profiles: the saved Base URL (the profile's config, else the list item's). */
   const storedUrl = detail.detail?.config?.providerBaseUrl ?? detail.baseUrl ?? null;
   const quotaDirty = quotaDraft !== null && JSON.stringify(quotaDraft) !== JSON.stringify(quota);
+  // A portrait choice this host cannot store (checked as it is made, or reported by the host's save): its note under the picker.
+  const themeName = (key: string) => portraitThemes.find((th) => th.key === key)?.name ?? key;
+  const shownThemeProblem = avatarTheme === undefined ? null : ((avatarTheme && features.has("profile-avatar-style") ? profilePortraitThemeProblem(avatarTheme, features) : null) ?? hostThemeProblem);
+  /** A refusal about portrait theme ids (an older host's own check): the short note, never the raw message. */
+  const portraitErrorText = (message: string): string | null => {
+    if (!/portraitThemes|invalid_portrait_themes/.test(message) || avatarTheme?.kind !== "portrait") return null;
+    const problem = profilePortraitThemeProblem(avatarTheme, new Set()) ?? { kind: "invalidReferences" as const, references: [...avatarTheme.portraitThemes], maxThemeLength: 20 as const };
+    return portraitProblemText(problem, themeName, t);
+  };
   const dirty = Object.keys(patch).some((k) => (k === "apiKey" ? !!patch.apiKey : true)) || quotaDirty || picture !== undefined || intro.portrait !== undefined || intro.greeting !== undefined || avatarTheme !== undefined;
   /** Sets one part of the opening draft (empty patch parts keep their previous value); any new
    *  draft action clears the old picker / save error, removing a portrait included. */
@@ -549,22 +580,31 @@ export function ProfileEditor({ profile, item, isDefault, refusal, onChanged, on
       return next;
     });
   };
-  const save = async () => {
-    const body: ProfilePatch = { ...patch };
-    if (avatarTheme !== undefined && features.has("profile-avatar-style")) body.avatarStyle = avatarTheme;
+  /** `true` when everything is saved (a refusal shows on the page). */
+  const save = async (): Promise<boolean> => {
+    if (!contextValid) return false;
+    let body: ProfilePatch = { ...patch };
+    // The style draft's revision when this save starts (lib/portraitThemeDraft): checked again when it ends.
+    const styleRevision = styleDraftRevision(targetHost, detail.id);
+    const hostStyle = avatarTheme !== undefined && features.has("profile-avatar-style");
+    if (hostStyle) body.avatarStyle = avatarTheme;
+    // Portrait themes this host cannot store (e.g. ids over an older host's 20 characters): every other field still
+    // saves, the style stays a draft with its note (owner 2026-11-18; never the backend's error).
+    let themeProblem: ProfilePortraitThemeProblem | null = null;
+    if (hostStyle) ({ patch: body, problem: themeProblem } = prepareProfilePortraitPatch(body, features));
     // API-key profiles always need a usable endpoint (an emptied field would drop the profile's URL).
     if ("providerBaseUrl" in body) {
       const url = body.providerBaseUrl?.trim() ?? "";
-      if (!url) return setError(t("agent-config.profile.error.baseUrlMissing"));
-      if (!validBaseUrl(url)) return setError(t("agent-config.profiles.new.error.baseUrlInvalid"));
+      if (!url) return (setError(t("agent-config.profile.error.baseUrlMissing")), false);
+      if (!validBaseUrl(url)) return (setError(t("agent-config.profiles.new.error.baseUrlInvalid")), false);
       if (url === storedUrl) delete body.providerBaseUrl;
       else body.providerBaseUrl = url;
     }
     // profile-generic-switches: cutex refuses the legacy `auto`; the 额度 section asks for a reader.
-    if (quotaDirty && quotaDraftNeedsReader(quotaDraft, usesQuotaReaders(quotaDraft, features.has(PROFILE_GENERIC_SWITCHES_FEATURE)))) return setError(t("agent-config.quota.legacyAuto"));
+    if (quotaDirty && quotaDraftNeedsReader(quotaDraft, usesQuotaReaders(quotaDraft, features.has(PROFILE_GENERIC_SWITCHES_FEATURE)))) return (setError(t("agent-config.quota.legacyAuto")), false);
     const changedLooks = cleanAppearanceChanges({ ...body,
       ...(picture !== undefined ? { avatar: picture } : {}),
-      ...(avatarTheme !== undefined && features.has("profile-avatar-style") ? { avatarStyle: avatarTheme } : {}),
+      ...(hostStyle && !themeProblem ? { avatarStyle: avatarTheme } : {}),
       ...(intro.portrait !== undefined ? { introPortrait: intro.portrait } : {}),
       ...(intro.greeting !== undefined ? { introGreeting: intro.greeting } : {}),
     });
@@ -586,11 +626,19 @@ export function ProfileEditor({ profile, item, isDefault, refusal, onChanged, on
       }
       // A rename moves the profile: later calls use the name cutex answered with.
       let name = profile;
+      /** Something besides a refused style was stored (the "saved" line). */
+      let stored = false;
       if (Object.keys(body).length) {
-        const next = await api.patchProfile(profile, body);
-        if ("avatarStyle" in body) noteProfileAvatarStyleSaved(targetHost, next);
+        const { portraitProblem, ...next } = await api.patchProfile(profile, body);
+        // The host left the style out itself (its capabilities changed after the check here): same as above.
+        if (portraitProblem) {
+          themeProblem = portraitProblem;
+          delete changedLooks.avatarStyle;
+        }
+        if ("avatarStyle" in body) noteProfileAvatarStyleSaved(targetHost, { ...next, portraitProblem });
         setDetail(next);
         name = next.name;
+        stored = !portraitProblem || Object.keys(body).some((k) => k !== "avatarStyle");
       }
       if (quotaDirty && quotaDraft) {
         // An empty 标签 is saved as the window name (7d) or "Q" (lib/quota.ts withQuotaLabel).
@@ -606,10 +654,19 @@ export function ProfileEditor({ profile, item, isDefault, refusal, onChanged, on
         if (next) (setQuota(next), setQuotaDraft(next), updateCachedProfile(name, { quota: next }, targetHost));
         void loadQuota(name, true);
       }
+      if (quotaDirty || picture !== undefined || intro.portrait !== undefined || intro.greeting !== undefined) stored = true;
       if (picture !== undefined) setProfileAvatar(host, detail.id, picture);
       setPicture(undefined);
-      if (avatarTheme !== undefined && !features.has("profile-avatar-style")) setProfileAvatarStyle(targetHost, detail.id, avatarTheme);
-      setAvatarTheme(undefined);
+      if (avatarTheme !== undefined && !features.has("profile-avatar-style")) (setProfileAvatarStyle(targetHost, detail.id, avatarTheme), (stored = true));
+      if (styleDraftRevision(targetHost, detail.id) !== styleRevision) {
+        // The owner changed or reverted the style while this save ran: what this save sent (or held back) no longer is
+        // the draft. The newer one stays as it is; a rename remounts the editor, so it is carried there (nothing after 撤销).
+        if (name !== profile && latestTheme.current !== undefined) holdBlockedStyle(targetHost, detail.id, latestTheme.current, null);
+      } else if (themeProblem) {
+        // Kept, and held across the remount a rename causes (the editor is keyed by name).
+        holdBlockedStyle(targetHost, detail.id, avatarTheme ?? null, themeProblem);
+        setHostThemeProblem(themeProblem);
+      } else setAvatarTheme(undefined);
       if (intro.portrait !== undefined || intro.greeting !== undefined) {
         // The opening is keyed by the edited host (targetHost), like the timeline outlet reads it.
         // A refused write (store full / quota) keeps the draft and shows the failure; the daemon
@@ -624,19 +681,21 @@ export function ProfileEditor({ profile, item, isDefault, refusal, onChanged, on
           setPatch({});
           if (name !== profile) onChanged(name);
           setSaving(false);
-          return;
+          return false;
         }
       }
-      if (syncLooks) await linkedAppearance.saved(changedLooks, syncAppearance);
+      if (syncLooks && Object.keys(changedLooks).length) await linkedAppearance.saved(changedLooks, syncAppearance);
       setIntroState({ portrait: undefined, greeting: undefined });
       setPatch({});
-      setStatus(t("agent-config.profile.savedNext"));
+      setStatus(stored ? t("agent-config.profile.savedNext") : null);
       if (name === profile) api.profileModels(profile).then(setModels, () => {});
       onChanged(name !== profile ? name : undefined);
+      return true;
     } catch (e) {
-      setError(e instanceof ProfileAppearanceSyncError ? t(`settings.profile.link.appearance.${e.kind}`) : errorText(e));
+      setError(e instanceof ProfileAppearanceSyncError ? t(`settings.profile.link.appearance.${e.kind}`) : portraitErrorText(errorText(e)) ?? errorText(e));
       // PATCH is all-or-nothing: the account was not saved either; say so next to the select.
       if ("claudeAccount" in body) setAccountError(errorText(e));
+      return false;
     } finally {
       finishAppearanceEdit();
       setSaving(false);
@@ -651,6 +710,7 @@ export function ProfileEditor({ profile, item, isDefault, refusal, onChanged, on
     setIntroError(null);
     setQuotaDraft(quota);
   };
+  leaveDraft.current = { dirty, save, discard: revert };
   // Base URL: official or custom by the URL's host (lib/profilePresets), never by the provider's name —
   // a provider called "GLM" on a third-party relay is custom. Always editable (cutex: `providerOptions`).
   const draftUrl = patch.providerBaseUrl !== undefined ? (patch.providerBaseUrl ?? "") : (storedUrl ?? "");
@@ -688,7 +748,7 @@ export function ProfileEditor({ profile, item, isDefault, refusal, onChanged, on
   const resetPlanLabel = () => setOrDrop("planLabel", planLabelReset(storedLabel), undefined);
 
   return (
-    <div className="pb-2">
+    <div className="pb-2" data-settings-draft="">
       <input
         ref={pictureFile}
         type="file"
@@ -849,35 +909,40 @@ export function ProfileEditor({ profile, item, isDefault, refusal, onChanged, on
       </div>
 
       <Section id="profile-models"   title={t("settings.profileIa.modelsContext" as MessageKey)} hint={t("settings.profileIa.hostProfile" as MessageKey, { name: detail.name })}>
-        <RowGroup title={t("settings.profileIa.profileDefaults" as MessageKey)}>
-        {/* A Kimi-kind Profile's default model / effort are its kimi variant's (运行时变体 above). */}
-        {kind === "dsh" ? <DshModelFields detail={detail} patch={patch} set={set} /> : kind === "kimi" ? <p className="py-2 text-xs text-subtle">{t("variants.kimiDefaultsAbove")}</p> : <ProfileModelFields detail={detail} models={models} cfg={cfg} set={set} />}
+        {/* One skeleton for every runtime (owner 2026-11-18): rows a runtime lacks stay, greyed, with the reason. */}
+        <RowGroup title={t("settings.modelContext.groupDefaults" as MessageKey)}>
+          {kind === "dsh" ? (
+            <>
+              <DshModelFields detail={detail} patch={patch} set={set} />
+              <SummaryUnsupportedRow reason={t("settings.modelContext.summaryNoRuntime" as MessageKey)} />
+            </>
+          ) : kind === "kimi" ? (
+            <>
+              {/* A Kimi-kind Profile's default model / effort are its kimi variant's (运行时变体 above). */}
+              <SettingRow source="host" agents="next" readOnly label={t("settings.modelContext.modelAndEffort" as MessageKey)} hint={t("variants.kimiDefaultsAbove")} />
+              <SummaryUnsupportedRow reason={t("settings.modelContext.summaryNoRuntime" as MessageKey)} />
+            </>
+          ) : (
+            <ProfileModelFields detail={detail} models={models} cfg={cfg} set={set} />
+          )}
         </RowGroup>
-        <ClaudeCompactionRow
-          detail={detail}
-          draft={patch.claudeCompaction}
-          change={(v) => {
-            const stored = detail.claudeCompaction ?? null;
-            setOrDrop("claudeCompaction", v === undefined || JSON.stringify(v) === JSON.stringify(stored) ? stored : v, stored);
-          }}
-        />
+        <RowGroup title={t("settings.modelContext.groupContext" as MessageKey)} hint={isAcpKind(kind) ? undefined : t("settings.modelContext.groupContextHint" as MessageKey)}>
+          <ProfileContextRows kind={kind} detail={detail} models={models} cfg={cfg} patch={patch} setOrDrop={setOrDrop} onValidityChange={setContextValid} />
+        </RowGroup>
         {!isAcpKind(kind) && models && (
           <ModelList
             profile={profile}
             view={models}
             setView={setModels}
-            compaction={
+            limit={MODELS_ON_PAGE}
+            claude={
               kind === "claude" && features.has(CLAUDE_COMPACTION_MODELS_FEATURE) && detail.claudeCompactionModels !== undefined
                 ? {
                     table: detail.claudeCompactionModels ?? null,
-                    draft: patch.claudeCompactionModels,
                     profile: patch.claudeCompaction !== undefined ? patch.claudeCompaction : (detail.claudeCompaction ?? null),
                     error: detail.detail?.claudeCompactionModelsError,
                     disabled: !fieldEditable(detail, "claudeCompactionModels"),
-                    change: (v) => {
-                      const stored = detail.claudeCompactionModels ?? null;
-                      setOrDrop("claudeCompactionModels", v === undefined ? stored : v, stored);
-                    },
+                    onDetail: setDetail,
                   }
                 : undefined
             }
@@ -930,7 +995,7 @@ export function ProfileEditor({ profile, item, isDefault, refusal, onChanged, on
 
       {/* Looks last (review UI-04): account and connection come first, a new profile is signed in before it is styled. */}
       <div id="profile-appearance">
-        <ProfileAppearance detail={detail} patch={patch} set={set} host={targetHost} picture={picture} setPicture={(p) => (setStatus(null), setPicture(p))} onPicture={() => pictureFile.current?.click()} intro={intro} setIntro={setIntro} onIntroPortrait={() => introFile.current?.click()} introError={introError} theme={avatarTheme} setTheme={(v) => (setStatus(null), setAvatarTheme(v))} linked={{ state: linkedAppearance, checked: syncAppearance, onChecked: setSyncAppearance }} />
+        <ProfileAppearance detail={detail} patch={patch} set={set} host={targetHost} picture={picture} setPicture={(p) => (setStatus(null), setPicture(p))} onPicture={() => pictureFile.current?.click()} intro={intro} setIntro={setIntro} onIntroPortrait={() => introFile.current?.click()} introError={introError} theme={avatarTheme} setTheme={(v) => (setStatus(null), setAvatarTheme(v))} themeProblem={shownThemeProblem} linked={{ state: linkedAppearance, checked: syncAppearance, onChecked: setSyncAppearance }} />
       </div>
 
       {kind === "apiKey" && (
@@ -965,7 +1030,7 @@ export function ProfileEditor({ profile, item, isDefault, refusal, onChanged, on
           {error && <span className="truncate text-xs text-danger" title={error}>{error}</span>}
           <span className="ml-auto flex gap-2">
             {dirty && <Button onClick={revert}>{t("agent-config.profile.revert")}</Button>}
-            {dirty && <Button primary disabled={saving} onClick={() => void save()}>{t("settings.save")}</Button>}
+            {dirty && <Button primary disabled={saving || !contextValid} onClick={() => void save()}>{t("settings.save")}</Button>}
           </span>
         </div>
       )}

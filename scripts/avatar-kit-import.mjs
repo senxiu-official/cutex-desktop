@@ -47,7 +47,7 @@ export function normalizeCatalog(catalog) {
   const characters = catalog.characters.map(character => typeof character === "string" ? character : character.id);
   need(new Set(characters).size === 6 && CHARACTERS.every(id => characters.includes(id)), "Invalid character ids");
   const themes = [...catalog.themes].sort((a, b) => a.order - b.order);
-  need(themes.every(theme => /^[a-z0-9][a-z0-9-]{0,31}$/.test(theme.id) && Number.isFinite(theme.order) && typeof theme.name === "string" && theme.name.trim()), "Invalid theme id/order/name");
+  need(themes.every(theme => typeof theme.id === "string" && /^[a-z0-9][a-z0-9-]{0,31}$(?![\s\S])/.test(theme.id) && Number.isFinite(theme.order) && typeof theme.name === "string" && theme.name.trim()), "Invalid theme id/order/name");
   need(new Set(themes.map(theme => theme.id)).size === 20 && new Set(themes.map(theme => theme.order)).size === 20, "Duplicate theme id/order");
   const byTheme = new Map(themes.map((theme, index) => [theme.id, index]));
   const byCharacter = new Map(characters.map((id, index) => [id, index]));

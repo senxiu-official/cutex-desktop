@@ -10,8 +10,8 @@ import type { AskAnswerPage } from "../../../shared/ipc";
 import { useI18n } from "../i18n";
 import { ARMED_FRAME } from "../lib/armedConfirm";
 import { contextMenu, openMenuFrom } from "../lib/contextMenu";
-import { attemptSeconds, delegateCallOf, delegationActions, delegationCanResume, delegationStatus, formatSpan, peerPartyText, requesterSession, stopPending, waitSeconds, type DelegationStatus } from "../lib/delegations";
-import { delegationMenu, runDelegationCommand } from "../lib/delegationMenu";
+import { attemptSeconds, delegateCallOf, delegationActions, delegationCanResume, delegationStatus, formatSpan, NO_DELEGATION_ACTIONS, openContinuationWait, peerPartyText, requesterSession, stopPending, waitSeconds, type DelegationStatus } from "../lib/delegations";
+import { canEndDelegationFollowUp, delegationMenu, endFollowUpShown, runDelegationCommand, runEndFollowUp } from "../lib/delegationMenu";
 import { delegationApi, hasDelegationViews, loadCardDelegation, loadDelegationDetail, useDelegations } from "../lib/delegationStore";
 import { hostKey } from "../lib/hostKeys";
 import { useAgentNames, useAgentProfile, useCardDelegation, useDelegationContext, useOwnerSteered, useResolvedAskId } from "../lib/delegationsView";
@@ -38,7 +38,6 @@ import { rawIdTitle, useModelName } from "../lib/modelDisplay";
 
 const NO_NOTES: { text: string; at: string }[] = [];
 const NO_QUESTIONS: AskQuestion[] = [];
-const NO_COMMANDS = { stop: false, retry: false, accept: false, abandon: false } as const;
 /** The action row's buttons (the armed face keeps this shape). */
 const ACTION_SHAPE = "rounded-md px-2 py-0.5 text-xs";
 const ACTION_IDLE = "text-muted hover:bg-surface-2 hover:text-foreground";
@@ -151,7 +150,9 @@ export function DelegationDetailBody({ d, brief, here, host, layout = "card" }: 
   const [abandonArmed, setAbandonArmed] = useState(false);
   // users-p2-access: a non-owner sees the commands only with send (lib/p2Access).
   const commands = useP2Access(host).delegations;
-  const can = commands ? delegationActions(d) : NO_COMMANDS;
+  const can = commands ? delegationActions(d) : NO_DELEGATION_ACTIONS;
+  const followUpOk = useApp((s) => canEndDelegationFollowUp(featuresOf(s, host)));
+  const followUpShown = useApp((s) => endFollowUpShown(featuresOf(s, host)));
   const targetName = d.targetName ?? nameOf(d.target);
   const requester = requesterSession(d.requester);
   const artifact = detail?.body?.textArtifact ?? null;
@@ -160,7 +161,7 @@ export function DelegationDetailBody({ d, brief, here, host, layout = "card" }: 
   const armed = stopArmed || abandonArmed;
   // Its target is an agent of the open agent's host (not the focus host's).
   const openTarget = () => (views && d.attempt?.turnId ? focusTurn(d.target, d.attempt.turnId, host) : void useApp.getState().select(d.target, host));
-  const button = `${ACTION_SHAPE} text-muted hover:bg-surface-2 hover:text-foreground`;
+  const button = `${ACTION_SHAPE} ${ACTION_IDLE}`;
   return (
     <div className={`message-body ${layout === "card" ? "mt-1 ml-5 max-w-[85%]" : ""} rounded-xl border px-3 py-2 text-xs transition-colors ${armed ? ARMED_FRAME : "border-transparent bg-surface"}`}>
       {/* The side detail (opened from the 需要你 strip, a queue row, a list): the owner review on top. The card has it under its line. */}
@@ -219,10 +220,11 @@ export function DelegationDetailBody({ d, brief, here, host, layout = "card" }: 
             {t("delegation.stop")}
           </ArmedButton>
         )}
+        {/* 结束等待并继续 lets the delegated work go on: one click (confirm by risk). */}
         {commands && delegationCanResume(d) && (
-          <ArmedButton shape={ACTION_SHAPE} idle={ACTION_IDLE} hint={armedHint(t("delegation.resumeWaitConfirm"), t("delegation.again"))} resetKey={d.revision} testId="delegation-resume" onConfirm={() => void runDelegationCommand(host, d, "cutex/ask/resume", t)}>
+          <button className={button} title={t("delegation.resumeWaitHint")} data-testid="delegation-resume" onClick={() => void runDelegationCommand(host, d, "cutex/ask/resume", t)}>
             {t("delegation.resumeWait")}
-          </ArmedButton>
+          </button>
         )}
         {can.retry && (
           <button className={button} onClick={() => void runDelegationCommand(host, d, "cutex/ask/retry", t)}>
@@ -237,6 +239,12 @@ export function DelegationDetailBody({ d, brief, here, host, layout = "card" }: 
         {can.abandon && (
           <ArmedButton shape={ACTION_SHAPE} idle={ACTION_IDLE_DANGER} hint={armedHint(t("delegation.abandonConfirm"), t("delegation.again"))} onArmedChange={setAbandonArmed} resetKey={d.revision} testId="delegation-abandon" onConfirm={() => void runDelegationCommand(host, d, "cutex/ask/close", t, "abandoned")}>
             {t("delegation.abandon")}
+          </ArmedButton>
+        )}
+        {/* 结束跟进 (N1/N2): stop waiting; nothing already sent is stopped. Greyed with the reason on an older host. */}
+        {can.endFollowUp && followUpShown && (
+          <ArmedButton shape={ACTION_SHAPE} idle={ACTION_IDLE} hint={armedHint(t("followUp.confirm"), t("delegation.again"))} resetKey={d.revision} disabled={!followUpOk} title={followUpOk ? t("followUp.confirm") : t("followUp.oldHost")} testId="delegation-end-follow-up" onConfirm={() => void runEndFollowUp(host, d, t)}>
+            {t("followUp.end")}
           </ArmedButton>
         )}
         <button className={`${button} ml-auto`} title={t("delegation.more")} aria-label={t("delegation.more")} onClick={(e) => openMenuFrom(e.currentTarget, delegationMenu(d, t, nameOf, { host, here, views }))}>
@@ -272,9 +280,10 @@ export function DelegationCard({ item, sessionId }: { item: RawItem; sessionId: 
   // The attempt model by the target profile's entry names (lib/modelDisplay); else the profile name.
   const model = d.attempt?.model ? modelName(d.attempt.model, null, profile) : profile;
   const targetName = d.targetName ?? (d.target ? nameOf(d.target) : (call.targetName ?? ""));
-  const held = !d.closed && !stopPending(d) && !!d.hold && (d.execution === "queued" || d.execution === "admitted");
-  // Held: the word on the right says 排队中 / 受阻; the second line says what for.
-  const shown: DelegationStatus = held && status.key !== "question" && !gateClosed(d) ? { ...status, key: status.dangerText ? "blocked" : "queued", n: undefined } : status;
+  // A yielded wait (r290 P14) is not a hold: its own words (等待中 · 约 14:15 继续) stay.
+  const held = !d.closed && !stopPending(d) && !!d.hold && (d.execution === "queued" || d.execution === "admitted") && !openContinuationWait(d);
+  // Held: the word on the right says 排队中 / 等待继续 / 需要你处理 (will it clear by itself, W6a); the line says what for.
+  const shown: DelegationStatus = held && status.key !== "question" && !gateClosed(d) ? { ...status, key: heldWord(status), n: undefined } : status;
   const time = statusTime(d, status, now);
   const tools = running && typeof d.attempt?.activity?.toolCalls === "number" ? t("delegation.tools", { n: d.attempt.activity.toolCalls }) : null;
   const line = running ? (activity ?? d.attempt?.activity?.line ?? null) : null;
@@ -324,15 +333,20 @@ export function DelegationCard({ item, sessionId }: { item: RawItem; sessionId: 
   );
 }
 
-/** blocked(quota): 额度用完 · 约 HH:MM 自动继续 — when the target's quota hold lifts and cutex redelivers it. */
+/**
+ * blocked(quota), W1: 额度用完 — with a time only when cutex has a pending continuation (预计 HH:MM 尝试继续; an estimate:
+ * 重置时间未知，预计 HH:MM 检查). The hover says what happens then: a queued delegation goes back in the queue, a running one's
+ * agent gets one 「继续」.
+ */
 function QuotaHoldLine({ host, d, waited }: { host: string; d: AskSummary; waited: string | null }) {
   const { t, locale } = useI18n();
   const now = useNow(false);
-  const at = useDelegationQuota(host, d)?.pending?.at;
-  const clock = at ? continueClock(at, now, locale) : "";
+  const pending = useDelegationQuota(host, d)?.pending;
+  const clock = pending?.at ? continueClock(pending.at, now, locale) : "";
+  const word = !clock ? t("delegation.status.quota") : pending?.estimated ? t("delegation.status.quotaEstimated", { at: clock }) : t("delegation.status.quotaAt", { at: clock });
   return (
     <>
-      {clock ? t("delegation.status.quotaAt", { at: clock }) : t("delegation.status.quota")}
+      <span title={clock ? t(d.execution === "queued" ? "delegation.status.quotaHintQueued" : "delegation.status.quotaHintRunning") : undefined}>{word}</span>
       {waited && <span className="text-subtle"> · {t("delegation.waited", { t: waited })}</span>}
     </>
   );
@@ -358,4 +372,11 @@ function DelegationHoldLine({ status, name, waited }: { status: DelegationStatus
       {waited && <span className="text-subtle"> · {t("delegation.waited", { t: waited })}</span>}
     </>
   );
+}
+
+/** The card's right-hand word for a held delegation: offline clears by itself, a peer problem or 需要你处理 does not. */
+function heldWord(status: DelegationStatus): DelegationStatus["key"] {
+  if (status.key === "needsAction" || status.key === "waiting") return status.key;
+  if (status.key === "offline") return "waiting";
+  return status.dangerText ? "needsAction" : "queued";
 }

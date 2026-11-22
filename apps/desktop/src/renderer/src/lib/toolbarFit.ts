@@ -112,7 +112,7 @@ export function useToolbarFit(): {
       watched.current = new Set();
     };
   }, [measure, sync]);
-  // The right group's children come and go with the agent (a gutter trigger, the observed-model tag): keep them watched.
+  // The right group's children come and go with the agent (a gutter trigger): keep them watched.
   useLayoutEffect(() => sync());
   const row = useCallback((el: HTMLElement | null) => void (els.current.row = el), []);
   const left = useCallback((el: HTMLElement | null) => void (els.current.left = el), []);

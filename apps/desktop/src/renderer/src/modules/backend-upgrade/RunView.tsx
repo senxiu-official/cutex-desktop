@@ -165,7 +165,8 @@ export function RunDetail({ run }: { run: UpgradeRun }) {
 
 /**
  * A finished run of the last day as one line at the top (model runDisplay): the outcome, where its
- * steps are, and a dismiss (remembered per host for this run). Not for needs-owner (that keeps the card).
+ * steps are, and a dismiss (remembered per host for this run). Not for needs-owner: that keeps the card until the
+ * owner says 「我已处理，收起」 on it (RunSection `onHandled`, handled.ts).
  */
 export function RunNote({ run, onDismiss }: { run: UpgradeRun; onDismiss(): void }) {
   const { t } = useI18n();
@@ -205,8 +206,9 @@ function RuntimeNote({ run, className }: { run: UpgradeRun; className: string })
 /**
  * The current run (or one that needs the owner), with cancel. `native`: the version a full run brings
  * as the manifest facts say (model releaseNative) — only used when the run carries no `runtimeChange`.
+ * `onHandled`: a needs-owner run's 「我已处理，收起」 (handled.ts; the run record stays as it is).
  */
-export function RunSection({ hostId, run, native = null }: { hostId: string; run: UpgradeRun; native?: string | null }) {
+export function RunSection({ hostId, run, native = null, onHandled }: { hostId: string; run: UpgradeRun; native?: string | null; onHandled?(): void }) {
   const { t } = useI18n();
   const api = useTargetApi();
   const action = useUpgradeAction();
@@ -232,6 +234,10 @@ export function RunSection({ hostId, run, native = null }: { hostId: string; run
           >
             {t("backend-upgrade.cancel")}
           </Button>
+        ) : run.phase === "needs-owner" && onHandled ? (
+          <span data-tip={t("backend-upgrade.handled.hint")}>
+            <Button onClick={onHandled}>{t("backend-upgrade.handled.button")}</Button>
+          </span>
         ) : undefined
       }
     >

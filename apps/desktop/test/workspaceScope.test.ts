@@ -83,17 +83,17 @@ describe("useWorkspace scope changes (98ce155)", () => {
     await flush();
     expect(h.render(() => useWorkspace(a, "local")).git).toEqual(STATUS);
     h.render(() => useWorkspace(null, "local"));
-    expect(h.render(() => useWorkspace(null, "local"))).toMatchObject({ git: null, error: null });
+    expect(h.render(() => useWorkspace(null, "local"))).toMatchObject({ git: null, gitIssue: null });
   });
 
-  it("a null scope clears the previous scope's error", async () => {
+  it("a null scope clears the previous scope's git issue", async () => {
     const a = { kind: "agent", id: "a" } as unknown as Scope;
     h.render(() => useWorkspace(a, "local"));
     git.calls[0]!.reject(new Error("workspace routes unsupported"));
     await flush();
-    expect(h.render(() => useWorkspace(a, "local")).error).toBe("workspace routes unsupported");
+    expect(h.render(() => useWorkspace(a, "local")).gitIssue).toMatchObject({ detail: "workspace routes unsupported", retrying: false });
     h.render(() => useWorkspace(null, "local"));
-    expect(h.render(() => useWorkspace(null, "local"))).toMatchObject({ git: null, error: null });
+    expect(h.render(() => useWorkspace(null, "local"))).toMatchObject({ git: null, gitIssue: null });
   });
 
   it("a request still in flight when the scope disappears is ignored", async () => {
@@ -102,7 +102,7 @@ describe("useWorkspace scope changes (98ce155)", () => {
     h.render(() => useWorkspace(null, "local"));
     git.calls[0]!.resolve(STATUS);
     await flush();
-    expect(h.render(() => useWorkspace(null, "local"))).toMatchObject({ git: null, error: null });
+    expect(h.render(() => useWorkspace(null, "local"))).toMatchObject({ git: null, gitIssue: null });
   });
 
   it("switching to another scope clears the old status until the new one loads", async () => {

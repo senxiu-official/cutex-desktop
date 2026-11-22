@@ -660,6 +660,48 @@ describe("self-service profile (users-self-profile)", () => {
     ]);
     await expect(mockClient(() => [413, apiError("avatar_too_large")]).client.putProfileImage("p1", "avatar", { contentType: "image/png", data: "AAAA" })).rejects.toMatchObject({ code: "avatar_too_large" });
   });
+
+  it("historyTurn reads one turn by id (history-turn-read), with compact / media=ref", async () => {
+    const { client, calls } = mockClient(() => [200, { contractVersion: 2, native: { method: "thread/read", result: {} }, page: {} }]);
+    await client.historyTurn("cutex.a b", "turn/1", { mediaRefs: true });
+    await client.historyTurn("s", "t");
+    expect(calls.map((c) => [c.method, c.url])).toEqual([
+      ["GET", "http://h:1/v2/sessions/cutex.a%20b/history/turns/turn%2F1?media=ref"],
+      ["GET", "http://h:1/v2/sessions/s/history/turns/t"],
+    ]);
+  });
+
+  it("enforces the picture size before the download: a stated Content-Length over it is not read, a long body stops at the cap", async () => {
+    let pulled = 0;
+    let cancelled = false;
+    // 10 chunks of 64 KiB, counted as the client pulls them.
+    const stream = () =>
+      new ReadableStream<Uint8Array>({
+        pull(controller) {
+          if (pulled >= 10) return controller.close();
+          pulled++;
+          controller.enqueue(new Uint8Array(64 * 1024));
+        },
+        cancel() {
+          cancelled = true;
+        },
+      });
+    const client = (response: () => Response) => new CutexClient({ baseUrl: "http://h:1", token: "tok" }, { fetch: (async () => response()) as typeof globalThis.fetch, clientId: "c" });
+    // Stated length over the avatar cap: refused with nothing read.
+    expect(await client(() => new Response(stream(), { status: 200, headers: { "Content-Type": "image/png", "Content-Length": String(640 * 1024) } })).profileImage("p1", "avatar")).toBeNull();
+    expect(pulled).toBeLessThanOrEqual(1);
+    expect(cancelled).toBe(true);
+    // No length stated: reading stops at the first chunk past the cap.
+    pulled = 0;
+    cancelled = false;
+    expect(await client(() => new Response(stream(), { status: 200, headers: { "Content-Type": "image/png" } })).profileImage("p1", "avatar")).toBeNull();
+    expect(pulled).toBeLessThan(10);
+    expect(cancelled).toBe(true);
+    // Under the cap (intro portrait ≤ 2 MiB): the whole body.
+    pulled = 0;
+    const portrait = await client(() => new Response(stream(), { status: 200, headers: { "Content-Type": "image/webp" } })).profileImage("p1", "intro-portrait");
+    expect(portrait && Buffer.from(portrait.data, "base64").length).toBe(640 * 1024);
+  });
 });
 
 describe("users and grants (users)", () => {
@@ -735,5 +777,53 @@ describe("dot-only ids never reroute a request", () => {
     expect(hasDotSegment("/v2/a/./b")).toBe(true);
     expect(hasDotSegment("/v2/sessions/a..b?x=..")).toBe(false);
     expect(hasDotSegment("/v2/sessions/...")).toBe(false);
+  });
+});
+
+describe("bounded bus bootstrap (bootstrap-bounded-bus)", () => {
+  it("sends ?bus=bounded only when asked and reads bus-messages pages with their filters", async () => {
+    const { client, calls } = mockClient(() => [200, {}]);
+    await client.bootstrap("s1", { turnLimit: 30, boundedBus: true });
+    await client.bootstrap("s1", { turnLimit: 30 });
+    await client.busMessages("s1", { direction: "sent", cursor: "k1", limit: 200, turnIds: ["t1", "t2"], itemIds: ["m1"] });
+    await client.busMessages("s1", { direction: "received" });
+    expect(new URL(calls[0]!.url).searchParams.get("bus")).toBe("bounded");
+    expect(new URL(calls[1]!.url).searchParams.has("bus")).toBe(false);
+    const page = new URL(calls[2]!.url);
+    expect(page.pathname).toBe("/v2/sessions/s1/bus-messages");
+    expect(Object.fromEntries(page.searchParams)).toEqual({ direction: "sent", cursor: "k1", limit: "200", turnIds: "t1,t2", itemIds: "m1" });
+    expect(Object.fromEntries(new URL(calls[3]!.url).searchParams)).toEqual({ direction: "received" });
+  });
+});
+
+describe("owner dispositions (r289)", () => {
+  it("each write goes to its record route once (never retried) with exactly the contract body", async () => {
+    const { client, calls } = mockClient(() => [200, {}]);
+    const sha = "cd".repeat(32);
+    await client.closeAskAsOwner("a1", { outcome: "followUpEnded", actionId: "act-1" });
+    await client.ownerNotificationAction("n1", "safety-dismiss");
+    await client.endBusMessageFollowUp({ messageId: "m1", actionId: "act-2", reason: "  gone  ", expectedSemanticSha256: sha });
+    await client.closeJobFollowUp({ jobId: "j1", expectedRevision: 2, reason: " owner " });
+    expect(calls.map((c) => [c.method, c.url, JSON.parse(String(c.body))])).toEqual([
+      ["POST", "http://h:1/v2/asks/a1/close", { outcome: "followUpEnded", actionId: "act-1" }],
+      ["POST", "http://h:1/v2/owner-notifications/n1/safety-dismiss", {}],
+      ["POST", "http://h:1/v2/agent-bus/stuck-messages/end-follow-up", { messageId: "m1", actionId: "act-2", reason: "gone", expectedSemanticSha256: sha }],
+      ["POST", "http://h:1/v2/job-service/close-follow-up", { jobId: "j1", expectedRevision: 2, reason: "owner" }],
+    ]);
+    const busy = mockClient(() => [503, apiError("unavailable")]);
+    await expect(busy.client.closeAskAsOwner("a1", { outcome: "stop", actionId: "act-1" })).rejects.toBeTruthy();
+    expect(busy.calls).toHaveLength(1);
+  });
+  it("refuses malformed input before sending", async () => {
+    const { client, calls } = mockClient(() => [200, {}]);
+    await expect(client.closeAskAsOwner("..", { outcome: "stop", actionId: "a" })).rejects.toThrow("bad ask id");
+    await expect(client.closeAskAsOwner("a1", { outcome: "delete" as never, actionId: "a" })).rejects.toThrow("bad outcome");
+    await expect(client.closeAskAsOwner("a1", { outcome: "stop", actionId: "" })).rejects.toThrow("bad action id");
+    await expect(client.ownerNotificationAction("n/1", "ack")).rejects.toThrow("bad notification id");
+    await expect(client.ownerNotificationAction("n1", "grant" as never)).rejects.toThrow("bad notification action");
+    await expect(client.endBusMessageFollowUp({ messageId: "m1", actionId: "a", reason: " " })).rejects.toThrow("bad reason");
+    await expect(client.endBusMessageFollowUp({ messageId: "m1", actionId: "a", reason: "r", expectedSemanticSha256: "x" })).rejects.toThrow("bad semantic digest");
+    await expect(client.closeJobFollowUp({ jobId: "j1", expectedRevision: 1.5, reason: "r" })).rejects.toThrow("bad revision");
+    expect(calls).toEqual([]);
   });
 });

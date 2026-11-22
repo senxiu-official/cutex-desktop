@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import { INPUT_KINDS, INPUT_REASONS_BY_STATE, INPUT_STATES, INPUT_WAITING_REASONS, type InputAction, type InputKind, type InputRecord } from "@cutex-desktop/protocol";
 import { record } from "../src/renderer/src/lib/inputLedger/testkit";
 import {
-  NEXT_UP_EFFECTS, NEXT_UP_PANEL_CONTROLS, NEXT_UP_STATE_IDS, NEXT_UP_STATES, REGISTRY_VERSION, RETIRED_WORDS, STATE_LABEL_KEYS,
+  NEXT_UP_DELEGATION_WAITS, NEXT_UP_DELEGATION_WAITS_APPROVAL, NEXT_UP_EFFECTS, NEXT_UP_PANEL_CONTROLS, NEXT_UP_STATE_IDS, NEXT_UP_STATES, REGISTRY_VERSION, RETIRED_WORDS, STATE_LABEL_KEYS,
   buttonsFor, hasExit, isLedgerPanelControl, helpRows, localSendView, projectNextUp, rowButtons, stateLabelKey, type NextUpContext, type NextUpStateId,
 } from "../src/renderer/src/lib/inputLedger/nextUpRegistry";
 import { zhCN } from "../src/renderer/src/i18n/zh-CN";
@@ -145,14 +145,19 @@ describe("registry table", () => {
 
 describe("panel controls (registry §三)", () => {
   it("1.8 adds agentPaused (any host) and legacyPausedQueue (old hosts only); the ID check covers both", () => {
-    expect(Object.keys(NEXT_UP_PANEL_CONTROLS).sort()).toEqual(["agentPaused", "cleanupUnconfirmed", "grantNotice", "legacyPausedQueue", "releaseLease", "resetCredit", "scheduledContinue"]);
+    expect(Object.keys(NEXT_UP_PANEL_CONTROLS).sort()).toEqual(["agentPaused", "asksPaused", "cleanupUnconfirmed", "grantNotice", "legacyPausedQueue", "releaseLease", "resetCredit", "scheduledContinue"]);
     expect(isLedgerPanelControl("agentPaused")).toBe(true);
     expect(isLedgerPanelControl("resetCredit")).toBe(true);
     expect(isLedgerPanelControl("legacyPausedQueue")).toBe(false);
     expect(isLedgerPanelControl("somethingElse")).toBe(false);
     expect(isLedgerPanelControl(undefined)).toBe(false);
     expect(NEXT_UP_PANEL_CONTROLS.legacyPausedQueue.buttons.map(b => b.zh)).toEqual(["继续", "放回输入框", "全部放弃"]);
-    expect(NEXT_UP_PANEL_CONTROLS.agentPaused.buttons.map(b => b.zh)).toEqual(["继续"]);
+    // 2.0 (W12): the two pause buttons say what they release; the UI shows the catalog words, which must match.
+    expect(NEXT_UP_PANEL_CONTROLS.agentPaused.buttons.map(b => b.zh)).toEqual([zhCN["agentPause.resumeButton"]]);
+    expect(NEXT_UP_PANEL_CONTROLS.agentPaused.buttons.map(b => b.en)).toEqual([en["agentPause.resumeButton"]]);
+    expect(NEXT_UP_PANEL_CONTROLS.asksPaused.buttons.map(b => b.zh)).toEqual([zhCN["asksPause.resumeShort"]]);
+    expect(NEXT_UP_PANEL_CONTROLS.asksPaused.buttons.map(b => b.en)).toEqual([en["asksPause.resumeShort"]]);
+    expect(NEXT_UP_PANEL_CONTROLS.asksPaused.label.zh).toBe(zhCN["asksPause.title"]);
   });
 });
 
@@ -321,8 +326,18 @@ describe("registry snapshot ↔ docs change log", () => {
       states: Object.fromEntries(NEXT_UP_STATE_IDS.map(id => [id, { tone: NEXT_UP_STATES[id].tone, buttons: NEXT_UP_STATES[id].buttons, exit: NEXT_UP_STATES[id].exit }])),
       effects: Object.fromEntries(Object.entries(NEXT_UP_EFFECTS).map(([id, e]) => [id, { label: e.label, disposal: e.disposal, action: e.action }])),
       panel: NEXT_UP_PANEL_CONTROLS,
+      delegationWaits: { forms: NEXT_UP_DELEGATION_WAITS, approval: NEXT_UP_DELEGATION_WAITS_APPROVAL },
     };
     // A failing snapshot means the registry changed: bump REGISTRY_VERSION with an approved change-log entry, then update.
     expect(snapshot).toMatchSnapshot(`registry ${REGISTRY_VERSION}`);
+  });
+});
+
+describe("registry 2.0 N10 note (cross-review P2-5)", () => {
+  it("the row note and its hover are the doc's approved words, in both languages' sources", () => {
+    const doc = readFileSync(join(__dirname, "../../../docs/design/next-up-registry.md"), "utf8");
+    expect(doc).toContain(`「${zhCN["queue.turn.afterStop"]}」`);
+    expect(doc).toContain(`「${zhCN["queue.turn.afterStopHint"]}」`);
+    expect(doc).toContain(`"${en["queue.turn.afterStop"]}"`);
   });
 });

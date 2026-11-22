@@ -4,7 +4,9 @@
 // and the owner's edits. 「从工作区发布…」 publishes a workspace file as the owner (POST /v2/artifact-store).
 // The 项目 page's 成果库 tab (`project.tab`, §21) is the same view for one project's scope (LibraryPanel).
 import { isImeComposing } from "../../lib/ime";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ReadIssueLine } from "../../components/ReadIssueLine";
+import { readIssue, retryDelay, type ReadIssue } from "../../lib/transientError";
 import { ArrowLeft, ArrowLeftRight, LayoutGrid, List, Loader2, Search, Star, Upload } from "lucide-react";
 import { ARTIFACT_KINDS, artifactRef, type ArtifactKind, type ArtifactList, type ArtifactScope, type ArtifactSummary } from "../../../../shared/artifactStore";
 import { useI18n } from "../../i18n";
@@ -74,7 +76,7 @@ function Meta({ hostId, a, now }: { hostId: string; a: ArtifactSummary; now: num
             void openDelegation(hostId, p.askId!, p.sessionId);
           }}
           title={p.askId}
-          className="flex shrink-0 items-center gap-0.5 rounded bg-surface-2 px-1 text-caption/[inherit] hover:text-accent"
+          className="press flex shrink-0 items-center gap-0.5 rounded bg-surface-2 px-1 text-caption/[inherit] hover:text-accent"
         >
           <ArrowLeftRight size={10} />
           {t("artifacts.delegation")}
@@ -102,14 +104,14 @@ function Row({ hostId, a, open, layout, now }: { hostId: string; a: ArtifactSumm
   );
   if (layout === "grid")
     return (
-      <div role="button" tabIndex={0} onClick={activate} onKeyDown={(e) => e.key === "Enter" && activate()} onContextMenu={menu} className="flex min-w-0 cursor-pointer flex-col gap-1 rounded-lg border border-border bg-surface p-1.5 hover:bg-hover">
+      <div role="button" tabIndex={0} onClick={activate} onKeyDown={(e) => e.key === "Enter" && activate()} onContextMenu={menu} className="press flex min-w-0 cursor-pointer flex-col gap-1 rounded-lg border border-border bg-surface p-1.5 hover:bg-hover">
         <Thumb hostId={hostId} a={a} />
         {title}
         <Meta hostId={hostId} a={a} now={now} />
       </div>
     );
   return (
-    <div role="button" tabIndex={0} onClick={activate} onKeyDown={(e) => e.key === "Enter" && activate()} onContextMenu={menu} className="flex min-w-0 cursor-pointer flex-col gap-0.5 rounded-md px-2 py-1 hover:bg-hover">
+    <div role="button" tabIndex={0} onClick={activate} onKeyDown={(e) => e.key === "Enter" && activate()} onContextMenu={menu} className="press flex min-w-0 cursor-pointer flex-col gap-0.5 rounded-md px-2 py-1 hover:bg-hover">
       {title}
       <span className="pl-[19px]">
         <Meta hostId={hostId} a={a} now={now} />
@@ -200,7 +202,7 @@ function PublishForm({ hostId, scope, open, onDone }: { hostId: string; scope: A
       </label>
       {error && <p className="text-caption/[inherit] text-danger">{error}</p>}
       <div className="flex justify-end gap-1.5">
-        <button type="button" onClick={onDone} className="rounded-md px-2 py-1 text-muted hover:bg-hover">
+        <button type="button" onClick={onDone} className="press rounded-md px-2 py-1 text-muted hover:bg-hover">
           {t("artifacts.cancel")}
         </button>
         <button type="submit" disabled={!path.trim() || busy} className={btn({ variant: "primary" })}>
@@ -212,7 +214,8 @@ function PublishForm({ hostId, scope, open, onDone }: { hostId: string; scope: A
   );
 }
 
-type Loaded = { key: string; list: ArtifactList; error?: undefined } | { key: string; list?: undefined; error: string };
+/** `issue` on a list: the last refresh failed transiently; the list stays, with the retry line above it. */
+type Loaded = { key: string; list: ArtifactList; error?: undefined; issue?: ReadIssue } | { key: string; list?: undefined; error: string; issue?: ReadIssue };
 
 export function LibraryBody({ instance, hostId, sessionId, setState, visible, open }: SideBodyProps<LibraryState>) {
   const { t } = useI18n();
@@ -273,7 +276,7 @@ export function ProjectLibraryTab({ hostId, projectId }: { hostId: string; proje
     return (
       <div className="flex h-[min(70vh,48rem)] min-h-[18rem] min-w-0 flex-col overflow-hidden rounded-lg border border-border">
         <div className="flex shrink-0 items-center gap-1 border-b border-border/60 px-1.5 py-1 text-xs">
-          <button onClick={() => setInline(null)} className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-muted hover:bg-hover hover:text-foreground">
+          <button onClick={() => setInline(null)} className="press flex items-center gap-1 rounded-md px-1.5 py-0.5 text-muted hover:bg-hover hover:text-foreground">
             <ArrowLeft size={12} />
             {t("artifacts.backToLibrary")}
           </button>
@@ -312,27 +315,45 @@ function LibraryPanel({ hostId, scope, state, setState, visible, open, emptyKey 
   const q = useDebounced(state.q.trim(), 250);
   const now = useClock();
   const [loaded, setLoaded] = useState<Loaded | null>(null);
+  // A failed list read: transient ones read again by themselves (1, 2, 5, 10, 30 s); 重新加载 bumps `attempt`.
+  const [attempt, setAttempt] = useState(0);
+  const failures = useRef(0);
   const [more, setMore] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const queryKey = `${hostId}|${libraryScopeKey(scope)}|${q}|${state.kind}|${state.archived}`;
   const filter = { q, kind: state.kind, archived: state.archived };
 
   useEffect(() => {
+    failures.current = 0;
+  }, [queryKey]);
+  useEffect(() => {
     if (!visible) return;
     let live = true;
+    let retry: ReturnType<typeof setTimeout> | undefined;
     services
       .daemonFor(hostId)
       .artifactStoreList(libraryQuery(scope, filter, PAGE))
       .then(
-        (list) => live && setLoaded(list ? { key: queryKey, list } : { key: queryKey, error: t("artifacts.err.artifact_not_found") }),
-        (e: unknown) => live && setLoaded({ key: queryKey, error: e instanceof Error ? e.message : String(e) }),
+        (list) => {
+          if (!live) return;
+          failures.current = 0;
+          setLoaded(list ? { key: queryKey, list } : { key: queryKey, error: t("artifacts.err.artifact_not_found") });
+        },
+        (e: unknown) => {
+          if (!live) return;
+          const issue = readIssue(e);
+          // The last list of this query stays on screen while it retries.
+          setLoaded((prev) => (prev?.list && prev.key === queryKey && issue.retrying ? { ...prev, issue } : { key: queryKey, error: issue.detail, issue }));
+          if (issue.retrying) retry = setTimeout(() => live && setAttempt((n) => n + 1), retryDelay(failures.current++));
+        },
       );
     return () => {
       live = false;
+      clearTimeout(retry);
     };
     // queryKey covers hostId / scope / q / kind / archived.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [queryKey, epoch, visible]);
+  }, [queryKey, epoch, visible, attempt]);
 
   const list = loaded?.list;
   const items = useMemo(() => (list ? arrangeLibrary(list.items, state) : []), [list, state.producer, state.sort]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -371,7 +392,7 @@ function LibraryPanel({ hostId, scope, state, setState, visible, open, emptyKey 
               className="min-w-0 flex-1 bg-transparent text-xs outline-none placeholder:text-subtle"
             />
           </label>
-          <button onClick={() => setPublishing((v) => !v)} disabled={!list} className={`flex shrink-0 items-center gap-1 rounded-md px-2 py-1 hover:bg-hover disabled:opacity-50 ${publishing ? "bg-surface-2 text-foreground" : "text-accent"}`}>
+          <button onClick={() => setPublishing((v) => !v)} disabled={!list} className={`press flex shrink-0 items-center gap-1 rounded-md px-2 py-1 hover:bg-hover disabled:opacity-50 disabled:hover:bg-transparent ${publishing ? "bg-surface-2 text-foreground" : "text-accent"}`}>
             <Upload size={12} />
             {t("artifacts.publish")}
           </button>
@@ -414,7 +435,7 @@ function LibraryPanel({ hostId, scope, state, setState, visible, open, emptyKey 
               {(["list", "grid"] as const).map((l) => {
                 const Icon = l === "list" ? List : LayoutGrid;
                 return (
-                  <button key={l} onClick={() => set({ layout: l })} aria-pressed={state.layout === l} title={t(`artifacts.layout.${l}`)} className={`px-1 py-0.5 ${state.layout === l ? "bg-surface-2 text-foreground" : "hover:bg-hover"}`}>
+                  <button key={l} onClick={() => set({ layout: l })} aria-pressed={state.layout === l} title={t(`artifacts.layout.${l}`)} className={`press px-1 py-0.5 ${state.layout === l ? "bg-surface-2 text-foreground" : "hover:bg-hover"}`}>
                     <Icon size={12} />
                   </button>
                 );
@@ -425,10 +446,13 @@ function LibraryPanel({ hostId, scope, state, setState, visible, open, emptyKey 
       </div>
       {publishing && list && <PublishForm hostId={hostId} scope={list.scope} open={open} onDone={() => setPublishing(false)} />}
       <div className={`min-h-0 flex-1 overflow-y-auto px-1 pb-2 ${stale ? "opacity-60" : ""}`}>
+        {loaded?.list && loaded.issue && <ReadIssueLine className="px-2 py-1.5" issue={loaded.issue} retryingText={t("artifacts.listRetrying")} failedText={t("artifacts.listFailed")} onReload={() => { failures.current = 0; setAttempt((n) => n + 1); }} />}
         {!loaded ? (
           <p className="p-3 text-subtle">{t("artifacts.loading")}</p>
         ) : loaded.error ? (
-          <p className="p-3 text-danger">{t("artifacts.loadFailed", { error: loaded.error })}</p>
+          loaded.issue
+            ? <ReadIssueLine className="p-3" issue={loaded.issue} retryingText={t("artifacts.listRetrying")} failedText={t("artifacts.listFailed")} onReload={() => { failures.current = 0; setAttempt((n) => n + 1); }} />
+            : <p className="p-3 text-danger">{t("artifacts.loadFailed", { error: loaded.error })}</p>
         ) : !items.length ? (
           <p className="p-3 leading-relaxed text-subtle">{state.q || state.kind || state.producer || state.archived !== "false" ? t("artifacts.noMatch") : t(emptyKey)}</p>
         ) : state.layout === "grid" ? (
@@ -441,7 +465,7 @@ function LibraryPanel({ hostId, scope, state, setState, visible, open, emptyKey 
           items.map((a) => <Row key={a.artifactId} hostId={hostId} a={a} open={open} layout="list" now={now} />)
         )}
         {list?.nextCursor && (
-          <button onClick={() => void loadMore()} disabled={more} className="mx-2 mt-1 text-accent hover:underline disabled:opacity-50">
+          <button onClick={() => void loadMore()} disabled={more} aria-busy={more || undefined} className="press mx-2 mt-1 rounded-sm text-accent enabled:hover:underline disabled:cursor-default disabled:opacity-50">
             {t("artifacts.loadMore")}
           </button>
         )}

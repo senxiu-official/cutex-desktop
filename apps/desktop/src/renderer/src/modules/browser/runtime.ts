@@ -49,8 +49,8 @@ export async function startBrowser(context: ModuleContext): Promise<void> {
       if (event.blocked === "popup") context.services.ui.notice(translate("browser.blocked.popup"));
       else if (event.blocked === "download") context.services.ui.notice(translate("browser.blocked.download"));
       else if (event.blocked === "download-hidden") context.services.ui.notice(translate("browser.blocked.downloadHidden", { name: agent }));
-      else if (event.sitePermission && (event.blocked === "permission-waiting" || event.blocked === "permission-hidden" || event.blocked === "permission-timeout")) {
-        const key = event.blocked === "permission-waiting" ? "browser.blocked.permissionWaiting" : event.blocked === "permission-hidden" ? "browser.blocked.permissionHidden" : "browser.blocked.permissionTimeout";
+      else if (event.sitePermission && (event.blocked === "permission-waiting" || event.blocked === "permission-held" || event.blocked === "permission-hidden" || event.blocked === "permission-timeout")) {
+        const key = event.blocked === "permission-waiting" ? "browser.blocked.permissionWaiting" : event.blocked === "permission-held" ? "browser.blocked.permissionHeld" : event.blocked === "permission-hidden" ? "browser.blocked.permissionHidden" : "browser.blocked.permissionTimeout";
         context.services.ui.notice(translate(key, { origin: browserTitle(event.sitePermission.origin), permissions: browserSitePermissionList(event.sitePermission.permissions) }));
       }
       return;

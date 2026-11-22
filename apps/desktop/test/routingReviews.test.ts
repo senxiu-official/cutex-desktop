@@ -34,7 +34,8 @@ import { PendingActions, unresolvedUpgradeActions as unresolved } from "../src/r
 const HOST = "routing-test-host";
 const PROJECT = "project-a";
 const reference: AskReviewReference = { kind: "routing", approvalId: "approval-a", projectId: PROJECT };
-const scope = routingActionScope(HOST, PROJECT);
+const ENTITY = "approval:approval-a";
+const scope = routingActionScope(HOST, PROJECT, ENTITY);
 const PENDING_KEY = "cutex.delegation-pending-actions.v1";
 const NOW = "2026-10-28T00:00:00.000Z";
 
@@ -293,8 +294,8 @@ describe("durable unknown-operation fence and read-only reconciliation", () => {
   it.each(["unknown", "notFound"] as const)("keeps the original action fence for %s operation lookup without mutation", async status => {
     const action = await uncertainWrite();
     fx.operation.mockResolvedValue({ schema: "cutex.delegation-operation.v1", actionId: action.actionId, status, outcomeUnknown: true, result: null });
-    await checkRoutingOutcome(HOST, PROJECT);
-    await checkRoutingOutcome(HOST, PROJECT);
+    await checkRoutingOutcome(HOST, PROJECT, ENTITY);
+    await checkRoutingOutcome(HOST, PROJECT, ENTITY);
     expect(fx.operation.mock.calls).toEqual([[action.actionId], [action.actionId]]);
     expect(unresolved.get(scope)).toEqual({ kind: "decision", actionId: action.actionId });
     expect(new PendingActions().get(scope)).toEqual(unresolved.get(scope));
@@ -305,7 +306,7 @@ describe("durable unknown-operation fence and read-only reconciliation", () => {
   it("reconciles a restored pending marker using the original operation actionId", async () => {
     const action = await uncertainWrite();
     unresolved.restore();
-    await checkRoutingOutcome(HOST, PROJECT);
+    await checkRoutingOutcome(HOST, PROJECT, ENTITY);
     expect(fx.operation).toHaveBeenCalledExactlyOnceWith(action.actionId);
     expect(unresolved.has(scope)).toBe(false);
     expect(new PendingActions().has(scope)).toBe(false);
@@ -315,7 +316,7 @@ describe("durable unknown-operation fence and read-only reconciliation", () => {
   it.each(["committed", "none"] as const)("clears a matching authoritative %s receipt without another write", async effectState => {
     const action = await uncertainWrite();
     fx.operation.mockResolvedValue(lookup(action.actionId, { effectState }));
-    await checkRoutingOutcome(HOST, PROJECT);
+    await checkRoutingOutcome(HOST, PROJECT, ENTITY);
     expect(unresolved.has(scope)).toBe(false);
     expect(fx.write).toHaveBeenCalledOnce();
   });
@@ -326,7 +327,7 @@ describe("durable unknown-operation fence and read-only reconciliation", () => {
   ] satisfies Partial<UpgradeOperationReceipt>[])("retains the fence for an unconfirmed receipt %o", async patch => {
     const action = await uncertainWrite();
     fx.operation.mockResolvedValue(lookup(action.actionId, patch));
-    await checkRoutingOutcome(HOST, PROJECT);
+    await checkRoutingOutcome(HOST, PROJECT, ENTITY);
     expect(unresolved.get(scope)?.actionId).toBe(action.actionId);
     expect(fx.write).toHaveBeenCalledOnce();
   });
@@ -334,14 +335,14 @@ describe("durable unknown-operation fence and read-only reconciliation", () => {
   it("ignores a found receipt for another lookup actionId", async () => {
     const action = await uncertainWrite();
     fx.operation.mockResolvedValue({ ...lookup(action.actionId), actionId: "other-operation" });
-    await checkRoutingOutcome(HOST, PROJECT);
+    await checkRoutingOutcome(HOST, PROJECT, ENTITY);
     expect(unresolved.get(scope)?.actionId).toBe(action.actionId);
   });
 
   it("retains the fence when the lookup transport fails", async () => {
     const action = await uncertainWrite();
     fx.operation.mockRejectedValueOnce(new Error("lookup_disconnected"));
-    await expect(checkRoutingOutcome(HOST, PROJECT)).rejects.toThrow("lookup_disconnected");
+    await expect(checkRoutingOutcome(HOST, PROJECT, ENTITY)).rejects.toThrow("lookup_disconnected");
     expect(unresolved.get(scope)?.actionId).toBe(action.actionId);
     expect(fx.write).toHaveBeenCalledOnce();
   });
@@ -350,7 +351,7 @@ describe("durable unknown-operation fence and read-only reconciliation", () => {
     const action = await uncertainWrite();
     const gate = deferred<UpgradeOperationLookup>();
     fx.operation.mockReturnValueOnce(gate.promise);
-    const checking = checkRoutingOutcome(HOST, PROJECT);
+    const checking = checkRoutingOutcome(HOST, PROJECT, ENTITY);
     if (change === "host reset") fireHostReset(HOST);
     else access(true, "read");
     gate.resolve(lookup(action.actionId));
@@ -360,16 +361,16 @@ describe("durable unknown-operation fence and read-only reconciliation", () => {
   });
 
   it("does not look up a different project or an absent operation", async () => {
-    await checkRoutingOutcome(HOST, PROJECT);
+    await checkRoutingOutcome(HOST, PROJECT, ENTITY);
     await uncertainWrite();
-    await checkRoutingOutcome(HOST, "other-project");
+    await checkRoutingOutcome(HOST, "other-project", ENTITY);
     expect(fx.operation).not.toHaveBeenCalled();
   });
 
   it("does not reconcile through a connection that lost owner authority", async () => {
     const action = await uncertainWrite();
     access(false);
-    await checkRoutingOutcome(HOST, PROJECT);
+    await checkRoutingOutcome(HOST, PROJECT, ENTITY);
     expect(fx.operation).not.toHaveBeenCalled();
     expect(unresolved.get(scope)?.actionId).toBe(action.actionId);
   });

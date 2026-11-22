@@ -37,7 +37,26 @@ export function tabRows(group: Pick<SidebarGroup, "online" | "offline"> | undefi
 }
 
 export const INDEPENDENT_GROUP: SidebarGroup["id"] = "__independent__";
-/** Bulk starts beyond this many ask first; at most START_CONCURRENCY run at once. */
+/** How a bulk action confirms (owner rule: confirm by risk). */
+export type BulkConfirm = "none" | "armed" | "dialog";
+
+/**
+ * Bulk stop / archive of idle agents and 移出项目 are restorable: the toolbar button arms in place. A running turn
+ * (it would be interrupted) or, for archive, owned services (they lose their owner) keep the dialog that names them.
+ * Starting more than START_CONFIRM_OVER arms too (each starts a runtime); restore runs at once.
+ */
+export function bulkConfirmLevel(action: AgentListAction | "detach", o: { count: number; busy: number; owners: number }): BulkConfirm {
+  switch (action) {
+    case "stop": return o.busy > 0 ? "dialog" : "armed";
+    case "archive": return o.busy > 0 || o.owners > 0 ? "dialog" : "armed";
+    case "detach": return "armed";
+    case "start":
+    case "restoreStart": return o.count > START_CONFIRM_OVER ? "armed" : "none";
+    default: return "none";
+  }
+}
+
+/** Bulk starts beyond this many confirm first; at most START_CONCURRENCY run at once. */
 export const START_CONFIRM_OVER = 10;
 export const START_CONCURRENCY = 3;
 

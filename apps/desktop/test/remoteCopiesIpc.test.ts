@@ -9,7 +9,7 @@ import { canOpenCopy, type PreparedCopy } from "../src/shared/remoteCopyRequests
 
 const base = join(tmpdir(), "remote-copies-ipc-");
 const roots: string[] = [], services: ReturnType<typeof createRemoteCopies>[] = [];
-afterEach(async () => { for (const service of services.splice(0)) await service.dispose(); for (const root of roots.splice(0)) { if (!resolve(root).startsWith(resolve(base))) throw Error("unsafe fixture cleanup"); await rm(root, { recursive: true, force: true }); } });
+afterEach(async () => { for (const service of services.splice(0)) await service.dispose(); for (const root of roots.splice(0)) { if (!resolve(root).startsWith(resolve(base))) throw Error("unsafe fixture cleanup"); await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } }); // Windows: rm retries EBUSY / EPERM / ENOTEMPTY.
 async function fixture(pick: () => Promise<string | null> = async () => null) {
   const root = await mkdtemp(base); roots.push(root);
   const meta = { path: "/project/test.bin", name: "test.bin", size: 3, modifiedAt: "2026-10-28T00:00:00Z", revision: "a".repeat(64), maxChunkBytes: 1024 };
@@ -64,7 +64,7 @@ describe("downloads: local artifacts and the download folder", () => {
     expect(await readdir(pickedDir)).toEqual([]);
     await expect(stat(join(f.root, "download-folder.json"))).rejects.toThrow();
     expect((await f.service.request({ kind: "list" }) as import("../src/shared/remoteCopies").CopyState).copies.map(c => c.id)).toEqual([id]);
-  });
+  }, 30_000); // Two real moves of the store (copy, reopen, delete): ~0.5 s alone, the fs work under full-suite load.
 
   it("refuses to move into the current folder, and a cancelled pick changes nothing", async () => {
     let pick: string | null = null;

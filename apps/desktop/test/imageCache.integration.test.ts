@@ -50,7 +50,8 @@ beforeEach(async () => {
   endpoint = { baseUrl: `http://127.0.0.1:${(server.address() as any).port}`, token: "private-test-token" };
   installImageCache(new ImageCache(root)); daemon = service();
 });
-afterEach(async () => { server.closeAllConnections(); await new Promise<void>(r => server.close(() => r())); await rm(root, { recursive: true, force: true }); });
+// Windows: cache files can still be open a moment after the last read; rm retries EBUSY / EPERM / ENOTEMPTY.
+afterEach(async () => { server.closeAllConnections(); await new Promise<void>(r => server.close(() => r())); await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
 describe("daemon image cache integration over loopback", () => {
   it("measures 50 remote file previews twice and across a main-process cache restart", async () => {
     const view = async () => { for (let n = 0; n < 50; n++) await daemon.hostFile(`/images/${n}.png`, 1024); };
@@ -58,8 +59,9 @@ describe("daemon image cache integration over loopback", () => {
     await view(); expect([full, metadata]).toEqual([50, 100]);
     installImageCache(new ImageCache(root)); daemon = service(); await view();
     expect([full, metadata]).toEqual([50, 150]);
+    // 150 loopback reads and 50 disk cache entries (~2.5 s alone): the work, slow under full-suite load.
     console.info("50 image remote reads: first=50 full + 50 metadata; repeat=0 full + 50 metadata; restart=0 full + 50 metadata");
-  });
+  }, 30_000);
   it("revalidates changed files and refuses cached bytes after deletion", async () => {
     await daemon.hostFile("/a.png", 1024); revision = "v2";
     await daemon.hostFile("/a.png", 1024); expect(full).toBe(2);

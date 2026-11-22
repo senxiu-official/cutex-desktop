@@ -7,7 +7,7 @@ export const DEFAULT_PORTRAIT_THEME_IDS = [
   "beyond-spotlight", "little-callings", "season-letters", "lanterns-after-dark", "kindred-creatures",
 ] as const;
 export const DEFAULT_PORTRAIT_THEMES = DEFAULT_PORTRAIT_THEME_IDS.map(id => `${DEFAULT_PORTRAIT_PACK}/${id}`);
-export const isPortraitThemeKey = (key: unknown): key is string => typeof key === "string" && /^[a-z0-9][a-z0-9-]{0,19}\/[a-z0-9][a-z0-9-]{0,31}$/.test(key);
+export const isPortraitThemeKey = (key: unknown): key is string => typeof key === "string" && /^[a-z0-9][a-z0-9-]{0,19}\/[a-z0-9][a-z0-9-]{0,31}$(?![\s\S])/.test(key);
 
 const OLD_THEMES: Record<string, string> = {
   lolita: "tales-of-frills", wizarding: "snowy-owl-post", "pajama-party": "girls-night-in", "street-food": "mortal-world",

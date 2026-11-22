@@ -13,7 +13,7 @@ import { agentHost, useApp } from "../../store";
 import { services } from "../app";
 import type { CutexRef, RefOpenResult, SideOpen } from "../slots";
 import { ARTIFACT_REF_KIND, previewKind, VIEW } from "./model";
-import { clearPageData } from "./pageData";
+import { pageDataClearEntry } from "./pageDataClear";
 import { invalidateArtifact, loadDetail } from "./store";
 import { artifactSourceFileEntries } from "./fileActions";
 import { canSaveArtifact, saveArtifact } from "../../lib/remoteCopies";
@@ -93,7 +93,7 @@ export function artifactMenu(hostId: string, a: ArtifactSummary, open: SideOpen 
     },
     { label: translate(a.archivedAt ? "artifacts.unarchive" : "artifacts.archive"), onSelect: () => void patch(hostId, a, { archived: !a.archivedAt }) },
     // A page's own saved data (channel A, pageData.tsx); all versions share it.
-    ...(previewKind(a.latest.mediaType, a.name, a.latest.sourcePath) === "html" ? [{ label: translate("artifacts.pageData.clear"), onSelect: () => void clearPageData(hostId, a) }] : []),
+    ...(previewKind(a.latest.mediaType, a.name, a.latest.sourcePath) === "html" ? [pageDataClearEntry(hostId, a)] : []),
     {
       label: translate("artifacts.delete"),
       danger: true,

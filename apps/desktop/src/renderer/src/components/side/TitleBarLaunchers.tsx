@@ -10,6 +10,7 @@
 import { useRef, type MouseEvent } from "react";
 import { PanelRight, PanelRightClose, Plus } from "lucide-react";
 import { useI18n } from "../../i18n";
+import { ICON_GHOST } from "../Button";
 import { preloadOnIntent } from "../../lib/lazyPage";
 import { contextMenu, openMenuFrom } from "../../lib/contextMenu";
 import { useSideView } from "../../lib/sideComponents";
@@ -37,7 +38,8 @@ function Badges({ attention, unread, busy }: { attention: number; unread: boolea
   );
 }
 
-const BTN = "[app-region:no-drag] relative flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted hover:bg-hover hover:text-foreground";
+// The shared bar icon button (components/Button ICON_GHOST: hover, pressed fill and press-in, focus ring); no-drag in the window bar.
+const BTN = `[app-region:no-drag] relative ${ICON_GHOST}`;
 
 function Launcher({ item, inView }: { item: Launchable; inView: boolean }) {
   const layout = useSide((s) => s.layout);
@@ -102,7 +104,7 @@ export function TitleBarLaunchers() {
           <Launcher key={item.kind} item={item} inView={inView.has(item.kind)} />
         ))}
       </span>
-      {multiInfo && <InfoMark text={multiInfo} className="hover-info px-0.5" />}
+      {multiInfo && <InfoMark text={multiInfo} className="hover-info px-0.5 [app-region:no-drag]" />}
       </span>
       <button onClick={(e) => openMenuFrom(e.currentTarget, launcherMenu())} onPointerEnter={() => void preloadOnIntent()} data-tip={plusTip} aria-label={plusTip} aria-haspopup="menu" data-side-launcher-menu className={BTN}>
         <Plus size={16} />

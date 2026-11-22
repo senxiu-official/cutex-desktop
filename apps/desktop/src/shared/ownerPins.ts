@@ -51,7 +51,10 @@ export interface OwnerPinList {
   openCount: number;
 }
 
-export type OwnerPinChange = { state: OwnerPinState } | { delete: true };
+/** `expectedRevision`: the revision the owner saw; cutex answers 409 when the pin changed since (the list is read again). */
+export type OwnerPinChange = { state: OwnerPinState; expectedRevision?: number } | { delete: true };
+/** cutex's cap (and default) for resolved pins in one `GET /v2/owner-pins`; it refuses more with 400. */
+export const OWNER_PINS_MAX_LIMIT = 200;
 export type OwnerPinUpdateResult = { ok: true; pin: OwnerPin | null } | { ok: false; error: CutexRefusal };
 
 const KINDS: readonly string[] = ["todo", "decide", "note"];

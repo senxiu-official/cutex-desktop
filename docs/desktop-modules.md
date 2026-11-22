@@ -409,3 +409,11 @@ background programs is a later phase and is not provided by this desktop release
 ## Large HTML file documents
 
 HTML files larger than a single 10 MiB read use bounded host file windows (`fs-file-window`, `offset` and `revision`), with a 256 MiB limit. The offline document store streams UTF-8 byte chunks without joining or re-encoding them. File documents retain the existing opaque origin, network-blocking CSP and absence of page channels.
+
+## Local resources in HTML file previews
+
+A single-window HTML file preview can inline images, style sheets and scripts from the page's own canonical folder. Main reads each resource through the same host filesystem API and accepts it only when the resolved real path stays inside that folder. Junctions and symlinks do not widen the boundary. A workspace path label is not trusted: the canonical directory root and the page's own resolved path establish the folder first. If the host cannot provide those trusted paths, no adjacent resource is inlined.
+
+URLs, absolute paths, other schemes, paths escaping the folder and truncated files are not read. Limits are 300 files, 10 MiB per read, 64 MiB total read bytes, four concurrent reads and 96 MiB of written UTF-8 content; every written reference counts. The document stays offline with its existing CSP, opaque origin and no page channels. Large windowed HTML documents are not concatenated to add resources.
+
+Deferred and asynchronous classic scripts move to the document end in source order. Inline modules retain module semantics; other classic scripts stay in place. Style-sheet media is preserved; alternate or disabled sheets are not applied. The known ordering difference is that end-positioned classic scripts run before modules.

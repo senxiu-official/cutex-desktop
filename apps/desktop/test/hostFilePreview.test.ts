@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { baseName, HOST_FILE_READ_FEATURE, resolveFileHref } from "../src/renderer/src/lib/workspace";
 import { normalizeEntries, type MenuAction } from "../src/renderer/src/lib/contextMenu";
 
-vi.mock("../src/renderer/src/bridge", () => ({ api: {}, onEvent: () => () => {} }));
+vi.mock("../src/renderer/src/bridge", () => ({ api: {}, bridge: { platform: "win32", shell: {} }, onEvent: () => () => {} }));
 const opened = vi.hoisted(() => [] as unknown[][]);
 vi.mock("../src/renderer/src/lib/sideServices", () => ({ sideOpen: (...args: unknown[]) => (opened.push(args), { status: "opened", id: "i1", page: "p1", existing: false }) }));
 
@@ -36,6 +36,23 @@ describe("host file preview", { timeout: 20_000 }, () => {
     const without = outsideFileMenu(ref, "/home/jy/.cutex/reports/issue.md:12", true, t as never);
     expect(labels(without)).not.toContain("menu.preview");
     expect((normalizeEntries(without)[0] as MenuAction).hint).toBe("menu.fileOutsideWorkspace");
+  });
+
+  it("a local file outside the workspace: 打开 by type; a script gets 打开 off, 以文本打开 (the preview) and 运行…", async () => {
+    const { outsideFileMenu } = await import("../src/renderer/src/lib/menus");
+    const { useApp } = await import("../src/renderer/src/store");
+    useApp.setState({ hosts: { active: "local", hosts: [{ id: "local", kind: "local", label: "This computer" }] } as never });
+    const labels = (entries: ReturnType<typeof outsideFileMenu>) => normalizeEntries(entries).filter((e): e is MenuAction => e !== "separator");
+    const doc = labels(outsideFileMenu(resolveFileHref("C:/Users/sam/Budget.xlsx", "D:/work")!, "C:/Users/sam/Budget.xlsx", false, t as never, null, "local"));
+    expect(doc.filter((e) => e.label === "menu.openFile" && !e.disabled)).toHaveLength(1);
+    expect(doc.map((e) => e.label)).not.toContain("menu.openAsText");
+    const preview = vi.fn();
+    const script = labels(outsideFileMenu(resolveFileHref("C:/Users/sam/build.ps1", "D:/work")!, "C:/Users/sam/build.ps1", false, t as never, preview, "local"));
+    const open = script.find((e) => e.label === "menu.openFile")!;
+    expect(open.disabled).toBe(true); expect(open.info).toBe("menu.openFileScript");
+    script.find((e) => e.label === "menu.openAsText")!.onSelect();
+    expect(preview).toHaveBeenCalledOnce();
+    expect(script.find((e) => e.label === "menu.runFile")?.danger).toBe(true);
   });
 
   it("openHostFile opens the preview component on a host path (right side, v1.4)", async () => {

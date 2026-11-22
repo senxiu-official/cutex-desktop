@@ -83,7 +83,7 @@ function AccountsSection({ hostId }: { hostId: string }) {
       hint={t("claude-accounts.sectionHintKeys")}
       actions={
         <>
-          <RefreshButton onClick={() => void data.load()} disabled={data.loading} />
+          <RefreshButton onClick={() => data.load()} pending={data.loading} />
           <AddButton disabled={addDisabled} onClick={() => add("api")}>
             {t("claude-accounts.addApi")}
           </AddButton>

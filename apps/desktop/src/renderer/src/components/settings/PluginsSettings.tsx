@@ -3,6 +3,7 @@
 // docs/research/codex-plugins.md). cutex projects the shared [plugins] into every Codex agent at
 // launch (settings `codexConfigFollowShared`, FollowSharedSection heads this page and MCP / 技能 / 钩子);
 // running agents need a restart.
+import { useSettingsCard } from "../../lib/settingsDrafts";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, ChevronDown, ChevronRight, X } from "lucide-react";
 import type { HookMetadata, HooksListResponse, MarketplaceAddResponse, MarketplaceUpgradeResponse, PluginDetail, PluginInstallResponse, PluginListResponse } from "@cutex-desktop/protocol/codex/v2";
@@ -100,6 +101,8 @@ function PluginDetailPanel({ row, onChanged, onNotice }: { row: PluginRow; onCha
 
   // Install confirmation (inline, not window.confirm): what it runs, and "also trust its hooks".
   const [confirming, setConfirming] = useState(false);
+  // The install confirmation: a choice in it is unsaved until 安装 / 取消 close it (lib/settingsDrafts).
+  const confirmCard = useSettingsCard();
   const [alsoTrust, setAlsoTrust] = useState(true);
   const declaredHooks = detail?.hooks.length ?? 0;
   const install = async () => {
@@ -206,7 +209,7 @@ function PluginDetailPanel({ row, onChanged, onNotice }: { row: PluginRow; onCha
             </div>
           )}
           {confirming && parts && (
-            <div className="space-y-2 rounded-lg border border-border bg-surface p-3">
+            <div ref={confirmCard.ref} className="space-y-2 rounded-lg border border-border bg-surface p-3">
               <p className="text-xs text-foreground">{t("codex-config.plugins.confirmInstall", { name: row.displayName, parts: summary(parts) })}</p>
               {declaredHooks > 0 && (
                 <div className="flex items-center gap-2 text-xs">

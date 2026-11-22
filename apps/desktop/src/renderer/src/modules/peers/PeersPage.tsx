@@ -5,6 +5,7 @@
 // last seen, in-flight / outbox counts, the user it belongs to — linked to 用户 → 对端主机 —, enable)
 // and, for one peer, PeerDetail. Writes are
 // loopback-only in cutex: a `loopback_only` refusal turns the page read-only for that connection.
+import { useSettingsCard } from "../../lib/settingsDrafts";
 import { useOwnerLocalLock } from "../../components/settings/OwnerDevices";
 import { useEffect, useState } from "react";
 import { ChevronRight } from "lucide-react";
@@ -70,6 +71,8 @@ function InviteRow() {
   const write = usePeerWrite();
   const { readOnly } = usePeerWrites();
   const [label, setLabel] = useState("");
+  // The label field: unsaved until a 创建 carrying it succeeds (it stays shown) (lib/settingsDrafts).
+  const labelCard = useSettingsCard();
   const [invite, setInvite] = useState<PeerInvite | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -79,15 +82,16 @@ function InviteRow() {
   const create = async () => {
     setBusy(true);
     setError(null);
+    const upTo = labelCard.revision();
     const r = await write(() => api.createPeerInvite(label ? { label } : {}), setError);
-    if (r) setInvite(r);
+    if (r) (setInvite(r), labelCard.saved(upTo));
     setBusy(false);
   };
   const left = invite ? Math.max(0, Math.floor((Date.parse(invite.expiresAt) - now) / 1000)) : 0;
   return (
     <div className="border-b border-border py-2.5" data-testid="peers-invite">
       <SettingRow agents="access" source="host" label={t("peers.invite")} hint={lock.hint ?? t("peers.inviteHint")}>
-        <TextInput value={label} onChange={setLabel} placeholder={t("peers.inviteLabelPlaceholder")} width="w-40" label={t("peers.inviteLabel")} disabled={readOnly || busy || lock.locked} />
+        <TextInput inputRef={labelCard.ref} value={label} onChange={setLabel} placeholder={t("peers.inviteLabelPlaceholder")} width="w-40" label={t("peers.inviteLabel")} disabled={readOnly || busy || lock.locked} />
         <Button primary onClick={() => void create()} disabled={readOnly || busy || badLabel || lock.locked}>
           {t("peers.inviteCreate")}
         </Button>

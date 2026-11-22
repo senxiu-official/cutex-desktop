@@ -5,7 +5,7 @@ import { Copy, RefreshCw, X } from "lucide-react";
 import type { JobRow, JobStream } from "../../../shared/ipc";
 import { useI18n } from "../i18n";
 import { formatSpan } from "../lib/delegations";
-import { jobSeconds, jobStatus, jobTitle } from "../lib/jobs";
+import { jobSeconds, jobStatus, jobStatusTipKey, jobTitle } from "../lib/jobs";
 import { closeJobOutput, readJobOutput, useHostJobs, useJobOutputView, useJobs } from "../lib/jobStore";
 import { useJobWord } from "../lib/jobsView";
 import { copyText } from "../lib/menus";
@@ -22,9 +22,11 @@ export function JobStatusMark({ job, trailing, className = "" }: { job: JobRow; 
   const word = useJobWord()(status);
   const { t } = useI18n();
   const observedAt = job.observedProcessState?.observedAtEpochMillis;
+  // One hover wherever the mark shows (jobs page, capsule, status row): the full word (it may be cut) and what it means.
+  const tipKey = jobStatusTipKey(status);
   const tip = status.key === "processStopped" || status.key === "processExited"
     ? t(`jobs.status.${status.key}.tip`, { time: typeof observedAt === "number" ? formatAbsolute(observedAt / 1000) : "" })
-    : undefined;
+    : tipKey ? `${word}\n${t(tipKey, { state: status.raw })}` : undefined;
   return (
     <span className={`inline-flex min-w-0 items-center gap-1 ${className}`} data-tip={tip}>
       <DelegationGlyph glyph={status.glyph} tone={status.tone} />

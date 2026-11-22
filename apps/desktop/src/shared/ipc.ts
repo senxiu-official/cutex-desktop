@@ -1,3 +1,4 @@
+import type { AliasFields } from "./modelResolution";
 import type { SessionForkRequest, SessionForkResult, SessionForkPreview, SessionForkPreviewRequest } from "./sessionFork";
 import type { AgentMcpResult } from "./sessionMcp";
 import type { FilesRevertRequest, FilesRevertResult } from "./filesRevert";
@@ -63,6 +64,7 @@ import type { KimiAccountList, KimiAccountRemoveResult, KimiAccountResult, KimiL
 import type { AlarmCancelResult, AlarmList } from "./alarms";
 import type { OwnerPinChange, OwnerPinList, OwnerPinUpdateResult } from "./ownerPins";
 import type { SkillArchiveList, SkillArchiveResult } from "./skillsArchive";
+import type { QuotaAttribution, QuotaHistory } from "./quotaAttribution";
 import type { UsageSourceCreate, UsageSourceDeleteResult, UsageSourcePatch, UsageSourceResult, UsageSourcesView } from "./usageSources";
 import type { WorkflowRunAction, WorkflowRunList, WorkflowRunView } from "./workflows";
 import type { RestoreCandidates } from "./runtimeRestore";
@@ -182,7 +184,7 @@ export interface QuotaConfigView {
 
 export interface CapabilitiesView {
   /** r260 non-durable text opt-in (normalized into featureList by main). */
-  features?: { runtimePruneV1?: boolean; liveTextDeltas?: boolean; ownerAdmissionHeldV1?: boolean; ownerAdmissionStateV1?: boolean; ownerAdmissionBusyV1?: boolean; formalAgentNameRenameV1?: boolean; quickChatPromoteV1?: boolean; baiduPan?: boolean; servicesWorkersV1?: boolean };
+  features?: { runtimePruneV1?: boolean; liveTextDeltas?: boolean; ownerAdmissionHeldV1?: boolean; ownerAdmissionStateV1?: boolean; ownerAdmissionBusyV1?: boolean; formalAgentNameRenameV1?: boolean; quickChatPromoteV1?: boolean; baiduPan?: boolean; servicesWorkersV1?: boolean; profileAvatarStyleTheme32?: boolean };
   /** r258 native event media references (also advertised in featureList). */
   eventMediaBlobs?: boolean;
   /** Build identity (cutex r224+; absent on older cutex). */
@@ -303,6 +305,8 @@ export interface GitStatus {
   behind: number | null;
   head: { sha: string; subject: string } | null;
   files: GitFileStatus[];
+  /** Files changed while cutex scanned (newer cutex; absent on older hosts): shown, and read once more soon. */
+  possiblyStale?: boolean;
 }
 
 export interface ProfileAccountLink {
@@ -335,6 +339,12 @@ export interface ProfileItem extends ProfileVariantFields {
   modelReasoningEffort: string | null;
   modelContextWindow: number | null;
   modelAutoCompactTokenLimit: number | null;
+  /** cutex profile-model-context-v1 (docs/model-context-contract.md): auto-compact as a share of the window (1–100). */
+  modelAutoCompactPercent?: number | null;
+  /** profile-model-context-v1: this Profile finished the one-shot migration (per-model values win over the Profile's). */
+  modelContextSettingsV1?: boolean;
+  /** profile-model-context-v1: whether the unified context settings apply to this Profile, else a reason code. */
+  modelContextSettingsSupport?: ModelContextSupport;
   authPresent: boolean;
   authKind: "chatgpt" | "apiKey" | "claude" | "none";
   /** cutex `profile-plan-label`: ChatGPT profiles show the signed-in account's plan, else the stored label. */
@@ -546,10 +556,11 @@ export type OwnerNotifyResult = { ok: true; notification: OwnerNotification } | 
 export type OwnerNotifyAction = "ack" | "reply" | "dismiss" | "delete";
 /**
  * claude-safety-grants: `cutex/safetyCheck/grant|dismiss {blockId}` on the agent's session (owner only). `ok`: the
- * updated notice; a grant whose follow-up message to the agent failed still stands (`submitError`).
+ * updated notice; a grant whose approval notice to the agent could not be queued still stands (`noticeError`: cutex
+ * r289+ `noticeError`, older `submitError`); nothing is retried.
  */
 export type SafetyCheckDecision = "grant" | "dismiss";
-export type SafetyCheckResult = { ok: true; notification: OwnerNotification; submitError: CutexRefusal | null; notice?: SafetyGrantNotice } | { ok: false; error: CutexRefusal; notification?: OwnerNotification };
+export type SafetyCheckResult = { ok: true; notification: OwnerNotification; noticeError: CutexRefusal | null; notice?: SafetyGrantNotice } | { ok: false; error: CutexRefusal; notification?: OwnerNotification };
 /** safety-grant-delivery: the approval notice a grant queued (ledger `inputId`, bus `messageId`); absent on an older cutex. */
 export interface SafetyGrantNotice { inputId: string; messageId: string }
 /** Longest owner reply cutex accepts (`cutex/ownerNotify/reply` text 1–20000). */
@@ -577,6 +588,10 @@ export interface ProfileConfig {
   modelCatalogJson: string | null;
   modelContextWindow: number | null;
   modelAutoCompactTokenLimit: number | null;
+  /** profile-model-context-v1 (Native): exclusive with modelAutoCompactTokenLimit (setting one clears the other). */
+  modelAutoCompactPercent?: number | null;
+  /** profile-model-context-v1 (Native): the one-shot migration marker (read only). */
+  modelContextSettingsV1?: boolean;
   providerName: string | null;
   providerBaseUrl: string | null;
   providerEnvKey: string | null;
@@ -642,6 +657,11 @@ export interface ProfileDetail extends ProfileItem {
  * Owner-started turns always wait.
  */
 export type AgentTurnQuestions = "decide" | "wait";
+
+/** Profile fields after a PATCH; an omitted portrait choice remains a renderer draft. */
+export type ProfilePatchResult = ProfileDetail & {
+  portraitProblem?: import("./profilePortraitThemes").ProfilePortraitThemeProblem;
+};
 
 /** PATCH body: omitted = keep, null = clear. `apiKey` is write-only. */
 export type ProfilePatch = { options?: { dsh: DshProfileOptions } } & Partial<{ [K in Exclude<keyof ProfileConfig, "modelCatalogJson">]: ProfileConfig[K] }> & {
@@ -712,10 +732,46 @@ export type ProfilePatch = { options?: { dsh: DshProfileOptions } } & Partial<{ 
   proxy?: ProfileProxyPatch | null;
 };
 
-/** `reference` / `notApplicable`: Claude rows (the adapter's nominal window; Claude Code decides compaction). */
-export type ContextSource = "profile" | "catalog" | "default90Percent" | "unknown" | "reference" | "notApplicable";
+/** `reference` / `notApplicable`: Claude rows (the adapter's nominal window; Claude Code decides compaction).
+ *  profile-model-context-v1 adds `model` (the row's own setting), `runtimeDefault` and `unsupported`. */
+export type ContextSource = "model" | "profile" | "catalog" | "default90Percent" | "runtimeDefault" | "unsupported" | "unknown" | "reference" | "notApplicable" | "preserved" | (string & {});
 
-export interface CatalogModel {
+/** A row's resolved context values with each field's own source (window and compaction are independent). */
+export interface ContextEffective {
+  contextWindow: number | null;
+  contextWindowSource: ContextSource;
+  /** Claude: the window is a reference / compaction-calculation window, not server capacity. */
+  contextWindowIsReference?: boolean;
+  autoCompactTokenLimit: number | null;
+  autoCompactTokenLimitSource: ContextSource;
+  /** profile-model-context-v1. Null in absolute mode (never derived from two numbers). */
+  autoCompactPercent?: number | null;
+  autoCompactPercentSource?: ContextSource;
+}
+
+/** One layer of a row's context settings (P13 B, docs/model-context-contract.md); a missing / null number = absent. */
+export interface ContextValues {
+  contextWindow?: number | null;
+  autoCompactPercent?: number | null;
+  autoCompactTokenLimit?: number | null;
+}
+
+/** P13 B: `catalog` = built-in recommendations, `owner` = what the owner set on this model, `preserved` = the old
+ *  effective value kept at upgrade where B would have changed it (wins until restored or edited). */
+export interface ContextSettingsLayers {
+  catalog: ContextValues;
+  owner: ContextValues;
+  preserved: ContextValues;
+}
+
+/** profile-model-context-v1: `reason` is a code (nativeModelContextSettingsV2Required — earlier …V1Required —,
+ *  claudeModelContextSettingsV1Required, dshContextSettingsUnsupported, kimiContextSettingsUnsupported) or null. */
+export interface ModelContextSupport {
+  supported: boolean;
+  reason: string | null;
+}
+
+export interface CatalogModel extends AliasFields {
   id: string;
   /** Actual upstream model for a named configuration; absent/null for ordinary model rows. */
   requestModel?: string | null;
@@ -725,17 +781,28 @@ export interface CatalogModel {
   contextWindow: number | null;
   maxContextWindow: number | null;
   autoCompactTokenLimit: number | null;
+  /** profile-model-context-v1: the row's own auto-compact share (exclusive with autoCompactTokenLimit). */
+  autoCompactPercent?: number | null;
   effectiveContextWindowPercent: number | null;
   inputModalities: string[];
   supportedReasoningEfforts: string[];
   defaultReasoningEffort: string | null;
   isDefault: boolean;
   discovered: boolean;
-  effective: { contextWindow: number | null; contextWindowSource: ContextSource; autoCompactTokenLimit: number | null; autoCompactTokenLimitSource: ContextSource };
+  effective: ContextEffective;
+  /** P13 B: the row's layers. Present: the flat numbers above are catalog recommendations, not owner settings. */
+  contextSettings?: ContextSettingsLayers;
+  /** P13 B: resolved defaults for the labels — `model` as if this row's own setting were cleared (keeps the Profile's),
+   *  `profile` as if the Profile's were cleared too. Null numbers = not known (show 默认 without a number). */
+  defaultValues?: { model: ContextEffective; profile: ContextEffective };
   /** Claude reference rows: `alias` / `pinned` / `default` / `custom`; absent on Codex rows. */
   kind?: string;
   /** Claude reference rows: false when the model's effort levels are unknown (aliases); true + no levels = it has none. */
   effortSupportKnown?: boolean;
+  /** cutex resolved-reasoning-effort: the owner's own level for this model (null = none). */
+  modelReasoningEffort?: string | null;
+  /** cutex resolved-reasoning-effort: the resolution a new agent on this row gets (read with shared/modelResolution). */
+  reasoningEffort?: unknown;
 }
 
 /**
@@ -785,14 +852,26 @@ export interface ProfileModelsView {
   selectedModel: string | null;
   /** false: the runtime decides compaction itself (Claude profiles); absent on older cutex. */
   autoCompactApplies?: boolean;
+  /** profile-model-context-v1: the selected Native supports the unified settings (Claude: false; see the support). */
+  modelContextSettingsV1Supported?: boolean;
+  /** profile-model-context-v1: this Profile's migration marker. */
+  modelContextSettingsV1?: boolean;
+  modelContextSettingsSupport?: ModelContextSupport;
   profileOverrides: { modelContextWindow: number | null; modelAutoCompactTokenLimit: number | null };
+  /** P13 B: the Profile controls' default labels — the selected model's `defaultValues.profile` (byModel: every row's). */
+  profileDefaultValues?: { selectedModel: string | null; selected: ContextEffective | null; byModel?: Record<string, ContextEffective> };
   discovery: { sourceUrl: string; fetchedAt: string; models: string[] } | null;
   models: CatalogModel[];
   unsupportedModelFields: string[];
   precedence: unknown;
 }
 
-export type CatalogModelPatch = Partial<Pick<CatalogModel, "requestModel" | "displayName" | "contextWindow" | "maxContextWindow" | "autoCompactTokenLimit" | "effectiveContextWindowPercent" | "inputModalities" | "supportedReasoningEfforts" | "defaultReasoningEffort">>;
+export type CatalogModelPatch = Partial<Pick<CatalogModel, "requestModel" | "displayName" | "contextWindow" | "maxContextWindow" | "autoCompactTokenLimit" | "autoCompactPercent" | "effectiveContextWindowPercent" | "inputModalities" | "supportedReasoningEfforts" | "defaultReasoningEffort">> & {
+  /** P13 B: drop the row's upgrade-preserved window / compaction (the owner's own setting shows again). A separate
+   *  request: never together with an edit of the same field (cutex refuses it). */
+  restorePreservedContextWindow?: true;
+  restorePreservedAutoCompaction?: true;
+};
 
 export interface UserInstructions {
   path: string;
@@ -1471,7 +1550,8 @@ export interface StuckBusDiscarded {
 
 export type StuckBusDiscardResult = { ok: true; discarded: StuckBusDiscarded } | { ok: false; error: CutexRefusal };
 
-export interface ModelOption {
+/** cutex resolved-reasoning-effort: Claude `model/list` rows carry the SDK alias resolution (shared/modelResolution). */
+export interface ModelOption extends AliasFields {
   id: string;
   model: string;
   displayName: string;
@@ -1612,8 +1692,13 @@ export interface DaemonApi extends StorageCleanupApi {
   sidebarLoadArchived(): Promise<void>;
   /** During the host's first sidebar read: the agents read so far; null otherwise. */
   sidebarPeek(): Promise<SidebarSnapshot | null>;
-  /** `turnLimit` (history-pages): newest turns only + `historyPage`; ignored by older cutex. */
-  bootstrap(sessionId: string, turnLimit?: number): Promise<SessionBootstrap>;
+  /**
+   * `turnLimit` (history-pages): newest turns only + `historyPage`; ignored by older cutex.
+   * `opts.boundedBus` (ordinary page opens only): `bus=bounded` when the host offers bootstrap-bounded-bus.
+   */
+  bootstrap(sessionId: string, turnLimit?: number, opts?: { boundedBus?: boolean }): Promise<SessionBootstrap>;
+  /** bootstrap-bounded-bus: a page of the agent's bus messages linked to turns / items; null on a host without it. */
+  busMessages(sessionId: string, request: import("./boundedBus").BusMessagesRequest): Promise<import("@cutex-desktop/protocol").BusMessagesPage | null>;
   /**
    * A page of turns (offline-history; with history-pages also while live): the newest `limit`
    * (default 20) older than `cursor`. Null if unsupported.
@@ -1689,6 +1774,10 @@ export interface DaemonApi extends StorageCleanupApi {
   rescanUsageSource(id: string): Promise<UsageSourceResult>;
   usagePrices(): Promise<UsagePrices>;
   putUsagePrices(prices: UsagePrices): Promise<UsagePrices>;
+  /** `GET /v2/usage/quota-history` (capability `usage-ledger`): a profile's quota snapshots by local day; null when the route is missing. */
+  quotaHistory(query: { profile: string; from: string; to: string }): Promise<QuotaHistory | null>;
+  /** `GET /v2/usage/quota-attribution` (capability `quota-attribution`, design 052): who used a window; null when the route is missing. */
+  quotaAttribution(query: { profile: string; window: string }): Promise<QuotaAttribution | null>;
   /** `GET /v2/human/preferences/guides` (guides.preferences): the owner's 全部跳过, shared across their devices. */
   guidesPreferences(): Promise<GuidesPreferences>;
   /** `PUT /v2/human/preferences/guides` (owner-full): `skippedThrough` null resets it. */
@@ -1762,7 +1851,7 @@ export interface DaemonApi extends StorageCleanupApi {
   profileLogout(profile: string): Promise<ProfileAccountView>;
   listProfiles(): Promise<{ defaultProfile: string | null; profiles: ProfileItem[] } | null>;
   getProfile(profile: string): Promise<ProfileDetail>;
-  patchProfile(profile: string, patch: ProfilePatch): Promise<ProfileDetail>;
+  patchProfile(profile: string, patch: ProfilePatch): Promise<ProfilePatchResult>;
   /** cutex `profile-avatar`: a profile's picture / intro portrait as a data: URL (null: none / older cutex). */
   profileImage(profileId: string, kind: ProfileImageKind): Promise<{ dataUrl: string; etag: string | null } | null>;
   /** cutex `profile-avatar`: upload (data: URL) / remove (null) → the stored ETag; refusals throw. */
@@ -1844,9 +1933,14 @@ export interface DaemonApi extends StorageCleanupApi {
   stuckBusMessages(minAgeSecs: number): Promise<StuckBusView | null>;
   /** `POST /v2/agent-bus/stuck-messages/discard` (the reason is fixed in main); 4xx (message_not_found, message_protected, message_not_discardable, …) come back as a refusal. */
   discardStuckBusMessage(request: StuckBusDiscardRequest): Promise<StuckBusDiscardResult>;
+  /** agent-bus-owner-end-followup-v1 `POST /v2/agent-bus/stuck-messages/end-follow-up`: 结束跟进 without evidence
+   *  (settlement outcome unconfirmed, by owner). Older hosts refuse (owner_disposition_unsupported). Never auto-retried. */
+  messageEndFollowUp(request: import("./ownerDispositions").MessageEndFollowUpRequest): Promise<import("./ownerDispositions").MessageEndFollowUpResult>;
   /** `GET /v2/runtimes` (feature runtimes-view) as cutex sends it (shared/runtimes.ts adapts it); null when the daemon predates it. */
   runtimes(): Promise<RuntimesWire | null>;
   runtimePrunePlan(): Promise<RuntimePrunePlan>;
+  /** Drops this host's plan reads still waiting (Settings closed, or the renderer gave up). */
+  cancelRuntimePrunePlan(): void;
   pruneRuntimes(ids: string[]): Promise<RuntimePruneResult>;
   /** `GET /v2/claude/accounts` (feature claude-accounts); null when the daemon predates it. */
   claudeAccounts(): Promise<ClaudeAccountList | null>;
@@ -2222,6 +2316,16 @@ export interface DaemonApi extends StorageCleanupApi {
    */
   askCommand(sessionId: string, method: AskCommandMethod, params: { askId: string; outcome?: "accepted" | "abandoned" }): Promise<MutationResult>;
   /**
+   * r289 owner disposition of a delegation (shared/ownerDispositions.ts): `POST /v2/asks/{askId}/close` when the host has
+   * owner-ask-disposition-v1 (works for archived / deleted targets), else `cutex/ask/stop|close` on `sessionId` (the
+   * target). `followUpEnded` (结束跟进) needs the new route: older hosts refuse it (owner_disposition_unsupported).
+   */
+  askDispose(sessionId: string, askId: string, outcome: import("./ownerDispositions").AskDisposeOutcome, actionId: string): Promise<import("./ownerDispositions").AskDisposeResult>;
+  /** Which r289 owner-disposition routes / fields this host offers (capability probe; all false on older hosts). */
+  ownerDispositionSupport(): Promise<import("./ownerDispositions").OwnerDispositionSupport>;
+  /** Job Service 结束跟进 (`POST /v2/job-service/close-follow-up`, humanOperations closeFollowUp): terminal unconfirmed. */
+  jobCloseFollowUp(jobId: string, expectedRevision: number, reason: string): Promise<JobResult<unknown>>;
+  /**
    * Job Service jobs (`POST /v2/job-service/management-query`, root; feature job-service): one page,
    * newest first. `query` matches job id, action id or session id (substring).
    */
@@ -2343,8 +2447,12 @@ export interface DaemonApi extends StorageCleanupApi {
   ownerNotifyAction(agentId: string, action: OwnerNotifyAction, notificationId: string, text?: string): Promise<OwnerNotifyResult>;
   /** `PATCH /v2/settings {ownerNotify}` (only the writable fields are forwarded). */
   patchOwnerNotify(patch: OwnerNotifySettingsPatch): Promise<GlobalSettings>;
-  /** claude-safety-grants: 批准一次 / 不批准 on a safety block of that agent (`cutex/safetyCheck/grant|dismiss`). */
-  safetyCheckDecide(agentId: string, blockId: string, decision: SafetyCheckDecision): Promise<SafetyCheckResult>;
+  /**
+   * claude-safety-grants: 批准一次 / 不批准 on a safety block of that agent (`cutex/safetyCheck/grant|dismiss`).
+   * `notificationId`: the notice carrying the block (its own id: cutex makes it apart from the runtime's `blockId`),
+   * for the direct 不批准 route.
+   */
+  safetyCheckDecide(agentId: string, blockId: string, decision: SafetyCheckDecision, notificationId: string): Promise<SafetyCheckResult>;
   // ---------- notification levels (capability notification-levels; shared/notificationLevels.ts) ----------
   /** `GET /v2/notification-levels`: registry, stored settings, effective tables; null on a cutex without the route. */
   notificationLevels(): Promise<NotificationLevelsView | null>;
@@ -2373,6 +2481,8 @@ export interface SubmitOptions {
   joinDelegation?: OwnerJoinDelegation;
   extra?: ExtraInput[];
   clientUserMessageId?: string;
+  /** interrupt-send-many-v1, strategy "interrupt": the unread owner inputs (by id + rev) that go along before the draft. */
+  interruptSend?: import("@cutex-desktop/protocol").InputInterruptSendManyParams;
 }
 
 /** Largest image the composer attaches (cute-codex / providers reject much bigger payloads). */
@@ -2668,6 +2778,8 @@ export interface DesktopEvents {
   ownerNotifyOpen: { hostId: string; agentId: string; notificationId: string };
   /** A desktop notification / event big alert the renderer raised was clicked (the window was shown). */
   notifyClick: { key: string };
+  /** A click in the 项目看板 window (main/board.ts): the main window was shown; open this target. */
+  boardOpen: { target: import("./board").BoardTarget };
   /** P2 person identity: key or per-host claim state changed (main/personIdentity.ts). */
   identityState: import("./personIdentity").PersonIdentityView;
   /** The open SSH questions changed (main/sshAskpass.ts; the whole list, oldest first). */
@@ -2893,7 +3005,7 @@ export interface ShellRetract {
 export type ShellRequest =
   | { op: "remoteCopies"; request: import("./remoteCopyRequests").CopyRequest }
   | { op: "filePathInfo"; hostId: string; path: string }
-  | { op: "filePath"; hostId: string; path: string; action: "reveal" | "open" }
+  | { op: "filePath"; hostId: string; path: string; action: "reveal" | "open" | "run" }
   | { op: "state" }
   | { op: "setCloseBehavior"; value: CloseBehavior }
   | { op: "setLocale"; value: ShellLocale }
@@ -2916,13 +3028,16 @@ export type ShellRequest =
   | { op: "setMultiWindow"; value: boolean }
   | { op: "migrateMultiWindow"; value: boolean }
   | { op: "remoteClose" }
-  | { op: "answerRemoteClose"; action: import("./remoteClose").RemoteCloseAction };
+  | { op: "answerRemoteClose"; action: import("./remoteClose").RemoteCloseAction }
+  | { op: "openBoard" }
+  | { op: "boardOpenOnLaunch" }
+  | { op: "setBoardOpenOnLaunch"; value: boolean };
 export interface ShellBridge {
   remoteCopies?<T = import("./remoteCopies").CopyState>(request: import("./remoteCopyRequests").CopyRequest): Promise<T>;
-  /** Eligibility only; main revalidates immediately before opening. */
-  filePathInfo?(hostId: string, path: string): Promise<{ canOpen: boolean }>;
-  /** User-selected local filesystem actions, independent of daemon connectivity. */
-  filePath?(hostId: string, path: string, action: "reveal" | "open"): Promise<void>;
+  /** Eligibility only; main revalidates immediately before opening. `runnable`: a script / program (打开 refuses it; 运行… may). */
+  filePathInfo?(hostId: string, path: string): Promise<{ canOpen: boolean; runnable?: "script" | "program" }>;
+  /** User-selected local filesystem actions, independent of daemon connectivity. `run`: main asks in its own native dialog first. */
+  filePath?(hostId: string, path: string, action: "reveal" | "open" | "run"): Promise<void>;
   state(): Promise<ShellState>;
   setCloseBehavior(value: CloseBehavior): Promise<ShellState>;
   setLocale(value: ShellLocale): Promise<void>;
@@ -2964,6 +3079,11 @@ export interface ShellBridge {
   remoteClose?(): Promise<import("./remoteClose").RemoteCloseView | null>;
   /** The countdown's 取消 / 立即关闭. */
   answerRemoteClose?(action: import("./remoteClose").RemoteCloseAction): Promise<void>;
+  /** Open (or bring up) the 项目看板 window (main/board.ts). */
+  openBoard?(): Promise<void>;
+  /** Settings → 通用 → 项目看板 → 启动时打开 (stored by main in userData/board-window.json). */
+  boardOpenOnLaunch?(): Promise<boolean>;
+  setBoardOpenOnLaunch?(value: boolean): Promise<boolean>;
 }
 
 export const UPDATE_CHANNEL = "cutex-desktop:update";
@@ -3040,12 +3160,14 @@ export const SESSION_ACTION_METHODS = [
   "cutex/session/visibility/show",
   "cutex/runtime/offline",
   "cutex/runtime/online",
-  // Only the Claude tool switches and memoryInjection (`patch` is checked in main: SESSION_DEFAULTS_KEYS).
+  // Only the Claude tool switches, memoryInjection and an offline agent's model / effort (`patch` checked in main: shared/sessionDefaults).
   "cutex/session/defaults/update",
   MESSAGES_WAKE_METHOD,
 ] as const;
 /** The `cutex/session/defaults/update` patch keys the renderer may send (boolean values; memoryInjection: cutex agent-memory-injection). */
 export const SESSION_DEFAULTS_KEYS = ["claudeAllowWrite", "claudeAllowExec", "memoryInjection"] as const;
+/** `cutex/session/defaults/update` text keys (批量换模型: an offline agent's model / effort for its next start). */
+export const SESSION_DEFAULTS_MODEL_KEYS = ["model", "reasoningEffort"] as const;
 export type SessionActionMethod = (typeof SESSION_ACTION_METHODS)[number];
 
 /** cute-codex ThreadBackgroundTerminal (rssKb narrowed to number for IPC). */
@@ -3174,6 +3296,10 @@ export interface AskAttemptView {
    * (`GET /v2/asks/{id}`, `cutex/ask/created`) has it; list rows do not yet (cutex r222).
    */
   stopRequested?: boolean;
+  /** ask-stop-settlement-v1: the absolute stop deadline (first stop request + N; never reset by reconnects), RFC 3339. */
+  stopDeadline?: string | null;
+  /** ask-stop-settlement-v1: the deadline passed and the attempt is still not proven ended. */
+  stopUnconfirmed?: boolean;
 }
 
 /** The handler's current delegation_await (`AskSummary.await`, cutex delegation-await). */
@@ -3218,6 +3344,8 @@ export interface AskSummary extends AskReviewFields {
   queuePosition?: number | null;
   /** Number of attempts. */
   attempts: number;
+  /** ask-stop-settlement-v1: closed by the owner's 结束跟进 (closed = stopped, execution unconfirmed). */
+  followUpEnded?: boolean;
   answerId?: string | null;
   openQuestions?: number;
   createdAt: string;
@@ -3241,6 +3369,18 @@ export interface AskSummary extends AskReviewFields {
   // ---------- delegation-await ----------
   await?: AskAwaitView | null;
   jobs?: AskJobView[] | null;
+  // ---------- r290 P14 ----------
+  /** The handler ended its turn and continues this delegation later (yielded continuation); null = no such wait.
+   *  Absent on hosts without it (the status then follows execution / hold as before). */
+  continuationWait?: ContinuationWait | null;
+}
+
+/** r290 P14 yielded wait (cutex docs/r290-p14-yielded-deliver.md). `nextWakeAt` (UTC) only for a timed wait. */
+export interface ContinuationWait {
+  state: "waiting" | "ready" | "limited" | (string & {});
+  kind: "after" | "children" | "jobs" | (string & {});
+  since: string | null;
+  nextWakeAt: string | null;
 }
 
 export interface AskFilter {
@@ -3369,7 +3509,7 @@ export interface JobListPage {
 }
 
 export interface JobServiceCapabilities {
-  /** Human (root) operations: "list", "cancel", "readOutput". Absent on an older Job Service = list only. */
+  /** Human (root) operations: "list", "cancel", "readOutput", "closeFollowUp" (r289). Absent on an older Job Service = list only. */
   humanOperations?: string[];
   [key: string]: unknown;
 }

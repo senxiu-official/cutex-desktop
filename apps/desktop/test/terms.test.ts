@@ -89,6 +89,8 @@ const ALLOWED: Record<string, string> = {
 const ALLOWED_PREFIXES: Record<string, string> = {
   // 代理 here is the network proxy (Settings → 网络代理), never one of our agents.
   "proxy.": "network proxy settings",
+  // 浏览器通过系统代理上网 (r290 P11 / B1): the system network proxy.
+  "browser.systemProxy.": "network proxy (browser egress)",
 };
 
 /** Strips what is not prose: `code`, identifiers with _ - . / (agent_tell, cutex-agent-bus, AGENTS.md), placeholders. */

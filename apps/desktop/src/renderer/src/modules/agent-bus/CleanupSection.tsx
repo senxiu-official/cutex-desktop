@@ -59,7 +59,7 @@ export function CleanupSection() {
           <div role="search" className="contents">
             <Select value={String(minAge)} options={minAgeOptions} width={FIELD_W.short} label={t("agent-bus.stuck.minAge")} disabled={stuck.bulk !== null} onChange={(v) => setMinAge(Number(v))} />
           </div>
-          <RefreshButton disabled={stuck.loading || delegations.loading || working} onClick={() => void Promise.all([stuckOn && stuck.refresh(), asksOn && delegations.refresh()])} />
+          <RefreshButton disabled={stuck.loading || delegations.loading || working} onClick={() => Promise.all([stuckOn && stuck.refresh(), asksOn && delegations.refresh()])} />
         </>
       }
     >

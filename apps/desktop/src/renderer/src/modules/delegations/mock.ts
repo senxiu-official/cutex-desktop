@@ -5,6 +5,7 @@
 import type { AskAnswerPage, AskCommandMethod, AskDetail, AskFilter, AskHold, AskSummary, DaemonApi, MutationResult } from "../../../../shared/ipc";
 import type { MockAdmissionEntry, MockCore, ModuleMock } from "../../dev/mockTypes";
 import type { UpgradeApprovalRead } from "../../../../shared/delegationUpgradePreview";
+import type { AskDisposeOutcome, AskDisposeResult } from "../../../../shared/ownerDispositions";
 
 
 const ROUTING_SCENE = typeof location !== "undefined" && new URLSearchParams(location.search).has("routingReviews");
@@ -15,6 +16,9 @@ function routingRows(seed: AskSummary): AskSummary[] {
     { id: "route-pending", title: "请 Kai 复核项目内委托的路由", state: "pending" as const },
     { id: "route-denied", title: "已拒绝：本次任务超出项目安排", state: "denied" as const },
     { id: "route-grant", title: "路由已批准，等待一次性审核授权", state: "approved" as const },
+    // W3: a review that can no longer be decided (the request changed / it was cancelled).
+    { id: "route-stale", title: "复核路由：请求在审核前已变化", state: "stale" as const },
+    { id: "route-cancelled", title: "复核路由：发起方已撤回", state: "cancelled" as const },
   ];
   return rows.map(row => {
     const approvalId = `routing-approval-${row.id}`, askId = `ask-${row.id}`;
@@ -163,8 +167,25 @@ const asks: AskSummary[] = [
   ask("ask-ownerstop", "全量 cargo test", HELPER, "interrupted", { ago: 5000, attempt: ended(4900, 4500, { state: "interrupted", interruptReason: "ownerStopped" }) }),
   ask("ask-restart", "生成协议类型", ALDEN, "interrupted", { ago: 2600, attempt: ended(2500, 2400, { state: "interrupted", interruptReason: "runtimeRestart" }) }),
   ask("ask-unknown", "把 Workstation 的 r206 升到 r207", SORA, "interrupted", { ago: 3300, attempt: ended(3200, 3000, { state: "interrupted", interruptReason: "outcomeUnknown", lastError: "native exited while the turn was running; whether it finished is unknown" }) }),
+  // State surfaces (owner-approved wording 2026-11-17, r289 ask-stop-settlement-v1): a stop not confirmed yet and one past
+  // its deadline (both offer 结束跟进), a closed 结束跟进, a hold that needs the owner, a turn that ended and waits, an
+  // accepted delegation that has not started.
+  ask("ask-stopping", "重建 node_modules 缓存", HELPER, "running", { ago: 900, ran: 600, attempts: 1, attempt: { n: 1, state: "running", turnId: "helper-t9", startedAt: iso(600), model: "deepseek-v4-flash", activity: { toolCalls: 4 }, stopRequested: true, stopDeadline: new Date(Date.now() + 7 * 60_000).toISOString() } as never }),
+  ask("ask-stopunconf", "跑一遍 Windows 打包", ALDEN, "running", { ago: 5200, ran: 4000, attempts: 3, attempt: { n: 3, state: "running", turnId: "alden-t3", startedAt: iso(4000), model: null, activity: { toolCalls: 22 }, stopRequested: true, stopDeadline: iso(1200), stopUnconfirmed: true } as never }),
+  ask("ask-followup", "核对 Rei 的 cron 日志", REI, "interrupted", { ago: 8600, attempt: ended(8500, 8000, { state: "interrupted", interruptReason: "stopped" }), closed: "stopped", closedAt: iso(7900), followUpEnded: true }),
+  ask("ask-needsaction", "用浏览器截 Waveline 的登录页", SORA, "queued", { ago: 2700, ...held({ reason: "runtimeUnsupported", missing: "browser" }) }),
+  ask("ask-yielded", "等 CI 跑完再合并 feat/board-window", MIKA, "running", { ago: 3100, attempts: 2, attempt: { n: 2, state: "yielded", turnId: "mika-t2", startedAt: iso(1900), endedAt: iso(1700), model: null, activity: { toolCalls: 6 }, stageNote: "CI 的 Windows 任务跑完后再看结果" } as never }),
+  ask("ask-admitted", "把 r289 的发布说明翻成英文", EVA, "admitted", { ago: 260 }),
   ...peerAsks(),
 ];
+/** The detail's 每次运行 table (`GET /v2/asks/{id}` attempts) where a row had more than one run. */
+const ATTEMPT_HISTORY: Record<string, NonNullable<AskDetail["attempts"]>> = {
+  "ask-stopunconf": [
+    { n: 1, state: "refused", startedAt: iso(5100), endedAt: iso(5100) },
+    { n: 2, state: "yielded", startedAt: iso(5000), endedAt: iso(4500), stageNote: "等签名证书" },
+    { n: 3, state: "running", startedAt: iso(4000), stopRequested: true, stopDeadline: iso(1200), stopUnconfirmed: true },
+  ] as never,
+};
 // `?projectview` (modules/project-view/mock.ts): the cutex-dev project's delegations (its Director and workers).
 if (typeof location !== "undefined" && new URLSearchParams(location.search).has("projectview")) {
   const agent = (id: string, name: string) => ({ requester: { kind: "agent" as const, cutexSessionId: id, cutex_session_id: id, name } });
@@ -203,7 +224,24 @@ if (typeof location !== "undefined" && new URLSearchParams(location.search).has(
     jobs: [{ jobId: job, source: "terminal", status: "running", exitCode: null, ok: null }],
   }));
 }
+// `?askcont`: r290 P14 yielded waits (continuationWait): the handler ended its turn and continues later. Execution stays
+// running; the ended attempt's time is not a run time. One per state / kind; Akari (idle, offline) shows the handler composer line.
+if (typeof location !== "undefined" && new URLSearchParams(location.search).has("askcont")) {
+  const at = (secondsAhead: number) => new Date(Date.now() + secondsAhead * 1000).toISOString();
+  const yielded = (n: number, endedAgo: number) => ({ n, state: "yielded", turnId: `t${n}`, startedAt: iso(endedAgo + 300), endedAt: iso(endedAgo), model: "deepseek-v4-flash", activity: { toolCalls: 9 } });
+  const cw = (state: string, kind: string, sinceAgo: number, wakeIn: number | null) => ({ state, kind, since: iso(sinceAgo), nextWakeAt: wakeIn === null ? null : at(wakeIn) });
+  asks.unshift(
+    ask("ask-cont-soon", "跑完 nightly 再复核结果", ["d-akari", "Akari"], "running", { ago: 3000, attempts: 3, attempt: yielded(3, 600), continuationWait: cw("waiting", "after", 600, 25 * 60) }),
+    ask("ask-cont-later", "等 remote 的 GPU 空出来再训练", MIKA, "running", { ago: 9000, attempts: 2, attempt: yielded(2, 1800), continuationWait: cw("waiting", "after", 1800, 3 * 3600 + 900) }),
+    ask("ask-cont-children", "汇总三个子委托的评测", SORA, "running", { ago: 5000, attempts: 1, attempt: yielded(1, 1200), continuationWait: cw("waiting", "children", 1200, null) }),
+    ask("ask-cont-jobs", "等编译作业结束再打包", ALDEN, "running", { ago: 4000, attempts: 2, attempt: yielded(2, 900), continuationWait: cw("waiting", "jobs", 900, null) }),
+    ask("ask-cont-ready", "继续整理迁移日志", REI, "running", { ago: 6000, attempts: 4, attempt: yielded(4, 60), continuationWait: cw("ready", "after", 1500, null) }),
+    ask("ask-cont-limited", "轮询上游 CI 直到变绿", ["kai", "Kai"], "running", { ago: 86000, attempts: 12, attempt: yielded(12, 3000), continuationWait: cw("limited", "after", 3000, null) }),
+  );
+}
 const byId = new Map(asks.map((a) => [a.askId, a]));
+/** r289 owner close receipts by actionId (askDispose replays). */
+const disposals = new Map<string, { askId: string; outcome: AskDisposeOutcome; result: AskDisposeResult }>();
 
 const ANSWERS: Record<string, string> = {
   "ask-done": "## 结果\n\n共 **3** 处调用 flush：\n\n1. `server.rs:3830` — 未校验 revision\n2. `user_input.rs:212` — 已校验\n3. queue 面板「立即发送」— 未校验\n\n建议在 `dispatch_queue_flush` 统一加 `expectedRevision`。",
@@ -490,7 +528,7 @@ function mockDelegationApi() {
         ...d,
         targetCutexSessionId: d.target,
         body: { text: BRIEFS[askId] ?? d.title, textArtifact: askId === "ask-run" ? "art-brief-run" : null },
-        attempts: d.attempt ? [{ ...d.attempt, attemptId: `${askId}#${d.attempt.n}` }] : [],
+        attempts: ATTEMPT_HISTORY[askId] && d.attempt ? [...ATTEMPT_HISTORY[askId]!.slice(0, -1), { ...d.attempt, attemptId: `${askId}#${d.attempt.n}` }] : d.attempt ? [{ ...d.attempt, attemptId: `${askId}#${d.attempt.n}` }] : [],
         answer: d.answerId ? { answerId: d.answerId, status: d.execution === "failed" ? "failed" : "completed", bytes: (ANSWERS[askId] ?? d.answerPreview ?? "").length * 3, metadata: OWNER_STEERED.has(askId) ? { ownerSteered: true } : null } : null,
         questions: askId === "ask-question" ? [{ questionId: "q-1", askId, attempt: 1, questions: [{ question: "队列面板要支持拖拽排序吗？cutex 目前还没有 reorder 接口。" }], route: "owner", routedToOwnerAt: iso(500), state: "open" }] : [],
       } as AskDetail);
@@ -508,6 +546,24 @@ function mockDelegationApi() {
       if (artifactId === LATE_ARTIFACT) return { artifact: { artifactId }, encoding: "utf8" as const, content: "## Workstation GPU 一周占用\n\n- 平均 **63%**\n- 峰值：周三 21:00–23:30（proj-r12 训练）\n- 空闲：周日全天\n\n（这是 workstation-lab 在本机已结束委托后才交回的结果。）" };
       if (artifactId !== "art-brief-run") return null;
       return { artifact: { artifactId }, encoding: "utf8" as const, content: `${BRIEFS["ask-run"]}\n\n## 背景\n\n两个 flush 并发时，如果没校验 revision，同一批消息会投递两次。完整的复现步骤见 docs/research/queue-flush.md。` };
+    },
+    // r289 `POST /v2/asks/{askId}/close`: no target session involved; the same actionId replays its first answer.
+    async askDispose(sessionId: string, askId: string, outcome: AskDisposeOutcome, actionId: string): Promise<AskDisposeResult> {
+      const replay = disposals.get(actionId);
+      if (replay) return replay.askId === askId && replay.outcome === outcome ? replay.result : { ok: false, error: { code: "idempotency_conflict", message: "this action id was used for another request" } };
+      const d = byId.get(askId);
+      let result: AskDisposeResult;
+      if (!d) result = { ok: false, error: { code: "ask_not_found", message: "no such delegation" } };
+      else if (d.closed) result = { ok: false, error: { code: "ask_closed", message: "this delegation is already closed" } };
+      else if (outcome === "followUpEnded") {
+        update(d.askId, { execution: "interrupted", hold: null, closed: "stopped", closedAt: new Date().toISOString(), followUpEnded: true, attempt: d.attempt ? { ...d.attempt, stopRequested: false } : d.attempt });
+        result = { ok: true, route: "ask", ask: byId.get(askId) };
+      } else {
+        const legacy = await this.askCommand(sessionId, outcome === "stop" ? "cutex/ask/stop" : "cutex/ask/close", { askId, ...(outcome === "stop" ? {} : { outcome }) });
+        result = legacy.ok ? { ok: true, route: "ask", ask: byId.get(askId) } : legacy;
+      }
+      disposals.set(actionId, { askId, outcome, result });
+      return result;
     },
     async askCommand(_sessionId: string, method: AskCommandMethod, params: { askId: string; outcome?: "accepted" | "abandoned" }): Promise<MutationResult> {
       const d = byId.get(params.askId);
@@ -603,7 +659,7 @@ function currentTurnOf(sessionId: string) {
 }
 
 export const mock: ModuleMock = {
-  features: { new: ["delegation-tree-stop-v1", "delegation-routing-v1", "project-run-control-v1", "delegation-continuation-v1", "agent-activity-v1", "agent-archive-kind-v1", ...(ROUTING_SCENE ? ["delegation-review-refs"] : [])] },
+  features: { new: ["owner-ask-disposition-v1", "ask-stop-settlement-v1", "stop-answer-admission-v1", "delegation-tree-stop-v1", "delegation-routing-v1", "project-run-control-v1", "delegation-continuation-v1", "agent-activity-v1", "agent-archive-kind-v1", ...(ROUTING_SCENE ? ["delegation-review-refs"] : [])] },
   api: (core) => {
     const base = { ...mockDelegationApi(), ...(!core.legacy ? createUpgradeMock("local") : {}) };
     return ROUTING_SCENE ? routingMockApi(base, asks, core) : base;

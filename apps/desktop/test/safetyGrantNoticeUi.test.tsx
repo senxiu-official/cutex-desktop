@@ -127,3 +127,26 @@ describe("safety-block card of a granted block", () => {
     expect(container.textContent).toContain("safetyBlock.state.expired");
   });
 });
+
+describe("granted but the agent was not told (noticeError)", () => {
+  it("the warning stays on the card after the grant, not only in a passing toast", async () => {
+    const { safetyCheckAct } = await import("../src/renderer/src/lib/ownerNotifyStore");
+    const open = block({ state: "blocked", decidedAt: null, expiresAt: null, noticeInputId: null, hardExpiresAt: null });
+    vi.mocked(safetyCheckAct).mockResolvedValueOnce({ ok: true, notification: note(block()), noticeError: { code: "agent_bus_unavailable", message: "approval notice delivery failed" } });
+    card(open);
+    const grant = container.querySelector<HTMLButtonElement>("[data-note-reply]")!;
+    await act(async () => grant.click());
+    expect(container.querySelector("[data-safety-warning]")?.textContent).toBe("safetyBlock.error.message(error=approval notice delivery failed)");
+    // The decided notice arrives: the warning is still there.
+    card(block());
+    expect(container.querySelector("[data-safety-warning]")).not.toBeNull();
+  });
+
+  it("no warning when the notice was queued", async () => {
+    const { safetyCheckAct } = await import("../src/renderer/src/lib/ownerNotifyStore");
+    vi.mocked(safetyCheckAct).mockResolvedValueOnce({ ok: true, notification: note(block()), noticeError: null });
+    card(block({ state: "blocked", decidedAt: null, expiresAt: null, noticeInputId: null, hardExpiresAt: null }));
+    await act(async () => container.querySelector<HTMLButtonElement>("[data-note-reply]")!.click());
+    expect(container.querySelector("[data-safety-warning]")).toBeNull();
+  });
+});

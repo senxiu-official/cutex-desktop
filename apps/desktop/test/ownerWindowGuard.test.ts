@@ -48,6 +48,7 @@ export const OWNER_WINDOW_ALLOW: Record<string, Allowed> = {
   "lib/ownerWaiting.ts": { reason: "whether the app (the main document) is visible decides if a waiting agent on screen counts as seen", uses: { docListener: 2 } },
   "modules/desk-pet/controller.ts": { reason: "keeps the counters on the main document's pagehide (the renderer's lifetime)", uses: { winListener: 2 } },
   "ownerAlert/main.ts": { reason: "the owner-alert window's own entry point (its own document, not drawn by this renderer)", uses: { query: 1 } },
+  "board/main.tsx": { reason: "the 项目看板 window's own entry point (its own document, not drawn by this renderer)", uses: { query: 1 } },
   "components/DeskWindows.tsx": { reason: "the P0 desk probe measures the main window's frame clock next to the desk's, on purpose", uses: { raf: 1 } },
   "lib/deskSync.ts": { reason: "the main document's pagehide takes its desks with it (main closes them; they stay remembered)", uses: { winListener: 2 } },
   "lib/paneDb.ts": { reason: "flushes the layout journal when the main document hides / unloads (the renderer's lifetime)", uses: { docListener: 2, winListener: 2 } },

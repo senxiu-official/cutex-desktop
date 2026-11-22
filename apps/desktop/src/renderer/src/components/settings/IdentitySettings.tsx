@@ -18,6 +18,7 @@ import { useTargetFeatures, useTargetHostId } from "../../lib/targetHost";
 import { useUserAvatar } from "../../lib/userAvatars";
 import { useHostScope } from "../../lib/useHostScope";
 import { Avatar } from "../Avatar";
+import { useSettingsCard } from "../../lib/settingsDrafts";
 import { Button, ErrorNote, Section, SettingRow, TextInput } from "./Form";
 import { PersonIdentityRows } from "./PersonIdentityRows";
 import { ProfilePictureCrop } from "./ProfilePictureCrop";
@@ -42,7 +43,12 @@ export function IdentitySection() {
   const adopted = useAdoptedIdentity(hostId);
   const hostPicture = useUserAvatar(adopted.picture?.hostId, prefs.picture ? null : adopted.picture?.userId, adopted.picture?.etag);
   const shown = identityName(access, draft, osName, selfProfile, adopted.name) || t("identity.you");
-  const commit = () => draft.trim() !== prefs.name && setIdentityPrefs({ name: draft.trim() });
+  // The name saves on Enter / blur (on this device, at once): a Settings card of its own (lib/settingsDrafts).
+  const nameCard = useSettingsCard();
+  const commit = () => {
+    if (draft.trim() !== prefs.name) setIdentityPrefs({ name: draft.trim() });
+    nameCard.saved();
+  };
   // One summary line of what others see (lib/identityPublish syncSummary), not a 「未设置」 per host.
   const statuses = useIdentitySyncStatus();
   const allAccess = useNonOwnerHosts();
@@ -63,6 +69,7 @@ export function IdentitySection() {
       </div>
       <SettingRow agents="none" source="local" label={t("identity.name")} hint={t("identity.nameHint")}>
         <TextInput
+          inputRef={nameCard.ref}
           value={draft}
           placeholder={t("identity.namePlaceholder")}
           maxLength={IDENTITY_NAME_MAX}

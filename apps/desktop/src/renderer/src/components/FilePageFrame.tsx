@@ -3,7 +3,8 @@
 // (docs/desktop-modules.md §10.2) — `sandbox="allow-scripts"` only (opaque origin: no same-origin, popups,
 // forms or top navigation), the document's strict CSP, no network (loopback included), no preload / Node.
 // Unlike an artifact page it has NO channels: no storage, no submit, no copy — no broker is attached.
-// Inline-only: files next to it never load (main counts the references, the view says so). A page that
+// Its own files (images, style sheets, scripts in its folder) are read by main and written in; the frame itself never
+// loads anything. What it still cannot load (web addresses, files outside its folder) is counted; the view says so. A page that
 // navigates itself is stopped; the caller offers a fresh mount. No strings here: the caller passes them.
 import { useEffect, useRef } from "react";
 import { applyOpaqueFrame, onFrameNavigatedAway } from "@cutex-desktop/opaque-frame";
@@ -27,7 +28,8 @@ export interface FilePageFrameProps {
   mount?: number;
   /** `maxBytes` (too-large): the largest page this file can be shown as on its host. */
   onProblem?(problem: FilePageProblem, totalBytes?: number, modifiedAt?: string, maxBytes?: number): void;
-  onReady?(externalRefs: number): void;
+  /** `externalRefs`: what it still cannot load; `localFiles`: its own files main wrote in (main/filePageAssets). */
+  onReady?(externalRefs: number, localFiles: number): void;
   onNavigated?(): void;
 }
 
@@ -72,7 +74,7 @@ export function FilePageFrame({ hostId, path, scope, title, large = false, mount
         if (!result.ok) return cb.current.onProblem?.(result.reason, result.totalBytes, result.modifiedAt, result.maxBytes);
         frame.src = result.frame.url;
         container.append(frame);
-        cb.current.onReady?.(result.externalRefs);
+        cb.current.onReady?.(result.externalRefs, result.localFiles ?? 0);
       },
       () => live && cb.current.onProblem?.("failed"),
     );

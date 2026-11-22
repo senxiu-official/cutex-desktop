@@ -47,6 +47,8 @@ import type {
   NotificationStates,
   TurnStopResult,
   SessionBootstrap,
+  BusMessagesDirection,
+  BusMessagesPage,
   SessionHistory,
   SessionLifecycle,
   SessionList,
@@ -62,6 +64,7 @@ import type { ClientTokenList, ClientTokenRenamed, HostSummary, PairingCode, Pai
 import { approveBody, denyBody, pairingInviteBody, pairingInvitePaths, readCreatedPairingInvite, readPairingInvite, readPairingInvites, type CreatedPairingInvite, type PairingInvite, type PairingInviteCreate } from "./pairingInvites";
 import { readRelayPairingStatus, RELAY_PAIRING_PATH, relayPairingBody, type RelayPairingStatus } from "./relayPairing";
 import { CutexApiError, CutexUnreachableError } from "./errors";
+import { isAttachmentId, readSessionServerRequests, SESSION_ATTACHMENT_MAX_BYTES, type SessionServerRequests } from "./sessionReads";
 import { errorOf, fetchWithRetry, type HttpRetryOptions } from "./retry";
 import { admittedResponse, finiteRead, ReadLoad, subscriptionRead } from "./readLoad";
 import { CLIENT_INSTANCE_ID, clientPresenceBody, closeGraceSeconds, readClientPresenceReply, readClientState, readOnlineClients, type ClientClosingOutcome, type ClientPresence, type ClientPresenceReply, type ClientState, type OnlineClient } from "./clients";
@@ -120,6 +123,9 @@ export type AttachmentBody = Uint8Array<ArrayBuffer> | ArrayBuffer | Blob;
 // Ids that may hold dots never consist of dots only: `.` / `..` as a path segment would be normalised
 // away by the URL parser and send the request to another route.
 const ASK_ID = /^(?!\.+$)[A-Za-z0-9._:-]{1,120}$/;
+/** Owner disposition action ids (idempotency keys) and stored owner-notification / safety-block ids. */
+const OWNER_ACTION_ID = /^[A-Za-z0-9._:-]{1,160}$/;
+const OWNER_RECORD_ID = /^(?!\.+$)[A-Za-z0-9._:-]{1,200}$/;
 const APPROVAL_ID = /^apr-[A-Za-z0-9-]{1,60}$/;
 const TOKEN_ID = /^(?!\.+$)[A-Za-z0-9._:-]{1,128}$/;
 const RUN_ID = /^rpu-[A-Za-z0-9-]{1,80}$/;
@@ -230,6 +236,41 @@ function mediaBytesExpected(expected: MediaBytesExpected | undefined): MediaByte
   if (!expected || typeof expected !== "object" || Array.isArray(expected) || Object.keys(expected).some(key => key !== "mime" && key !== "size") || !historyMediaMime(expected.mime) || !Number.isSafeInteger(expected.size) || expected.size < 0 || expected.size > HISTORY_MEDIA_DESCRIPTOR_MAX_BYTES) throw new Error("bad expected media descriptor");
   return { mime: expected.mime.toLowerCase(), size: expected.size };
 }
+
+/** A response body of at most `maxBytes` (null when it is longer: reading stops there and the body is cancelled). */
+export async function readCapped(response: Response, maxBytes: number): Promise<Uint8Array | null> {
+  if (!response.body) {
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    return bytes.length > maxBytes ? null : bytes;
+  }
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > maxBytes) {
+        await reader.cancel().catch(() => undefined);
+        return null;
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const out = new Uint8Array(size);
+  let at = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, at);
+    at += chunk.byteLength;
+  }
+  return out;
+}
+
+/** `history-turn-read` answer: the history shape plus whether the preview holds the whole turn. */
+export type HistoryTurnRead = SessionHistory & { complete?: boolean };
 
 /** A response too large to hold as one string (V8 ~512 M characters; design 025). */
 export class ResponseTooLargeError extends Error {
@@ -449,13 +490,31 @@ export class CutexClient {
    * `compact-history`): large item fields (command / tool output, diffs) cut to 2 KB with
    * `truncated: true` on the item; `?compact=1` is only sent when true.
    */
-  bootstrap(id: string, opts: { turnLimit?: number; compact?: boolean; mediaRefs?: boolean; signal?: AbortSignal } = {}): Promise<SessionBootstrap> {
+  bootstrap(id: string, opts: { turnLimit?: number; compact?: boolean; mediaRefs?: boolean; boundedBus?: boolean; signal?: AbortSignal } = {}): Promise<SessionBootstrap> {
     const query: Record<string, string> = {};
     if (opts.turnLimit) query.turnLimit = String(opts.turnLimit);
     if (opts.compact) query.compact = "1";
     // history-media-refs (design 025): media over 64 KiB as cutex-media: references (historyMedia).
     if (opts.mediaRefs) query.media = "ref";
+    // bootstrap-bounded-bus: unresolved messages + the finished ones of the returned turns (busMessages pages the rest).
+    // Send it only to a host with the capability; a bootstrap without `busMessagesPage` is a full one.
+    if (opts.boundedBus) query.bus = "bounded";
     return this.request("GET", `/v2/sessions/${encodeURIComponent(id)}/bootstrap`, { query, ...(opts.signal ? { signal: opts.signal } : {}) });
+  }
+
+  /**
+   * bootstrap-bounded-bus: one page of an agent's received or sent bus messages, newest slice first
+   * (rows oldest first); `cursor` continues from the previous page's `nextCursor` (bound to the same filters).
+   * `turnIds` / `itemIds` (≤ 200 each): only rows linked to those turns (received contextTurnId, sent
+   * senderTurnId) or whose messageId is one of those item ids. Merge by messageId.
+   */
+  busMessages(id: string, opts: { direction: BusMessagesDirection; cursor?: string | null; limit?: number; turnIds?: readonly string[]; itemIds?: readonly string[] }): Promise<BusMessagesPage> {
+    const query: Record<string, string> = { direction: opts.direction };
+    if (opts.limit) query.limit = String(opts.limit);
+    if (opts.cursor) query.cursor = opts.cursor;
+    if (opts.turnIds?.length) query.turnIds = opts.turnIds.join(",");
+    if (opts.itemIds?.length) query.itemIds = opts.itemIds.join(",");
+    return this.request("GET", `/v2/sessions/${encodeURIComponent(id)}/bus-messages`, { query });
   }
 
   events(query: EventQuery = {}, options: ReadOptions = {}): Promise<EventPage> {
@@ -555,6 +614,8 @@ export class CutexClient {
       onHttpTrace?: SubmitHttpTraceObserver;
       /** Caller has checked owner-admission-held-v1 (or ownerAdmissionHeldV1). */
       allowHeld?: boolean;
+      /** interrupt-send-many-v1 (strategy "interrupt" only): the unread owner inputs that go along before this one. */
+      interruptSend?: UserInputSubmitParams["interruptSend"];
     } = {},
   ): Promise<UserInputSubmitResult> {
     const params: UserInputSubmitParams = {
@@ -569,6 +630,7 @@ export class CutexClient {
     if (extra.startIfOffline) params.startIfOffline = true;
     if (extra.joinDelegation) params.joinDelegation = extra.joinDelegation;
     if (extra.allowHeld) params.allowHeld = true;
+    if (extra.interruptSend && strategy === "interrupt") params.interruptSend = extra.interruptSend;
     // The same requestId on every attempt (the idempotency key); clientUserMessageId is fixed in params.
     const requestId = randomUUID();
     return this.retryWhenFull(async (attempt) => {
@@ -601,6 +663,19 @@ export class CutexClient {
     if (page.compact) q.set("compact", "1");
     if (page.mediaRefs) q.set("media", "ref");
     return this.request("GET", `/v2/sessions/${encodeURIComponent(sessionId)}/history?${q}`);
+  }
+
+  /**
+   * cutex `history-turn-read`: one turn by id (`GET /v2/sessions/{id}/history/turns/{turnId}`), the
+   * `/history` answer shape with that single turn; `compact` / `mediaRefs` as for history. The route is a
+   * bounded preview (512 KiB of detail): `complete: false`, and cut items / turns say `truncated`.
+   */
+  historyTurn(sessionId: string, turnId: string, opts: { compact?: boolean; mediaRefs?: boolean } = {}): Promise<HistoryTurnRead> {
+    const q = new URLSearchParams();
+    if (opts.compact) q.set("compact", "1");
+    if (opts.mediaRefs) q.set("media", "ref");
+    const query = q.toString();
+    return this.request("GET", `/v2/sessions/${encodeURIComponent(sessionId)}/history/turns/${encodeURIComponent(turnId)}${query ? `?${query}` : ""}`);
   }
 
   queueList(sessionId: string): Promise<QueueListResult> {
@@ -1264,6 +1339,51 @@ export class CutexClient {
     return this.request<T>("POST", "/v2/agent-bus/stuck-messages/discard", { body });
   }
 
+  // ---------- owner dispositions (cutex r289: owner-ask-disposition-v1, owner-notify-direct-v1,
+  // agent-bus-owner-end-followup-v1, Job Service humanOperations closeFollowUp). Root only; these routes name the stored
+  // record and never resolve the target agent's session, so they work for archived or deleted agents. Never retried.
+
+  /** `POST /v2/asks/{askId}/close {outcome, actionId}` → `{ask, receipt, stopping?}`; reusing an actionId with another
+   *  body is 409 idempotency_conflict, the same body replays the first result. */
+  async closeAskAsOwner<T = JsonObject>(askId: string, request: { outcome: "stop" | "abandoned" | "accepted" | "followUpEnded"; actionId: string }): Promise<T> {
+    if (!ASK_ID.test(askId)) throw new Error("bad ask id");
+    if (!["stop", "abandoned", "accepted", "followUpEnded"].includes(request.outcome)) throw new Error("bad outcome");
+    if (!OWNER_ACTION_ID.test(request.actionId)) throw new Error("bad action id");
+    return this.request<T>("POST", `/v2/asks/${encodeURIComponent(askId)}/close`, { body: { outcome: request.outcome, actionId: request.actionId }, retryable: false });
+  }
+
+  /** `POST /v2/owner-notifications/{id}/{ack|dismiss|delete|safety-dismiss}` (empty body). */
+  async ownerNotificationAction<T = JsonObject>(notificationId: string, action: "ack" | "dismiss" | "delete" | "safety-dismiss"): Promise<T> {
+    if (!OWNER_RECORD_ID.test(notificationId)) throw new Error("bad notification id");
+    if (!["ack", "dismiss", "delete", "safety-dismiss"].includes(action)) throw new Error("bad notification action");
+    return this.request<T>("POST", `/v2/owner-notifications/${encodeURIComponent(notificationId)}/${action}`, { body: {}, retryable: false });
+  }
+
+  /** `POST /v2/agent-bus/stuck-messages/end-follow-up`: the owner ends follow-up without evidence (outcome unconfirmed);
+   *  no collector, no native request, no session lookup. */
+  async endBusMessageFollowUp<T = JsonObject>(request: { messageId: string; actionId: string; reason: string; expectedSemanticSha256?: string }): Promise<T> {
+    if (typeof request.messageId !== "string" || !request.messageId || request.messageId.length > 512) throw new Error("bad message id");
+    if (!OWNER_ACTION_ID.test(request.actionId)) throw new Error("bad action id");
+    const reason = typeof request.reason === "string" ? request.reason.trim() : "";
+    if (!reason) throw new Error("bad reason");
+    const body: Record<string, unknown> = { messageId: request.messageId, actionId: request.actionId, reason: reason.slice(0, 300) };
+    if (request.expectedSemanticSha256 !== undefined) {
+      if (!/^[0-9a-fA-F]{64}$/.test(request.expectedSemanticSha256)) throw new Error("bad semantic digest");
+      body.expectedSemanticSha256 = request.expectedSemanticSha256;
+    }
+    return this.request<T>("POST", "/v2/agent-bus/stuck-messages/end-follow-up", { body, retryable: false });
+  }
+
+  /** `POST /v2/job-service/close-follow-up {jobId, expectedRevision, reason}` → the raw JobRecord (terminal
+   *  `unconfirmed`, terminalReason `followUpEnded`); no process is signalled. */
+  async closeJobFollowUp<T = JsonObject>(request: { jobId: string; expectedRevision: number; reason: string }): Promise<T> {
+    if (typeof request.jobId !== "string" || !/^[A-Za-z0-9._:-]{1,160}$/.test(request.jobId)) throw new Error("bad job id");
+    if (!Number.isSafeInteger(request.expectedRevision) || request.expectedRevision < 0) throw new Error("bad revision");
+    const reason = typeof request.reason === "string" ? request.reason.trim() : "";
+    if (!reason) throw new Error("bad reason");
+    return this.request<T>("POST", "/v2/job-service/close-follow-up", { body: { jobId: request.jobId, expectedRevision: request.expectedRevision, reason: reason.slice(0, 300) }, retryable: false });
+  }
+
   /** agent-bus-message-settlement-v1. Read an uncertain write before an explicit same-key retry. */
   async busMessageEvidence(request: { messageId: string }): Promise<MessageSettlementEvidenceResponse> {
     const body = messageSettlementEvidenceBody(request);
@@ -1291,8 +1411,8 @@ export class CutexClient {
     }
   }
 
-  runtimePrunePlan(): Promise<RuntimePrunePlan> {
-    return this.request("GET", "/v2/runtimes/prune");
+  runtimePrunePlan(options: { signal?: AbortSignal } = {}): Promise<RuntimePrunePlan> {
+    return this.request("GET", "/v2/runtimes/prune", options.signal ? { signal: options.signal } : {});
   }
 
   pruneRuntimes(ids: string[]): Promise<RuntimePruneResult> {
@@ -1716,6 +1836,26 @@ export class CutexClient {
     return this.fetchHistoryMediaBytes(path, sha256, mediaBytesExpected(options.expected), HISTORY_MEDIA_MAX_BYTES, false);
   }
 
+  /**
+   * `GET /v2/sessions/{id}/server-requests` (r290 P4, capability session-server-requests-read): the live runtime's pending
+   * native requests only — no history, no bootstrap. A session read grant is enough.
+   */
+  async serverRequests(sessionId: string, signal?: AbortSignal): Promise<SessionServerRequests> {
+    if (typeof sessionId !== "string" || !SESSION_ID.test(sessionId)) throw new Error("bad session id");
+    return readSessionServerRequests(await this.request<unknown>("GET", `/v2/sessions/${encodeURIComponent(sessionId)}/server-requests`, signal ? { signal } : {}));
+  }
+
+  /**
+   * An uploaded image's bytes (r290 P4, capability session-attachment-read): `GET /v2/sessions/{id}/attachments/{attachmentId}`,
+   * the id being the SHA-256 of the bytes (checked). Null when the host no longer has it for this session.
+   */
+  async sessionAttachment(sessionId: string, attachmentId: string, expected?: MediaBytesExpected): Promise<HistoryMediaBytes | null> {
+    if (typeof sessionId !== "string" || !SESSION_ID.test(sessionId)) throw new Error("bad session id");
+    if (!isAttachmentId(attachmentId)) throw new Error("bad attachment id");
+    const path = `/v2/sessions/${encodeURIComponent(sessionId)}/attachments/${attachmentId}`;
+    return this.fetchHistoryMediaBytes(path, attachmentId, mediaBytesExpected(expected), SESSION_ATTACHMENT_MAX_BYTES, true);
+  }
+
   /** A granted event blob on the visible-session route; never falls back to owner-only history media. */
   async eventBlob(sessionId: string, sha256: string, expected?: MediaBytesExpected): Promise<HistoryMediaBytes | null> {
     if (typeof sessionId !== "string" || !SESSION_ID.test(sessionId)) throw new Error("bad media session id");
@@ -1823,8 +1963,15 @@ export class CutexClient {
       await response.body?.cancel();
       return null;
     }
-    const bytes = new Uint8Array(await response.arrayBuffer());
-    if (bytes.length === 0 || bytes.length > maxBytes) return null;
+    // The cap holds before the download, not after it (Waveline audit): a stated Content-Length over it is
+    // refused unread, and the body is read only up to maxBytes (a host that states no length, or a wrong one).
+    const rawLength = response.headers.get("content-length");
+    if (rawLength !== null && /^[0-9]+$/.test(rawLength.trim()) && Number(rawLength.trim()) > maxBytes) {
+      await response.body?.cancel().catch(() => undefined);
+      return null;
+    }
+    const bytes = await readCapped(response, maxBytes);
+    if (!bytes || bytes.length === 0) return null;
     let binary = "";
     for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
     const etag = response.headers.get("etag")?.replace(/^W\//, "").replace(/"/g, "") ?? null;

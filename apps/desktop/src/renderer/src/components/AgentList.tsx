@@ -22,7 +22,7 @@ import {
   selectionState,
   selectRange,
   START_CONCURRENCY,
-  START_CONFIRM_OVER,
+  bulkConfirmLevel,
   tabActions,
   tabRows,
   type AgentListAction,
@@ -44,6 +44,8 @@ import { beginOperation, trackedOperationItem } from "../lib/backgroundOperation
 import { isHostBusyActionPending } from "../lib/hostBusyActions";
 import { useTargetHostId, useTargetIsFocus, useTargetSelect } from "../lib/targetHost";
 import { Avatar } from "./Avatar";
+import { ArmedButton } from "./ArmedButton";
+import { openBatchModel } from "../lib/batchModel";
 import { RunningTime, StatusAvatar, StatusPill } from "./AgentStatus";
 import { formatAutoRetryWait } from "../lib/modelOverloadRetry";
 import { useModelOverloadRetry } from "../lib/modelOverloadRetryView";
@@ -263,7 +265,7 @@ function Row({
         }
       }}
       onContextMenu={contextMenu(menu)}
-      className={`group ${GRID} cursor-default border-b border-border/60 px-4 py-2 outline-none last:border-b-0 focus-visible:bg-surface-2 ${checked ? "bg-accent/10" : "hover:bg-surface-2/60"}`}
+      className={`press group ${GRID} cursor-default border-b border-border/60 px-4 py-2 outline-none last:border-b-0 focus-visible:bg-surface-2 ${checked ? "bg-accent/10" : "hover:bg-surface-2/60"}`}
     >
       <Checkbox state={checked ? "all" : "none"} disabled={!selectable} onClick={onToggle} />
       {online ? (
@@ -314,7 +316,7 @@ function Row({
               e.stopPropagation();
               openMenuFrom(e.currentTarget, menu());
             }}
-            className="rounded p-0.5 text-subtle opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 hover:bg-surface hover:text-foreground"
+            className="press-icon reveal-focus rounded p-0.5 text-subtle opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 group-focus-within:opacity-100 hover:bg-surface hover:text-foreground"
           >
             <MoreHorizontal size={14} />
           </button>
@@ -331,7 +333,7 @@ function Pill<T extends string>({ value, options, onChange }: { value: T; option
         <button
           key={o.value}
           onClick={() => onChange(o.value)}
-          className={`rounded-md px-2.5 py-0.5 text-xs whitespace-nowrap ${value === o.value ? "bg-background text-foreground shadow-sm" : "text-muted hover:text-foreground"}`}
+          className={`press rounded-md px-2.5 py-0.5 text-xs whitespace-nowrap ${value === o.value ? "bg-background text-foreground shadow-sm" : "text-muted hover:text-foreground"}`}
         >
           {o.label}
         </button>
@@ -440,27 +442,36 @@ export function AgentList({
     onOpened?.();
   };
 
-  const bulk = async (action: Action) => {
+  /** What `action` would touch now: its ids, how many run a turn, the agents owning services, and how it confirms. */
+  const assess = (action: Action) => {
     const ids = action === "detach" ? detachable(chosen, members?.directorId ?? null) : chosen;
-    if (ids.length === 0 || busy) return;
-    const starts = action === "start" || action === "restoreStart";
-    if (starts && ids.length > START_CONFIRM_OVER && !(await confirmDialog(t("agents.startConfirm", { count: ids.length })))) return;
     const byId = new Map(rows.map((r) => [r.id, r]));
     const busyCount = ids.filter((id) => !!(live.get(id) ?? byId.get(id))?.session.runtime.activeTurnId).length;
+    // The agent menu's warning for agents that own services, one paragraph per such agent.
+    const owners = action !== "archive" ? [] : ids.flatMap((id) => {
+      const note = ownedServicesNote(id, t, hostId);
+      return note ? [`${byId.get(id)?.name ?? id}：${note}`] : [];
+    });
+    return { ids, byId, busyCount, owners, level: bulkConfirmLevel(action, { count: ids.length, busy: busyCount, owners: owners.length }) };
+  };
+
+  /** The dialog of `action` (busy agents, owned services, or a state that changed since the button armed). */
+  const confirmBulk = (action: Action, { ids, busyCount, owners }: ReturnType<typeof assess>): Promise<boolean> => {
     const busyNote = busyCount > 0 ? t("agents.busyNote", { count: busyCount }) : "";
-    if (action === "stop" && !(await confirmDialog([t("agents.stopConfirm", { count: ids.length }), busyNote].filter(Boolean).join("\n\n"), busyCount > 0))) return;
-    if (action === "detach") {
-      const skipped = ids.length < chosen.length ? t("agents.detachSkipsDirector") : "";
-      if (!(await confirmDialog([t("agents.detachConfirm", { count: ids.length }), skipped].filter(Boolean).join("\n\n"), true))) return;
-    }
-    if (action === "archive") {
-      // The agent menu's warning for agents that own services, one paragraph per such agent.
-      const owners = ids.flatMap((id) => {
-        const note = ownedServicesNote(id, t, hostId);
-        return note ? [`${byId.get(id)?.name ?? id}：${note}`] : [];
-      });
-      if (!(await confirmDialog([t("agents.archiveConfirm", { count: ids.length }), busyNote, ...owners].filter(Boolean).join("\n\n"), true))) return;
-    }
+    const join = (parts: string[]) => parts.filter(Boolean).join("\n\n");
+    if (action === "start" || action === "restoreStart") return confirmDialog(t("agents.startConfirm", { count: ids.length }));
+    if (action === "stop") return confirmDialog(join([t("agents.stopConfirm", { count: ids.length }), busyNote]), busyCount > 0);
+    if (action === "detach") return confirmDialog(join([t("agents.detachConfirm", { count: ids.length }), ids.length < chosen.length ? t("agents.detachSkipsDirector") : ""]), true);
+    return confirmDialog(join([t("agents.archiveConfirm", { count: ids.length }), busyNote, ...owners]), true);
+  };
+
+  /** `armed`: the armed button's second click. The selection is read again here; a change that needs more asks. */
+  const bulk = async (action: Action, armed = false) => {
+    const now = assess(action);
+    const { ids, byId, level } = now;
+    if (ids.length === 0 || busy) return;
+    const starts = action === "start" || action === "restoreStart";
+    if ((level === "dialog" || (level === "armed" && !armed)) && !(await confirmBulk(action, now))) return;
     setProgress((prev) => {
       const next = { ...prev };
       for (const id of ids) {
@@ -486,6 +497,27 @@ export function AgentList({
         update(id, isHostBusyActionPending(e) ? { phase: "hostBusy", error: undefined } : { phase: "failed", error: errorText(e) });
       }
     });
+  };
+
+  /**
+   * A toolbar button by its confirm level for the current selection: armed (click twice, the hint says what the
+   * second click does) or plain (runs, or opens its dialog). bulk() checks again at the click.
+   */
+  const bulkButton = (action: Action, face: string, label: string, disabled: boolean) => {
+    const now = assess(action);
+    if (now.level !== "armed" || disabled) {
+      return <button disabled={disabled} onClick={() => void bulk(action)} className={`${BUTTON} ${face}`}>{label}</button>;
+    }
+    const count = now.ids.length;
+    const hint = action === "stop" ? t("agents.stopArmed", { count })
+      : action === "archive" ? t("agents.archiveArmed", { count })
+      : action === "detach" ? [t("agents.detachArmed", { count }), count < chosen.length ? t("agents.detachSkipsDirector") : ""].filter(Boolean).join(" ")
+      : t("agents.startArmed", { count });
+    return (
+      <ArmedButton shape={BUTTON} idle={face} hint={hint} resetKey={`${tab}:${now.ids.join(",")}`} testId={`agent-list-${action}`} onConfirm={() => void bulk(action, true)}>
+        {label}
+      </ArmedButton>
+    );
   };
 
   const move = (el: HTMLElement, delta: 1 | -1) => {
@@ -588,17 +620,16 @@ export function AgentList({
             .filter(Boolean)
             .join(" · ")}
         </span>
-        {members && tab !== "archived" && (
-          <button disabled={detachCount === 0 || busy} onClick={() => void bulk("detach")} className={`${BUTTON} text-muted hover:bg-surface-2 hover:text-danger`}>
-            {t("agents.detach", { count: detachCount })}
+        {tab !== "archived" && (
+          <button disabled={chosen.length === 0 || busy} data-testid="agent-list-batch-model" title={t("batchModel.selectionHint")}
+            onClick={() => openBatchModel({ hostId, ids: chosen, label: t("batchModel.scope.selected", { n: chosen.length }) })}
+            className={`${BUTTON} text-muted hover:bg-surface-2 hover:text-foreground`}>
+            {t("batchModel.selectionButton", { count: chosen.length })}
           </button>
         )}
-        <button disabled={chosen.length === 0 || busy} onClick={() => void bulk(secondary)} className={`${BUTTON} text-muted hover:bg-surface-2 hover:text-foreground`}>
-          {t(ACTION_LABEL[secondary], { count: chosen.length })}
-        </button>
-        <button disabled={chosen.length === 0 || busy} onClick={() => void bulk(primary)} className={`${BUTTON} bg-accent font-medium text-white hover:bg-accent/90`}>
-          {t(ACTION_LABEL[primary], { count: chosen.length })}
-        </button>
+        {members && tab !== "archived" && bulkButton("detach", "text-muted hover:bg-surface-2 hover:text-danger", t("agents.detach", { count: detachCount }), detachCount === 0 || busy)}
+        {bulkButton(secondary, "text-muted hover:bg-surface-2 hover:text-foreground", t(ACTION_LABEL[secondary], { count: chosen.length }), chosen.length === 0 || busy)}
+        {bulkButton(primary, "bg-accent font-medium text-white hover:bg-accent/90", t(ACTION_LABEL[primary], { count: chosen.length }), chosen.length === 0 || busy)}
       </div>
     </div>
     </AttentionContext.Provider>

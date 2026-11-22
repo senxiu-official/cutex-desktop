@@ -51,6 +51,7 @@ export function FontCombo({ value, fonts, defaultLabel, installed, describe, onC
         aria-expanded={open}
         aria-controls={listId}
         aria-autocomplete="list"
+        data-settings-filter=""
         spellCheck={false}
         value={query ?? shown}
         title={shown}

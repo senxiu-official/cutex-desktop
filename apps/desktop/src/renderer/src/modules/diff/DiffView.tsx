@@ -2,10 +2,12 @@
 // one turn's changes to a file (text from the timeline, memory only), or a caller's unified diff (`text`, v1.7).
 import { LocateFixed } from "lucide-react";
 import { revealHostInTree, revealInTree } from "../../lib/sideOpen";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { ReadIssueLine } from "../../components/ReadIssueLine";
+import { readIssue, retryDelay, type ReadIssue } from "../../lib/transientError";
 import { UnifiedDiff } from "../../components/UnifiedDiff";
 import { useI18n } from "../../i18n";
-import { useSelectedWorkspace, workspaceError } from "../../lib/workspaceView";
+import { useSelectedWorkspace } from "../../lib/workspaceView";
 import { selectedFeatures, useApp } from "../../store";
 import type { SideBodyProps } from "../slots";
 import { diffKey, diffLabel, turnTexts, type DiffState } from "./diffState";
@@ -24,28 +26,44 @@ function GitDiff({ path, staged, visible }: { path: string; staged?: boolean; vi
   const selectedStage = staged ?? git?.files.find((f) => f.path === path)?.staged;
   const hasFs = useApp((s) => selectedFeatures(s).has("workspace-fs"));
   const [diff, setDiff] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  // A failed read: transient ones read again by themselves (1, 2, 5, 10, 30 s); 重新加载 bumps `attempt`.
+  const [issue, setIssue] = useState<ReadIssue | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  const failures = useRef(0);
   useEffect(() => {
+    failures.current = 0;
     setDiff(null);
-    setError(null);
+    setIssue(null);
+  }, [api, scope, hasFs, path, selectedStage]);
+  useEffect(() => {
     if (!scope || !hasFs) return;
     let live = true;
+    let retry: ReturnType<typeof setTimeout> | undefined;
     api.gitDiff(scope, path, selectedStage).then(
-      (d) => live && setDiff(d.diff),
+      (d) => {
+        if (!live) return;
+        failures.current = 0;
+        setIssue(null);
+        setDiff(d.diff);
+      },
       (e: unknown) => {
         if (!live) return;
-        setError(workspaceError(e));
-        setDiff("");
+        const next = readIssue(e);
+        setIssue(next);
+        if (next.retrying) retry = setTimeout(() => live && setAttempt((n) => n + 1), retryDelay(failures.current++));
       },
     );
     return () => {
       live = false;
+      clearTimeout(retry);
     };
-  }, [api, scope, hasFs, path, selectedStage, revision]);
+  }, [api, scope, hasFs, path, selectedStage, revision, attempt]);
   if (!hasFs) return <p className="p-3 text-xs text-subtle">{t("diff.noWorkspaceFs")}</p>;
   if (!scope) return <p className="p-3 text-xs text-subtle">{t("diff.noScope")}</p>;
-  if (error) return <p className="p-3 text-xs text-danger">{error}</p>;
-  if (diff === null) return <p className="p-3 text-xs text-subtle">…</p>;
+  const issueLine = issue && <ReadIssueLine className="px-1 py-2" issue={issue} retryingText={t("diff.retrying")} failedText={t("diff.failed")} onReload={() => { failures.current = 0; setAttempt((n) => n + 1); }} />;
+  // The last diff stays under the line while it retries.
+  if (diff === null) return issueLine || <p className="p-3 text-xs text-subtle">…</p>;
+  if (issueLine) return <>{issueLine}{diff ? <UnifiedDiff text={diff} className="py-2" /> : null}</>;
   return diff ? <UnifiedDiff text={diff} className="py-2" /> : <p className="p-2 text-subtle">{t("diff.noDiff")}</p>;
 }
 

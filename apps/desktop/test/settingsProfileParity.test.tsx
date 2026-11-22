@@ -4,10 +4,12 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { CatalogModel, ProfileDetail, ProfileModelsView, QuotaConfigView } from "../src/shared/ipc";
 import { en, zhCN } from "../src/renderer/src/lib/settingsProfileParityMessages";
+import { en as modelContextEn } from "../src/renderer/src/lib/modelContextMessages";
+import { en as effortLabelEn } from "../src/renderer/src/lib/effortLabelMessages";
 
 const env = vi.hoisted(() => ({ features: new Set<string>(), loadQuota: vi.fn(), api: {}, quotas: {} }));
 vi.mock("../src/renderer/src/i18n", () => ({ useI18n: () => ({ locale: "en", t: (key: string, vars?: Record<string, string | number>) => {
-  let text = (en as Record<string, string>)[key] ?? key;
+  let text = (en as Record<string, string>)[key] ?? (modelContextEn as Record<string, string>)[key] ?? (effortLabelEn as Record<string, string>)[key] ?? key;
   for (const [name, value] of Object.entries(vars ?? {})) text = text.replaceAll(`{${name}}`, String(value));
   return text;
 } }) }));
@@ -56,16 +58,18 @@ it("does not invent supported effort levels when model metadata omits them", () 
   const set = vi.fn();
   act(() => root.render(h(ProfileModelFields, { detail, models: { ...view, models: [{ ...model, supportedReasoningEfforts: [], defaultReasoningEffort: null }] }, cfg: { model: model.id }, set })));
   expect([...host.querySelectorAll("select")[1]!.options].map((o) => o.value)).toEqual([""]);
-  expect(host.textContent).toContain("catalog provides no reasoning levels");
+  expect(host.textContent).toContain("The catalog lists no levels for this model");
   expect(set).not.toHaveBeenCalled();
 });
 
 it("shows reported reasoning and effective limit sources on a read-only Codex model list", () => {
   act(() => root.render(h(ModelList, { profile: "p", view, setView: vi.fn() })));
   expect(host.querySelector('[data-model-effort="api-model"]')!.textContent).toContain("Reasoning: low / high");
-  expect(host.textContent).toContain("Model default: high");
-  expect(host.textContent).toContain("agent-config.profile.source.profile");
-  expect(host.textContent).toContain("agent-config.profile.source.default90Percent");
+  expect(host.querySelector('[data-model-effort="api-model"]')!.textContent).toContain("high when unset"); // an explicit level, never 「default」 (owner 2026-11-20)
+  // 上下文 / 自动压缩 columns carry their value source (owner 2026-11-18).
+  expect(host.textContent).toContain("300K");
+  expect(host.textContent).toContain("Profile");
+  expect(host.querySelector('[data-model-compact="api-model"]')!.textContent).toContain("90% of window");
   expect(host.textContent).not.toContain("agent-config.profile.vision");
   expect(host.textContent).not.toContain("agent-config.profile.edit");
 });

@@ -16,6 +16,7 @@ import { MenuLayersContext, findMenuLayerElement, menuFlyoutRows, menuLayerConta
 import { AgentInfoDialog } from "./AgentInfoDialog";
 import { FolderLookDialog } from "./FolderLookDialog";
 import { StopIdleDialog } from "./StopIdleDialog";
+import { BatchModelDialog } from "./BatchModelDialog";
 import { FolderBrowser } from "./FolderBrowser";
 import { OwnerLayer } from "./OwnerLayer";
 import { useOwnerDocument, useOwnerWindow } from "../lib/ownerContext";
@@ -314,7 +315,7 @@ const MenuRow = memo(function MenuRow({ item, i, base, active, flyoutClosed, set
         onClick={() => (item.submenu || item.flyout !== undefined ? setActive(i) : select(item))}
         // Armed keeps the danger face while focused (it always is, after its first click): no focus:bg-* with it.
         className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left outline-none disabled:opacity-40 ${
-          armed === item ? `${ARMED_COUNTDOWN} bg-danger-solid text-white` : `focus:bg-surface-2 ${active && !item.disabled ? "bg-surface-2" : ""} ${item.danger ? "text-danger" : ""}`
+          armed === item ? `${ARMED_COUNTDOWN} bg-danger-solid text-white` : `press focus:bg-surface-2 ${active && !item.disabled ? "bg-surface-2" : ""} ${item.danger ? "text-danger" : ""}`
         }`}
       >
         {/* A rich row without an icon (e.g. the identity menu's avatar header) starts at the left edge. */}
@@ -368,7 +369,7 @@ function MenuToggleButton({ toggle }: { toggle: MenuToggle }) {
         if (toggles) toggles.flip(toggle);
         else toggle.onToggle(!on);
       }}
-      className={`absolute top-1/2 right-1.5 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md hover:bg-hover ${on ? "text-accent" : "text-subtle opacity-60 hover:opacity-100"}`}
+      className={`absolute top-1/2 right-1.5 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md press hover:bg-hover ${on ? "text-accent" : "text-subtle opacity-60 hover:opacity-100"}`}
     >
       {on ? toggle.onIcon : toggle.offIcon}
     </button>
@@ -433,10 +434,16 @@ function DialogCheckbox({ check }: { check: DialogCheck }) {
   );
 }
 
-function PromptView({ title, initial, placeholder, multiline, maxLength, hint, check, resolve }: { title: string; initial: string; placeholder?: string; multiline?: boolean; maxLength?: number; hint?: string; check?: DialogCheck; resolve(v: string | null): void }) {
+function PromptView({ title, initial, placeholder, multiline, maxLength, hint, check, expect, mismatch, resolve }: { title: string; initial: string; placeholder?: string; multiline?: boolean; maxLength?: number; hint?: string; check?: DialogCheck; expect?: string; mismatch?: string; resolve(v: string | null): void }) {
   const { t } = useI18n();
   const [value, setValue] = useState(initial);
+  // A typed confirmation that does not match stays open with the note (the owner corrects it, not starts over).
+  const [wrong, setWrong] = useState(false);
   const done = (v: string | null) => {
+    if (v !== null && expect !== undefined && v !== expect) {
+      setWrong(true);
+      return;
+    }
     closeDialog();
     resolve(v);
   };
@@ -445,7 +452,7 @@ function PromptView({ title, initial, placeholder, multiline, maxLength, hint, c
     value,
     placeholder,
     maxLength,
-    onChange: (e: { target: { value: string } }) => setValue(e.target.value),
+    onChange: (e: { target: { value: string } }) => { setValue(e.target.value); setWrong(false); },
     onFocus: (e: { target: HTMLInputElement | HTMLTextAreaElement }) => e.target.select(),
     onKeyDown: (e: React.KeyboardEvent) => {
       if (isImeComposing(e)) return;
@@ -462,12 +469,13 @@ function PromptView({ title, initial, placeholder, multiline, maxLength, hint, c
       <div className="mb-3 text-sm font-medium">{title}</div>
       {multiline ? <textarea rows={4} {...field} /> : <input {...field} />}
       {hint && <div className="mt-1.5 text-xs text-subtle">{hint}</div>}
+      {wrong && <div role="alert" data-testid="prompt-mismatch" className="mt-1.5 text-xs text-danger">{mismatch ?? t("dialog.typeMismatch")}</div>}
       {check && <DialogCheckbox check={check} />}
       <div className="mt-4 flex justify-end gap-2">
-        <button onClick={() => done(null)} className="rounded-md px-3 py-1 text-sm text-muted hover:bg-surface-2">
+        <button onClick={() => done(null)} className="press rounded-md px-3 py-1 text-sm text-muted hover:bg-surface-2">
           {t("dialog.cancel")}
         </button>
-        <button onClick={() => done(value)} className="rounded-md bg-accent px-3 py-1 text-sm text-white">
+        <button onClick={() => done(value)} className="press-solid rounded-md bg-accent px-3 py-1 text-sm text-white">
           {t("dialog.ok")}
         </button>
       </div>
@@ -497,11 +505,11 @@ function ConfirmView({ message, danger, notice, labels, check, resolve }: { mess
       {check && <DialogCheckbox check={check} />}
       <div className="mt-4 flex justify-end gap-2">
         {!notice && (
-          <button onClick={() => done(false)} className="rounded-md px-3 py-1 text-sm text-muted hover:bg-surface-2">
+          <button onClick={() => done(false)} className="press rounded-md px-3 py-1 text-sm text-muted hover:bg-surface-2">
             {labels?.cancel ?? t("dialog.cancel")}
           </button>
         )}
-        <button autoFocus onClick={() => done(true)} className={`rounded-md px-3 py-1 text-sm text-white ${danger ? "bg-danger-solid" : "bg-accent"}`}>
+        <button autoFocus onClick={() => done(true)} className={`press-solid rounded-md px-3 py-1 text-sm text-white ${danger ? "bg-danger-solid" : "bg-accent"}`}>
           {notice ? t("dialog.ok") : (labels?.ok ?? t("dialog.confirm"))}
         </button>
       </div>
@@ -517,6 +525,8 @@ export function Overlays() {
       {menu && <OwnerLayer doc={menu.doc}><ContextMenuView key={`${menu.x},${menu.y}`} {...menu} /></OwnerLayer>}
       {/* 停止空闲的智能体 (design 031): its own state (lib/stopIdle). */}
       <StopIdleDialog />
+      {/* 批量换模型 (owner 2026-11-18): its own state (lib/batchModel). */}
+      <BatchModelDialog />
       {dialog && (
         <OwnerLayer doc={dialogDoc}>
         <div className={`fixed inset-0 z-[150] flex items-start justify-center bg-black/30 ${dialog.kind === "folder" ? "pt-[10vh]" : dialog.kind === "agentInfo" ? "pt-[5vh]" : "pt-[20vh]"}`} onMouseDown={(e) => e.target === e.currentTarget && (dialog.kind === "confirm" ? dialog.resolve(false) : dialog.resolve(null), closeDialog())}>

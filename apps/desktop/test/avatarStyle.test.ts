@@ -5,9 +5,9 @@ const legacy = vi.hoisted(() => ({
   prefs: { portraitPacks: [] as string[], agentAvatarDefault: "emoji" },
   profiles: new Map<string, string[] | null>(), writes: vi.fn(), prefsListeners: new Set<() => void>(), looksListeners: new Set<() => void>(),
   capable: new Set<string>(), hostProfiles: new Map<string, unknown>(), patch: vi.fn(), get: vi.fn(),
-  atomic: true, storeListeners: new Set<(next: any, prev: any) => void>(),
+  atomic: true, theme32: false, storeListeners: new Set<(next: any, prev: any) => void>(),
 }));
-vi.mock("../src/renderer/src/store", () => ({ featuresOf: (_s: unknown, host: string) => new Set(legacy.capable.has(host) ? ["profile-avatar-style", ...(legacy.atomic ? ["profile-avatar-style-import-if-unset"] : [])] : []), useApp: { getState: () => ({}), subscribe: (listener: (next: any, prev: any) => void) => { legacy.storeListeners.add(listener); return () => legacy.storeListeners.delete(listener); } } }));
+vi.mock("../src/renderer/src/store", () => ({ featuresOf: (_s: unknown, host: string) => new Set(legacy.capable.has(host) ? ["profile-avatar-style", ...(legacy.atomic ? ["profile-avatar-style-import-if-unset"] : []), ...(legacy.theme32 ? ["profile-avatar-style-theme-32"] : [])] : []), useApp: { getState: () => ({}), subscribe: (listener: (next: any, prev: any) => void) => { legacy.storeListeners.add(listener); return () => legacy.storeListeners.delete(listener); } } }));
 vi.mock("../src/renderer/src/lib/hostSwitch", () => ({ onHostReset: () => {}, onHostSwitch: () => {} }));
 vi.mock("../src/renderer/src/lib/prefs", () => ({
   getUiPrefs: () => legacy.prefs,
@@ -31,12 +31,53 @@ beforeEach(() => {
   storage.clear(); legacy.prefs.portraitPacks = []; legacy.prefs.agentAvatarDefault = "emoji";
   legacy.profiles.clear(); legacy.writes.mockClear(); legacy.prefsListeners.clear(); legacy.looksListeners.clear();
   legacy.capable.clear(); legacy.hostProfiles.clear(); legacy.patch.mockReset(); legacy.get.mockReset();
-  legacy.atomic = true; legacy.storeListeners.clear();
+  legacy.atomic = true; legacy.theme32 = false; legacy.storeListeners.clear();
   vi.stubGlobal("localStorage", { getItem: (k: string) => storage.get(k) ?? null, setItem: (k: string, v: string) => storage.set(k, v) });
 });
 afterEach(() => vi.unstubAllGlobals());
 
 describe("host Profile avatar style", () => {
+  it("a host that cannot store the local themes yet: no read or write per refresh; imported once it can (cross-review P3)", async () => {
+    const styles = await load();
+    const local: AvatarStyle = { kind: "portrait", portraitThemes: ["kit-20261029/mountain-city-myriad-layers"] };
+    styles.setProfileAvatarStyle("a", "p", local);
+    legacy.capable.add("a");
+    legacy.hostProfiles.set(scope("a", "p"), profile());
+    legacy.get.mockResolvedValue(profile());
+    for (let i = 0; i < 3; i++) await styles.importLocalProfileAvatarStyles("a", [profile()]);
+    expect(legacy.get).not.toHaveBeenCalled();
+    expect(legacy.patch).not.toHaveBeenCalled();
+    expect(styles.pendingLocalProfileAvatarStyle("a", "p")).toEqual(local);
+    legacy.theme32 = true;
+    legacy.patch.mockResolvedValue(profile(local));
+    await styles.importLocalProfileAvatarStyles("a", [profile()]);
+    expect(legacy.get).toHaveBeenCalledTimes(1);
+    expect(legacy.patch).toHaveBeenCalledWith("p", { avatarStyle: local, avatarStyleImportIfUnset: true });
+  });
+
+  it("retains a local style draft when main returns it as unsaved", async () => {
+    const styles = await load();
+    const local: AvatarStyle = { kind: "portrait", portraitThemes: ["kit-20261029/mountain-city-myriad-layers"] };
+    styles.setProfileAvatarStyle("a", "p", local);
+    legacy.capable.add("a");
+    // It advertises 32-character ids (the renderer's own check passes): main still answers that the host left it out.
+    legacy.theme32 = true;
+    legacy.hostProfiles.set(scope("a", "p"), profile());
+    legacy.get.mockResolvedValue(profile());
+    const portraitProblem = { kind: "invalidReferences", references: local.portraitThemes, maxThemeLength: 20 };
+    legacy.patch.mockResolvedValue({ ...profile() as object, portraitProblem });
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await styles.importLocalProfileAvatarStyles("a", [profile()]);
+      expect(legacy.patch).toHaveBeenCalledTimes(1);
+      expect(styles.pendingLocalProfileAvatarStyle("a", "p")).toEqual(local);
+      await expect(styles.saveLocalProfileAvatarStyle("a", "p")).rejects.toThrow("mountain-city-myriad-layers");
+      styles.noteProfileAvatarStyleSaved("a", { id: "p", appearance: { avatarStyle: null }, portraitProblem } as never);
+      expect(JSON.parse(storage.get(key)!).profiles[scope("a", "p")]).toEqual(local);
+      expect(styles.pendingLocalProfileAvatarStyle("a", "p")).toEqual(local);
+    } finally { warning.mockRestore(); }
+  });
+
   it("migrates retired theme ids and preserves explicitly saved emoji or letter styles", async () => {
     storage.set(key, JSON.stringify({ version: 1, app: { kind: "portrait", portraitThemes: ["overnight-test-v1/office"] }, profiles: {}, portraitThemes: [] }));
     expect((await load()).getAppAvatarStyle()).toEqual({ kind: "portrait", portraitThemes: ["kit-20261029/metropolitan-muses"] });

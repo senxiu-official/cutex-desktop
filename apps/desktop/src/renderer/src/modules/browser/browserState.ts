@@ -65,9 +65,19 @@ const LABEL = /^(?!-)[\p{L}\p{N}-]{1,63}(?<!-)$/u;
  * (localhost, *.localhost, 127.x, [::1]), otherwise `https://`. The result still passes every
  * browserNavigationUrl check and is syntax only: main decides whether the host may be opened.
  */
+/** A service page's address as the address bar shows it: its query reads `?a=b&c`, not the ref key's `%3Fa%3Db%26c`
+ * (the cutex:service/ ref encodes the query inside its key; serviceAddressRef turns typed text back). */
+export function browserAddressText(url: string): string {
+  return url.startsWith("cutex:service/") ? url.replace(/%3F/gi, "?").replace(/%3D/gi, "=").replace(/%26/gi, "&") : url;
+}
+/** Typed service address back to its ref form (`?`, `=`, `&` encoded inside the key); other text unchanged. */
+function serviceAddressRef(value: string): string {
+  return value.startsWith("cutex:service/") ? value.replace(/[?=&]/g, (c) => encodeURIComponent(c)) : value;
+}
+
 export function browserAddressUrl(raw: unknown): BrowserAddressResult {
   if (typeof raw !== "string" || raw.length > MAX_BROWSER_INPUT) return { error: INVALID_ADDRESS };
-  const value = raw.trim();
+  const value = serviceAddressRef(raw.trim());
   if (!value) return { error: NOT_WEB_ADDRESS };
   if (CONTROL.test(value) || value.includes("\\")) return { error: INVALID_ADDRESS };
   // An explicit scheme (http://, about:blank, cutex:service/, javascript:, …): unchanged rules.

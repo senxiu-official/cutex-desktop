@@ -18,7 +18,8 @@ import { Button, ResetButton, SettingRow, Section, SettingsGroup, Select, TextAr
 import type { LinkedAppearanceControls } from "../../lib/profileLinkAppearance";
 import { useTargetFeatures } from "../../lib/targetHost";
 import { getAppAvatarStyle, getProfileAvatarStyle, pendingLocalProfileAvatarStyle, saveLocalProfileAvatarStyle, useAvatarStyleVersion, type AvatarStyle } from "../../lib/avatarStyle";
-import { AvatarStyleLabel, AvatarStylePicker } from "./AvatarStylePicker";
+import { AvatarStyleLabel, AvatarStylePicker, PortraitThemeNote } from "./AvatarStylePicker";
+import { ProfilePortraitThemeError, type ProfilePortraitThemeProblem } from "../../../../shared/profilePortraitThemes";
 import { useProfileLooksSynced } from "../../lib/profileLooks";
 
 const CATEGORIES: (Provider | "other")[] = ["kimi", "glm", "zai", "claude", "deepseek", "codex", "other"];
@@ -39,7 +40,7 @@ function Swatch({ color, selected, title, onClick, children }: { color: string; 
   );
 }
 
-export function ProfileAppearance({ detail, patch, set, host, picture, setPicture, onPicture, intro, setIntro, onIntroPortrait, introError, theme, setTheme, linked }: {
+export function ProfileAppearance({ detail, patch, set, host, picture, setPicture, onPicture, intro, setIntro, onIntroPortrait, introError, theme, setTheme, themeProblem = null, linked }: {
   detail: ProfileDetail;
   patch: ProfilePatch;
   set(p: ProfilePatch): void;
@@ -58,6 +59,8 @@ export function ProfileAppearance({ detail, patch, set, host, picture, setPictur
   /** Full style draft: undefined unchanged, null inherit app; local fallback for older hosts. */
   theme: AvatarStyle | null | undefined;
   setTheme(theme: AvatarStyle | null | undefined): void;
+  /** The drafted portrait themes this host cannot store (ProfileEditor): a short named note; the draft is kept. */
+  themeProblem?: ProfilePortraitThemeProblem | null;
   linked?: { state: LinkedAppearanceControls; checked: boolean; onChecked(value: boolean): void };
 }) {
   const { t, locale } = useI18n();
@@ -81,7 +84,7 @@ export function ProfileAppearance({ detail, patch, set, host, picture, setPictur
   const storedStyle = getProfileAvatarStyle(host, detail.id);
   const localStyle = pendingLocalProfileAvatarStyle(host, detail.id);
   const [savingLocalStyle, setSavingLocalStyle] = useState(false);
-  const [localStyleError, setLocalStyleError] = useState<string | null>(null);
+  const [localStyleError, setLocalStyleError] = useState<string | ProfilePortraitThemeError | null>(null);
   const shownStyle = theme !== undefined ? theme : storedStyle;
 
   // Provider: "" = automatic (what cutex infers).
@@ -157,14 +160,14 @@ export function ProfileAppearance({ detail, patch, set, host, picture, setPictur
           </div>
         </SettingRow>
         <SettingRow agents="none" source={features.has("profile-avatar-style") ? "host" : "local"} label={t("avatarStyle.title" as MessageKey)} hint={<>{t((features.has("profile-avatar-style") ? "avatarStyle.profileHost" : "avatarStyle.profileLocal") as MessageKey, { name: detail.name })}<span className="block">{t("avatarStyle.hint" as MessageKey)}</span></>}
-          sample={<AvatarStylePicker value={shownStyle} allowInherit inherited={getAppAvatarStyle()} onChange={(next) => setTheme(JSON.stringify(next) === JSON.stringify(storedStyle) ? undefined : next)} />} />
+          sample={<>{themeProblem && <PortraitThemeNote problem={themeProblem} kept />}<AvatarStylePicker value={shownStyle} allowInherit inherited={getAppAvatarStyle()} blocked={themeProblem?.references} onChange={(next) => setTheme(JSON.stringify(next) === JSON.stringify(storedStyle) ? undefined : next)} /></>} />
         {localStyle && <SettingsGroup agents="none" source="host"><div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-muted" data-avatar-style-local-draft>
           <span>{t("avatarStyle.localDraft" as MessageKey)}: <AvatarStyleLabel style={localStyle} /></span>
           <Button disabled={savingLocalStyle || theme !== undefined} onClick={() => {
             setSavingLocalStyle(true); setLocalStyleError(null);
-            void saveLocalProfileAvatarStyle(host, detail.id).catch((error) => setLocalStyleError(error instanceof Error ? error.message : String(error))).finally(() => setSavingLocalStyle(false));
+            void saveLocalProfileAvatarStyle(host, detail.id).catch((error) => setLocalStyleError(error instanceof ProfilePortraitThemeError ? error : error instanceof Error ? error.message : String(error))).finally(() => setSavingLocalStyle(false));
           }}>{t("avatarStyle.saveToHost" as MessageKey)}</Button>
-          {localStyleError && <span role="alert" className="text-danger">{localStyleError}</span>}
+          {localStyleError && (typeof localStyleError === "string" ? <span role="alert" className="text-danger">{localStyleError}</span> : <PortraitThemeNote problem={localStyleError.problem} />)}
         </div></SettingsGroup>}
         <SettingRow source="host"
           agents="none" readOnly={!canProvider}

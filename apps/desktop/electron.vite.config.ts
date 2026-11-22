@@ -23,8 +23,8 @@ export default defineConfig({
     plugins: [externalizeDepsPlugin({ exclude: workspace })],
     build: {
       rollupOptions: {
-        // The big alert window (main/ownerAlert.ts) has its own narrow preload.
-        input: { index: resolve(__dirname, "src/preload/index.ts"), ownerAlert: resolve(__dirname, "src/preload/ownerAlert.ts"), deskPet: resolve(__dirname, "src/preload/deskPet.ts") },
+        // The big alert window (main/ownerAlert.ts) and the 项目看板 window (main/board.ts) have their own narrow preloads.
+        input: { index: resolve(__dirname, "src/preload/index.ts"), ownerAlert: resolve(__dirname, "src/preload/ownerAlert.ts"), deskPet: resolve(__dirname, "src/preload/deskPet.ts"), board: resolve(__dirname, "src/preload/board.ts") },
         // Sandboxed preloads must be CommonJS.
         output: { format: "cjs", entryFileNames: "[name].cjs" },
       },
@@ -40,7 +40,7 @@ export default defineConfig({
       // pdf.js CMaps / fonts / wasm (lib/pdfjs.ts) stay separate files, read only when a PDF needs one.
       assetsInlineLimit: (file: string) => (/[\\/]pdfjs-dist[\\/]/.test(file) ? false : undefined),
       rollupOptions: {
-        input: { index: resolve(__dirname, "src/renderer/index.html"), ownerAlert: resolve(__dirname, "src/renderer/owner-alert.html"), deskPet: resolve(__dirname, "src/renderer/desk-pet.html") },
+        input: { index: resolve(__dirname, "src/renderer/index.html"), ownerAlert: resolve(__dirname, "src/renderer/owner-alert.html"), deskPet: resolve(__dirname, "src/renderer/desk-pet.html"), board: resolve(__dirname, "src/renderer/board.html") },
         // The browser-preview mocks (dev/, modules/<id>/mock.ts) only run from installMockBridge(),
         // which bridge.ts calls under import.meta.env.DEV: declare them side-effect free so a
         // production build drops them entirely (their top-level data would otherwise be kept).

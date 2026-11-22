@@ -17,6 +17,8 @@ const daemon = vi.hoisted(() => ({
   asks: vi.fn(async (f: { state?: string }) => (f.state === "closed" ? h.closed : h.open)),
   ask: vi.fn(async (_id: string): Promise<unknown> => h.detail),
   askCommand: vi.fn(async () => ({ ok: true as const })),
+  // r289: stop / accept / abandon go through the owner's ask route (main falls back to the session path itself).
+  askDispose: vi.fn(async () => ({ ok: true as const, route: "ask" as const })),
 }));
 vi.mock("../src/renderer/src/bridge", () => ({
   api: daemon,
@@ -70,6 +72,7 @@ describe("abandoned delegation leaves the project card (owner 2026-10-28)", () =
     daemon.asks.mockClear();
     daemon.ask.mockClear();
     daemon.askCommand.mockClear();
+    daemon.askDispose.mockClear();
   });
   afterEach(() => {
     unwatch?.();
@@ -97,7 +100,8 @@ describe("abandoned delegation leaves the project card (owner 2026-10-28)", () =
     h.detail = abandoned("ask-a", 6);
     const r = await store.delegationCommand(remote, { askId: "ask-a", target: "worker" }, "cutex/ask/close", "abandoned");
     expect(r.ok).toBe(true);
-    expect(daemon.askCommand).toHaveBeenCalledWith("worker", "cutex/ask/close", { askId: "ask-a", outcome: "abandoned" });
+    expect(daemon.askDispose).toHaveBeenCalledWith("worker", "ask-a", "abandoned", expect.stringMatching(/^owner-abandoned-/));
+    expect(daemon.askCommand).not.toHaveBeenCalled();
     await vi.waitFor(() => expect(cardOut(remote)).toEqual(["ask-b"]));
     expect(daemon.ask).toHaveBeenCalledWith("ask-a");
     expect(store.delegationOn(store.useDelegations.getState().byKey, remote, "ask-a")).toMatchObject({ closed: "abandoned", revision: 6 });
@@ -106,7 +110,7 @@ describe("abandoned delegation leaves the project card (owner 2026-10-28)", () =
   it("a refused command (already closed on the host) still corrects the row", async () => {
     unwatch = store.watchDelegationHost(remote);
     seed(remote, [row("ask-a", 4)]);
-    daemon.askCommand.mockResolvedValueOnce({ ok: false, error: { code: "ask_closed", message: "it is already closed" } } as never);
+    daemon.askDispose.mockResolvedValueOnce({ ok: false, error: { code: "ask_closed", message: "it is already closed" } } as never);
     h.open = [];
     h.detail = abandoned("ask-a", 9);
     await store.delegationCommand(remote, { askId: "ask-a", target: "worker" }, "cutex/ask/close", "abandoned");

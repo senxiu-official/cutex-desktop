@@ -8,7 +8,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { ProfileDetail } from "../src/shared/ipc";
 
 const fx = vi.hoisted(() => ({ api: {} as Record<string, ReturnType<typeof vi.fn>>, notify: vi.fn(), features: new Set<string>(["profile-runtime-variants", "dsh-runtime", "profile-create"]) }));
-vi.mock("../src/renderer/src/i18n", () => ({ useI18n: () => ({ t: (key: string, vars?: Record<string, unknown>) => key + (vars ? JSON.stringify(vars) : ""), locale: "en" }) }));
+vi.mock("../src/renderer/src/i18n", async (original) => ({ ...(await original<object>()), useI18n: () => ({ t: (key: string, vars?: Record<string, unknown>) => key + (vars ? JSON.stringify(vars) : ""), locale: "en" }) }));
 vi.mock("../src/renderer/src/lib/targetHost", async (original) => ({ ...(await original<object>()), useTargetApi: () => fx.api, useTargetHostId: () => "local", useTargetFeatures: () => fx.features }));
 vi.mock("../src/renderer/src/lib/useProfilePresets", () => ({ useProfilePresets: () => [{ id: "deepseek", aliases: [], label: "DeepSeek", providerId: "deepseek", baseUrl: "https://api.deepseek.com/", baseUrlRequired: false, defaultModel: "deepseek-flash", providerFamily: "deepseek", providerFamilyLabel: "DeepSeek" }] }));
 vi.mock("../src/renderer/src/lib/componentView", () => ({ useComponentState: () => ({ state: { kind: "body" }, entry: { list: null, refusal: null } }) }));
@@ -236,3 +236,87 @@ it("normalizes DeepSeek official /v1 spelling before create so DSH keeps its off
     expect(fx.api.addProfileVariant).toHaveBeenCalledWith("omega", { runtime: "dsh", defaults: { model: "deepseek-flash" } });
   } finally { fx.features.delete("profile-relay-runtimes"); }
 });
+
+// Final review 2026-11-18 (night-review): changing a variant's 推理强度 showed 保存 but the watcher (text fields only) said
+// clean, so a window-bar entry dropped it. A variant row is a Settings card: unsaved until its 保存 succeeds.
+it("an unsaved variant effort is guarded; a refused 保存 keeps it, a saved one does not", async () => {
+  const { useSettingsShelf, openSettingsShelf, setSettingsShelfMaximized, resetSettingsShelfForTest } = await import("../src/renderer/src/lib/settingsShelf");
+  const { useSettingsEditWatch, hasSettingsDrafts, resetSettingsDrafts } = await import("../src/renderer/src/lib/settingsDrafts");
+  const { runBarEntry } = await import("../src/renderer/src/lib/navEntries");
+  const { closeMenu } = await import("../src/renderer/src/lib/contextMenu");
+  const d = detail();
+  const go = vi.fn();
+  function Shelf() {
+    const open = useSettingsShelf((s) => s.open);
+    const watch = useSettingsEditWatch();
+    return open ? h("div", { ref: watch }, h(ProfileVariantsSection, { detail: d, onChanged: vi.fn() })) : null;
+  }
+  resetSettingsShelfForTest();
+  resetSettingsDrafts();
+  openSettingsShelf({ tab: "profiles" });
+  setSettingsShelfMaximized(true);
+  try {
+    await act(async () => root.render(h(Shelf)));
+    const effort = host.querySelector<HTMLSelectElement>('[data-variant-row="dsh"] select[aria-label="agent-config.profile.effort"]')!;
+    act(() => {
+      effort.value = "high";
+      effort.dispatchEvent(new Event("input", { bubbles: true }));
+      effort.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    expect(effort.value).toBe("high");
+    expect(hasSettingsDrafts()).toBe(true);
+    await act(async () => runBarEntry({ id: "review", target: { run: go } } as never));
+    expect(go).not.toHaveBeenCalled();
+    expect(useSettingsShelf.getState().open).toBe(true);
+    act(() => closeMenu());
+    fx.api.patchProfileVariant = vi.fn().mockResolvedValueOnce({ ok: false, error: { code: "review", message: "refused" } }).mockResolvedValueOnce({ ok: true, profile: d });
+    await act(async () => button("variants.save").click());
+    expect(hasSettingsDrafts()).toBe(true);
+    await act(async () => button("variants.save").click());
+    expect(fx.api.patchProfileVariant).toHaveBeenCalledTimes(2);
+    expect(hasSettingsDrafts()).toBe(false);
+  } finally {
+    act(() => {
+      closeMenu();
+      resetSettingsShelfForTest();
+      resetSettingsDrafts();
+    });
+  }
+}, 20000);
+
+// Final review 2026-11-18 (night-review, second pass): the multi-runtime new-Profile form did not use a Settings card,
+// so ticking only DSH and clicking a window-bar entry left without asking.
+it("a runtime ticked in the new multi-runtime Profile form is guarded", async () => {
+  const { useSettingsShelf, openSettingsShelf, setSettingsShelfMaximized, resetSettingsShelfForTest } = await import("../src/renderer/src/lib/settingsShelf");
+  const { useSettingsEditWatch, hasSettingsDrafts, resetSettingsDrafts } = await import("../src/renderer/src/lib/settingsDrafts");
+  const { runBarEntry } = await import("../src/renderer/src/lib/navEntries");
+  const { closeMenu } = await import("../src/renderer/src/lib/contextMenu");
+  function Shelf() {
+    const open = useSettingsShelf((s) => s.open);
+    const watch = useSettingsEditWatch();
+    return open ? h("div", { ref: watch }, h(NewProfileVariantsForm, { existing: [], initialPreset: "deepseek", onCreated: vi.fn(), onCancel: vi.fn() })) : null;
+  }
+  resetSettingsShelfForTest();
+  resetSettingsDrafts();
+  openSettingsShelf({ tab: "profiles" });
+  setSettingsShelfMaximized(true);
+  try {
+    await act(async () => root.render(h(Shelf)));
+    expect(hasSettingsDrafts()).toBe(false);
+    const dsh = host.querySelector<HTMLButtonElement>('[data-variant-choice="dsh"] [role="checkbox"]')!;
+    expect(dsh.disabled).toBe(false);
+    act(() => dsh.click());
+    expect(dsh.getAttribute("aria-checked")).toBe("true");
+    expect(hasSettingsDrafts()).toBe(true);
+    const go = vi.fn();
+    await act(async () => runBarEntry({ id: "review", target: { run: go } } as never));
+    expect(go).not.toHaveBeenCalled();
+    expect(useSettingsShelf.getState().open).toBe(true);
+  } finally {
+    act(() => {
+      closeMenu();
+      resetSettingsShelfForTest();
+      resetSettingsDrafts();
+    });
+  }
+}, 20000);

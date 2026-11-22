@@ -13,7 +13,7 @@ import { app, BrowserWindow, dialog, Menu, nativeImage, Notification, powerMonit
 import { chromiumProxyRules, isProxyParseError, parseProxyUrl, type UpdateProxyRequest } from "../shared/proxy";
 import type { UpdateProxyConfig } from "./updateNet";
 import { readMemoryHost } from "@cutex-desktop/cutex-client";
-import type { CloseBehavior, DesktopPrefs, ShellCommand, ShellLocale, ShellState } from "../shared/ipc";
+import type { CloseBehavior, DesktopPrefs, ShellCommand, ShellLocale, ShellState, ShellTermsPref } from "../shared/ipc";
 import { parseDeviceOff, type DeviceOff } from "../shared/notificationLevels";
 import { attentionCount, closeAction, editMenuLabels, effectiveCloseBehavior, multiWindowChange, openMultiWindowMigration, overlayDescription, parseNameHasOwner, parsePrefs, parseTerms, resolveLocale, trayMenuLabels, trayNoticeText, trayTooltip, type TrayHost } from "../shared/shell";
 import icon16 from "../../resources/icons/icon-16.png?asset";
@@ -110,6 +110,14 @@ export class DesktopShell {
   get locale(): ShellLocale {
     return resolveLocale(this.prefs.locale, app.getLocale());
   }
+
+  /** The terms mirror (Settings → 通用 → 称呼) for windows main draws itself (the 项目看板). */
+  get terms(): ShellTermsPref | null {
+    return this.prefs.terms ?? null;
+  }
+
+  /** Tray menu 项目看板 (main/index.ts sets it to main/board.ts open). */
+  onOpenBoard: (() => void) | null = null;
 
   get editLabels() {
     return editMenuLabels(this.locale);
@@ -435,6 +443,7 @@ export class DesktopShell {
             this.sendCommand("newChat");
           },
         },
+        { label: labels.board, click: () => this.onOpenBoard?.() },
         { type: "separator" },
         { label: labels.quit, click: () => this.quit() },
       ]),

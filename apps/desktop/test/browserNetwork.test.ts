@@ -291,6 +291,20 @@ describe("browser guest navigation and popup denial", () => {
     expect(diagnostic).toHaveBeenLastCalledWith("no_owner_gesture");
     expect(diagnostic.mock.calls.every(call => call.length === 1 && !String(call[0]).includes("secret"))).toBe(true);
   });
+  it("B10: only an allowed popup missing the owner click is offered back to main (never a refusal or the agent's)", () => {
+    const mock = guestMock(), onNewTab = vi.fn(), kept = vi.fn(), diagnostic = vi.fn();
+    let agent = false;
+    const current: BrowserPopupPolicyOptions = { hostId: "local", webContentsId: 7, policy: policy(), consumeOwnerGesture: () => false, onNewTab, onOwnerGestureMissing: kept,
+      agentActing: () => agent, consumeAgentPopup: () => false };
+    mock.guest.setWindowOpenHandler(createBrowserWindowOpenHandler(() => current, diagnostic));
+    expect(mock.open("http://localhost/after-fetch?q=1")).toEqual({ action: "deny" });
+    expect(diagnostic).toHaveBeenLastCalledWith("no_owner_gesture");
+    expect(kept).toHaveBeenCalledWith({ url: "http://localhost/after-fetch?q=1" });
+    kept.mockClear();
+    expect(mock.open("https://example.com/")).toEqual({ action: "deny" }); // policy refusal
+    agent = true; expect(mock.open("http://localhost/agent")).toEqual({ action: "deny" }); // the agent's own, rate limited
+    expect(kept).not.toHaveBeenCalled(); expect(onNewTab).not.toHaveBeenCalled();
+  });
   it("service links forward only as same-host HTTP URLs using the current policy, without native windows", () => {
     const mock = guestMock(), onNewTab = vi.fn();
     let host: BrowserNetworkHost | undefined = { kind: "ssh", serviceProxy: true, connectionPort: 26111 };

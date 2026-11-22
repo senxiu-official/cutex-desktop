@@ -21,6 +21,7 @@ import { effectiveDefaultEffort } from "../../../../shared/effortFallback";
 import { displayWidth, isBadgeLabelError, projectBadgeWidth } from "../../lib/badgeWidth";
 import { BadgeTextInput } from "../../components/BadgeTextInput";
 import { claudeCatalogChoices, claudeShortName, isClaudeCatalog } from "../../lib/claudeModels";
+import { effortText, effortTip, launchEffortShown, rowResolution, resolutionShown, unsetChoice } from "../../lib/effortDisplay";
 import { unlistedModel } from "../../lib/models";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { SessionAvatar } from "@cutex-desktop/protocol";
@@ -130,7 +131,7 @@ function LaunchModelPanel({ profile, catalog, form, touched, onChange, onReset, 
   // Claude (docs/design/024-model-list.md): one choice per real model, aliases folded in.
   const claude = isClaudeCatalog(catalog);
   const choices = claude
-    ? claudeCatalogChoices([...models, ...extra.map((id) => ({ id, displayName: null }))], form.model || selected || null, t).map((c) => ({ value: c.id, label: modelName(c.id, c.name, profile) }))
+    ? claudeCatalogChoices([...models, ...extra.map((id) => ({ id, displayName: null }))], form.model || selected || null, t).map((c) => ({ value: c.id, label: modelName(c.id, c.option, profile) }))
     : [
         ...models.map((m) => ({ value: m.id, label: modelName(m.id, m.displayName, profile) })),
         ...extra.map((id) => ({ value: id, label: modelName(id, null, profile) })),
@@ -158,7 +159,7 @@ function LaunchModelPanel({ profile, catalog, form, touched, onChange, onReset, 
           <label className="launch-field">
             {t("agent-config.newAgent.effort")}
             <Select width="w-full" value={form.reasoningEffort}
-              options={[{ value: "", label: shown?.defaultReasoningEffort ? `— (${effortName(shown.defaultReasoningEffort)})` : t("quick-chats.defaultProfile") }, ...efforts.map((e) => ({ value: e, label: effortName(e) }))]}
+              options={[{ value: "", label: unsetChoice(t, rowResolution(shown) ? resolutionShown(rowResolution(shown)) : shown?.defaultReasoningEffort ? { level: shown.defaultReasoningEffort, none: null, skipped: [] } : null) }, ...efforts.map((e) => ({ value: e, label: effortName(e) }))]}
               onChange={(reasoningEffort) => onChange({ reasoningEffort })} />
           </label>
         </div>
@@ -724,13 +725,17 @@ function NewAgentForm({ params, target, presetHost, restored }: { params: PagePa
     }, (e: unknown) => { if (generation === draftGeneration.current) setSkillsError(e instanceof Error ? e.message : String(e)); });
   };
   const shownModel = model ? modelName(model, (isClaudeCatalog(catalog) ? claudeShortName(models, model, t) : null) ?? row?.displayName, chosen?.id) : unspecified;
-  const shownModelTitle = model && shownModel !== model ? `${t("composer.modelTitle")}: ${shownModel} · ${model}` : undefined;
+  // No alias / model id in the normal UI (owner 2026-11-18).
+  const shownModelTitle = undefined;
   // The row's own levels; without a pick, the level cutex will actually use (a profile default the
   // model does not offer falls back, design 028 (b)). Nothing is sent unless the owner picks one.
   const efforts = secondaryVariant ? (row?.supportedReasoningEfforts.length ? row.supportedReasoningEfforts : [...(runtimeEfforts(chosenVariant!.runtime) ?? [])]) : (row?.supportedReasoningEfforts ?? []);
-  const effort = launch.reasoningEffort || (secondaryVariant ? variantEffort(chosenVariant!, model) : effectiveDefaultEffort(model, launch.model ? null : (chosen?.modelReasoningEffort ?? null), efforts, row?.defaultReasoningEffort ?? null)) || null;
-  const effortKey = `composer.effort.${effort}` as MessageKey;
-  const effortLabel = effort ? (t(effortKey) === effortKey ? effort : t(effortKey)) : unspecified;
+  // No pick: the host's resolution for the row (cutex resolved-reasoning-effort), else the level worked out here the
+  // old way (design 028 (b)), else 「—」 with 未上报 / 不支持 — never 「默认」 (owner 2026-11-20, lib/effortDisplay).
+  const effortView = launchEffortShown(launch.reasoningEffort, secondaryVariant ? null : row, secondaryVariant ? variantEffort(chosenVariant!, model) : effectiveDefaultEffort(model, launch.model ? null : (chosen?.modelReasoningEffort ?? null), efforts, row?.defaultReasoningEffort ?? null), claude);
+  const effort = effortView.level;
+  const effortLabel = effortText(t, effortView);
+  const effortHover = effortTip(t, effortView);
   const workspace = !dsh && !claude && launch.sandbox === "workspace-write";
   const network = launch.sandbox === "danger-full-access" || (workspace && launch.networkAccess);
   const mode = permissionModeOfLaunch(launch.sandbox, launch.approvalPolicy, launch.approvalsReviewer);
@@ -956,10 +961,10 @@ function NewAgentForm({ params, target, presetHost, restored }: { params: PagePa
                 </button>
               )}
               {canLaunch && efforts.length > 0 ? <Menu title={t("composer.effortTitle")} align="right" onOpen={() => setPanel(null)}
-                trigger={<LaunchValue label={t("launch.reasoning")} value={effortLabel} />}
+                trigger={<LaunchValue label={t("launch.reasoning")} value={effortLabel} title={effortHover ? `${t("launch.reasoning")}: ${effortLabel}\n${effortHover}` : undefined} />}
                 items={efforts.map((e) => { const key = `composer.effort.${e}` as MessageKey; return { value: e, label: t(key) === key ? e : t(key) }; })}
                 selected={effort} onSelect={(reasoningEffort) => patchLaunch({ reasoningEffort })} /> : (
-                <button type="button" disabled={!canLaunch} onClick={() => setPanel("model")}><LaunchValue label={t("launch.reasoning")} value={effortLabel} /></button>
+                <button type="button" disabled={!canLaunch} onClick={() => setPanel("model")}><LaunchValue label={t("launch.reasoning")} value={effortLabel} title={effortHover ? `${t("launch.reasoning")}: ${effortLabel}\n${effortHover}` : undefined} /></button>
               )}
             </div>
             {canLaunch && !dsh && (claude ? (
@@ -1091,7 +1096,7 @@ function NewAgentForm({ params, target, presetHost, restored }: { params: PagePa
             {canLaunch && models.length > 0 ? (
               <ModelPicker profile={chosen?.name ?? null}
                 models={isClaudeCatalog(catalog)
-                  ? claudeCatalogChoices(models, model, t).map((c) => ({ model: c.id, displayName: c.name, description: [c.id === defaultModel ? t("quick-chats.defaultProfile") : "", c.description].filter(Boolean).join(" · "), primary: c.primary }))
+                  ? claudeCatalogChoices(models, model, t).map((c) => ({ model: c.id, displayName: c.name, description: [c.id === defaultModel ? t("quick-chats.defaultProfile") : "", c.description].filter(Boolean).join(" · "), primary: c.primary, tag: c.tag }))
                   : models.map((m) => ({ model: m.id, displayName: m.displayName ?? m.id, description: m.id === defaultModel ? t("quick-chats.defaultProfile") : "" }))}
                 current={model} label={shownModel} unavailable={modelUnavailable} openSignal={modelSignal} trigger={<span className="trim-cap max-w-40 truncate">{shownModel}</span>}
                 triggerTitle={modelControlTitle(t("composer.modelTitle"), model, shownModel)} onOpen={() => setPanel(null)}
@@ -1100,8 +1105,8 @@ function NewAgentForm({ params, target, presetHost, restored }: { params: PagePa
             ) : <button type="button" disabled={!canLaunch} data-launch-option="model" title={modelControlTitle(t("composer.modelTitle"), model, shownModel)}
               onClick={(e) => { e.stopPropagation(); setPanel((current) => current === "model" ? null : "model"); }}
               className="max-w-40 truncate rounded-md px-1 py-0.5 text-xs text-muted hover:bg-surface-2">{shownModel}</button>}
-            {canLaunch && efforts.length > 0 && effort ? <EffortPicker effort={effort} efforts={efforts} onChange={(value) => patchLaunch({ reasoningEffort: value })} /> : (
-              <button type="button" disabled={!canLaunch} title={t("composer.effortTitle")}
+            {canLaunch && efforts.length > 0 && effort ? <EffortPicker claude={claude} effort={effort} skipped={effortView.skipped} efforts={efforts} onChange={(value) => patchLaunch({ reasoningEffort: value })} /> : (
+              <button type="button" disabled={!canLaunch} title={[t("composer.effortTitle"), effortHover].filter(Boolean).join("\n")} data-effort-none={effortView.none ?? undefined}
                 onClick={(e) => { e.stopPropagation(); setPanel((current) => current === "model" ? null : "model"); }}
                 className="whitespace-nowrap rounded-md px-1 py-0.5 text-xs text-muted hover:bg-surface-2">{effortLabel}</button>
             )}

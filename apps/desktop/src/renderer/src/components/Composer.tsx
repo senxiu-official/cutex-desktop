@@ -60,7 +60,7 @@ import { useModelName } from "../lib/modelDisplay";
 import { setUiPref, useUiPrefs } from "../lib/prefs";
 import { agentFeaturesOf, changesSettingsLive, CLAUDE_SESSION_SKILLS_CAPABILITY, claudeFastMode, isAcpAgent, lacks, maxImageBytes, skillSource, steerAction, type AgentFeatures } from "../lib/agentFeatures";
 import { useObservedModel } from "../lib/observedModelView";
-import { shortModelId } from "../lib/observedModel";
+import { answeringModelShown, shownContext, shownEffort, shownModelName } from "../lib/composerShown";
 import { structuralErrorText } from "../lib/structuralGateView";
 import { boundSkills, insertMention, mentionAt, paletteQuery, parseSlash, rankEntries, runSlash, SLASH_COMMANDS, slashSpec, slashUnavailable, type PaletteEntry, type SlashContext } from "../lib/slashCommands";
 import { anyOverlayOpen } from "../lib/openOverlays";
@@ -78,6 +78,7 @@ import { insertFeedbackOf, useQueueInsertFeedback } from "../lib/queueInsertFeed
 import { useHeldBusy } from "../lib/legacyDelivery/busyHold";
 import { lastAssistantText, timelineToMarkdown } from "../lib/transcript";
 import { agentState, featuresOf, hostApi, interruptWithFeedback, queueItemText, sidebarOf, useApp, viewOf, type AgentAddress } from "../store";
+import { escSteerCount, sendsManyAtOnce, unreadSteers, SUBMIT_SELECTION_MAX } from "../lib/inputLedger/interruptSelection";
 import { useConvFeatures, useConvHost, useConvScope } from "../lib/conversationScope";
 import { formatAutoRetryWait } from "../lib/modelOverloadRetry";
 import { useModelOverloadRetry } from "../lib/modelOverloadRetryView";
@@ -89,8 +90,12 @@ import { setSettingsHost } from "../lib/settingsHost";
 import { ExperimentalPanel, MemoriesPanel, ProjectMemoryPanel, StatusPanel, type StatusRow } from "./ComposerPanels";
 import { ComposerTools } from "./ComposerTools";
 import { GaugeBar } from "./GaugeBar";
+import { ForecastLine, WhoUses } from "./QuotaInsight";
+import { forecastGauge, forecastText, useQuotaHistory, type ForecastGauge, type QuotaForecast } from "../lib/quotaForecast";
+import { attributionForecast, attributionWindow, useAttributionVersion, useQuotaAttribution } from "../lib/quotaAttribution";
 import { ProfileAvatar, type AvatarProfile } from "./ProfileAvatar";
 import { Segmented } from "./settings/Form";
+import { usePending } from "../lib/usePending";
 import { Ring } from "./Ring";
 import { Menu, Popover } from "./Menu";
 import { WindowsSandboxMenuNote } from "./WindowsSandboxNotice";
@@ -121,6 +126,7 @@ import { followAfterSend } from "../lib/stickToBottom";
 import { ComposerTriggers } from "./gutter/ComposerTriggers";
 import { ASKS_PAUSE_FEATURE } from "../lib/asksPause";
 import { QUOTA_CONTINUE_FEATURE } from "../../../shared/quotaContinue";
+import { QUOTA_ATTRIBUTION_FEATURE } from "../../../shared/quotaAttribution";
 import { RESET_CREDITS_FEATURE } from "../../../shared/resetCredits";
 import { quotaExhausted, ResetCreditsLine, ResetOfferSection } from "./ResetCredits";
 import { useResetOffer } from "../lib/resetCredits";
@@ -133,7 +139,9 @@ import { queueAutoCompact, useShortWindow } from "../lib/queueChips";
 import { DelegationAwaitLine, DelegationSendMenu, DelegationTurnHint, DelegationTurnOverlay } from "./DelegationComposer";
 import { SlashPalette, type PaletteRow } from "./SlashPalette";
 import { unlistedModel, composerEfforts } from "../lib/models";
-import { claudePickerItems, claudeShortName } from "../lib/claudeModels";
+import { catalogRowFor, claudeIdInfo, claudePickerItems, claudeShortName, observedVersionFor, pinnedName } from "../lib/claudeModels";
+import { aliasFieldsOf, aliasResolutionOf, sessionAliasFields, sessionReasoningResolution, withSessionAlias } from "../../../shared/modelResolution";
+import { effortText } from "../lib/effortDisplay";
 import { sharedResizeObserver } from "../lib/resizeHub";
 import { NoSteerSendHint } from "./NoSteerSendHint";
 import { noSteerHintShown } from "../lib/noSteerHint";
@@ -167,6 +175,8 @@ export function ProfileQuota({ profile, rateLimits, rateLimitsAt, sessionId, bus
   const quotas = useHostQuotas(quotaHost);
   const cutexGauges = profile ? quotas[profile] : undefined;
   const loadQuota = useHostLoadQuota(quotaHost);
+  // ↻ shows the request running (press-feedback audit 2026-11-18); the gauges stay readable meanwhile.
+  const refresh = usePending(`${quotaHost}\u0000${profile ?? ""}`);
   const features = useApp((s) => featuresOf(s, quotaHost));
   const resetsOn = features.has(RESET_CREDITS_FEATURE);
   const convHost = useConvHost();
@@ -212,12 +222,24 @@ export function ProfileQuota({ profile, rateLimits, rateLimitsAt, sessionId, bus
   const base = mergeGauges(cutexGauges ?? [], nativeQuota ? gaugesFromRateLimits(nativeQuota.limits, nativeQuota.at) : []);
   const gauges = mergeGauges(base, gaugesFromRateLimits(rateLimits, rateLimitsAt));
   const observed = latestObservedAt(gauges);
+  // Per window: when it runs out at the current pace (design 052 §5; the quota curve, cutex `usage-ledger`).
+  const history = useQuotaHistory(quotaHost, profile, observed);
+  // cutex's own forecast wins (on the gauge, or from the window's attribution answer: design 052 §6); the
+  // desktop's estimate from the curve is only the fallback for older cutex.
+  useAttributionVersion();
+  const forecastOf = (g: QuotaGauge): QuotaForecast | null => {
+    const wire = (g as ForecastGauge).forecast ?? attributionForecast(quotaHost, profile, g);
+    if (wire) return forecastGauge({ ...g, forecast: wire }, history ?? []);
+    return history ? forecastGauge(g, history) : null;
+  };
   const title = (g: QuotaGauge) => (g.windowLabel && g.windowLabel !== g.label ? `${gaugeName(g)} · ${windowName(g.windowLabel)}` : gaugeName(g));
   // With no gauge yet, a dim ring keeps the chip's size, so nothing shifts when quota lands.
   const view = prefs.quotaView;
   const visible = gauges.some((g) => g.kind === "balance" || quotaFill(g, view) !== null);
   // The row's rings after the per-gauge choices and same-reset merging (lib/quota composerGauges).
   const rings = composerGauges(gauges, prefs.quotaGauges, prefs.quotaResetDefault, prefs.quotaMerge);
+  // 「谁在用」 sits under the first 5h window (052 §5 item 2; capability `quota-attribution`).
+  const whoGauge = gauges.find((g) => g.kind === "window" && attributionWindow(g.windowLabel) === "5h");
   const choiceOf = (g: QuotaGauge) => prefs.quotaGauges[gaugeChoiceName(g)];
   const setChoice = (g: QuotaGauge, patch: GaugeChoice) => setUiPref("quotaGauges", { ...prefs.quotaGauges, [gaugeChoiceName(g)]: { ...choiceOf(g), ...patch } });
   const toggleChoice = (g: QuotaGauge, field: "ring" | "reset") =>
@@ -228,11 +250,15 @@ export function ProfileQuota({ profile, rateLimits, rateLimitsAt, sessionId, bus
   };
   // A merged ring's hover names every window it stands for and their shared reset.
   const ringTitle = (r: ComposerGauge) => {
+    const forecastLine = (g: QuotaGauge) => {
+      const f = forecastOf(g);
+      return f && f.kind !== "unknown" ? forecastText(f) : "";
+    };
     if (r.members.length === 1) {
       const g = r.members[0]!;
-      return g.resetAt ? `${title(g)} · ${t("composer.quota.resets", { in: resetsIn(g.resetAt) })}` : title(g);
+      return [g.resetAt ? `${title(g)} · ${t("composer.quota.resets", { in: resetsIn(g.resetAt) })}` : title(g), forecastLine(g)].filter(Boolean).join("\n");
     }
-    const members = r.members.map((m) => [title(m), percentOf(m)].filter(Boolean).join(" · "));
+    const members = r.members.map((m) => [title(m), percentOf(m), forecastLine(m)].filter(Boolean).join(" · "));
     return [...members, r.resetAt !== null ? t("composer.quota.mergedResets", { in: resetsIn(r.resetAt) }) : ""].filter(Boolean).join("\n");
   };
   return (
@@ -246,11 +272,7 @@ export function ProfileQuota({ profile, rateLimits, rateLimitsAt, sessionId, bus
         <span className="flex min-w-0 items-center gap-2">
           {item && prefs.composerProfileAvatar && <ProfileAvatar profile={item} size={18} host={quotaHost} />}
           <span className="trim-cap max-w-28 truncate" data-quota-name="" data-tip={profile ?? undefined}>{profile ?? t("composer.quota.noProfile")}</span>
-          {!visible && (
-            <span className="opacity-40">
-              <Ring ratio={0} />
-            </span>
-          )}
+          {/* No gauge (yet, or ever: API-key profiles have none): no placeholder ring — a dim empty ring read as a loading spinner (owner 2026-11-18). */}
           {rings.map((r) => {
             const g = r.draw;
             const fill = quotaFill(g, view);
@@ -279,8 +301,8 @@ export function ProfileQuota({ profile, rateLimits, rateLimitsAt, sessionId, bus
             <span className="flex items-center gap-2">
               {profile}
               {profile && (
-                <button data-tip={t("composer.quota.refresh")} aria-label={t("composer.quota.refresh")} onClick={() => void loadQuota(profile, true)} className="hover:text-foreground">
-                  ↻
+                <button data-tip={t("composer.quota.refresh")} aria-label={t("composer.quota.refresh")} aria-busy={refresh.pending || undefined} data-pending={refresh.pending ? "" : undefined} onClick={() => refresh.run(() => loadQuota(profile, true))} className="press-icon rounded px-0.5 hover:text-foreground">
+                  <span aria-hidden className={`inline-block ${refresh.pending ? "animate-spin" : ""}`}>↻</span>
                 </button>
               )}
             </span>
@@ -293,6 +315,7 @@ export function ProfileQuota({ profile, rateLimits, rateLimitsAt, sessionId, bus
               {gauges.map((g) => {
                 const fill = quotaFill(g, view);
                 const percent = quotaPercent(g, view);
+                const forecast = forecastOf(g);
                 return (
                   <div key={g.id} className={`col-span-4 grid grid-cols-subgrid items-baseline gap-y-1.5 ${g.stale ? "opacity-60" : ""}`} data-tip={g.observedAt ? t("composer.quota.observedAt", { at: observedClock(g.observedAt) }) : undefined}>
                     {/* The row's two choices (owner 2026-10-28): this gauge's ring and its countdown. A hidden row stays listed, dimmed. */}
@@ -306,7 +329,7 @@ export function ProfileQuota({ profile, rateLimits, rateLimitsAt, sessionId, bus
                           aria-pressed={choiceOf(g)?.ring !== false}
                           data-tip={t("composer.quota.ring")} aria-label={t("composer.quota.ring")}
                           onClick={() => toggleChoice(g, "ring")}
-                          className={`rounded p-0.5 hover:bg-surface-2 ${choiceOf(g)?.ring === false ? "text-subtle opacity-60" : "text-muted"}`}
+                          className={`press-icon rounded p-0.5 hover:bg-surface-2 ${choiceOf(g)?.ring === false ? "text-subtle opacity-60" : "text-muted"}`}
                         >
                           {choiceOf(g)?.ring === false ? <EyeOff size={13} /> : <Eye size={13} />}
                         </button>
@@ -316,7 +339,7 @@ export function ProfileQuota({ profile, rateLimits, rateLimitsAt, sessionId, bus
                           aria-pressed={choiceOf(g)?.reset ?? prefs.quotaResetDefault}
                           data-tip={t("composer.quota.reset")} aria-label={t("composer.quota.reset")}
                           onClick={() => toggleChoice(g, "reset")}
-                          className={`rounded p-0.5 hover:bg-surface-2 ${(choiceOf(g)?.reset ?? prefs.quotaResetDefault) ? "text-muted" : "text-subtle opacity-60"}`}
+                          className={`press-icon rounded p-0.5 hover:bg-surface-2 ${(choiceOf(g)?.reset ?? prefs.quotaResetDefault) ? "text-muted" : "text-subtle opacity-60"}`}
                         >
                           <Clock size={13} />
                         </button>
@@ -338,7 +361,9 @@ export function ProfileQuota({ profile, rateLimits, rateLimitsAt, sessionId, bus
                         <Bar ratio={fill} view={view} />
                       </div>
                     )}
+                    {forecast && <ForecastLine forecast={forecast} id={g.id} />}
                     {g.error && <p className="col-span-4 text-xs text-danger">{g.error}</p>}
+                    {profile && g.id === whoGauge?.id && <WhoUsesFor hostId={quotaHost} profile={profile} gauge={g} refreshKey={observed} close={close} />}
                   </div>
                 );
               })}
@@ -349,6 +374,10 @@ export function ProfileQuota({ profile, rateLimits, rateLimitsAt, sessionId, bus
             <label className="flex cursor-pointer items-center justify-between">
               {t("composer.quota.merge")}
               <input type="checkbox" checked={prefs.quotaMerge} onChange={(e) => setUiPref("quotaMerge", e.target.checked)} />
+            </label>
+            <label className="flex cursor-pointer items-center justify-between gap-3" data-tip={t("quota.alert.settingHint")}>
+              {t("quota.alert.setting")}
+              <input type="checkbox" data-quota-alert-toggle="" checked={prefs.quotaRunOutAlert} onChange={(e) => setUiPref("quotaRunOutAlert", e.target.checked)} />
             </label>
             <div className="flex items-center justify-between gap-2">
               <span>{t("composer.quota.view")}</span>
@@ -366,6 +395,23 @@ export function ProfileQuota({ profile, rateLimits, rateLimitsAt, sessionId, bus
         </div>
       )}
     </Popover>
+  );
+}
+
+/** 「谁在用」 of one window, read while the popover is open (mounted with it); a click opens the agent. */
+function WhoUsesFor({ hostId, profile, gauge, refreshKey, close }: { hostId: string; profile: string; gauge: QuotaGauge; refreshKey: number | null; close(): void }) {
+  const attribution = useQuotaAttribution(hostId, profile, attributionWindow(gauge.windowLabel), true, refreshKey);
+  const openAgent = useApp((s) => s.openAgent);
+  const offered = useApp((s) => featuresOf(s, hostId).has(QUOTA_ATTRIBUTION_FEATURE));
+  if (!offered) return null;
+  return (
+    <WhoUses
+      attribution={attribution}
+      onOpenAgent={(sessionId) => {
+        close();
+        void openAgent(sessionId, hostId);
+      }}
+    />
   );
 }
 
@@ -410,7 +456,7 @@ function ContextMeter({ usage, onCompact, billingUnavailable = false, canCompact
                 onCompact();
                 close();
               }}
-              className="rounded-md bg-surface-2 px-2 py-1 text-xs hover:text-foreground"
+              className="press rounded-md bg-surface-2 px-2 py-1 text-xs hover:text-foreground"
             >
               {t("composer.context.compact")}
             </button>}
@@ -518,6 +564,14 @@ export function Composer({
   const joinIntent = delegationJoinIntent(delegation, timeline?.activeTurnId, runtimeGeneration, features);
   const canJoin = features.has(OWNER_JOIN_FEATURE) && !!joinIntent;
   const pendingSteers = useApp((s) => agentState(s.pendingSteers, hostId, sessionId));
+  // Input ledger: the unread 插话 are ledger records (the old pendingSteers list stays empty). A cli-preset Esc sends
+  // them (all on a host that sends several at once, one alone on any host; several on an older host: Esc just stops).
+  const ledgerSteers = useApp((s) => {
+    if (!ledgerMode) return 0;
+    const ledger = agentState(s.inputs, hostId, sessionId);
+    return ledger ? escSteerCount(unreadSteers(ledger.records.values(), ledger.delivery?.turn?.turnId).length, sendsManyAtOnce(features)) : 0;
+  });
+  const steersWaiting = ledgerMode ? ledgerSteers : pendingSteers?.length ?? 0;
   const queuePause = useApp((s) => viewOf(s, hostId, sessionId)?.queuePause ?? null);
   const asksPaused = useApp((s) => featuresOf(s, hostId).has(ASKS_PAUSE_FEATURE) && !!viewOf(s, hostId, sessionId)?.asksPaused);
   // stop-holds-ridealongs: the owner's stop holds everything until 继续发送 (lib/stopHold).
@@ -675,23 +729,44 @@ export function Composer({
   const modelInfo = models?.find((m) => m.model === currentModel || m.id === currentModel);
   // Claude (docs/design/024-model-list.md): one row per real model, aliases folded in.
   const claudeList = !!session && runtimeOf(session) === "claude";
-  const claudeName = claudeList && models ? claudeShortName(models.map((m) => ({ id: m.model, displayName: m.displayName })), currentModel, t) : null;
+  // Claude agents (claude-runtime-features): hide what the adapter reports as unsupported.
+  const agent = useMemo(() => agentFeaturesOf(session), [session]);
+  // The model that actually answered (Claude adapters with modelObservation).
+  const observedModel = useObservedModel(sessionId, agent, online, timeline, currentModel);
+  // Alias names (owner 2026-11-23: 「Opus 5.5」): the version from the SDK handshake — the session's own evidence for its
+  // current model (replacing the row's alias fields as a whole), else the model/list row's (shared/modelResolution) —
+  // else from the catalog name of the model that last answered, else 「Opus」.
+  const sessionAlias = sessionAliasFields(session?.runtimeDefaults, currentModel);
+  const currentInfo = currentModel ? claudeIdInfo(currentModel) : null;
+  const listRows = models?.map((m) => ({ id: m.model, displayName: m.displayName })) ?? [];
+  const withCurrent = <M extends object>(own: M, id: string): M => {
+    if (id !== currentModel) return own;
+    const merged = withSessionAlias(own, sessionAlias);
+    const version = claudeList && currentInfo?.kind === "alias" && !aliasResolutionOf(merged)?.version ? observedVersionFor(observedModel, currentInfo.family, listRows) : null;
+    return version ? { ...merged, observedVersion: version } : merged;
+  };
+  const claudeIds = models?.map((m) => withCurrent({ id: m.model, displayName: m.displayName, ...aliasFieldsOf(m) }, m.model));
+  const claudeName = claudeList && claudeIds ? claudeShortName(claudeIds, currentModel, t) : null;
+  const currentAlias = claudeList && currentInfo?.kind === "alias" ? aliasResolutionOf(claudeIds?.find((m) => m.id === currentModel) ?? sessionAlias) : null;
   // The profile's entry name, else the catalog name (lib/modelDisplay); "" = no model yet.
   const modelShown = modelName(currentModel, claudeName ?? modelInfo?.displayName, profile);
   const { efforts, empty: effortsEmpty } = composerEfforts(models, currentModel);
   const fastFeature = useApp((s) => featuresOf(s, hostId).has(SESSION_FAST_MODE_FEATURE));
-  const modelItems: (Pick<ModelOption, "model" | "displayName" | "description"> & { primary?: boolean })[] =
-    models ? (claudeList ? claudePickerItems(models, currentModel, t) : models) : [];
-  // Claude agents (claude-runtime-features): hide what the adapter reports as unsupported.
-  const agent = useMemo(() => agentFeaturesOf(session), [session]);
+  const modelItems: (Pick<ModelOption, "model" | "displayName" | "description"> & { primary?: boolean; tag?: string })[] =
+    models ? (claudeList ? claudePickerItems(models.map((m) => withCurrent(m, m.model)), currentModel, t) : models) : [];
   const claudeAgent = !!session && runtimeOf(session) === "claude";
   // Fast mode where the model offers a Fast tier and the choice survives restarts: Codex through cutex
   // `session-fast-mode`, Claude through its adapter (`fastMode`: Claude Code fast mode, kept per thread).
   const fastTier = (claudeAgent ? claudeFastMode(agent) : fastFeature) ? (modelInfo?.fastTier ?? null) : null;
-  // The model that actually answered (Claude adapters with modelObservation), when it differs from the selection.
-  const observedModel = useObservedModel(sessionId, agent, online, timeline, currentModel);
-  // A Claude alias shown by its model already says which model answered (Sonnet 5.5 = claude-sonnet-5-5).
-  const observedIsShown = !!(claudeName && observedModel && models && claudeShortName(models.map((m) => ({ id: m.model, displayName: m.displayName })), observedModel, t) === claudeName);
+  // Owner 2026-11-23: the answering model only in the chip's tooltip / menu note, only when it is not the family /
+  // version the chip shows, by its catalog name (lib/composerShown answeringModelShown).
+  const observedRow = observedModel && claudeList ? catalogRowFor(listRows, observedModel) : undefined;
+  const observedShown = answeringModelShown(observedModel, currentModel, claudeList ? currentAlias : null)
+    ? modelName(observedModel, observedRow ? pinnedName(observedRow.id, observedRow.displayName) : null, profile) : null;
+  // Never a 「…」 or 「默认」: the live level, else the host's resolution, else the runtime's default for this model, else
+  // the last one seen, else 「—」 with 未上报 / 不支持 (lib/composerShown).
+  const effortShown = shownEffort(hostId, sessionId, currentModel, currentEffort, effortsEmpty === "unlisted" ? null : modelInfo, { resolution: sessionReasoningResolution(session?.runtimeDefaults), claude: claudeList });
+  const modelLabel = shownModelName(hostId, sessionId, modelShown, models?.find((m) => m.isDefault));
   // 额度用完 · HH:MM 自动继续 · 取消 (claude-quota-auto-continue, lib/quotaContinue).
   const quotaApplies = useApp((s) => featuresOf(s, hostId).has(QUOTA_CONTINUE_FEATURE)) && !!session && runtimeOf(session) === "claude";
   const quotaView = useQuotaContinue(hostId, sessionId, quotaApplies);
@@ -1062,7 +1137,7 @@ export function Composer({
     {
       preset: sendKeys,
       turnId: busy ? (timeline?.activeTurnId ?? null) : null,
-      pendingSteers: pendingSteers?.length ?? 0,
+      pendingSteers: steersWaiting,
       delegation: !!delegation,
       blocked: !!panel || popupCount > 0 || (timeline?.pending.size ?? 0) > 0,
       focused,
@@ -1144,6 +1219,13 @@ export function Composer({
       ? draftSteerPlan({ feature: imageSteerFeature, busy: sendBusy, images: hasImageInput(extra), mode: imageSteering })
       : "plain";
     if (imagePlan === "refuse") notifyHere(t("queue.steer.imageUnsupported"));
+    // Ctrl+Shift+Enter would take more unread 插话 along than the host accepts with a draft: refused whole, the draft
+    // stays here (one interrupt would drop the ones left out).
+    if (strategy === "interrupt" && ledgerMode && sendsManyAtOnce(features) && ledgerSteers > SUBMIT_SELECTION_MAX) {
+      notifyHere(t("interruptSend.tooMany", { max: SUBMIT_SELECTION_MAX }), "error");
+      enterDecision?.("interrupt-busy");
+      return;
+    }
     // Optimistic (lib/outbox): the draft leaves the composer at once and shows up where it will land
     // (queue tray / steers / timeline) as 发送中…; a failure stays there with retry / edit / discard.
     clearDraft();
@@ -1212,7 +1294,7 @@ export function Composer({
     const keyAction = composerKeyAction(
       sendKeys,
       { key: e.key, ctrl: e.ctrlKey || e.metaKey, shift: e.shiftKey, alt: e.altKey },
-      { busy, hasContent: !!text.trim() || images.length > 0, pendingSteers: pendingSteers?.length ?? 0, collapsedSelection: el.selectionStart === el.selectionEnd },
+      { busy, hasContent: !!text.trim() || images.length > 0, pendingSteers: steersWaiting, collapsedSelection: el.selectionStart === el.selectionEnd },
     );
     if (!keyAction) { report(e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey ? "newline" : "unhandled"); return; }
     const action = delegationKeyAction(keyAction, guardKeys);
@@ -1250,7 +1332,7 @@ export function Composer({
     const k = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
     return [
       { label: t("slash.status.model"), value: modelShown ? (currentModel && modelShown !== currentModel ? `${modelShown} (${currentModel})` : modelShown) : "—" },
-      { label: t("slash.status.effort"), value: currentEffort ? t(`composer.effort.${currentEffort}` as MessageKey) : "—" },
+      { label: t("slash.status.effort"), value: effortText(t, effortShown) },
       { label: t("slash.status.permissions"), value: mode ? t(`composer.mode.${mode}` as MessageKey) : "—", tone: mode === "full" ? "warn" : undefined },
       { label: t("slash.status.collab"), value: t(collabMode === "plan" ? "composer.collab.plan" : "composer.collab.default"), tone: collabMode === "plan" ? "accent" : undefined },
       { label: t("slash.status.profile"), value: profile ?? t("composer.quota.noProfile") },
@@ -1422,7 +1504,7 @@ export function Composer({
                   <button
                     onClick={() => setImages((prev) => prev.filter((x) => x.id !== img.id))}
                     data-tip={t("composer.image.remove")} aria-label={t("composer.image.remove")}
-                    className="absolute top-0.5 right-0.5 rounded-full bg-black/60 p-0.5 text-white opacity-0 group-hover:opacity-100"
+                    className="press-solid reveal-focus absolute top-0.5 right-0.5 rounded-full bg-black/60 p-0.5 text-white opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
                   >
                     <X size={10} />
                   </button>
@@ -1488,7 +1570,7 @@ export function Composer({
                   disabled={!busy}
                   data-tip={t("composer.stopHint")}
                   aria-label={t("composer.stop")}
-                  className="flex size-7 items-center justify-center rounded-full bg-foreground text-background transition-colors hover:bg-foreground/85 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:opacity-40"
+                  className="press-solid flex size-7 items-center justify-center rounded-full bg-foreground text-background transition-colors hover:bg-foreground/85 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:opacity-40"
                 >
                   <Square size={11} fill="currentColor" strokeWidth={0} aria-hidden />
                 </button>
@@ -1508,7 +1590,7 @@ export function Composer({
               disabled={!hasContent || sending}
               data-tip={`${delegation ? t("delegationTurn.choice.queue") : busy ? (sendKeys === "cli" && !noSteer ? t("composer.steerSend") : t("composer.queueSend")) : t("composer.send")} · Enter`}
               aria-label={delegation ? t("delegationTurn.choice.queue") : busy ? (sendKeys === "cli" && !noSteer ? t("composer.steerSend") : t("composer.queueSend")) : t("composer.send")}
-              className="mb-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-accent text-white transition-colors hover:bg-accent/85 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:bg-surface-2 disabled:text-subtle"
+              className="press-solid mb-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-accent text-white transition-colors hover:bg-accent/85 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:bg-surface-2 disabled:text-subtle"
             >
               <ArrowUp size={15} strokeWidth={2.25} />
             </button>
@@ -1616,7 +1698,7 @@ export function Composer({
           <button
             onClick={() => void setPlan(false)}
             data-tip={t("composer.tools.planOff")}
-            className="ml-0.5 flex items-center gap-1 rounded-md bg-accent/15 px-1.5 py-0.5 text-xs text-accent hover:bg-accent/25"
+            className="press-solid ml-0.5 flex items-center gap-1 rounded-md bg-accent/15 px-1.5 py-0.5 text-xs text-accent hover:bg-accent/25"
           >
             {t("composer.collab.plan")}
             <X size={11} />
@@ -1628,26 +1710,26 @@ export function Composer({
           <ConversationModelControls runtime={agent.runtime} live={changesSettingsLive(agent)}
             model={{
               profile, models: modelItems, current: currentModel, unavailable: modelUnavailable,
-              label: modelShown || (runtimeDown ? "—" : "…"),
+              label: modelLabel || (runtimeDown ? "—" : t("composer.model.default")),
               trigger: <span className="flex min-w-0 items-center gap-1">
-                <span className="trim-cap max-w-40 truncate">{modelShown || (runtimeDown ? "—" : "…")}</span>
-                {observedModel && observedModel !== currentModel && !observedIsShown && <span className="trim-cap max-w-28 truncate text-caption/[inherit] text-subtle" data-testid="observed-model">{shortModelId(observedModel)}</span>}
+                <span className="trim-cap max-w-40 truncate">{modelLabel || (runtimeDown ? "—" : t("composer.model.default"))}</span>
               </span>,
-              triggerTitle: [runtimeDown ? `${t("composer.modelTitle")} · ${t("composer.model.offline")}` : currentModel && modelShown !== currentModel ? `${t("composer.modelTitle")} · ${currentModel}` : t("composer.modelTitle"), observedModel ? t("composer.model.observed", { model: observedModel }) : null].filter(Boolean).join("\n"),
-              note: runtimeDown ? t("composer.model.offline") : observedModel ? t("composer.model.observed", { model: observedModel }) : undefined,
+              // No alias / model id lines (owner 2026-11-18); a different answering model is the one exception.
+              triggerTitle: [runtimeDown ? `${t("composer.modelTitle")} · ${t("composer.model.offline")}` : t("composer.modelTitle"), observedShown ? t("composer.model.observed", { model: observedShown }) : null].filter(Boolean).join("\n"),
+              note: runtimeDown ? t("composer.model.offline") : observedShown ? t("composer.model.observed", { model: observedShown }) : undefined,
               onOpen: () => void loadModels(true, sessionId, hostId),
               onSelect: model => void updateSettings({ model }, sessionId, hostId),
               openSignal: sig("model"),
             }}
             effort={{
-              effort: currentEffort, efforts,
+              effort: effortShown.level, none: effortShown.none, skipped: effortShown.skipped, efforts, claude: claudeAgent,
               onChange: effort => void updateSettings({ effort }, sessionId, hostId),
               offline: runtimeDown ? t("composer.model.offline") : undefined,
               empty: effortsEmpty === "none" ? t("composer.effort.noneOffered") : effortsEmpty === "unlisted" ? t("composer.effort.unlisted") : undefined,
               onOpen: effortsEmpty === "unlisted" && !runtimeDown ? () => void loadModels(true, sessionId, hostId) : undefined,
               fast: fastTier && session ? { on: isFastTier(settings?.serviceTier, fastTier), onToggle: on => void updateSettings(fastModePatch(on, fastTier), sessionId, hostId) } : undefined,
             }} />
-          <ContextMeter usage={timeline?.contextUsage ?? null} billingUnavailable={lacks(agent, "billingUsage")} canCompact={!lacks(agent, "compact")} onCompact={() => void compact(sessionId, hostId)} />
+          <ContextMeter usage={shownContext(hostId, sessionId, timeline?.contextUsage ?? null)} billingUnavailable={lacks(agent, "billingUsage")} canCompact={!lacks(agent, "compact")} onCompact={() => void compact(sessionId, hostId)} />
       </>} tail={<ComposerTriggers hostId={hostId} sessionId={sessionId} side="right" />} />
       {/* A reserved status line outside the input and toolbar. Notices neither cover other
           conversation controls nor change the input's geometry when they appear or disappear. */}

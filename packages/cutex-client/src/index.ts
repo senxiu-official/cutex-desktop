@@ -4,6 +4,7 @@ export * from "./mobileManagement";
 export * from "./director";
 export * from "./build";
 export * from "./client";
+export * from "./sessionReads";
 export * from "./messageSettlement";
 export * from "./clients";
 export * from "./components";
@@ -25,4 +26,5 @@ export * from "./runtimePrune";
 export * from "./users";
 export * from "./upgrade";
 
+export * from "./artifacts";
 export * from "./delegation";

@@ -338,6 +338,13 @@ async function boot() {
 // explicit time); each test's boot then only re-evaluates the fresh modules (~40 ms), as before.
 beforeAll(boot, 60_000);
 beforeEach(boot);
+/** A working agent: archive keeps its dialog (an idle one with no services arms in place, lib/menus archiveAgent). */
+function busyResource(name: string, revision: number) {
+  const r = resource(name, revision);
+  r.runtime.activeTurnId = "turn-1";
+  store.setState({ sidebar: { ...store.getState().sidebar!, active: [r] } as never });
+  return r;
+}
 function changeRoute(host = "remote", epoch = "epoch-b") {
   endpoint(host, epoch);
   fake.event!({}, "hostsState", fake.current);
@@ -439,7 +446,7 @@ describe("route-scoped actual menu/store/preload/main actions", () => {
     expect(action).not.toHaveBeenCalled();
   });
   it("archive helper gates confirmed continuation", async () => {
-    const pending = menus.archiveAgent(resource("LOCAL OLD AGENT", 7), key => key);
+    const pending = menus.archiveAgent(busyResource("LOCAL OLD AGENT", 7), key => key);
     confirm();
     changeRoute();
     expect(await pending).toBe(false);
@@ -527,7 +534,7 @@ describe("route-scoped actual menu/store/preload/main actions", () => {
     fake.reply = Promise.resolve({
       deleted: true
     });
-    const pending = menus.archiveAgent(resource("LOCAL OLD AGENT", 7), key => key);
+    const pending = menus.archiveAgent(busyResource("LOCAL OLD AGENT", 7), key => key);
     fake.afterReply = method => {
       if (method === "sessionAction") {
         fake.afterReply = null;

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { queueUpgradeRead } from "./upgradeReads";
 import { apiFor, bridge } from "../../bridge";
 import { canUpgradeAction, isConfirmedUpgradeResult, isKnownNoneUpgradeResult, isUpgradePreconditionFailure, validApprovalRead, unresolvedUpgradeActions as unresolved } from "./upgradeActions";
+import { blockingOperation, forgetOperation, operationEntity, operationScope, projectOperations, type TrackedOperation } from "../../lib/delegationOperations";
 import { delegationUpgradeCapabilities, type DelegationUpgradeCapabilities } from "./upgradeCapabilities";
 import { isUpgradeSnapshotComplete, isUpgradeApprovalRead, panelSnapshotOf } from "./upgradeContract";
 import type { UpgradeAction, UpgradeIntent, UpgradeSnapshot, PermanentRetirementReviewRequest } from "./upgradeTypes";
@@ -9,18 +10,25 @@ import type { UpgradeAction, UpgradeIntent, UpgradeSnapshot, PermanentRetirement
 /** Typed main adapter; older bridges may omit these additive methods. */
 export const upgradePreviewApiOf = apiFor;
 // Preserve the immutable original request across panel remounts. Reads never replay it.
+/** Lifecycle actions without a receipt lookup: the owner inspects them by hand. */
+/** Operations whose unknown outcome needs a manual check (W4 names the operation in the notice). */
+export const MANUAL_KINDS: ReadonlySet<string> = new Set(["retire", "archive", "restore", "offline"]);
+const MANUAL = MANUAL_KINDS;
+const noticeOf = (ops: readonly TrackedOperation[]) => ops.some(op => MANUAL.has(op.action.kind)) ? "manualResolution" as const : "partialResult" as const;
 const EVENTS = new Set(["cutex/project/runControlChanged", "cutex/delegation/routingApprovalChanged", "cutex/delegation/lineageChanged", "cutex/delegation/continuationChanged"]);
 export function useUpgradeProject(hostId: string, projectId: string, enabled: boolean, capabilities: DelegationUpgradeCapabilities = delegationUpgradeCapabilities([])) {
   const [snapshot, setSnapshot] = useState<UpgradeSnapshot | null>(null);
   const snapshotRef = useRef<UpgradeSnapshot | null>(null);
   const [readOnly, setReadOnly] = useState(false);
   const actionScope = JSON.stringify([hostId, projectId]);
-  const [uncertain, setUncertain] = useState(() => unresolved.has(actionScope));
+  // A1: unknown outcomes fence only their own entity; a legacy whole-project marker still makes the panel read-only.
+  const [pending, setPending] = useState<TrackedOperation[]>(() => projectOperations(hostId, projectId));
+  const uncertain = pending.some(op => op.entity === null);
   useEffect(() => unresolved.subscribe(() => {
-    const pending = unresolved.get(actionScope);
-    setUncertain(!!pending);
-    if (pending && !mutating.current) setNotice(["retire", "archive", "restore", "offline"].includes(pending.kind) ? "manualResolution" : "partialResult");
-  }), [actionScope]);
+    const next = projectOperations(hostId, projectId);
+    setPending(next);
+    if (next.length && !mutating.current) setNotice(noticeOf(next));
+  }), [hostId, projectId]);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<"failed" | "readFailed" | "partialResult" | "done" | "incomplete" | "manualResolution" | null>(null);
   const generation = useRef(0), reading = useRef(0), mutating = useRef(false);
@@ -65,8 +73,9 @@ export function useUpgradeProject(hostId: string, projectId: string, enabled: bo
   const read = useCallback((cursor?: string) => currentScope.current === scope && activeScope.current === scope ? queueUpgradeRead(actionScope, () => performRead(cursor)) : Promise.resolve(), [actionScope, performRead, scope]);
   useEffect(() => {
     activeScope.current = scope;
-    setUncertain(unresolved.has(actionScope));
-    generation.current++; snapshotRef.current = null; setSnapshot(null); setReadOnly(false); setNotice(unresolved.has(actionScope) ? ["retire", "archive", "restore", "offline"].includes(unresolved.get(actionScope)!.kind) ? "manualResolution" : "partialResult" : null); setBusy(false); mutating.current = false;
+    const tracked = projectOperations(hostId, projectId);
+    setPending(tracked);
+    generation.current++; snapshotRef.current = null; setSnapshot(null); setReadOnly(false); setNotice(tracked.length ? noticeOf(tracked) : null); setBusy(false); mutating.current = false;
     void read();
     const off = bridge.on("hostEvent", event => {
       if (event.hostId !== hostId || !EVENTS.has(event.envelope.cutex?.method ?? "")) return;
@@ -79,7 +88,8 @@ export function useUpgradeProject(hostId: string, projectId: string, enabled: bo
     const fn = upgradePreviewApiOf(hostId).delegationUpgradeAction;
     if (currentScope.current !== scope || activeScope.current !== scope || !enabled || !fn || mutating.current || !isUpgradeSnapshotComplete(snapshotRef.current, capabilities)) throw new Error("action_unavailable");
     const token = generation.current;
-    if (unresolved.has(actionScope)) throw new Error("outcome_unknown");
+    const entity = operationEntity(intent), entityScope = operationScope(hostId, projectId, entity);
+    if (blockingOperation(hostId, projectId, entity)) throw new Error("outcome_unknown");
     if (!canUpgradeAction(panelSnapshotOf(snapshotRef.current!), intent, capabilities)) throw new Error("action_unavailable");
     mutating.current = true; setBusy(true); setNotice(null);
     let submittedActionId: string | undefined;
@@ -101,7 +111,7 @@ export function useUpgradeProject(hostId: string, projectId: string, enabled: bo
       if (!canUpgradeAction(panelSnapshotOf(snapshotRef.current!), checkedIntent, capabilities)) throw new Error("action_unavailable");
       const action = { ...checkedIntent, actionId: crypto.randomUUID() } as UpgradeAction;
       submittedActionId = action.actionId;
-      unresolved.set(actionScope, action);
+      unresolved.set(entityScope, action);
       const result = await fn(projectId, action);
       if (token !== generation.current || currentScope.current !== scope) throw new Error("context_changed");
       reading.current++;
@@ -112,20 +122,18 @@ export function useUpgradeProject(hostId: string, projectId: string, enabled: bo
         } else { snapshotRef.current = result.snapshot; setSnapshot(result.snapshot); }
       }
       if (isKnownNoneUpgradeResult(result, action)) {
-        unresolved.delete(actionScope, action.actionId); setUncertain(false); throw new Error("action_not_applied");
+        unresolved.delete(entityScope, action.actionId); throw new Error("action_not_applied");
       }
       const committed = isConfirmedUpgradeResult(result, action);
-      if (committed) { unresolved.delete(actionScope, action.actionId); setUncertain(false); }
-      else setUncertain(true);
+      if (committed) unresolved.delete(entityScope, action.actionId);
       setNotice(committed ? result.readError ? "readFailed" : "done" : "partialResult");
       if (!committed) throw new Error("partial_result");
     } catch (error) {
       if (submittedActionId && isUpgradePreconditionFailure(error)) {
-        unresolved.delete(actionScope, submittedActionId);
-        if (token === generation.current && currentScope.current === scope) { setUncertain(false); void read(); }
+        unresolved.delete(entityScope, submittedActionId);
+        if (token === generation.current && currentScope.current === scope) void read();
       }
-      if (unresolved.has(actionScope) && token === generation.current && currentScope.current === scope) setUncertain(true);
-      if (token === generation.current && currentScope.current === scope) setNotice(error instanceof Error && error.message === "contract_incomplete" ? "incomplete" : unresolved.get(actionScope)?.kind === "retire" ? "manualResolution" : error instanceof Error && error.message === "partial_result" ? "partialResult" : "failed");
+      if (token === generation.current && currentScope.current === scope) setNotice(error instanceof Error && error.message === "contract_incomplete" ? "incomplete" : unresolved.get(entityScope)?.kind === "retire" ? "manualResolution" : error instanceof Error && error.message === "partial_result" ? "partialResult" : "failed");
       throw error;
     } finally {
       if (token === generation.current && currentScope.current === scope) { mutating.current = false; setBusy(false); }
@@ -133,7 +141,7 @@ export function useUpgradeProject(hostId: string, projectId: string, enabled: bo
   }, [hostId, projectId, enabled, scope, actionScope, capabilities.treeStop, capabilities.routing, capabilities.runControl, capabilities.continuation, capabilities.activity, capabilities.retirement, read]);
   const reviewRetirement = useCallback(async (request: PermanentRetirementReviewRequest) => {
     const fn = upgradePreviewApiOf(hostId).delegationRetirementReview;
-    if (currentScope.current !== scope || activeScope.current !== scope || unresolved.has(actionScope) || !enabled || !fn || !capabilities.retirement || !snapshotRef.current?.caller.isOwner || !isUpgradeSnapshotComplete(snapshotRef.current, capabilities)) throw new Error("review_unavailable");
+    if (currentScope.current !== scope || activeScope.current !== scope || blockingOperation(hostId, projectId, operationEntity({ kind: "retire", payload: request })) || !enabled || !fn || !capabilities.retirement || !snapshotRef.current?.caller.isOwner || !isUpgradeSnapshotComplete(snapshotRef.current, capabilities)) throw new Error("review_unavailable");
     const token = generation.current;
     const result = await fn(projectId, request);
     if (token !== generation.current || currentScope.current !== scope) throw new Error("context_changed");
@@ -149,23 +157,32 @@ export function useUpgradeProject(hostId: string, projectId: string, enabled: bo
   }, [hostId, projectId, enabled, scope, capabilities.routing]);
   const refresh = useCallback(async () => {
     if (currentScope.current !== scope || activeScope.current !== scope || !enabled) return;
-    const action = unresolved.get(actionScope);
+    const tracked = projectOperations(hostId, projectId);
     const lookup = upgradePreviewApiOf(hostId).delegationUpgradeOperation;
-    if (action && ["retire", "archive", "restore", "offline"].includes(action.kind)) setNotice("manualResolution");
-    if (enabled && action && lookup && !["retire", "archive", "restore", "offline"].includes(action.kind)) {
+    if (tracked.some(op => MANUAL.has(op.action.kind))) setNotice("manualResolution");
+    // Look up every original receipt; each settles only its own fence.
+    for (const { scope: opScope, action } of tracked) {
+      if (!enabled || !lookup || MANUAL.has(action.kind)) continue;
       try {
         const result = await lookup(action.actionId);
         if (currentScope.current !== scope) return;
         if (result.schema === "cutex.delegation-operation.v1" && result.actionId === action.actionId
           && result.status === "found" && !result.outcomeUnknown && result.result && isConfirmedUpgradeResult({ receipt: result.result.receipt, effectState: result.result.receipt.effectState }, action)) {
-          unresolved.delete(actionScope, action.actionId); setUncertain(false); setNotice("done");
+          unresolved.delete(opScope, action.actionId); setNotice("done");
         } else if (result.status === "found" && result.actionId === action.actionId && !result.outcomeUnknown && result.result
           && isKnownNoneUpgradeResult({ receipt: result.result.receipt, effectState: result.result.receipt.effectState }, action)) {
-          unresolved.delete(actionScope, action.actionId); setUncertain(false); setNotice("failed");
-        } else { setUncertain(true); setNotice("partialResult"); }
-      } catch { if (currentScope.current === scope) { setUncertain(true); setNotice("failed"); } }
+          unresolved.delete(opScope, action.actionId); setNotice("failed");
+        } else setNotice("partialResult");
+      } catch { if (currentScope.current === scope) setNotice("failed"); }
     }
+    const left = projectOperations(hostId, projectId);
+    if (left.length) setNotice(noticeOf(left));
     await read();
-  }, [actionScope, enabled, hostId, projectId, read, scope]);
-  return { snapshot, readOnly: readOnly || uncertain, busy, notice, refresh, more: () => read(snapshot?.nextCursor ?? undefined), onAction, reviewRetirement, readApproval };
+  }, [enabled, hostId, projectId, read, scope]);
+  /** Owner recovery: stop tracking one unresolved operation (drops the local fence only; never replays). */
+  const forget = useCallback((op: TrackedOperation) => {
+    forgetOperation(op.scope, op.action.actionId);
+    if (!projectOperations(hostId, projectId).length) setNotice(null);
+  }, [hostId, projectId]);
+  return { snapshot, readOnly: readOnly || uncertain, busy, notice, refresh, more: () => read(snapshot?.nextCursor ?? undefined), onAction, reviewRetirement, readApproval, pending, forget };
 }

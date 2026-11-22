@@ -1,7 +1,8 @@
 // Full Profile styles live on capable hosts; older hosts keep this desktop's copy.
 // The app default always stays local. Legacy emoji themes are a separate field.
 import { useSyncExternalStore } from "react";
-import type { ProfileItem } from "../../../shared/ipc";
+import type { ProfileItem, ProfilePatchResult } from "../../../shared/ipc";
+import { ProfilePortraitThemeError, profilePortraitThemeProblem } from "../../../shared/profilePortraitThemes";
 import { featuresOf, useApp } from "../store";
 import { AVATAR_THEME_IDS, type AvatarThemeId } from "./avatarThemes";
 import { hostKey, parseHostKey } from "./hostKeys";
@@ -113,7 +114,8 @@ export function getProfileAvatarStyle(hostId: string, profileId: string): Avatar
 export const profileAvatarStyleSupported = (hostId: string): boolean => featuresOf(useApp.getState(), hostId).has("profile-avatar-style");
 
 /** A successful host save also fences a later one-time local import. */
-export function noteProfileAvatarStyleSaved(hostId: string, profile: Pick<ProfileItem, "id" | "appearance">): void {
+export function noteProfileAvatarStyleSaved(hostId: string, profile: Pick<ProfileItem, "id" | "appearance"> & Pick<ProfilePatchResult, "portraitProblem">): void {
+  if (profile.portraitProblem) return;
   patchProfileLook(hostId, profile.id, { appearance: profile.appearance });
   const saved = current(), key = hostKey(hostId, profile.id);
   const profiles = { ...saved.profiles };
@@ -137,6 +139,7 @@ export async function saveLocalProfileAvatarStyle(hostId: string, profileId: str
   if (!style || !api) return;
   const currentHost = epochs.get(hostId) ?? 0;
   const next = await api.patchProfile(profileId, { avatarStyle: style });
+  if (next.portraitProblem) throw new ProfilePortraitThemeError(next.portraitProblem);
   if ((epochs.get(hostId) ?? 0) === currentHost && profileAvatarStyleSupported(hostId)) noteProfileAvatarStyleSaved(hostId, next);
 }
 
@@ -163,6 +166,9 @@ export async function importLocalProfileAvatarStyles(hostId: string, profiles: r
     // The atomic condition is separately advertised. A GET followed by an ordinary
     // PATCH could overwrite an owner save from another device between those calls.
     if (!featuresOf(useApp.getState(), hostId).has("profile-avatar-style-import-if-unset")) continue;
+    // Themes this host cannot store yet (by its advertised features, e.g. ids over an older host's 20 characters): no
+    // read or write on each Profile refresh while it stays so; the local draft waits for an upgrade.
+    if (profilePortraitThemeProblem(saved.profiles[key], featuresOf(useApp.getState(), hostId))) continue;
     importing.add(key);
     try {
       const fresh = await api.getProfile(profile.id);
@@ -175,6 +181,7 @@ export async function importLocalProfileAvatarStyles(hostId: string, profiles: r
       if (!style || current().imported?.[key]) continue;
       if (!featuresOf(useApp.getState(), hostId).has("profile-avatar-style-import-if-unset")) continue;
       const next = await api.patchProfile(profile.id, { avatarStyle: copyStyle(style), avatarStyleImportIfUnset: true });
+      if (next.portraitProblem) throw new ProfilePortraitThemeError(next.portraitProblem);
       if (isCurrent()) noteProfileAvatarStyleSaved(hostId, next);
     } catch (error) {
       // The IPC error preserves the code, not necessarily the canonical response body.

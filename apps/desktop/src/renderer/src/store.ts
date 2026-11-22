@@ -10,6 +10,7 @@ import { addTombstone, hasTombstone, listTombstones, LOCAL_SEND_WHAT, pruneTombs
 import type { InputActionResult } from "./lib/inputLedger/actionResult";
 import { projectNextUp, rowIdentity, shownInNextUp } from "./lib/inputLedger/nextUpRegistry";
 import { migrateLegacyDelivery } from "./lib/inputLedger/migration";
+import { interruptSelection, selectionParams, sendsManyAtOnce, unreadSteers, SUBMIT_SELECTION_MAX, INTERRUPT_SEND_MAX, TooManyToInterrupt } from "./lib/inputLedger/interruptSelection";
 import { captureDebugError } from "./lib/debugState";
 import type { EventCheckpoint, OwnerAdmission, OwnerJoinDelegation } from "@cutex-desktop/protocol";
 import type { DesktopEvents } from "../../shared/ipc";
@@ -93,10 +94,12 @@ import { hostBusyActionError } from "../../shared/hostBusyAction";
 import { CREATOR_PATHS_CODE, creatorPathsBlock, creatorPathsWire } from "../../shared/creatorPaths";
 import { hostBusyActionKey, hostBusyActionShown, isHostBusyActionPending, runHostBusyAction } from "./lib/hostBusyActions";
 import { useAgentMessages } from "./lib/agentMessageStore";
+import { BOUNDED_BUS_FEATURE, BUS_PAGE_LIMIT, boundedBusPage, busHydrationTasks, busLinksOf, readLinkedBusMessages, type BusHydrationTask } from "./lib/boundedBus";
 import { refreshPendingOwnerNotes, seedOwnerNotes, startOwnerNotifySync } from "./lib/ownerNotifyStore";
+import { startBoardLink } from "./lib/boardLink";
 import { noteCatalogNames } from "./lib/modelDisplay";
 import { MESSAGES_WAKE_METHOD } from "../../shared/ipc";
-import { cloneTimeline, historyPageSize, MAX_PAGE_TURNS, olderAfterPage, olderFromPage, prependHistory, INTERRUPT_STEER_CHECK_TURNS, STEER_CHECK_TURNS, type OlderHistory } from "./lib/historyPages";
+import { cloneTimeline, keepPagedTurns, historyPageSize, MAX_PAGE_TURNS, olderAfterPage, olderFromPage, prependHistory, INTERRUPT_STEER_CHECK_TURNS, STEER_CHECK_TURNS, type OlderHistory } from "./lib/historyPages";
 import { getUiPrefs, setUiPref } from "./lib/prefs";
 import { shareSidebar } from "./lib/sidebarShare";
 import { agentManagementToolCompleted, coalescedRefresh, sidebarRefreshesForMethod, type CoalescedRefresh } from "./lib/coalescedRefresh";
@@ -107,6 +110,7 @@ import { closeSettingsShelf, openSettingsShelf, resetSettingsSubPage, setSetting
 import { isViewOf, viewKey, viewKeyParts, type ViewKey } from "./lib/viewKey";
 import { FrameBatch, isStreamDelta } from "./lib/streamBatch";
 import { forgetAgentPicture } from "./lib/agentPicture";
+import { readIssue, type ReadIssue } from "./lib/transientError";
 
 /** Notices of the move refusals cutex names (shared/queueMove). */
 const QUEUE_MOVE_NOTICES: Record<QueueMoveErrorKind, MessageKey> = {
@@ -148,6 +152,8 @@ export interface SessionView {
   startErrorQueueIds?: string[];
   /** History pages: older turns still on the host (lib/historyPages); null = all loaded. */
   older: OlderHistory | null;
+  /** bootstrap-bounded-bus: bus messages of paged-in turns being read, or some not read (failed / budget): 继续读取. */
+  busHydration?: "reading" | "incomplete" | null;
   /** history-media-refs: replaced media payloads seen while loading this conversation. */
   mediaRefs?: number;
 }
@@ -164,9 +170,14 @@ export function agentState<T>(map: Readonly<Record<ViewKey, T>>, hostId: string,
 }
 
 /** Plain text of a queued input (cute-codex UserInput[]). */
+/**
+ * A queued message's own text, byte for byte: its text parts joined by a line break (empty ones too), other items left
+ * out. Send paths (再发一次, insert) use it, so it must never be a display preview; rows use queuedRowText.
+ */
 export function queueItemText(item: QueueItem): string {
   return (item.input as { type: string; text?: string }[])
-    .map((part) => (part.type === "text" ? part.text ?? "" : `[${part.type}]`))
+    .filter((part) => part.type === "text")
+    .map((part) => part.text ?? "")
     .join("\n");
 }
 
@@ -566,7 +577,11 @@ interface AppState {
   featuresKnown: boolean;
   /** cutex services registry (null until loaded / unsupported); patched live from host events. */
   services: ServiceView[] | null;
-  refreshServices(): Promise<void>;
+  /** Per host: its last services list read failed (the list keeps its last value); the 服务 page shows and retries
+   *  only the hosts it displays (cross-review 2026-11-16: one global issue showed host A's on a host-B project). */
+  servicesIssues: Readonly<Record<string, ReadIssue>>;
+  /** Read the services list of `hostId` (default: the focus host). */
+  refreshServices(hostId?: string): Promise<void>;
   /**
    * Reads the archived agents of `hostId` (default: every host whose list lacks them) and resolves once its list
    * has them (or after 20 s). They are read on demand: the archive list, the agent pages, an archived agent opened.
@@ -595,6 +610,8 @@ interface AppState {
    * History pages: prepend the next older page of turns to the agent's timeline (scrolled to the top).
    * `opts` (jumps, lib/jump.ts): another page size, a reader that may answer from the reference cache.
    */
+  /** Resume the bus-message reads of an agent's paged-in turns that did not finish (bootstrap-bounded-bus). */
+  continueBusHydration(sessionId: string, hostId?: string): Promise<void>;
   loadOlder(sessionId: string, opts?: { limit?: number; read?(cursor: string): Promise<SessionHistory | null>; hostId?: string }): Promise<void>;
   /** The agent's whole thread (older pages fetched into a copy; the view is untouched), e.g. for export. */
   completeTimeline(sessionId: string, hostId?: string): Promise<TimelineState | null>;
@@ -604,6 +621,45 @@ interface AppState {
 const CACHED_SESSIONS = 12;
 /** View keys (lib/viewKey) of the agents viewed recently in the main area, most recent first. */
 let recentViews: ViewKey[] = [];
+/** Views opened with a bounded bus bootstrap whose host holds more finished bus messages (per direction): older turns page theirs in. */
+const boundedBusViews = new Map<ViewKey, { received: boolean; sent: boolean }>();
+/** Bus-message reads of those views not finished (failed, stalled cursor, page budget): 继续读取 resumes them. */
+const busHydrationRest = new Map<ViewKey, BusHydrationTask[]>();
+/** Bus-message reads running per view (several may: each paged-in history page starts one). */
+const busHydrationActive = new Map<ViewKey, number>();
+/** Bumped when the reads above are dropped (host switch / reset): a read from before applies nothing. */
+let busHydrationGeneration = 0;
+/** Cached ids re-checked on a bounded re-open, at most (a few filtered reads). */
+const MAX_OMITTED_RECHECK = 2_000;
+/**
+ * Cached messages of `sessionId` (to or from it) not final here — waiting, or an open settlement — that a bounded
+ * bootstrap did not list. That snapshot lists every unresolved message, so the host has settled them since; their
+ * absence proves nothing, so they are read again by id (bus-messages `itemIds`).
+ */
+function omittedUnresolved(sessionId: string, received: unknown[] | null | undefined, sent: unknown[] | null | undefined): string[] {
+  const listed = new Set([...(received ?? []), ...(sent ?? [])].map((r) => (r as { messageId?: unknown } | null)?.messageId));
+  const out: string[] = [];
+  for (const m of Object.values(useAgentMessages.getState().byId)) {
+    if (out.length >= MAX_OMITTED_RECHECK) break;
+    if ((m.to !== sessionId && m.from !== sessionId) || listed.has(m.messageId)) continue;
+    const open = m.state === "pending" || (!!m.settlement && m.settlement.state !== "closed");
+    if (open) out.push(m.messageId);
+  }
+  return out;
+}
+/** Drop the bounded-bus state of one host's views (all hosts without one). */
+function dropBusHydration(hostId?: string): void {
+  if (hostId === undefined) {
+    busHydrationGeneration++;
+    boundedBusViews.clear();
+    busHydrationRest.clear();
+    busHydrationActive.clear();
+    return;
+  }
+  const prefix = viewKey(hostId, "");
+  for (const map of [boundedBusViews, busHydrationRest, busHydrationActive] as Map<ViewKey, unknown>[])
+    for (const key of [...map.keys()]) if (key.startsWith(prefix)) map.delete(key);
+}
 /** Panes holding an agent live (retainView), by view key. */
 const viewRefs = new Map<ViewKey, number>();
 /** Runtime generation each cached model list was fetched for (by view key). */
@@ -1214,20 +1270,74 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
     persistLedgerOutbox(entry);
 
     try {
-      const result = await apiOn(host).submit(id, wireForSend(host, id, entry.text), entry.strategy, true, { clientUserMessageId: entry.inputId, extra: entry.extra, ...(joinDelegation ? { joinDelegation } : {}) });
+      const result = await apiOn(host).submit(id, wireForSend(host, id, entry.text), entry.strategy, true, { clientUserMessageId: entry.inputId, extra: entry.extra, ...(joinDelegation ? { joinDelegation } : {}), ...(entry.interruptSend ? { interruptSend: entry.interruptSend } : {}) });
       if (current()) {
         if (result.input) await mergeLedgerReply(id, host, result.input, generation);
         else await getLedgerInput(id, host, entry.inputId);
+        // The 插话 it took along move by their own records (state events, or this read).
+        if (entry.interruptSend) await readLedgerInputs(id, host, entry.interruptSend.inputIds).catch(readError => captureDebugError(readError, "renderer.inputLedger.get"));
       }
       return result;
     } catch (error) {
       if (current()) {
         set(state => ({ ledgerOutbox: { ...state.ledgerOutbox, [key]: (state.ledgerOutbox[key] ?? []).map(item => item.inputId === entry.inputId ? { ...item, phase: "unconfirmed", error: error instanceof Error ? error.message : String(error) } : item) } }));
+        // An older runtime pin refuses the batch before interrupting (the draft was not sent either): said plainly.
+        const message = error instanceof Error ? error.message : String(error);
+        if (entry.interruptSend && /(^|[^_\w])interrupt_send_many_unsupported\b/.test(message))
+          notifyAgent(id, host, translate("interruptSend.manyUnsupported"), "error");
+        // Definitely not admitted and stopped (history unavailable, recovery required, hook …): each row says why and
+        // offers the host's Retry when it applies.
+        else if (entry.interruptSend && /(^|[^_\w])owner_batch_not_submitted\b/.test(message))
+          notifyAgent(id, host, translate("interruptSend.notSubmitted"), "error");
         // The POST may have succeeded. Read this exact id; never infer absence from native history or resend.
         await getLedgerInput(id, host, entry.inputId).catch(readError => captureDebugError(readError, "renderer.inputLedger.get"));
+        if (entry.interruptSend) await readLedgerInputs(id, host, entry.interruptSend.inputIds).catch(readError => captureDebugError(readError, "renderer.inputLedger.get"));
       }
       return null;
     }
+  };
+
+  /** One input/get of several ids (at most 100 per read), merged; no reclaim / outbox side effects. */
+  const readLedgerInputs = async (id: string, host: string, inputIds: readonly string[]): Promise<void> => {
+    const current = captureHostAction(host);
+    const generation = ledgerSession(id, host).generation;
+    for (let i = 0; i < inputIds.length; i += 100) {
+      const result = await apiOn(host).inputGet(id, inputIds.slice(i, i + 100));
+      if (!current()) return;
+      mergeLedgerSnapshot(id, host, inputGetSnapshot(result, generation));
+    }
+  };
+
+  /**
+   * interrupt-send-many-v1: ONE interrupt for the list (ordered, each under its rev). The host keeps those the stopped
+   * turn read and starts the next turn with the rest, each under its own id. A lost answer reads the ids back and is
+   * never repeated; an older runtime pin refuses before interrupting (interrupt_send_many_unsupported), and the desktop
+   * never falls back to one-at-a-time.
+   */
+  const interruptSendMany = async (sessionId: string, host: string, list: readonly InputRecord[]): Promise<InputActionResult> => {
+    const session = ledgerSession(sessionId, host);
+    const params = selectionParams(list, session.delivery);
+    if (!params) throw new Error(translate("queue.insert.unknown"));
+    const key = JSON.stringify([host, sessionId, session.generation, params]);
+    const pending = ledgerInterrupts.get(key);
+    if (pending) { await pending; return { ok: true }; }
+    const current = captureHostAction(host);
+    const release = pinLedger(sessionId, host);
+    const run = (async () => {
+      try {
+        const result = await apiOn(host).inputInterruptSend(sessionId, params);
+        if (current() && "records" in result && ledgerSession(sessionId, host).generation === session.generation) mergeLedgerSnapshot(sessionId, host, {
+          ledgerEpoch: result.ledgerEpoch, stateRevision: result.stateRevision, records: result.records, coverage: { kind: "partial" }, generation: session.generation,
+        });
+      } catch (error) {
+        if (current()) await readLedgerInputs(sessionId, host, params.inputIds).catch(() => {});
+        throw error;
+      }
+      if (current()) await readLedgerInputs(sessionId, host, params.inputIds);
+    })().finally(() => { if (ledgerInterrupts.get(key) === run) ledgerInterrupts.delete(key); release(); });
+    ledgerInterrupts.set(key, run);
+    await run;
+    return { ok: true };
   };
 
   const ledgerRecoveries = new Map<string, Promise<void>>();
@@ -1984,11 +2094,67 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
     return now.actions?.includes(action) ? { ok: false, reason: "changed" } : { ok: false, reason: "notOffered" };
   };
 
+  /**
+   * After a bounded bus bootstrap: the finished bus messages of turns paged in later (sender names, read
+   * state, sent status), merged by messageId; rows the store has stay as they are. Nothing on a full bootstrap.
+   */
+  /** The view's 继续读取 state from all its reads: some left → incomplete (whatever else runs), else reading / none. */
+  const showBusHydration = (sessionId: string, host: string) => {
+    const key = viewKey(host, sessionId);
+    const busHydration = busHydrationRest.get(key)?.length ? "incomplete" : busHydrationActive.get(key) ? "reading" : null;
+    if ((viewOn(sessionId, host)?.busHydration ?? null) !== busHydration) patchSession(sessionId, { busHydration }, host);
+  };
+
+  const loadLinkedBusMessages = async (sessionId: string, host: string, timeline: TimelineState, turns: TimelineState["turns"] | null, messageIds: readonly string[] = []) => {
+    const scope = captureHost(host);
+    const key = viewKey(host, sessionId);
+    const bounded = boundedBusViews.get(key);
+    if (!bounded) return;
+    let tasks: BusHydrationTask[];
+    if (turns) {
+      const links = busLinksOf(turns, timeline.entries);
+      const turnIds = links.turnIds;
+      const itemIds = [...links.itemIds, ...messageIds];
+      tasks = [...(busHydrationRest.get(key) ?? []), ...busHydrationTasks((["received", "sent"] as const).filter((d) => bounded[d]), turnIds, itemIds)];
+    } else tasks = busHydrationRest.get(key) ?? [];
+    busHydrationRest.delete(key);
+    if (!tasks.length) return showBusHydration(sessionId, host);
+    const generation = busHydrationGeneration;
+    busHydrationActive.set(key, (busHydrationActive.get(key) ?? 0) + 1);
+    showBusHydration(sessionId, host);
+    const daemon = apiOn(host);
+    // Each page read is numbered when it starts (agentMessageStore beginPageRead): its rows' settlement applies
+    // only if no authoritative observation of that message came after that start.
+    const pageSeq = new WeakMap<object, number>();
+    try {
+      const rows = await readLinkedBusMessages(async (q) => {
+        const seq = useAgentMessages.getState().beginPageRead();
+        const page = await daemon.busMessages(sessionId, { direction: q.direction, cursor: q.cursor, limit: BUS_PAGE_LIMIT, turnIds: q.turnIds, itemIds: q.itemIds });
+        if (!page) throw new Error("bus-messages unsupported");
+        for (const row of page.messages) if (row && typeof row === "object") pageSeq.set(row, seq);
+        return page;
+      }, tasks);
+      // A host switch / reset since (the message store and these reads were dropped): nothing of it applies.
+      if (generation !== busHydrationGeneration || !scope.current()) return;
+      // Rows are merged whatever happened to the timeline meanwhile (by messageId, never backwards).
+      if (rows.received.length || rows.sent.length) useAgentMessages.getState().mergePage(sessionId, rows.received, rows.sent, (row) => (row && typeof row === "object" ? pageSeq.get(row) ?? 0 : 0));
+      if (rows.rest.length) busHydrationRest.set(key, [...rows.rest, ...(busHydrationRest.get(key) ?? [])]);
+    } finally {
+      if (generation === busHydrationGeneration) {
+        const left = (busHydrationActive.get(key) ?? 1) - 1;
+        if (left > 0) busHydrationActive.set(key, left);
+        else busHydrationActive.delete(key);
+        showBusHydration(sessionId, host);
+      }
+    }
+  };
+
   const load = async (sessionId: string, host = hostOf(sessionId)) => {
     const scope = captureHost(host);
     const daemon = apiOn(scope.host);
     // What was shown before (resync / re-open): tells a reverted plan turn from one not loaded yet.
     const previous = viewOn(sessionId, scope.host)?.timeline;
+    const previousOlder = viewOn(sessionId, scope.host)?.older;
     const bootTick = ++outboxTick;
     try {
       // History pages: only the newest turns (a cutex without history-pages ignores turnLimit and
@@ -2001,8 +2167,13 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
       }
       if (isArchived(sidebarOn(scope.host)?.retired.find((s) => s.cutexSessionId === sessionId))) return await loadArchived(sessionId, pageSize, scope);
       const ledgerGeneration = ledgerSession(sessionId, scope.host).generation;
-      const boot = await daemon.bootstrap(sessionId, pageSize);
+      // bootstrap-bounded-bus: the open needs the unresolved messages and those of the shown turns only; older
+      // turns read theirs when paged in (loadOlder). Settlement recovery and steer checks keep full reads.
+      const boot = await daemon.bootstrap(sessionId, pageSize, featuresOn(scope.host).has(BOUNDED_BUS_FEATURE) ? { boundedBus: true } : undefined);
       if (!scope.current()) return;
+      const bounded = boundedBusPage(boot.cutexState.busMessagesPage);
+      if (bounded && (bounded.received || bounded.sent)) boundedBusViews.set(viewKey(scope.host, sessionId), bounded);
+      else boundedBusViews.delete(viewKey(scope.host, sessionId));
       if (ledgerOn(scope.host)) {
         const snapshot = bootstrapSnapshot(boot.cutexState as Parameters<typeof bootstrapSnapshot>[0], ledgerGeneration);
         if (snapshot) mergeLedgerSnapshot(sessionId, scope.host, snapshot);
@@ -2012,12 +2183,16 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
       // Offline runtime: fall back to stored history (read-only reader on the daemon side).
       const history = !boot.native && featuresOn(scope.host).has("offline-history") ? await daemon.history(sessionId, null, pageSize ?? MAX_PAGE_TURNS).catch(() => null) : null;
       if (!scope.current()) return;
-      const older = olderFromPage(boot.native ? boot.historyPage : history?.page);
       const timeline = boot.native
         ? timelineFromThreadRead(boot.native.result, boot.cutexState.pendingServerRequests)
         : history
           ? timelineFromThreadRead(history.native.result, [], { runtimeLive: false })
           : emptyTimeline();
+      // A re-read keeps the older turns the cached view showed in front of the fresh window (they would
+      // otherwise appear on the re-open, then vanish when this read lands — lib/historyPages keepPagedTurns).
+      const freshTurns = timeline.turns.length;
+      const fromPage = olderFromPage(boot.native ? boot.historyPage : history?.page);
+      const older = (fromPage && keepPagedTurns(timeline, previous, previousOlder)) || fromPage;
       // Seed live settings from the session resource; thread/settings/updated keeps them fresh.
       const sidebar = sidebarOn(scope.host);
       const resource = [...(sidebar?.active ?? []), ...(sidebar?.retired ?? [])].find((s) => s.cutexSessionId === sessionId);
@@ -2060,6 +2235,9 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
         mediaRefs: boot.mediaRefs ?? history?.mediaRefs ?? 0,
       }), scope.host);
       if (!scope.current()) return;
+      // A bounded read of an offline agent has no turn window (cutex sends the unresolved messages only):
+      // the stored history's turns read theirs like a paged-in page.
+      if (!boot.native && history && timeline.turns.length) void loadLinkedBusMessages(sessionId, scope.host, timeline, timeline.turns);
       applyPendingReviewer(sessionId, agent, boot.native ? timeline : null, daemon);
       if (!ledgerOn(scope.host)) {
       settleOutbox(sessionId, bootTick, scope.host);
@@ -2075,7 +2253,13 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
       if (featuresOn(scope.host).has(ADMISSION_ORDER_FEATURE)) refreshQueue(sessionId, scope.host);
       // Agent messages v2: pending incoming messages (待读留言) + the status of its sent ones (the
       // agent-messages store follows the focus host and the open agent's host).
+      // A bounded re-open: the older turns kept from the cached view (keepPagedTurns) and cached unresolved messages of
+      // this agent the new snapshot left out (it lists every unresolved one, so they moved on — maybe by an event this
+      // desktop missed) are read again from bus-messages, after this seed (its fence orders them), without blocking.
+      const staleIds = boundedBusViews.has(viewKey(scope.host, sessionId)) ? omittedUnresolved(sessionId, boot.cutexState.agentBusMessages, boot.cutexState.agentBusSentMessages) : [];
       useAgentMessages.getState().seed(sessionId, boot.cutexState.agentBusMessages, boot.cutexState.agentBusSentMessages);
+      const keptTurns = boot.native ? timeline.turns.slice(0, timeline.turns.length - freshTurns) : [];
+      if (keptTurns.length || staleIds.length) void loadLinkedBusMessages(sessionId, scope.host, timeline, keptTurns, staleIds);
       // owner-notify: the agent's recent agent → owner messages (timeline cards).
       seedOwnerNotes(boot.cutexState.ownerNotifications, scope.host);
       if (!scope.current()) return;
@@ -2136,6 +2320,7 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
     useDelegations.getState().reset();
     useJobs.getState().reset();
     useAgentMessages.getState().reset();
+    dropBusHydration();
     sessionHosts.clear();
     viewRefs.clear();
     const view = get().view;
@@ -2179,6 +2364,7 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
 
   /** A host's connection was replaced or closed, or the host removed: what the app followed of it goes. */
   const resetHost = (hostId: string) => {
+    dropBusHydration(hostId);
     resetBackgroundWork(hostId);
     capabilityReads.delete(hostId);
     clearTimeout(capabilityTimers.get(hostId));
@@ -2286,6 +2472,15 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
   const afterHostsDelivered = (fn: () => void) => queueMicrotask(fn);
 
   const sliceCurrent = (hostId: string, epoch: string) => get().byHost[hostId]?.epoch === epoch;
+  /** Record (or clear) why `hostId`'s services list could not be read. */
+  const noteServicesIssue = (hostId: string, issue: ReadIssue | null) => {
+    const issues = get().servicesIssues;
+    if (issue ? issues[hostId] === issue : !(hostId in issues)) return;
+    const next = { ...issues };
+    if (issue) next[hostId] = issue;
+    else delete next[hostId];
+    set({ servicesIssues: next });
+  };
   const patchSlice = (hostId: string, epoch: string, patch: Partial<HostSlice> | ((slice: HostSlice) => Partial<HostSlice>)) =>
     set((state) => {
       const slice = state.byHost[hostId];
@@ -2351,8 +2546,15 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
         if (sliceCurrent(hostId, epoch)) patchSlice(hostId, epoch, { approvals: list ? sortApprovals(list.filter((a) => a.state === "pending")) : null });
       }
       if (features.has("services")) {
-        const services = (await daemon.services()).services;
-        if (sliceCurrent(hostId, epoch)) patchSlice(hostId, epoch, { services });
+        try {
+          const services = (await daemon.services()).services;
+          if (sliceCurrent(hostId, epoch)) {
+            patchSlice(hostId, epoch, { services });
+            noteServicesIssue(hostId, null);
+          }
+        } catch (error) {
+          if (sliceCurrent(hostId, epoch)) noteServicesIssue(hostId, readIssue(error));
+        }
       }
     } catch {
       // unreachable meanwhile: its next connect retries
@@ -2599,6 +2801,13 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
       patchSession(sessionId, (v) => ({ version: v.version + 1 }), host);
     },
 
+    async continueBusHydration(sessionId, hostId) {
+      const host = hostId ?? hostOf(sessionId);
+      const view = viewOn(sessionId, host);
+      if (!view || !busHydrationRest.get(viewKey(host, sessionId))?.length) return;
+      await loadLinkedBusMessages(sessionId, host, view.timeline, null);
+    },
+
     async loadOlder(sessionId, opts) {
       const host = opts?.hostId ?? hostOf(sessionId);
       const view = viewOn(sessionId, host);
@@ -2614,6 +2823,7 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
         if (!page) return patchSession(sessionId, (v) => ({ older: v.older && { ...v.older, loading: false, cursor: null } }), host);
         const added = prependHistory(timeline, page.native.result);
         patchSession(sessionId, (v) => ({ version: v.version + 1, mediaRefs: (v.mediaRefs ?? 0) + (page.mediaRefs ?? 0), older: olderAfterPage(v.older, page.page, added, cursor) }), host);
+        if (added && !opts?.read) void loadLinkedBusMessages(sessionId, host, timeline, timeline.turns.slice(0, added));
       } catch (e) {
         if (current()) patchSession(sessionId, (v) => ({ older: v.older && { ...v.older, loading: false, error: e instanceof Error ? e.message : String(e) } }), host);
       }
@@ -2689,6 +2899,7 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
       return result;
     },
     services: null,
+    servicesIssues: {},
     ensureArchived(hostId) {
       const s = get();
       const hosts = hostId ? [hostId] : [focusHost(), ...Object.keys(s.byHost)];
@@ -2710,12 +2921,35 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
       })).then(() => undefined);
     },
 
-    async refreshServices() {
-      if (!get().features.has("services")) return;
+    async refreshServices(hostId) {
+      const focus = focusHost();
+      const host = hostId ?? focus;
+      // Keep the last list on failure; say why (the page stayed on 「…」 when the first read failed).
+      // The list and the issue are written only while the connection that was read is still current: a reply of a
+      // replaced connection must neither clear nor overwrite the current one's issue (and its retry).
+      if (host === focus) {
+        if (!get().features.has("services")) return;
+        const { current } = captureHost(host);
+        try {
+          const services = (await api.services()).services;
+          if (!current()) return;
+          set({ services });
+          noteServicesIssue(host, null);
+        } catch (error) {
+          if (current()) noteServicesIssue(host, readIssue(error));
+        }
+        return;
+      }
+      const slice = get().byHost[host];
+      if (!slice || !slice.features.has("services")) return;
+      const epoch = slice.epoch;
       try {
-        set({ services: (await api.services()).services });
-      } catch {
-        // keep the last list
+        const services = (await apiFor(host).services()).services;
+        if (!sliceCurrent(host, epoch)) return;
+        patchSlice(host, epoch, { services });
+        noteServicesIssue(host, null);
+      } catch (error) {
+        if (sliceCurrent(host, epoch)) noteServicesIssue(host, readIssue(error));
       }
     },
     async editAndResend(sessionId, turnId, text, hostId, extra) {
@@ -2838,6 +3072,14 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
       const refused = guardInput(sessionId, host, inputId, record, "interruptSend");
       if (refused) return refused;
       if (record!.kind !== "owner") return { ok: false, reason: "notOffered" };
+      // interrupt-send-many-v1: the interrupt would drop every unread 插话 of the turn, so they all go, in send order
+      // (one interrupt, each under its own id). One input alone keeps the singleton form (an older pin takes it).
+      if (sendsManyAtOnce(featuresOn(host))) {
+        const list = interruptSelection(session.records.values(), session.delivery, inputId);
+        // Over the host's limit: one interrupt would drop the ones left out, so nothing is sent at all.
+        if (list.length > INTERRUPT_SEND_MAX) throw new TooManyToInterrupt(translate("interruptSend.tooMany", { max: INTERRUPT_SEND_MAX }), INTERRUPT_SEND_MAX);
+        if (list.length > 1) return interruptSendMany(sessionId, host, list);
+      }
       // Held / waiting inputs need not have a carrying turn yet. The expected active turn and
       // generation belong to SessionDelivery, exactly as required by the frozen daemon CAS.
       const expectedTurnId = session.delivery?.turn?.turnId;
@@ -3110,6 +3352,7 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
       initialized = true;
       startDelegationSync(useApp);
       startOwnerNotifySync(useApp);
+      startBoardLink();
       startJobSync(useApp);
       startRuntimePackageSync(useApp);
       // Opening an agent / the approvals page takes back their alerts (lib/notifyRetract).
@@ -3780,7 +4023,17 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
       noteOwnerMessage(host);
       if (ledgerOn(host)) {
         const key = viewKey(host, id);
-        const entry: LedgerOwnerOutbox = { inputId: crypto.randomUUID(), sessionId: id, hostId: host, text, extra, strategy, predictedSurface: predictedOwnerSurface({ strategy }, ledgerSession(id, host).delivery, featuresOn(host).has(OWNER_IDLE_BUSY_TIMELINE_FEATURE)), ...(opts.joinDelegation ? { joinDelegation: opts.joinDelegation } : {}), createdAt: new Date().toISOString(), phase: "sending" };
+        // An interrupt drops the 插话 the turn has not read; a host that sends several at once takes them along, in
+        // send order before this draft (interrupt-send-many-v1). An older host keeps the draft-only interrupt.
+        const session = ledgerSession(id, host);
+        const steers = strategy === "interrupt" && !opts.joinDelegation && sendsManyAtOnce(featuresOn(host)) ? unreadSteers(session.records.values(), session.delivery?.turn?.turnId) : [];
+        // Over the limit: refused whole (never the draft alone, never a cut selection); the composer keeps the draft.
+        if (steers.length > SUBMIT_SELECTION_MAX) {
+          notifyAgent(id, host, translate("interruptSend.tooMany", { max: SUBMIT_SELECTION_MAX }), "error");
+          return null;
+        }
+        const interruptSend = steers.length ? selectionParams(steers, session.delivery) : null;
+        const entry: LedgerOwnerOutbox = { inputId: crypto.randomUUID(), sessionId: id, hostId: host, text, extra, strategy, predictedSurface: predictedOwnerSurface({ strategy }, ledgerSession(id, host).delivery, featuresOn(host).has(OWNER_IDLE_BUSY_TIMELINE_FEATURE)), ...(opts.joinDelegation ? { joinDelegation: opts.joinDelegation } : {}), ...(interruptSend ? { interruptSend } : {}), createdAt: new Date().toISOString(), phase: "sending" };
         set(state => ({ ledgerOutbox: { ...state.ledgerOutbox, [key]: [...(state.ledgerOutbox[key] ?? []), entry] }, ledgerOwnerDrafts: { ...state.ledgerOwnerDrafts, [key]: { ...state.ledgerOwnerDrafts[key], [entry.inputId]: entry } } }));
         return sendLedgerOwner(entry, opts.joinDelegation);
       }
@@ -4194,10 +4447,16 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
       if (!agent) return;
       const { id, host } = agent;
       if (ledgerOn(host)) {
-        const eligible = [...ledgerSession(id, host).records.values()].filter(record => record.kind === "owner" && record.actions?.includes("interruptSend"));
-        // Per-record controls name the input. A legacy grouped shortcut must not guess which of
-        // several accepted inputs to interrupt, or silently perform only the stop half.
-        if (eligible.length !== 1) throw new Error(translate("queue.insert.unknown"));
+        const session = ledgerSession(id, host);
+        // The unread 插话 of the running turn: all of them on a host that sends several at once (the row action
+        // expands from the first), one alone on any host. Several on an older host: it cannot take them in one
+        // interrupt, and one at a time would interrupt the turn the first one started — said, nothing is sent.
+        const steers = unreadSteers(session.records.values(), session.delivery?.turn?.turnId);
+        if (steers.length > 1 && !sendsManyAtOnce(featuresOn(host))) throw new Error(translate("interruptSend.oneAtATime"));
+        const eligible = steers.length ? steers : [...session.records.values()].filter(record => record.kind === "owner" && record.actions?.includes("interruptSend"));
+        // Without an unread 插话, a grouped shortcut must not guess which of several offered inputs to interrupt, or
+        // silently perform only the stop half.
+        if (!steers.length && eligible.length !== 1) throw new Error(translate("queue.insert.unknown"));
         await get().interruptSendInput(id, eligible[0]!.inputId, host);
         return;
       }

@@ -15,7 +15,7 @@ vi.mock("../src/renderer/src/lib/modelDisplay", async (importOriginal) => ({
   ...(await importOriginal<object>()), useModelName: () => (id: string) => id,
   modelLabel: (id: string) => id, updateProfileModelNames: () => {},
 }));
-import { ProfileModelFields } from "../src/renderer/src/components/settings/ProfileModelFields";
+import { ProfileContextRows, ProfileModelFields } from "../src/renderer/src/components/settings/ProfileModelFields";
 import { ProfileModelDialog } from "../src/renderer/src/components/settings/ProfileModelDialog";
 import { ModelList } from "../src/renderer/src/components/settings/ProfileModels";
 import { OfficialQuotaSection, QuotaConfigSection } from "../src/renderer/src/components/settings/ProfileQuota";
@@ -37,11 +37,14 @@ const headerChips = (element: Element) => [...element.querySelectorAll('button[d
 const row = (element: Element, key: string) => [...element.querySelectorAll("[data-setting-row]")].find((r) => r.textContent?.startsWith(key))!;
 
 it("states uniform Profile model timing once at page level", () => {
-  act(() => root.render(h(SettingsPage, { page: "profiles", children: h(Section, { title: "Models", children: h(ProfileModelFields, { detail, models: view, cfg: { model: "m" }, set: vi.fn() }) }) })));
+  act(() => root.render(h(SettingsPage, { page: "profiles", children: h(Section, { title: "Models", children: [
+    h(ProfileModelFields, { key: "m", detail, models: view, cfg: { model: "m" }, set: vi.fn() }),
+    h(ProfileContextRows, { key: "c", kind: "apiKey", detail, models: view, cfg: { model: "m" }, patch: {}, setOrDrop: vi.fn() }),
+  ] }) })));
   expect(headerChips(host)).toEqual(["settings.scope.agents.next"]);
   expect(host.querySelector('section button[data-timing-presentation="header"]')).toBeNull();
-  for (const name of ["model", "effort", "reasoningSummary", "contextWindow", "autoCompact"]) {
-    expect(chips(row(host, `agent-config.profile.${name}`))).toEqual([]);
+  for (const key of ["agent-config.profile.model", "agent-config.profile.effort", "agent-config.profile.reasoningSummary", "settings.modelContext.window", "settings.modelContext.compact"]) {
+    expect(chips(row(host, key))).toEqual([]);
   }
 });
 
@@ -49,9 +52,9 @@ it("keeps catalog draft metadata but omits per-field settings badges in the mode
   act(() => root.render(h(ProfileModelDialog, { model, profile: "p", view, names: true, onSaved: vi.fn(), onClose: vi.fn() })));
   const dialog = document.querySelector("dialog")!;
   expect(headerChips(dialog)).toEqual([]);
-  for (const name of ["contextWindow", "maxContextWindow", "autoCompact", "vision", "efforts", "defaultEffort"]) {
-    expect(chips(row(dialog, `agent-config.profile.${name}`))).toEqual([]);
-    expect(row(dialog, `agent-config.profile.${name}`).getAttribute("data-effect-timing")).toBe("next");
+  for (const key of ["settings.modelContext.window", "agent-config.profile.maxContextWindow", "settings.modelContext.compact", "agent-config.profile.vision", "agent-config.profile.efforts", "agent-config.profile.defaultEffort"]) {
+    expect(chips(row(dialog, key))).toEqual([]);
+    expect(row(dialog, key).getAttribute("data-effect-timing")).toBe("next");
   }
   const names = row(dialog, "agent-config.profile.displayName");
   expect(chips(names)).toEqual([]);
@@ -80,9 +83,9 @@ it("does not label a name-only catalog editor as changing runtime configuration"
 
 it("labels the catalog control once for runtime or display-only edits", () => {
   act(() => root.render(h(ModelList, { profile: "p", view, setView: vi.fn() })));
-  expect(chips(row(host, "settings.profileIa.catalogOverrides"))).toEqual(["settings.scope.agents.next"]);
+  expect(chips(row(host, "settings.modelContext.catalog"))).toEqual(["settings.scope.agents.next"]);
   act(() => root.render(h(ModelList, { profile: "p", view: { ...view, catalogSupported: false }, setView: vi.fn() })));
-  expect(chips(row(host, "settings.profileIa.catalogOverrides"))).toEqual([]);
+  expect(chips(row(host, "settings.modelContext.catalog"))).toEqual([]);
 });
 
 it("never marks read-only current quota or official quota results", () => {

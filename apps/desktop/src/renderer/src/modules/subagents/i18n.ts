@@ -32,6 +32,15 @@ export const zhCN = {
   "subagents.outcome.completed": "完成",
   "subagents.outcome.failed": "失败",
   "subagents.outcome.stopped": "已停止",
+  "subagents.unconfirmed": "结果未确认",
+  "subagents.unconfirmedHint": "{{agent}}已断开：没法再知道这个{{subagent}}是否还在运行，或怎样结束的。可以结束跟进。",
+  "subagents.stopOutcome.accepted": "已请求停止",
+  "subagents.stopOutcome.refused": "停止被拒绝（{reason}）",
+  "subagents.stopOutcome.unknown": "停止结果未确认",
+  "subagents.stopOutcome.noReason": "未说明原因",
+  "subagents.stopOutcome.acceptedHint": "停止请求已被接下；还没确认这个{{subagent}}已经停下。",
+  "subagents.stopOutcome.refusedHint": "停止请求没有被接受，这个{{subagent}}仍在运行。",
+  "subagents.stopOutcome.unknownHint": "停止请求已发出，但读不到结果：这个{{subagent}}可能仍在运行。可以再停止一次。",
 } as const;
 
 // Adds these keys to MessageKey (modules/i18nCatalog.ts collects the dictionary itself).

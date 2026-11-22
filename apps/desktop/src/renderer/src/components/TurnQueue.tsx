@@ -45,18 +45,21 @@ import { refusesImageSteer, type ImageSteering } from "../lib/imageSteer";
 import type { StripLabel } from "../lib/railStrip";
 import { INSERT_DWELL_MS, insertTargetShown, insertTargetState, mergeInsertShown } from "../lib/insertTarget";
 import { mergeableOwnerItem } from "../../../shared/queueMerge";
-import { heldKeys, splitHeld } from "../lib/stopHold";
+import { answerStartsAfterStop, heldKeys, perItemAdmission, splitHeld } from "../lib/stopHold";
 import { immediateStartItems, STARTS_NOW_STUCK_MS, useWaitedIds } from "../lib/legacyDelivery/settledRideAlongs";
 import { taskTag } from "../lib/tasks";
 import { useNow } from "../lib/time";
 import { queueViewOf, setQueueView } from "../lib/queueView";
 import { queueItemText, useApp, viewOf } from "../store";
+import { queuedRowText } from "../lib/queuePause";
 import { ledgerOrderRef } from "../lib/admissionOrder";
 import { AskTurnRow, KindIcon, NextStepRow, SteerDeliveryNote, TimingSlot, type RideAlongOrder } from "./AdmissionRows";
 import { META_YIELDS, QUEUE_ROW, ROW_ACTIONS, ROW_META, ROW_TEXT, rowText } from "../lib/queueRow";
 import { useUserLayoutToggle } from "../lib/userLayoutToggle";
 import { HoverActions, Rail, RailRow } from "./QueueRail";
 import { QueuedImages } from "./ImageThumbs";
+import { QueuedMessageInline } from "./QueuedMessageInline";
+import type { InputPart } from "../../../shared/inputPreview";
 import { messageImages } from "../../../shared/input";
 import { DROP_TINT, dropTint } from "../lib/dropTint";
 import { formatAutoRetryWait } from "../lib/modelOverloadRetry";
@@ -87,9 +90,11 @@ export function LedgerTurnQueue({ records, sessionId, hostId, items, canEdit, on
     const item = record.kind === "owner" ? byId.get(record.inputId) : undefined;
     const movable = !!item && !!admission && record.actions?.includes("edit");
     const handlers = item ? { insertNow: () => onSendNow?.(item), sendNow: () => onSendNow?.(item), edit: () => onEdit(item), remove: () => onDelete(item) } : undefined;
-    return <LedgerAdmissionRow key={record.inputId} record={record} sessionId={sessionId} hostId={hostId} body={item ? queueItemText(item) : undefined}
+    const step = record.kind === "delegationResult" ? admission?.nextStep?.find(n => n.id === record.inputId) : undefined;
+    return <LedgerAdmissionRow key={record.inputId} record={record} sessionId={sessionId} hostId={hostId} body={item ? queuedRowText(item) : undefined} queuedAt={item?.createdAt}
+      afterStop={!!step && answerStartsAfterStop(step, admission)}
       handlers={handlers} ctx={record.kind === "owner" ? { queueItem: !!item && (!!onSendNow || !record.actions?.includes("sendNow")), idle: !!sendNowStartsTurn, composerEmpty: canEdit } : undefined}
-      media={item ? <QueuedImages images={messageImages(item.input as { type: string }[])} hostId={hostId} /> : undefined}
+      inline={item ? (textWrap) => <QueuedMessageInline input={item.input as InputPart[]} hostId={hostId} textWrap={textWrap} /> : undefined}
       grip={movable ? <GripVertical size={12} className="shrink-0 cursor-grab text-subtle" aria-hidden /> : undefined}
       rowProps={{
         draggable: movable, tabIndex: movable ? 0 : undefined, title: movable ? t("queue.move.dragHint") : undefined,
@@ -408,14 +413,14 @@ export function TurnQueue({
   for (const item of boundary)
     boundaryList.push(
       <RailRow key={item.id} rail={bRail()}>
-        <NextStepRow item={item} running order={order} sessionId={sessionId} autoRetry={retry} />
+        <NextStepRow item={item} running order={order} sessionId={sessionId} autoRetry={retry} afterStop={answerStartsAfterStop(item, ordered)} />
       </RailRow>,
     );
 
   // ---- after-turn / starts-now rows (idle: the next-step ones lead in their own card, like the boundary card) ----
   const afterRow = (item: AdmissionNextStep, i: number) => (
     <RailRow key={`after:${item.id}`} rail={<Rail label={afterLabel} strip={afterStrip}>{i === 0 && (running ? <ArrowDownToLine size={12} /> : <Clock3 size={12} className="text-subtle" />)}</Rail>} testId={running ? "group-after-turn" : "group-starts-now"}>
-      <NextStepRow item={item} running={running} order={order} sessionId={sessionId} autoRetry={retry} stuck={!retry && !running && stuck.has(item.id)} idleNote={running ? undefined : t("queue.turn.startsNow")} />
+      <NextStepRow item={item} running={running} order={order} sessionId={sessionId} autoRetry={retry} stuck={!retry && !running && stuck.has(item.id)} idleNote={running ? undefined : t("queue.turn.startsNow")} afterStop={answerStartsAfterStop(item, ordered)} />
     </RailRow>
   );
   const startsNowList = startsNow.map((item, i) => afterRow(item, i));
@@ -425,7 +430,7 @@ export function TurnQueue({
   afterTurn.forEach((item, i) => queueList.push({ counts: true, node: afterRow(item, i + startsNow.length) }));
   // Held ride-alongs: their own group per reason, paused (no timing, no ring).
   for (const group of held) {
-    const keys = heldKeys(group.reason);
+    const keys = heldKeys(group.reason, perItemAdmission(nextStep));
     group.items.forEach((item, i) =>
       queueList.push({
         counts: true,

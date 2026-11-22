@@ -39,7 +39,8 @@ export function Ring({ ratio, size = 14, view = "used", segments }: {
     // push the ring off its row's centre line).
     <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="block shrink-0">
       <circle cx={mid} cy={mid} r={r} fill="none" stroke="var(--border)" strokeWidth="2" />
-      <circle
+      {/* Nothing used: no arc. A round cap on a zero-length arc draws a dot that reads as a loading spinner. */}
+      {ratio > 0 && <circle
         cx={mid}
         cy={mid}
         r={r}
@@ -49,7 +50,7 @@ export function Ring({ ratio, size = 14, view = "used", segments }: {
         strokeDasharray={`${c * Math.min(1, ratio)} ${c}`}
         transform={`rotate(-90 ${mid} ${mid})`}
         strokeLinecap="round"
-      />
+      />}
     </svg>
   );
 }

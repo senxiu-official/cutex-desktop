@@ -1,5 +1,8 @@
-// Working and recently finished sub-agents of an agent, and the category's useStatus.
+// Working and recently finished sub-agents of an agent, and the category's useStatus. With the agent offline, the
+// sub-agents last heard working stay as 结果未确认 rows until the owner ends follow-up on them (state surfaces S12,
+// lib/subagents unconfirmedSubAgents, lib/localFollowUp).
 import { useEffect } from "react";
+import { useI18n } from "../../i18n";
 import { Bot } from "lucide-react";
 import { StatusMore } from "../../components/StatusChip";
 import { activeSubAgents, useAgentOnline, useSubAgentLive } from "../../lib/background";
@@ -7,10 +10,11 @@ import { useAgentFeatures } from "../../lib/agentFeaturesView";
 import { canOpenSubAgent } from "../../lib/claudeTasks";
 import { finishedSubAgents, subAgentSpanFromThreadRead, type FinishedSubAgent } from "../../lib/finishedSubagents";
 import { useSessionTimeline } from "../../lib/statusItemsView";
-import { subAgentMetaFromThreadRead, type SubAgentInfo } from "../../lib/subagents";
+import { subAgentMetaFromThreadRead, unconfirmedSubAgents, type SubAgentInfo } from "../../lib/subagents";
+import { subagentFollowUpKey, useLocalFollowUpEnded } from "../../lib/localFollowUp";
 import { recordSubAgentMeta, recordSubAgentSpan, useSubAgentMeta, useSubAgentSpans } from "../../lib/subagentMetaStore";
 import { useApp } from "../../store";
-import { convApi, convViewOf, useConvScope } from "../../lib/conversationScope";
+import { convApi, convViewOf, useConvScope, useConvViewHost } from "../../lib/conversationScope";
 import type { StatusLine } from "../slots";
 
 export function useActiveSubAgents(sessionId: string): SubAgentInfo[] {
@@ -19,6 +23,29 @@ export function useActiveSubAgents(sessionId: string): SubAgentInfo[] {
   const live = useSubAgentLive(sessionId);
   const meta = useSubAgentMeta();
   return activeSubAgents(timeline, online, live, meta);
+}
+
+/** Sub-agents of an offline agent last heard working, without those the owner ended follow-up on. */
+export function useUnconfirmedSubAgents(sessionId: string): SubAgentInfo[] {
+  const timeline = useSessionTimeline(sessionId);
+  const online = useAgentOnline(sessionId);
+  const live = useSubAgentLive(sessionId);
+  const meta = useSubAgentMeta();
+  const hostId = useConvViewHost(sessionId);
+  const ended = useLocalFollowUpEnded();
+  return unconfirmedSubAgents(timeline, online, live, meta).filter((a) => !ended[subagentFollowUpKey(hostId, sessionId, a.threadId)]);
+}
+
+/**
+ * The rows of the category: working sub-agents, or (agent offline) the unconfirmed ones. A sub-agent the owner ended
+ * follow-up on stays hidden in both, so a reconnect that still reports it running does not bring it back.
+ */
+export function useShownSubAgents(sessionId: string): SubAgentInfo[] {
+  const hostId = useConvViewHost(sessionId);
+  const ended = useLocalFollowUpEnded();
+  const active = useActiveSubAgents(sessionId).filter((a) => !ended[subagentFollowUpKey(hostId, sessionId, a.threadId)]);
+  const unconfirmed = useUnconfirmedSubAgents(sessionId);
+  return active.length > 0 ? active : unconfirmed;
 }
 
 /** The 最近完成 group: the agent's last finished sub-agents, newest first (lib/finishedSubagents). */
@@ -69,7 +96,9 @@ export function useFinishedSpanReads(sessionId: string, rows: FinishedSubAgent[]
 }
 
 export function useSubagentsStatus(sessionId: string): { data: SubAgentInfo[]; line: StatusLine } | null {
-  const agents = useActiveSubAgents(sessionId);
+  const { t } = useI18n();
+  const agents = useShownSubAgents(sessionId);
+  const unconfirmed = !useAgentOnline(sessionId);
   const [first] = agents;
   if (!first) return null;
   const doing = first.message ?? first.task;
@@ -80,7 +109,7 @@ export function useSubagentsStatus(sessionId: string): { data: SubAgentInfo[]; l
       text: (
         <>
           <span className="font-medium">{first.name}</span>
-          {doing && <span className="ml-1.5 text-subtle">{doing}</span>}
+          {unconfirmed ? <span className="ml-1.5 text-warn-text">{t("subagents.unconfirmed")}</span> : doing && <span className="ml-1.5 text-subtle">{doing}</span>}
         </>
       ),
       title: agents.map((a) => a.name).join(", "),

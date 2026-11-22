@@ -7,7 +7,7 @@
 // hash, so they never change. By hand the owner may pick any colour (red included, the extra swatches or a custom
 // one): its ink is derived per theme (lib/folderInk) so the name still reads ≥ 4.5:1, and any icon of
 // lib/folderIcons.
-import { Archive, Bookmark, Box, Briefcase, Flag, Folder, Layers, Shapes, Tag, type LucideIcon } from "lucide-react";
+import { Archive, Bookmark, Box, Briefcase, Flag, Folder, FolderOpen, Layers, Shapes, Tag, type LucideIcon } from "lucide-react";
 import type { CSSProperties } from "react";
 import { FOLDER_ICON_BY_ID } from "./folderIcons";
 import { folderInks } from "./folderInk";
@@ -97,7 +97,7 @@ export function folderLook(id: string, choice?: FolderLookChoice): FolderLook {
   };
 }
 
-/** The CSS variables a folder's header (or the dialog's preview) needs for `.folder-ink` / `.folder-line`. */
+/** The CSS variables a folder's header (or the dialog's preview) needs for `.folder-ink`. */
 export function folderStyle(look: FolderLook): CSSProperties {
   return { "--folder-color": look.color, ...(look.ink ? { "--folder-ink-light": look.ink.light, "--folder-ink-dark": look.ink.dark } : { "--folder-ink-light": "initial", "--folder-ink-dark": "initial" }) } as CSSProperties;
 }
@@ -107,3 +107,9 @@ export function folderStyle(look: FolderLook): CSSProperties {
  * gets (FOLDER_ICONS, FOLDER_ICON_CHOICES, lib/folderIcons), so an owner folder of the same name never looks the same.
  */
 export const OLDER_FOLDER_LOOK: FolderLook = { color: "#64748B", icon: Archive };
+
+/**
+ * The automatic 「未分组」 folder (owner 2026-11-18): the projects in no 文件夹. Slate like 「更早的项目」, with an open
+ * folder no owner folder gets (not in FOLDER_ICON_CHOICES / lib/folderIcons).
+ */
+export const UNGROUPED_FOLDER_LOOK: FolderLook = { color: "#64748B", icon: FolderOpen };

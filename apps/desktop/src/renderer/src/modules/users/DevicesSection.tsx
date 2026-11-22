@@ -6,6 +6,7 @@
 // address, the user it belongs to (a select; 待分配 sends it back), 移除. A device that now uses another
 // person's identity says so (知道了 with `person-identity-ack`). A user filter (also set from a user's
 // counts), 添加设备 with the pairing requests (AddDevice.tsx), and the 新设备先待分配 switch at the bottom.
+import { useSettingsCard } from "../../lib/settingsDrafts";
 import { isImeComposing } from "../../lib/ime";
 import { useState } from "react";
 import { Fingerprint } from "lucide-react";
@@ -245,12 +246,14 @@ function ApprovalSetting({ list, write }: { list: UsersList; write: Write }) {
 
 /** The identity an unassigned device brought: who it is when a user already has the key, else its fingerprint + 「以后认出这个人」. */
 function PendingPerson({ list, token, remember, onRemember }: { list: UsersList; token: UserTokenRecord; remember: boolean; onRemember(on: boolean): void }) {
+  // 「记住这个人」 is part of the pending device's assignment: unsaved until it is assigned (lib/settingsDrafts).
+  const card = useSettingsCard();
   const { t } = useI18n();
   const person = tokenPerson(list, token);
   if (person.kind === "none") return null;
   const known = person.ownerId ? list.users.find((u) => u.id === person.ownerId) : undefined;
   return (
-    <div className="mt-1 ml-7 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-subtle" data-testid="pending-person">
+    <div ref={card.ref} className="mt-1 ml-7 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-subtle" data-testid="pending-person">
       <span className="flex items-center gap-1.5">
         <Fingerprint size={13} className="shrink-0" />
         {known && <UserDot user={known} />}

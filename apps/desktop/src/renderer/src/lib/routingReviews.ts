@@ -9,7 +9,7 @@ import { hostAccessNow, hostAccessStore, useHostAccess } from "./hostAccess";
 import { hostApi } from "./hostLists";
 import { captureHostAction, onHostReset } from "./hostSwitch";
 import { isUpgradeApprovalRead } from "./delegationApprovalRead";
-import { isConfirmedUpgradeResult, isKnownNoneUpgradeResult, isUpgradePreconditionFailure, unresolvedUpgradeActions as unresolved } from "./delegationOperations";
+import { blockingOperation, isConfirmedUpgradeResult, isKnownNoneUpgradeResult, isUpgradePreconditionFailure, operationScope, projectOperationScope, unresolvedUpgradeActions as unresolved } from "./delegationOperations";
 
 export const ROUTING_REVIEW_FEATURE = "delegation-review-refs";
 const listeners = new Set<() => void>();
@@ -66,28 +66,30 @@ export function useRoutingReview(host: string, ref: AskReviewReference, enabled:
   return state.key === key ? state : { key, record: null, error: false };
 }
 
-export function routingActionScope(host: string, project: string): string { return JSON.stringify([host, project]); }
-export function useRoutingOperation(host: string, project: string) {
-  const scope = routingActionScope(host, project);
-  return useSyncExternalStore(listener => unresolved.subscribe(listener), () => unresolved.get(scope) ?? null, () => null);
+/** The fence of one routing target (A1: per entity): `approval:<id>` decisions, `routing` grants/policy. */
+export function routingActionScope(host: string, project: string, entity: string): string { return operationScope(host, project, entity); }
+/** The unresolved operation blocking `entity` (its own or a legacy whole-project one), or null. */
+export function useRoutingOperation(host: string, project: string, entity: string) {
+  const own = operationScope(host, project, entity), legacy = projectOperationScope(host, project);
+  return useSyncExternalStore(listener => unresolved.subscribe(listener), () => unresolved.get(own) ?? unresolved.get(legacy) ?? null, () => null);
 }
 
-/** Serialize owner routing decisions and scoped one-use grant writes together. */
-export function beginRoutingWrite(host: string, project: string): boolean {
-  const scope = routingActionScope(host, project);
-  if (!permitted(host) || unresolved.has(scope) || writing.has(scope)) return false;
-  writing.add(scope);
+/** Serialize in-flight owner routing decisions and one-use grant writes of a project; an unknown outcome fences only its entity. */
+export function beginRoutingWrite(host: string, project: string, entity: string): boolean {
+  const key = projectOperationScope(host, project);
+  if (!permitted(host) || blockingOperation(host, project, entity) || writing.has(key)) return false;
+  writing.add(key);
   return true;
 }
 
 export function endRoutingWrite(host: string, project: string): void {
-  writing.delete(routingActionScope(host, project));
+  writing.delete(projectOperationScope(host, project));
 }
 
 /** The current full record authorizes the write; references and compact rows never provide CAS. */
 export async function decideRoutingReviewOn(host: string, shown: UpgradeApprovalRead, decision: ApprovalDecision): Promise<void> {
-  const scope = routingActionScope(host, shown.projectId);
-  if (!beginRoutingWrite(host, shown.projectId)) throw Error("routing_not_authorized");
+  const entity = `approval:${shown.id}`, scope = routingActionScope(host, shown.projectId, entity);
+  if (!beginRoutingWrite(host, shown.projectId, entity)) throw Error("routing_not_authorized");
   const current = captureHostAction(host), access = authority(host);
   let action: Extract<UpgradeAction, { kind: "decision" }> | null = null;
   try {
@@ -109,9 +111,10 @@ export async function decideRoutingReviewOn(host: string, shown: UpgradeApproval
 }
 
 /** Read the original receipt only. Unknown/notFound never sends a new mutation or replaces its id. */
-export async function checkRoutingOutcome(host: string, project: string): Promise<void> {
-  const scope = routingActionScope(host, project), action = unresolved.get(scope);
-  if (!action || !permitted(host)) return;
+export async function checkRoutingOutcome(host: string, project: string, entity: string): Promise<void> {
+  const blocking = blockingOperation(host, project, entity);
+  if (!blocking || !permitted(host)) return;
+  const { scope, action } = blocking;
   const current = captureHostAction(host), access = authority(host);
   const lookup = await hostApi(host).delegationUpgradeOperation(action.actionId);
   if (!current() || access !== authority(host)) return;

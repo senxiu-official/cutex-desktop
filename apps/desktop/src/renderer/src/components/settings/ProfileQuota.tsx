@@ -154,7 +154,7 @@ export function OfficialQuotaSection({ profile, claude, name = profile }: { prof
   const label = claude ? (claudeCutex ? "agent-config.quota.claudeCutex" : "agent-config.quota.claude") : "agent-config.quota.official";
   const empty = claude ? (claudeCutex ? "agent-config.quota.officialEmpty" : "agent-config.quota.claudeEmpty") : native ? "agent-config.quota.officialEmpty" : "agent-config.quota.officialPending";
   return (
-    <Section   title={t("agent-config.quota.title")} hint={claude ? undefined : t("settings.profileParity.officialQuotaHint" as MessageKey, { name })} actions={<RefreshButton label={t("composer.quota.refresh")} onClick={() => void loadQuota(profile, true)} />}>
+    <Section   title={t("agent-config.quota.title")} hint={claude ? undefined : t("settings.profileParity.officialQuotaHint" as MessageKey, { name })} actions={<RefreshButton label={t("composer.quota.refresh")} target={`${hostId}\u0000${profile}`} onClick={() => loadQuota(profile, true)} />}>
       <GaugesRow profile={profile} label={t(label)} empty={t(empty)} />
       {resets && (
         <SettingRow source="host" agents="now" label={t("resets.title")} hint={t("resets.hint")}>
@@ -203,7 +203,7 @@ export function QuotaConfigSection({ profile, name = profile, draft, setDraft }:
           t("agent-config.quota.customHint")
         );
   return (
-    <Section   title={t("agent-config.quota.title")} hint={t("settings.profileParity.apiQuotaHint" as MessageKey, { name })} actions={<RefreshButton label={t("composer.quota.refresh")} onClick={() => void loadQuota(profile, true)} />}>
+    <Section   title={t("agent-config.quota.title")} hint={t("settings.profileParity.apiQuotaHint" as MessageKey, { name })} actions={<RefreshButton label={t("composer.quota.refresh")} target={`${hostId}\u0000${profile}`} onClick={() => loadQuota(profile, true)} />}>
       <RowGroup title={t("settings.profileParity.quotaReadings" as MessageKey)} hint={t("settings.profileParity.quotaRefreshHint" as MessageKey)}>
       {/* No reader on: cutex reads nothing, so say so and offer the switch (saved by the save bar). */}
       {draft && quotaReadersOff(draft) ? (

@@ -18,8 +18,10 @@ export function useDelegationQuota(host: string, d: Pick<AskSummary, "target" | 
   return applies && view?.cutexSessionId === d.target ? view : null;
 }
 
+/** A closed runtime gate holds this delegation. Running counts too: cutex keeps a logical delegation running while
+ *  its effect-free input is retained behind the gate, with the same explicit hold. */
 export function gateClosed(d: AskSummary): boolean {
-  return !d.closed && !d.remote && (d.execution === "queued" || d.execution === "admitted")
+  return !d.closed && !d.remote && (d.execution === "queued" || d.execution === "admitted" || d.execution === "running")
     && d.hold?.reason === "heldByRuntime" && d.hold.native === "gate_closed";
 }
 

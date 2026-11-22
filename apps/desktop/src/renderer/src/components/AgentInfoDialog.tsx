@@ -217,7 +217,7 @@ export function AgentInfoDialog({ name, color, seed, initial, options, resolve }
                 <p className="text-caption/[inherit] text-subtle">{t("info.avatar.otherHint")}</p>
               </div>
             ) : (
-              <button type="button" onClick={() => setOtherOpen(true)} className="rounded-md px-1.5 py-0.5 text-xs text-muted hover:bg-surface-2 hover:text-foreground">
+              <button type="button" onClick={() => setOtherOpen(true)} className="press rounded-md px-1.5 py-0.5 text-xs text-muted hover:bg-surface-2 hover:text-foreground">
                 {t("info.avatar.other")}
               </button>
             )}
@@ -228,7 +228,7 @@ export function AgentInfoDialog({ name, color, seed, initial, options, resolve }
             <div className="flex flex-wrap items-center gap-1.5">
               {combineColor && (
                 <button type="button" onClick={() => { fixed(); setTint(null); }} title={t("info.avatar.profileColor")} aria-label={t("info.avatar.profileColor")} aria-pressed={tint === null}
-                  className="h-6 rounded-full border border-dashed border-border px-2 text-caption/[inherit] text-muted aria-pressed:ring-2 aria-pressed:ring-accent aria-pressed:ring-offset-2 aria-pressed:ring-offset-surface">
+                  className="press h-6 rounded-full border border-dashed border-border px-2 text-caption/[inherit] text-muted hover:text-foreground aria-pressed:ring-2 aria-pressed:ring-accent aria-pressed:ring-offset-2 aria-pressed:ring-offset-surface">
                   {t("info.avatar.profileColor")}
                 </button>
               )}
@@ -240,7 +240,7 @@ export function AgentInfoDialog({ name, color, seed, initial, options, resolve }
                   title={c}
                   aria-label={c}
                   aria-pressed={picked?.toLowerCase() === c}
-                  className="h-6 w-6 rounded-full aria-pressed:ring-2 aria-pressed:ring-accent aria-pressed:ring-offset-2 aria-pressed:ring-offset-surface"
+                  className="press-solid h-6 w-6 rounded-full hover:brightness-110 aria-pressed:ring-2 aria-pressed:ring-accent aria-pressed:ring-offset-2 aria-pressed:ring-offset-surface"
                   style={{ background: c }}
                 />
               ))}
@@ -256,7 +256,7 @@ export function AgentInfoDialog({ name, color, seed, initial, options, resolve }
         {kind === "picture" && (
           <div className="space-y-2">
             <button type="button" onClick={() => { setError(null); fileInput.current?.click(); }}
-              className="flex items-center gap-1.5 rounded-md border border-border px-2 py-1.5 text-xs hover:bg-surface-2">
+              className="press flex items-center gap-1.5 rounded-md border border-border px-2 py-1.5 text-xs hover:bg-surface-2">
               <Upload size={13} />{t(picture ? "info.avatar.replacePicture" : "info.avatar.upload")}
             </button>
             <p className="text-xs text-subtle">{t(icon && !picture ? "info.avatar.pictureElsewhere" : "info.avatar.pictureHint")}</p>
@@ -295,7 +295,7 @@ export function AgentInfoDialog({ name, color, seed, initial, options, resolve }
         </label>
       )}
       <div className="mt-4 flex justify-end gap-2">
-        <button type="button" onClick={() => done(null)} className="rounded-md px-3 py-1 text-sm text-muted hover:bg-surface-2">
+        <button type="button" onClick={() => done(null)} className="press rounded-md px-3 py-1 text-sm text-muted hover:bg-surface-2">
           {t("dialog.cancel")}
         </button>
         <button type="button" onClick={save} disabled={shown === "picture" && !icon} className={btn({ variant: "primary" })}>

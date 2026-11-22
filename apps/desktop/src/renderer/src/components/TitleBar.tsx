@@ -35,10 +35,14 @@ import { usePortrait } from "../lib/portrait";
 import { createPeekRest } from "../lib/sidebarPeek";
 import { useWindowKey } from "../lib/windowScope";
 import { IdentityChip } from "./IdentityMenu";
+import { ICON_GHOST } from "./Button";
 
 const win = bridge.window;
 const NO_DRAG = "[app-region:no-drag]";
-const ICON_BTN = `${NO_DRAG} rounded-md p-1.5 text-muted hover:bg-surface-2 hover:text-foreground`;
+// The shared bar icon button (components/Button ICON_GHOST: 28 px square, hover, pressed fill and press-in, focus ring,
+// disabled; owner 2026-11-18: the bar had a hover face only). Every button here is no-drag: the window drag region would
+// swallow its pointer events.
+const ICON_BTN = `${NO_DRAG} ${ICON_GHOST}`;
 
 /**
  * Keep the native window in the app's colours (theme and palette can change at runtime): the Windows
@@ -87,7 +91,7 @@ function SearchField({ entry }: { entry: AppSlotEntry<"window.search"> }) {
       data-tip={keys ? `${text} (${keys})` : text}
       aria-label={text}
       data-window-bar="search"
-      className={`${NO_DRAG} titlebar-capsule flex h-7 w-[340px] max-w-full min-w-[120px] shrink items-center gap-2 rounded-ctl bg-surface-2 pr-2 pl-2.5 text-ui/[inherit] text-subtle hover:bg-[color-mix(in_srgb,var(--fg)_9%,var(--surface-2))]`}
+      className={`${NO_DRAG} titlebar-capsule flex h-7 w-[340px] max-w-full min-w-[120px] shrink items-center gap-2 rounded-ctl bg-surface-2 pr-2 pl-2.5 text-ui/[inherit] text-subtle hover:bg-[color-mix(in_srgb,var(--fg)_9%,var(--surface-2))] active:bg-[color-mix(in_srgb,var(--fg)_15%,var(--surface-2))] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent`}
     >
       <Search size={14} className="shrink-0" />
       <span className="min-w-0 flex-1 truncate text-left">{text}</span>

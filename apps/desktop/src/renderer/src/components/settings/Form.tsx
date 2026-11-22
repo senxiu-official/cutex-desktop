@@ -16,6 +16,7 @@ import { useI18n } from "../../i18n";
 import { isImeComposing } from "../../lib/ime";
 import { graphemeCount } from "../../lib/graphemes";
 import { ARMED_BUTTON, useArmed } from "../../lib/armedConfirm";
+import { usePending } from "../../lib/usePending";
 import { FIELD_W } from "../../lib/fieldWidths";
 import { parseClamped, radioKeyTarget, RowA11yContext, useRowA11y } from "../../lib/formA11y";
 import { useLayoutView } from "../../lib/userLayoutView";
@@ -30,6 +31,7 @@ import { placeTip } from "../../lib/tips";
 import { useOwnerWindow } from "../../lib/ownerContext";
 import { ownerWindowOf } from "../../lib/ownerWindow";
 import { FILTER_FROM } from "../../lib/listFilter";
+import { settingsControlChanged } from "../../lib/settingsDrafts";
 
 const FOCUS = "outline-none focus-visible:ring-2 focus-visible:ring-accent/60 focus-visible:ring-offset-1 focus-visible:ring-offset-surface";
 const FIELD = "rounded-md border border-border bg-background px-2 py-1 text-sm outline-none focus:border-accent focus-visible:ring-2 focus-visible:ring-accent/30 disabled:opacity-50";
@@ -183,7 +185,7 @@ export function ScopeChip({ tone, icon, label, title, body, joined, timing }: { 
   }, [visible, layer, win]);
   return (
     <span ref={ref} className="relative inline-flex align-middle" onMouseEnter={timing ? () => setHovered(true) : undefined} onMouseLeave={timing ? () => setHovered(false) : undefined}>
-      <button type="button" aria-label={timing ? label : undefined} aria-expanded={visible} aria-controls={id} data-settings-agents={timing?.kind} data-timing-presentation={timing?.presentation} onClick={() => setOpen((v) => !v)} className={timing ? `inline-flex shrink-0 cursor-pointer items-center gap-1 rounded p-0.5 text-xs font-normal ${timing.kind === "none" || timing.kind === "mixed" || timing.kind === "access" ? "text-subtle" : "text-warn-text"} hover:bg-hover ${FOCUS}` : `${CHIP} ${CHIP_TONE[tone]} cursor-pointer hover:brightness-125 ${joined ? "rounded-r-none pr-1" : ""} ${FOCUS}`}>
+      <button type="button" aria-label={timing ? label : undefined} aria-expanded={visible} aria-controls={id} data-settings-agents={timing?.kind} data-timing-presentation={timing?.presentation} onClick={() => setOpen((v) => !v)} className={timing ? `inline-flex shrink-0 cursor-pointer items-center gap-1 rounded p-0.5 text-xs font-normal ${timing.kind === "none" || timing.kind === "mixed" || timing.kind === "access" ? "text-subtle" : "text-warn-text"} press hover:bg-hover ${FOCUS}` : `${CHIP} ${CHIP_TONE[tone]} press-solid cursor-pointer hover:brightness-125 ${joined ? "rounded-r-none pr-1" : ""} ${FOCUS}`}>
         {icon}
         {timing ? timing.presentation === "header" && <span className="text-muted">{timing.short}</span> : label}
       </button>
@@ -387,7 +389,7 @@ export function Section({ title, tabs, hint, children, actions, id, tag, picker,
   }, []);
   const filter =
     modified.size > 0 || only ? (
-      <label className="inline-flex cursor-pointer items-center gap-1.5 text-xs text-muted">
+      <label className="inline-flex cursor-pointer items-center gap-1.5 text-xs text-muted" data-settings-filter="">
         {t("settings.onlyModified", { n: modified.size })}
         <Toggle label={t("settings.onlyModified", { n: modified.size })} checked={only} onChange={setOnly} />
       </label>
@@ -516,7 +518,7 @@ function CardError({ message, onRetry }: { message: string; onRetry(): void }) {
   return (
     <div role="alert" data-card-error="" className="flex items-start gap-2 py-2.5 text-xs text-danger">
       <span className="min-w-0 flex-1 break-words select-text">{t("settings.cardError", { message })}</span>
-      <button type="button" onClick={onRetry} className={`shrink-0 rounded px-1.5 py-0.5 text-muted hover:bg-surface-2 hover:text-foreground ${FOCUS}`}>
+      <button type="button" onClick={onRetry} className={`press shrink-0 rounded px-1.5 py-0.5 text-muted hover:bg-surface-2 hover:text-foreground ${FOCUS}`}>
         {t("settings.cardRetry")}
       </button>
     </div>
@@ -651,7 +653,8 @@ export function SettingRow({ label, hint, info, children, reset, sample, agents,
             {label}
             {modified && <RestoreDefault onClick={reset$!.onClick} title={reset$!.title} />}
           </span>
-          {info && !hint && <InfoTip id={hintId}>{info}</InfoTip>}
+          {/* R7: a one-line hint and the rest in the ⓘ can both be present; the hint keeps the row's description id. */}
+          {info && <InfoTip id={hint ? `${hintId}-info` : hintId}>{info}</InfoTip>}
           <EffectMarkers agents={agents} source={source} allHosts={allHosts} readOnly={readOnly || navigation} row />
         </div>
         {hint && (
@@ -690,7 +693,7 @@ function RestoreDefault({ onClick, title }: { onClick(): void; title?: string })
       title={label}
       aria-label={label}
       onClick={onClick}
-      className={`absolute top-1/2 left-full z-10 ml-1.5 inline-flex h-5 -translate-y-1/2 items-center gap-1 rounded bg-surface px-1 text-caption/[inherit] whitespace-nowrap text-subtle opacity-0 group-hover/row:opacity-100 group-focus-within/row:opacity-100 hover:bg-surface-2 hover:text-foreground focus-visible:opacity-100 ${FOCUS}`}
+      className={`absolute top-1/2 left-full z-10 ml-1.5 inline-flex h-5 -translate-y-1/2 items-center gap-1 rounded bg-surface px-1 text-caption/[inherit] whitespace-nowrap text-subtle press opacity-0 group-hover/row:opacity-100 group-focus-within/row:opacity-100 hover:bg-surface-2 hover:text-foreground focus-visible:opacity-100 ${FOCUS}`}
     >
       <RotateCcw size={12} aria-hidden />
       {t("appearance.reset")}
@@ -721,7 +724,7 @@ export function RadioList<T extends string>({ name, value, options, onChange, la
     <div role="radiogroup" aria-label={label} data-settings-radio-list="" className="py-1.5">
       {options.map((o) => (
         <label key={o.value} className="flex cursor-pointer items-start gap-2 py-1 text-sm">
-          <input type="radio" name={name} checked={value === o.value} onChange={() => onChange(o.value)} className="mt-1 accent-[var(--color-accent)]" />
+          <input type="radio" name={name} checked={value === o.value} data-settings-control="" onChange={(e) => settingsControlChanged(e.currentTarget, onChange(o.value))} className="mt-1 accent-[var(--color-accent)]" />
           <span className="min-w-0">
             {o.label}
             {o.extra}
@@ -736,7 +739,7 @@ export function RadioList<T extends string>({ name, value, options, onChange, la
 /** A link-styled text button with a trailing →, e.g. a page header's related page. */
 export function TextLink({ children, onClick }: { children: ReactNode; onClick(): void }) {
   return (
-    <button type="button" onClick={onClick} className={`inline-flex min-w-0 max-w-full items-center gap-1 rounded text-xs text-accent hover:underline ${FOCUS}`}>
+    <button type="button" onClick={onClick} className={`press inline-flex min-w-0 max-w-full items-center gap-1 rounded text-xs text-accent hover:underline ${FOCUS}`}>
       <span className="truncate">{children}</span>
       <ArrowRight size={12} className="shrink-0" aria-hidden />
     </button>
@@ -751,7 +754,7 @@ export function PartNav({ label, parts, onJump }: { label: string; parts: readon
   return (
     <nav aria-label={label} data-settings-part-nav="" className="mb-5 flex flex-wrap gap-1.5">
       {parts.map((p) => (
-        <button key={p.anchor} type="button" onClick={() => onJump(p.anchor)} className={`rounded-full bg-surface-2 px-2.5 py-0.5 text-xs text-muted hover:bg-hover hover:text-foreground ${FOCUS}`}>
+        <button key={p.anchor} type="button" onClick={() => onJump(p.anchor)} className={`press rounded-full bg-surface-2 px-2.5 py-0.5 text-xs text-muted hover:bg-hover hover:text-foreground ${FOCUS}`}>
           {p.label}
         </button>
       ))}
@@ -766,7 +769,7 @@ export function PartHeading({ children }: { children: ReactNode }) {
 /** The entry to a sub-page: its name, what is there (or how many), and ›. The whole row opens it. */
 export function SubPageRow({ title, summary, effect, onOpen }: { title: ReactNode; summary?: ReactNode; /** What the card's rows do, so its header keeps its tags. */ effect?: Pick<SettingEffect, "agents" | "source">; onOpen(): void }) {
   return (
-    <SettingsGroup navigation={!effect} agents={effect?.agents ?? "none"} source={effect?.source ?? "local"}><button type="button" data-settings-subpage="" onClick={onOpen} className={`-mx-4 flex w-[calc(100%+2rem)] min-w-0 items-center gap-3 border-b border-border px-4 py-2.5 text-left last:border-b-0 hover:bg-surface-2/60 ${FOCUS}`}>
+    <SettingsGroup navigation={!effect} agents={effect?.agents ?? "none"} source={effect?.source ?? "local"}><button type="button" data-settings-subpage="" onClick={onOpen} className={`-mx-4 flex w-[calc(100%+2rem)] min-w-0 items-center gap-3 border-b border-border px-4 py-2.5 text-left last:border-b-0 hover:bg-surface-2/60 press ${FOCUS}`}>
       <span className="shrink-0 text-sm text-foreground">{title}</span>
       {summary && <span className="min-w-0 flex-1 truncate text-xs text-subtle">{summary}</span>}
       <ChevronRight size={14} aria-hidden className="ml-auto shrink-0 text-subtle" />
@@ -778,13 +781,13 @@ export function SubPageRow({ title, summary, effect, onOpen }: { title: ReactNod
 export function ListFilter({ count, value, onChange }: { count: number; value: string; onChange(value: string): void }) {
   const { t } = useI18n();
   if (count <= FILTER_FROM && !value) return null;
-  return <div className="py-2" data-settings-list-filter=""><TextInput value={value} onChange={onChange} width="w-56" label={t("settings.filter")} placeholder={t("settings.filter")} /></div>;
+  return <div className="py-2" data-settings-list-filter=""><TextInput search value={value} onChange={onChange} width="w-56" label={t("settings.filter")} placeholder={t("settings.filter")} /></div>;
 }
 
 /** A link-styled way back with a leading ‹, e.g. a host's page's 「‹ 主机」. */
 export function BackLink({ children, onClick }: { children: ReactNode; onClick(): void }) {
   return (
-    <button type="button" data-settings-back onClick={onClick} className={`-ml-0.5 inline-flex items-center gap-0.5 rounded text-xs text-accent hover:underline ${FOCUS}`}>
+    <button type="button" data-settings-back onClick={onClick} className={`press -ml-0.5 inline-flex items-center gap-0.5 rounded text-xs text-accent hover:underline ${FOCUS}`}>
       <ChevronLeft size={13} aria-hidden />
       {children}
     </button>
@@ -801,7 +804,7 @@ export function Details({ children, label }: { children: ReactNode; label?: stri
   const id = useId();
   return (
     <div className="border-b border-border/60 last:border-b-0" data-details={open ? "open" : "closed"}>
-      <button type="button" aria-expanded={open} aria-controls={id} onClick={() => setOpen((o) => !o)} className={`-mx-1 my-1.5 flex items-center gap-1 rounded px-1 py-1 text-xs text-muted hover:text-foreground ${FOCUS}`}>
+      <button type="button" aria-expanded={open} aria-controls={id} onClick={() => setOpen((o) => !o)} className={`press -mx-1 my-1.5 flex items-center gap-1 rounded px-1 py-1 text-xs text-muted hover:text-foreground ${FOCUS}`}>
         {open ? <ChevronDown size={13} aria-hidden /> : <ChevronRight size={13} aria-hidden />}
         {label ?? t("settings.details")}
       </button>
@@ -818,7 +821,7 @@ export function Details({ children, label }: { children: ReactNode; label?: stri
 export function LinkRow({ label, hint, link, onClick, agents, source, allHosts }: SettingEffect & { label: ReactNode; hint?: ReactNode; link: string; onClick(): void }) {
   return (
     <SettingRow label={label} hint={hint} agents={agents} source={source} allHosts={allHosts} readOnly navigation>
-      <button onClick={onClick} className={`rounded text-xs text-accent hover:underline ${FOCUS}`}>
+      <button onClick={onClick} className={`press rounded text-xs text-accent hover:underline ${FOCUS}`}>
         {link}
       </button>
     </SettingRow>
@@ -828,7 +831,7 @@ export function LinkRow({ label, hint, link, onClick, agents, source, allHosts }
 /** A text action inside a SettingRow hint (「恢复官方地址」…): link-styled, so the control column never shifts. */
 export function HintAction({ children, onClick, title, disabled }: { children: ReactNode; onClick(): void; title?: string; disabled?: boolean }) {
   return (
-    <button type="button" title={title} disabled={disabled} onClick={onClick} className={`ml-1.5 rounded text-accent hover:underline disabled:opacity-40 ${FOCUS}`}>
+    <button type="button" title={title} disabled={disabled} onClick={onClick} className={`press ml-1.5 rounded text-accent hover:underline disabled:opacity-40 ${FOCUS}`}>
       {children}
     </button>
   );
@@ -839,18 +842,20 @@ export function ResetButton({ disabled, onClick, title }: { disabled?: boolean; 
   const { t } = useI18n();
   const label = title ?? t("appearance.reset");
   return (
-    <button title={label} aria-label={label} disabled={disabled} onClick={onClick} className={`rounded p-1 text-subtle hover:bg-surface-2 hover:text-foreground disabled:invisible ${FOCUS}`}>
+    <button title={label} aria-label={label} disabled={disabled} onClick={onClick} className={`press rounded p-1 text-subtle hover:bg-surface-2 hover:text-foreground disabled:invisible ${FOCUS}`}>
       <RotateCcw size={13} />
     </button>
   );
 }
 
 /** Icon-only button (refresh / add / remove…): always has an accessible name and a tooltip. */
-export function IconButton({ label, onClick, disabled, children, danger }: { label: string; onClick(e: React.MouseEvent<HTMLButtonElement>): void; disabled?: boolean; children: ReactNode; danger?: boolean }) {
+export function IconButton({ label, onClick, disabled, children, danger, busy }: { label: string; onClick(e: React.MouseEvent<HTMLButtonElement>): void; disabled?: boolean; children: ReactNode; danger?: boolean; busy?: boolean }) {
   return (
     <button
       title={label}
       aria-label={label}
+      aria-busy={busy || undefined}
+      data-pending={busy ? "" : undefined}
       disabled={disabled}
       onClick={onClick}
       className={`${btn({ variant: "ghost", size: "sm", icon: true })} ${danger ? "hover:text-danger" : ""}`}
@@ -860,11 +865,18 @@ export function IconButton({ label, onClick, disabled, children, danger }: { lab
   );
 }
 
-export function RefreshButton({ onClick, disabled, label }: { onClick(): void; disabled?: boolean; label?: string }) {
+/**
+ * ↻ for a card. A handler that returns its request (a promise) gets the pending state: the icon turns and the button
+ * says it is busy until it settles (`pending` forces it, e.g. a load started elsewhere).
+ */
+/** `target`: what it reloads now (e.g. host + Profile), so a request for an earlier target never holds this one (lib/usePending). */
+export function RefreshButton({ onClick, disabled, pending, label, target }: { onClick(): unknown; disabled?: boolean; pending?: boolean; label?: string; target?: string }) {
   const { t } = useI18n();
+  const own = usePending(target);
+  const busy = !!pending || own.pending;
   return (
-    <IconButton label={label ?? t("settings.reload")} disabled={disabled} onClick={onClick}>
-      <RotateCw size={14} />
+    <IconButton label={label ?? t("settings.reload")} disabled={disabled} busy={busy} onClick={() => !busy && own.run(onClick)}>
+      <RotateCw size={14} className={busy ? "animate-spin" : undefined} />
     </IconButton>
   );
 }
@@ -1003,15 +1015,15 @@ export function Segmented<T extends string>({ value, options, onChange, disabled
             title={o.title}
             tabIndex={i === selected ? 0 : -1}
             disabled={disabled}
-            onClick={() => onChange(o.value)}
+            onClick={(e) => settingsControlChanged(e.currentTarget, onChange(o.value))}
             onKeyDown={(e) => {
               const next = radioKeyTarget(e.key, i, options.length);
               if (next === null) return;
               e.preventDefault();
               refs.current[next]?.focus();
-              onChange(options[next]!.value);
+              settingsControlChanged(e.currentTarget, onChange(options[next]!.value));
             }}
-            className={`rounded-md px-2.5 py-1 text-xs whitespace-nowrap ${o.icon ? "inline-flex items-center gap-1.5" : ""} ${FOCUS} ${on ? (accent ? "bg-accent text-white shadow-sm" : "bg-raised text-foreground shadow-sm ring-1 ring-border") : "text-muted hover:text-foreground"}`}
+            className={`rounded-md px-2.5 py-1 text-xs whitespace-nowrap ${o.icon ? "inline-flex items-center gap-1.5" : ""} ${FOCUS} ${on ? (accent ? "bg-accent text-white shadow-sm" : "bg-raised text-foreground shadow-sm ring-1 ring-border") : "press text-muted hover:text-foreground"}`}
           >
             {o.icon}
             {o.label}
@@ -1023,7 +1035,7 @@ export function Segmented<T extends string>({ value, options, onChange, disabled
 }
 
 /** Raw controlled text input, for draft forms (add host, add MCP server…) that save with a button. */
-export function TextInput({ value, onChange, placeholder, mono, width = "w-64", disabled, type = "text", maxLength, label, onBlur, onKeyDown, autoFocus }: { value: string; onChange(v: string): void; placeholder?: string; mono?: boolean; width?: string; disabled?: boolean; type?: "text" | "password"; maxLength?: number; label?: string; onBlur?(): void; onKeyDown?(e: React.KeyboardEvent<HTMLInputElement>): void; autoFocus?: boolean }) {
+export function TextInput({ value, onChange, placeholder, mono, width = "w-64", disabled, type = "text", maxLength, label, onBlur, onKeyDown, autoFocus, search, inputRef }: { value: string; onChange(v: string): void; placeholder?: string; mono?: boolean; width?: string; disabled?: boolean; type?: "text" | "password"; maxLength?: number; label?: string; onBlur?(): void; onKeyDown?(e: React.KeyboardEvent<HTMLInputElement>): void; autoFocus?: boolean; /** A filter / search box: never an unsaved edit (lib/settingsDrafts). */ search?: boolean; /** The input (TextField; a field that is a Settings card of its own, lib/settingsDrafts). */ inputRef?: React.Ref<HTMLInputElement> }) {
   const aria = useRowA11y(label);
   const { t } = useI18n();
   const composing = useRef(false);
@@ -1037,9 +1049,14 @@ export function TextInput({ value, onChange, placeholder, mono, width = "w-64", 
   useEffect(() => { input.current?.setCustomValidity(problem); }, [problem]);
   const field = (
     <input
-      ref={input}
+      ref={(el) => {
+        input.current = el;
+        if (typeof inputRef === "function") inputRef(el);
+        else if (inputRef) inputRef.current = el;
+      }}
       type={type}
       {...aria}
+      data-settings-filter={search ? "" : undefined}
       autoComplete={type === "password" ? "off" : undefined}
       value={shown}
       autoFocus={autoFocus}
@@ -1088,13 +1105,31 @@ export function TextField({ value, onCommit, placeholder, mono, width = "w-64", 
   const { t } = useI18n();
   const [draft, setDraft] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const box = useRef<HTMLInputElement | null>(null);
+  // Each edit (typing, Esc) is a new revision; a save that failed gives back its text only if none came since (final
+  // review 2026-11-18: a late failure never overwrites newer text or an Esc).
+  const edits = useRef(0);
+  const edit = (next: string | null) => {
+    edits.current += 1;
+    setDraft(next);
+  };
   const commit = async () => {
     if (draft === null) return;
     const next = draft;
     if (maxLength !== undefined && graphemeCount(next) > maxLength) return;
     setDraft(null);
     if (next === value) return;
-    await onCommit(next);
+    const carried = edits.current;
+    const run = (async () => {
+      if ((await onCommit(next)) === false) throw new Error("not saved");
+    })();
+    settingsControlChanged(box.current, run);
+    try {
+      await run;
+    } catch {
+      if (edits.current === carried) setDraft(next);
+      return;
+    }
     setSaved(true);
     setTimeout(() => setSaved(false), 1500);
   };
@@ -1102,6 +1137,7 @@ export function TextField({ value, onCommit, placeholder, mono, width = "w-64", 
     <>
       {saved && <span className="text-xs text-subtle">{t("settings.saved")}</span>}
       <TextInput
+        inputRef={box}
         label={label}
         mono={mono}
         width={width}
@@ -1109,11 +1145,11 @@ export function TextField({ value, onCommit, placeholder, mono, width = "w-64", 
         maxLength={maxLength}
         placeholder={placeholder}
         value={draft ?? value}
-        onChange={setDraft}
+        onChange={edit}
         onBlur={() => void commit()}
         onKeyDown={(e) => {
           if (e.key === "Enter") void commit();
-          if (e.key === "Escape") setDraft(null);
+          if (e.key === "Escape") edit(null);
         }}
       />
     </>
@@ -1133,16 +1169,17 @@ export function NumberField({ value, range, unit, step = 1, slider, onCommit, di
   const aria = useRowA11y(label);
   const [draft, setDraft] = useState<string | null>(null);
   const [dragging, setDragging] = useState<number | null>(null);
-  const release = () => {
+  const box = useRef<HTMLInputElement | null>(null);
+  const release = (e: { currentTarget: Element }) => {
     if (dragging === null) return;
-    if (dragging !== value) onCommit(dragging);
+    if (dragging !== value) settingsControlChanged(e.currentTarget, onCommit(dragging));
     setDragging(null);
   };
   const shown = dragging ?? value;
   const commit = () => {
     if (draft === null) return;
     const n = parseClamped(draft, range);
-    if (n !== value && (n !== null || draft.trim() === "")) onCommit(n);
+    if (n !== value && (n !== null || draft.trim() === "")) settingsControlChanged(box.current, onCommit(n));
     setDraft(null);
   };
   return (
@@ -1156,7 +1193,8 @@ export function NumberField({ value, range, unit, step = 1, slider, onCommit, di
           step={step}
           value={shown ?? range[0]}
           disabled={disabled}
-          onChange={(e) => (commitOnRelease ? setDragging(Number(e.target.value)) : onCommit(Number(e.target.value)))}
+          data-settings-control=""
+          onChange={(e) => (commitOnRelease ? setDragging(Number(e.target.value)) : settingsControlChanged(e.currentTarget, onCommit(Number(e.target.value))))}
           onPointerUp={commitOnRelease ? release : undefined}
           onKeyUp={commitOnRelease ? release : undefined}
           onBlur={commitOnRelease ? release : undefined}
@@ -1164,6 +1202,7 @@ export function NumberField({ value, range, unit, step = 1, slider, onCommit, di
         />
       )}
       <input
+        ref={box}
         type="text"
         inputMode="numeric"
         {...aria}
@@ -1202,15 +1241,15 @@ export function SwatchPicker<T extends string>({ value, options, onChange, label
             role="radio"
             aria-checked={on}
             tabIndex={on ? 0 : -1}
-            onClick={() => onChange(o.value)}
+            onClick={(e) => settingsControlChanged(e.currentTarget, onChange(o.value))}
             onKeyDown={(e) => {
               const next = radioKeyTarget(e.key, i, options.length);
               if (next === null) return;
               e.preventDefault();
-              onChange(options[next]!.value);
+              settingsControlChanged(e.currentTarget, onChange(options[next]!.value));
               (e.currentTarget.parentElement?.children[next] as HTMLElement | undefined)?.focus();
             }}
-            className={`inline-flex h-7 items-center gap-1.5 rounded-md border px-2 text-xs ${on ? "border-accent bg-accent/10 text-foreground" : "border-border text-muted hover:text-foreground"} ${FOCUS}`}
+            className={`inline-flex h-7 items-center gap-1.5 rounded-md border px-2 text-xs ${on ? "border-accent bg-accent/10 text-foreground" : "press border-border text-muted hover:text-foreground"} ${FOCUS}`}
           >
             <span aria-hidden className="h-3.5 w-3.5 shrink-0 rounded-full ring-1 ring-border" style={{ background: `linear-gradient(135deg, ${o.colors[0]} 50%, ${o.colors[1]} 50%)` }} />
             {o.label}
@@ -1243,7 +1282,7 @@ export function Select<T extends string>({ value, options, onChange, disabled, w
   const aria = useRowA11y(label);
   const current = options.find((o) => o.value === value)?.label;
   return (
-    <select {...aria} value={value} disabled={disabled} title={current} onChange={(e) => onChange(e.target.value as T)} className={`${width} truncate ${FIELD}`}>
+    <select {...aria} value={value} disabled={disabled} title={current} data-settings-control="" onChange={(e) => settingsControlChanged(e.currentTarget, onChange(e.target.value as T))} className={`${width} truncate ${FIELD}`}>
       {/* `group`: consecutive options sharing it sit under one <optgroup>. */}
       {optionRuns(options).map((run) =>
         run.group ? (
@@ -1266,8 +1305,8 @@ export function Toggle({ checked, onChange, disabled, label }: { checked: boolea
       {...aria}
       aria-checked={checked}
       disabled={disabled}
-      onClick={() => onChange(!checked)}
-      className={`relative h-5 w-9 shrink-0 rounded-full transition-colors disabled:opacity-50 ${FOCUS} ${checked ? "bg-accent" : "bg-surface-2 ring-1 ring-border ring-inset"}`}
+      onClick={(e) => settingsControlChanged(e.currentTarget, onChange(!checked))}
+      className={`press-solid relative h-5 w-9 shrink-0 rounded-full transition-colors disabled:opacity-50 ${FOCUS} ${checked ? "bg-accent" : "bg-surface-2 ring-1 ring-border ring-inset"}`}
     >
       <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${checked ? "left-[18px]" : "left-0.5"}`} />
     </button>
@@ -1287,8 +1326,8 @@ export function Checkbox({ checked, onChange, disabled, label }: { checked: bool
       aria-checked={checked}
       aria-label={label}
       disabled={disabled}
-      onClick={() => onChange(!checked)}
-      className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border transition-colors disabled:opacity-40 ${FOCUS} ${checked ? "border-accent bg-accent text-white" : "border-border bg-background hover:border-accent/70"}`}
+      onClick={(e) => settingsControlChanged(e.currentTarget, onChange(!checked))}
+      className={`press-solid flex h-4 w-4 shrink-0 items-center justify-center rounded border transition-colors disabled:opacity-40 ${FOCUS} ${checked ? "border-accent bg-accent text-white" : "border-border bg-background hover:border-accent/70"}`}
     >
       {checked && <Check size={11} strokeWidth={3} />}
     </button>

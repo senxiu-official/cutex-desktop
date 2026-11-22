@@ -116,21 +116,25 @@ describe("the independent group next to a folder", () => {
 });
 
 describe("system rows and the roster spacing table (owner 2026-11-06)", () => {
-  it("a system row is grey with a system line (虚线 by default, 灰底条 by the setting); a folder keeps its coloured line", async () => {
+  it("a system row is grey with a system gap (无线 by default, 虚线 / 灰底条 by the setting); a folder header has no line (owner 2026-11-18)", async () => {
     setUiPref("sidebarSections", [{ id: "s-life", name: "生活", collapsed: false, members: [KEY] }]);
     await render(h(Sidebar));
     const roster = container.querySelector<HTMLElement>("[data-sidebar-roster]")!;
-    expect(getUiPrefs().systemRows).toBe("line");
-    expect(roster.dataset.systemRows).toBe("line");
+    expect(getUiPrefs().systemRows).toBe("plain");
+    expect(roster.dataset.systemRows).toBe("plain");
     const solo = container.querySelector<HTMLElement>("[data-group-key*=\"__independent__\"] [data-standalone-header]")!;
     expect(solo.hasAttribute("data-system-row")).toBe(true);
     expect(solo.querySelector(".system-line")).not.toBeNull();
     const folder = container.querySelector<HTMLElement>("[data-sidebar-section] [data-folder-header]")!;
     expect(folder.hasAttribute("data-system-row")).toBe(false);
-    expect(folder.querySelector(".folder-line")).not.toBeNull();
+    expect(folder.querySelector(".folder-line")).toBeNull();
+    // The stuck layout in place: name, then the count right-aligned (the last thing in the row).
+    expect(folder.lastElementChild!.hasAttribute("data-folder-count")).toBe(true);
+    await act(async () => setUiPref("systemRows", "line"));
+    expect(container.querySelector<HTMLElement>("[data-sidebar-roster]")!.dataset.systemRows).toBe("line");
     await act(async () => setUiPref("systemRows", "band"));
     expect(container.querySelector<HTMLElement>("[data-sidebar-roster]")!.dataset.systemRows).toBe("band");
-    setUiPref("systemRows", "line");
+    setUiPref("systemRows", "plain");
     setUiPref("sidebarSections", []);
   });
 

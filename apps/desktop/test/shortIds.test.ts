@@ -137,9 +137,9 @@ describe("delegation rows with short ids (cutex task 06)", () => {
     const delegated = done("agent_delegate", { target: "KiMi", title: "Short parser", text: "Review it" }, { ok: true, delegation_id: "ask-5a5a5a", target: "Kimi", target_id: "cutex.…0000b1", state: "queued" });
     expect(taskToolRow(delegated)).toMatchObject({ verb: "delegate", counterpartId: "cutex.…0000b1", counterpartName: "Kimi" });
     // Later calls name the delegation fully, by the grown display form, or by the agent's own prefix.
-    expect(taskToolRow(done("delegation_stop", { delegation: "ask-5a5a5a00000000000000000000000000" }, { ok: true }))).toMatchObject({ verb: "delegationStop", text: "Short parser" });
-    expect(taskToolRow(done("delegation_close", { delegation: "ask-5a5a5a0", outcome: "accepted" }, { ok: true }))).toMatchObject({ verb: "delegationAccept", text: "Short parser" });
-    expect(taskToolRow(done("delegation_read", { delegation: "5a5a5a" }, { ok: true }))?.text).toBe("Short parser");
+    expect(taskToolRow(done("delegation_stop", { delegation: "ask-5a5a5a00000000000000000000000000" }, { ok: true }))).toMatchObject({ verb: "delegationStop", delegation: { title: "Short parser", label: true } });
+    expect(taskToolRow(done("delegation_close", { delegation: "ask-5a5a5a0", outcome: "accepted" }, { ok: true }))).toMatchObject({ verb: "delegationAccept", delegation: { title: "Short parser" } });
+    expect(taskToolRow(done("delegation_read", { delegation: "5a5a5a" }, { ok: true }))?.delegation?.title).toBe("Short parser");
     expect(taskToolRow(done("delegation_wait", { delegations: ["ask-5a5a5a"] }, { ok: true, results: [] }))?.detail).toBe("Short parser");
   });
 
@@ -165,7 +165,7 @@ describe("delegation rows with short ids (cutex task 06)", () => {
   it("still handles the full-id format of older daemons", () => {
     const delegated = done("agent_delegate", { target: TARGET, title: "Full parser" }, { ok: true, delegation_id: "ask-7b7b7b00000000000000000000000000", target: "Kimi", target_id: TARGET });
     expect(taskToolRow(delegated)).toMatchObject({ counterpartId: TARGET, counterpartName: "Kimi" });
-    expect(taskToolRow(done("delegation_stop", { delegation: "ask-7b7b7b00000000000000000000000000" }, { ok: true }))?.text).toBe("Full parser");
+    expect(taskToolRow(done("delegation_stop", { delegation: "ask-7b7b7b00000000000000000000000000" }, { ok: true }))?.delegation?.title).toBe("Full parser");
     expect(taskToolRow(done("agent_tell", { to: TARGET, text: "hi" }, { ok: true, to: TARGET }))?.counterpartId).toBe(TARGET);
   });
 });

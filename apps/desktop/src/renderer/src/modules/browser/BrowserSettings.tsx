@@ -27,12 +27,21 @@ const HOST_PART_REQUIRES = ["browser-relay-v1"] as const;
 function BrowserExternalPagesSettings() {
   const { t } = useI18n();
   const [view, setView] = useState<BrowserExternalPagesView | null>(null);
+  const [proxy, setProxy] = useState<{ enabled: boolean } | null>(null);
   const [busy, setBusy] = useState(false), [error, setError] = useState<string | null>(null);
   useEffect(() => {
     let live = true;
     void bridge.browser?.externalPages().then(next => { if (live) setView(next); }, reason => { if (live) setError(browserError(reason)); });
+    void bridge.browser?.systemProxy?.().then(next => { if (live) setProxy(next); }, reason => { if (live) setError(browserError(reason)); });
     return () => { live = false; };
   }, []);
+  async function changeProxy(enabled: boolean) {
+    if (!bridge.browser?.systemProxy || busy) return;
+    setBusy(true); setError(null);
+    try { setProxy(await bridge.browser.systemProxy(enabled)); }
+    catch (reason) { setError(browserError(reason)); }
+    finally { setBusy(false); }
+  }
   async function change(enabled: boolean) {
     if (!bridge.browser || busy) return;
     setBusy(true); setError(null);
@@ -47,6 +56,12 @@ function BrowserExternalPagesSettings() {
       </span>
     </SettingRow>
     {view?.forced && <p role="status" className="text-xs text-subtle">{t("browser.externalPages.forced")}</p>}
+    {/* Main stores it and N2 applies it per connection; LAN / local addresses never go through the proxy. */}
+    <SettingRow agents="now" source="local" label={t("browser.systemProxy.label")} hint={t("browser.systemProxy.hint")}>
+      <span data-browser-system-proxy>
+        <Toggle checked={proxy?.enabled ?? false} disabled={!bridge.browser?.systemProxy || !proxy || busy} label={t("browser.systemProxy.label")} onChange={value => void changeProxy(value)} />
+      </span>
+    </SettingRow>
     {error && <ErrorNote>{t("browser.actionFailed", { reason: t(browserErrorKey(error)) })}</ErrorNote>}
   </Section>;
 }

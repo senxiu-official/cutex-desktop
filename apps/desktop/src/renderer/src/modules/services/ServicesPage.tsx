@@ -1,6 +1,9 @@
 // Services: the owner's organised catalogue. Cards are the default; the details view keeps the
 // operational table. Organisation lives on the cutex host, while the chosen view is per device.
 import { useEffect, useMemo, useState } from "react";
+import { ReadIssueLine } from "../../components/ReadIssueLine";
+import { useIssueRetry } from "../../lib/useIssueRetry";
+import type { ReadIssue } from "../../lib/transientError";
 import { isImeComposing } from "../../lib/ime";
 import { MoreHorizontal, Star } from "lucide-react";
 import type { ServicePatch, ServiceView, SidebarSnapshot } from "../../../../shared/ipc";
@@ -12,7 +15,7 @@ import { openHostAgent, useListHosts, type ListHosts } from "../../lib/hostLists
 import { staleHostIds } from "../../lib/hostCounts";
 import { useHostData } from "../../lib/useHostScope";
 import { hostKey, type HostItem, type HostLook } from "../../lib/hostScope";
-import { groupServices, openService, serviceMenu } from "../../lib/services";
+import { groupServices, openService, serviceHealthTitle, serviceMenu } from "../../lib/services";
 import { projectColor } from "../../lib/sidebar";
 import { projectIcon } from "../../lib/projectIcons";
 import { useProjectIcons } from "../../lib/projectIconSync";
@@ -116,9 +119,18 @@ function ServiceOrganizer({ row, hostName, done, error }: { row: Row; hostName: 
         onCompositionEnd={(e) => { if (e.currentTarget.ownerDocument.activeElement !== e.currentTarget) void patch({ note: e.currentTarget.value.trim() || null }); }}
         className="w-full rounded border border-border bg-background px-2 py-1 text-foreground" /></label>
       <label className="grid gap-1 text-subtle">{t("services.sortOrder")}<input type="number" defaultValue={s.sortOrder ?? 0} onBlur={(e) => void patch({ sortOrder: Number(e.currentTarget.value) || 0 })} className="w-20 rounded border border-border bg-background px-2 py-1 text-foreground" /></label>
-      <button onClick={done} className="rounded px-2 py-1 text-muted hover:bg-surface-2 hover:text-foreground">×</button>
+      <button onClick={done} className="press-icon rounded px-2 py-1 text-muted hover:bg-surface-2 hover:text-foreground">×</button>
     </div>
   );
+}
+
+/** One displayed host's failed services read: transient ones read that host again after 1, 2, 5, 10, then every
+ *  30 s while shown; the last list stays; 重新加载 reads now. */
+function ServicesHostIssue({ hostId, issue, label }: { hostId: string; issue: ReadIssue; label: string | null }) {
+  const { t } = useI18n();
+  const reload = useIssueRetry(issue, () => void useApp.getState().refreshServices(hostId));
+  const text = (key: "services.listRetrying" | "services.listFailed") => (label ? `${label} · ${t(key)}` : t(key));
+  return <ReadIssueLine className="mb-3 text-sm" issue={issue} retryingText={text("services.listRetrying")} failedText={text("services.listFailed")} onReload={reload} />;
 }
 
 function ServicesTable({ project, initialQuery }: { project?: { hostId: string; projectId: string }; initialQuery?: string }) {
@@ -147,7 +159,15 @@ function ServicesTable({ project, initialQuery }: { project?: { hostId: string; 
   const sidebarOf = useMemo(() => new Map<string, SidebarSnapshot | null>(hosts.data.map((d) => [d.hostId, d.sidebar])), [hosts.data]);
   const icons = useProjectIcons();
 
-  useEffect(() => void refresh(), [refresh]);
+  // Read the lists of the hosts shown (a project page shows its own host, not the focus host's).
+  const servedKey = served.map((d) => d.hostId).join(",");
+  useEffect(() => {
+    for (const hostId of servedKey ? servedKey.split(",") : []) void refresh(hostId);
+  }, [refresh, servedKey]);
+  // A displayed host whose list read failed (store servicesIssues, per host): its own line, retry and 重新加载
+  // (ServicesHostIssue); other hosts' issues are not this page's (a project page shows one host).
+  const issues = useApp((s) => s.servicesIssues);
+  const failed = served.filter((d) => issues[d.hostId]);
   useEffect(() => { if (!project) localStorage.setItem(VIEW_KEY, view); }, [view, project]);
 
   const rows = useMemo(() => {
@@ -213,15 +233,15 @@ function ServicesTable({ project, initialQuery }: { project?: { hostId: string; 
 
   const columns: Column<Row>[] = [
     ...(supportsOrganize ? [{ key: "select", header: "", width: "2rem", cell: (r: Row) => organizable(r) ? <input type="checkbox" checked={selected.has(r.key)} onChange={() => toggleSet(setSelected, selected, r.key)} aria-label={r.item.displayName || r.item.slug} /> : null }] : []),
-    { key: "status", header: t("table.status"), width: hosts.marks ? "7.5rem" : "6.5rem", cell: (r) => <span className={`flex min-w-0 items-center gap-1.5 ${stale(r) ? "opacity-50" : ""}`}><RowHost host={hosts.look(r.hostId)} show={hosts.marks} /><StatusCell kind={serviceStatus(r.item)} label={t(serviceHealthKey(r.item))} /></span> },
-    { key: "name", header: t("table.service"), cell: (r) => <button disabled={stale(r) || r.item.archived} onClick={() => isWorker(r.item) ? toggleLogs(r.key) : void openService(r.item, r.hostId).catch((e: unknown) => setError(String(e)))} title={isWorker(r.item) ? t("services.worker.nameHint") : (r.item.url ?? undefined)} className="flex max-w-full items-center gap-1 truncate text-left enabled:hover:underline disabled:text-subtle">{r.item.starred && <Star size={12} className="fill-current text-warn-text" />}<span className="truncate">{r.item.displayName || r.item.slug}</span>{isWorker(r.item) && <WorkerBadge />}</button> },
+    { key: "status", header: t("table.status"), width: hosts.marks ? "7.5rem" : "6.5rem", cell: (r) => <span className={`flex min-w-0 items-center gap-1.5 ${stale(r) ? "opacity-50" : ""}`}><RowHost host={hosts.look(r.hostId)} show={hosts.marks} /><StatusCell kind={serviceStatus(r.item)} label={t(serviceHealthKey(r.item))} title={serviceHealthTitle(t(serviceHealthKey(r.item)), r.item, t)} /></span> },
+    { key: "name", header: t("table.service"), cell: (r) => <button disabled={stale(r) || r.item.archived} onClick={() => isWorker(r.item) ? toggleLogs(r.key) : void openService(r.item, r.hostId).catch((e: unknown) => setError(String(e)))} title={isWorker(r.item) ? t("services.worker.nameHint") : (r.item.url ?? undefined)} className="press flex max-w-full items-center gap-1 truncate rounded-sm text-left enabled:hover:underline disabled:cursor-default disabled:text-subtle">{r.item.starred && <Star size={12} className="fill-current text-warn-text" />}<span className="truncate">{r.item.displayName || r.item.slug}</span>{isWorker(r.item) && <WorkerBadge />}</button> },
     { key: "retention", header: t("services.retention"), width: "7rem", cell: (r) => <span className="text-xs text-muted">{r.item.lifetime === "persistent" ? t(`services.purpose.${serviceSection(r.item)}` as MessageKey) : !ttlEnabled(r) ? "—" : r.item.effectiveIdleTtlMinutes == null ? t("services.idleTtl.0") : `${r.item.effectiveIdleTtlMinutes}m`}</span> },
-    { key: "owner", header: t("table.owner"), width: "10rem", cell: (r) => { const p = projectOf(r); if (p) return <span data-service-scope="project" title={scopeTitle(r)} className="flex min-w-0 items-center gap-1 text-xs text-muted"><ProjectBadge badge={p.badge || p.name.slice(0, 1)} color={p.color} size="sm" /><span className="truncate">{t("services.ownerScope.project", { project: p.name })}</span></span>; const owner = ownerOf(r); return owner ? <button onClick={() => openHostAgent(r.hostId, owner.row.cutexSessionId)} title={owner.retired ? t("services.owner.retiredHint") : undefined} data-service-owner-retired={owner.retired || undefined} className="flex min-w-0 items-center gap-1 text-xs text-muted hover:text-foreground"><Avatar name={owner.row.displayName} avatar={owner.row.avatar} seed={owner.row.cutexSessionId} size={16} /><span className="truncate">{owner.retired ? t("services.owner.retired", { name: owner.row.displayName }) : owner.row.displayName}</span></button> : <span className="text-xs text-subtle">—</span>; } },
+    { key: "owner", header: t("table.owner"), width: "10rem", cell: (r) => { const p = projectOf(r); if (p) return <span data-service-scope="project" title={scopeTitle(r)} className="flex min-w-0 items-center gap-1 text-xs text-muted"><ProjectBadge badge={p.badge || p.name.slice(0, 1)} color={p.color} size="sm" /><span className="truncate">{t("services.ownerScope.project", { project: p.name })}</span></span>; const owner = ownerOf(r); return owner ? <button onClick={() => openHostAgent(r.hostId, owner.row.cutexSessionId)} title={owner.retired ? t("services.owner.retiredHint") : undefined} data-service-owner-retired={owner.retired || undefined} className="press flex min-w-0 items-center gap-1 rounded-sm text-xs text-muted hover:text-foreground"><Avatar name={owner.row.displayName} avatar={owner.row.avatar} seed={owner.row.cutexSessionId} size={16} /><span className="truncate">{owner.retired ? t("services.owner.retired", { name: owner.row.displayName }) : owner.row.displayName}</span></button> : <span className="text-xs text-subtle">—</span>; } },
     { key: "url", header: t("services.url"), width: "13rem", cell: (r) => isWorker(r.item) ? <span className="block truncate text-caption/[inherit] text-subtle">{t("services.worker.noPage", { tag: t("services.worker.badge") })}</span> : <span className="block truncate font-mono text-caption/[inherit] text-subtle" title={r.item.url ?? undefined}>{r.item.url ?? "—"}</span> },
     { key: "port", header: t("table.port"), width: "4rem", align: "right", cell: (r) => <span className="font-mono text-caption/[inherit] text-subtle">{r.item.port ? `:${r.item.port}` : "—"}</span> },
     ...(served.some((host) => host.features.has(SERVICES_IDLE_PRESETS_FEATURE)) ? [{ key: "idleStop", header: t("services.idleStop"), width: "11rem", cell: (r: Row) => idleEnabled(r) && isSupervised(r.item) && r.item.lifetime === "persistent" ? <span title={t("services.idleStop.hint")} className="text-xs text-muted"><span>{t(`services.idleStop.${r.item.idleStopPreset ?? "forever"}`)}</span>{(r.item.stoppedIdleAt ?? r.item.idleStopAt) && <span className="block text-caption text-subtle">{new Date((r.item.stoppedIdleAt ?? r.item.idleStopAt)!).toLocaleString()}</span>}{r.item.idleWakeFailedAt && <span className="block text-caption text-warn-text">{t("services.idleWakeFailed")}</span>}</span> : <span>—</span> }] : []),
     { key: "traffic", header: t("services.lastTraffic"), width: "8rem", cell: (r) => <span className="text-caption/[inherit] text-subtle">{r.item.lastTrafficAt ? new Date(r.item.lastTrafficAt).toLocaleString() : "—"}</span> },
-    { key: "menu", header: "", width: "2rem", cell: (r) => <button disabled={stale(r)} onClick={(e) => openMenuFrom(e.currentTarget, menu(r))} className="rounded p-0.5 text-subtle opacity-0 group-hover:opacity-100 hover:bg-surface-2 hover:text-foreground"><MoreHorizontal size={14} /></button> },
+    { key: "menu", header: "", width: "2rem", cell: (r) => <button disabled={stale(r)} onClick={(e) => openMenuFrom(e.currentTarget, menu(r))} aria-label={t("services.more")} aria-haspopup="menu" data-service-row-more="" className="press-icon reveal-focus rounded p-0.5 text-subtle opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 hover:bg-surface-2 hover:text-foreground"><MoreHorizontal size={14} /></button> },
   ];
 
   return (
@@ -234,12 +254,13 @@ function ServicesTable({ project, initialQuery }: { project?: { hostId: string; 
         {view === "details" && !project && <Select<GroupMode> width="w-28" label={t("services.group")} value={groupMode} onChange={setGroupMode} options={[{ value: "purpose", label: t("services.purpose") }, { value: "project", label: t("projects.title") }]} />}
         <Segmented<HealthScope> value={scope} onChange={setScope} options={(["all", "running", "down"] as const).map((s) => ({ value: s, label: `${t(`services.scope.${s}` as MessageKey)} ${count(s)}` }))} />
       </PageToolbar>
-      {selected.size > 0 && supportsOrganize && <div className="mb-3 flex items-center gap-2 text-xs">{visibility === "active" && <button className="rounded border border-border px-2 py-1 hover:bg-surface-2" onClick={() => void bulk("hide")}>{t("services.bulk.hide")}</button>}{visibility !== "archived" && <button className="rounded border border-border px-2 py-1 hover:bg-surface-2" onClick={() => void bulk("archive")}>{t("services.bulk.archive")}</button>}{visibility === "hidden" && <button className="rounded border border-border px-2 py-1 hover:bg-surface-2" onClick={() => void bulk("show")}>{t("services.bulk.show")}</button>}{visibility === "archived" && <button className="rounded border border-border px-2 py-1 hover:bg-surface-2" onClick={() => void bulk("restore")}>{t("services.bulk.restore")}</button>}</div>}
+      {selected.size > 0 && supportsOrganize && <div className="mb-3 flex items-center gap-2 text-xs">{visibility === "active" && <button className="press rounded border border-border px-2 py-1 hover:bg-surface-2" onClick={() => void bulk("hide")}>{t("services.bulk.hide")}</button>}{visibility !== "archived" && <button className="press rounded border border-border px-2 py-1 hover:bg-surface-2" onClick={() => void bulk("archive")}>{t("services.bulk.archive")}</button>}{visibility === "hidden" && <button className="press rounded border border-border px-2 py-1 hover:bg-surface-2" onClick={() => void bulk("show")}>{t("services.bulk.show")}</button>}{visibility === "archived" && <button className="press rounded border border-border px-2 py-1 hover:bg-surface-2" onClick={() => void bulk("restore")}>{t("services.bulk.restore")}</button>}</div>}
       {hosts.multi && <MissingHosts hosts={hosts.missing} unsupported={unsupported} />}
       {error && <p className="mb-3 rounded-lg bg-danger/10 px-3 py-2 text-xs text-danger">{error}</p>}
       {project && <ServiceClaimStrip hostId={project.hostId} projectId={project.projectId} className="mb-3" />}
       {!supported && hosts.missing.length === 0 && <p className="text-sm text-subtle">{t("services.unsupported")}</p>}
-      {supported && !loaded && <p className="text-sm text-subtle">…</p>}
+      {failed.map((d) => <ServicesHostIssue key={d.hostId} hostId={d.hostId} issue={issues[d.hostId]!} label={hosts.multi ? hosts.look(d.hostId)?.label ?? d.hostId : null} />)}
+      {supported && !loaded && !failed.length && <p className="text-sm text-subtle">…</p>}
       {loaded && all.length === 0 && <p className="text-sm text-subtle">{t(projectId === undefined ? "services.none" : "services.projectNone")}</p>}
       {all.length > 0 && groups.length === 0 && <p className="text-sm text-subtle">{t("services.noMatch")}</p>}
       {rows.length > 0 && view === "cards" && !project && <ServiceCards rows={rows as ServiceCardRow[]} hostName={(row) => hosts.look(row.hostId)?.label ?? row.hostId} ownerName={(row) => { const p = projectOf(row); if (p) return t("services.ownerScope.project", { project: p.name }); const owner = ownerOf(row); return !owner ? t("services.reveal.someAgent") : owner.retired ? t("services.owner.retired", { name: owner.row.displayName }) : owner.row.displayName; }} ownerTitle={(row) => scopeTitle(row) ?? (ownerOf(row)?.retired ? t("services.owner.retiredHint") : undefined)} stale={stale} tileEnabled={tileEnabled} organizable={organizable} menu={menu} logs={(row) => logs.has(row.key) ? <ServiceLogs slug={row.item.slug} hostId={row.hostId} /> : null} refresh={refresh} error={setError} />}

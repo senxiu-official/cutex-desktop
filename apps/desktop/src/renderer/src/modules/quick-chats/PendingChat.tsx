@@ -47,6 +47,8 @@ import { profileProvider } from "../../lib/provider";
 import { draftRuntime, variantDefaultModel, variantModelRows, type DraftModelRow } from "../../lib/draftRuntime";
 import { variantEffort } from "../../lib/profileVariants";
 import { runtimeEfforts } from "../../lib/runtimeChoices";
+import { claudeCatalogChoices, claudeShortName, isClaudeCatalog } from "../../lib/claudeModels";
+import { effortText, effortTip, launchEffortShown } from "../../lib/effortDisplay";
 import { btn } from "../../components/Button";
 import { useOwnerWindow } from "../../lib/ownerContext";
 
@@ -198,8 +200,13 @@ function PendingChatBody({ target }: { target: CreateHost }) {
   const defaultModel = variant ? variantDefaultModel(variant, models) : (models.find((m) => m.isDefault)?.id ?? catalog?.selectedModel ?? item?.model ?? null);
   const model = launch.model ?? defaultModel;
   const row = models.find((m) => m.id === model);
-  const shownModel = modelName(model, row?.displayName, item?.id);
-  const effort = launch.reasoningEffort ?? (variant ? (launch.model ? row?.defaultReasoningEffort : variantEffort(variant, model)) : launch.model ? row?.defaultReasoningEffort : (item?.modelReasoningEffort ?? row?.defaultReasoningEffort)) ?? null;
+  // Claude (docs/design/024-model-list.md): aliases folded and named 「Opus 5.5」 from the catalog's handshake.
+  const claudeCatalog = !variant && isClaudeCatalog(catalog);
+  const shownModel = modelName(model, (claudeCatalog && catalog ? claudeShortName(catalog.models, model, t) : null) ?? row?.displayName, item?.id);
+  // No pick: the host's resolution for the row (cutex resolved-reasoning-effort), else the level worked out here, else
+  // 「—」 with 未上报 / 不支持 — never 「默认」 (owner 2026-11-20, lib/effortDisplay).
+  const effortView = launchEffortShown(launch.reasoningEffort, variant ? null : (catalog?.models.find((m) => m.id === model) ?? null), (variant ? (launch.model ? row?.defaultReasoningEffort : variantEffort(variant, model)) : launch.model ? row?.defaultReasoningEffort : (item?.modelReasoningEffort ?? row?.defaultReasoningEffort)) ?? null, runtimeOf.claude);
+  const effort = effortView.level;
   const mode = permissionModeOfLaunch(launch.sandbox ?? quick.sandbox, launch.approvalPolicy ?? quick.approvalPolicy, launch.approvalsReviewer ?? quick.approvalsReviewer);
   // Claude profiles: Claude Code's own modes (same names as the composer); an older cutex shows the
   // profile's rules only (Codex presets would be refused for a Claude profile).
@@ -436,11 +443,7 @@ function PendingChatBody({ target }: { target: CreateHost }) {
       }}
     />
   );
-  const effortLabel = (e: string) => {
-    const key = `composer.effort.${e}`;
-    const label = t(key as MessageKey);
-    return label === key ? e : label;
-  };
+  const effortHover = effortTip(t, effortView);
 
   return (
     <LaunchPage intro={drafts.length === 0 ? <LaunchIntro showArtGreeting portraits={{ profileId: item?.id, profiles: available, selected: portraitSelected, disabled: locked, onSelect: (id) => { if (locked) return; setPortraitSelected(true); update({ profile: id, launch: keptMode(launch) }); } }} provider={item ? profileProvider(item) : undefined} icon={<MessageSquarePlus size={24} />} title={t("quick-chats.title")} hint={t("chat.draftHint")} /> : null}>
@@ -622,7 +625,9 @@ function PendingChatBody({ target }: { target: CreateHost }) {
             ) : (
               <ModelPicker
                 profile={item?.name ?? null}
-                models={models.map((m) => ({ model: m.id, displayName: m.displayName ?? m.id, description: m.id === defaultModel ? t("quick-chats.defaultProfile") : "" }))}
+                models={claudeCatalog && catalog
+                  ? claudeCatalogChoices(catalog.models, model, t).map((c) => ({ model: c.id, displayName: c.name, description: [c.id === defaultModel ? t("quick-chats.defaultProfile") : "", c.description].filter(Boolean).join(" · "), primary: c.primary, tag: c.tag }))
+                  : models.map((m) => ({ model: m.id, displayName: m.displayName ?? m.id, description: m.id === defaultModel ? t("quick-chats.defaultProfile") : "" }))}
                 current={model}
                 label={shownModel || "—"}
                 trigger={<span className="trim-cap max-w-40 truncate">{shownModel || "—"}</span>}
@@ -631,13 +636,15 @@ function PendingChatBody({ target }: { target: CreateHost }) {
                 onSelect={(id) => update({ launch: { ...launch, model: id, reasoningEffort: undefined } })}
               />
             )}
-            {effort &&
-              (locked || efforts.length === 0 ? (
-                <span className={staticChip}>
-                  <span className="trim-cap">{effortLabel(effort)}</span>
+            {/* No level known: 「—」 with 未上报 / 不支持 (owner 2026-11-18: never empty / 「…」; 11-20: never 「默认」). */}
+            {!effort ? (
+              <span className={staticChip} title={effortHover} data-effort-none={effortView.none ?? undefined}><span className="trim-cap">{effortText(t, effortView)}</span></span>
+            ) : (locked || efforts.length === 0 ? (
+                <span className={staticChip} title={effortHover}>
+                  <span className="trim-cap">{effortText(t, effortView)}</span>
                 </span>
               ) : (
-                <EffortPicker effort={effort} efforts={efforts} onChange={(x) => update({ launch: { ...launch, reasoningEffort: x } })} />
+                <EffortPicker claude={claude} effort={effort} skipped={effortView.skipped} efforts={efforts} onChange={(x) => update({ launch: { ...launch, reasoningEffort: x } })} />
               ))}
           </div>
         </div>

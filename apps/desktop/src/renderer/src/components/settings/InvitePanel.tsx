@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { shownUserName, type UserGrant, type UserRecord } from "../../../../shared/users";
 import { useI18n } from "../../i18n";
+import { useSettingsCard } from "../../lib/settingsDrafts";
 import { useTargetApi, useTargetSidebar } from "../../lib/targetHost";
 import { EMPTY_GRANT, grantChoices, grantSummary, refusalText, sortedUsers, toggleId, USER_NAME_MAX } from "../../lib/userGrants";
 import { Checklist } from "./Checklist";
@@ -22,6 +23,8 @@ export function InvitePanel({ users, busy, onCode }: { users: readonly UserRecor
   const [error, setError] = useState<string | null>(null);
   // A new person created before the code failed: the retry uses them instead of a second person.
   const [created, setCreated] = useState<UserRecord | null>(null);
+  // Unsaved from the first change until the code is made, which closes it (lib/settingsDrafts).
+  const card = useSettingsCard();
   const others = sortedUsers(users).filter((u) => !u.isOwner);
   const person = created ?? others.find((u) => u.id === who) ?? null;
   const all = grant.projects === "all";
@@ -42,7 +45,7 @@ export function InvitePanel({ users, busy, onCode }: { users: readonly UserRecor
   };
   const sentence = grantSummary(person ? person.grant : grant, tt, projects);
   return (
-    <div className="-mx-4 space-y-1 border-b border-border px-4 py-2.5" data-testid="pair-invite">
+    <div ref={card.ref} className="-mx-4 space-y-1 border-b border-border px-4 py-2.5" data-testid="pair-invite">
       {!created && others.length > 0 && (
         <SettingRow agents="access" source="host" label={t("users.invite.who")}>
           <Select<string> width="w-48" label={t("users.invite.who")} value={who} options={[{ value: NEW_PERSON, label: t("users.invite.newPerson") }, ...others.map((u) => ({ value: u.id, label: shownUserName(u) }))]} onChange={setWho} />
@@ -59,7 +62,7 @@ export function InvitePanel({ users, busy, onCode }: { users: readonly UserRecor
           {!all && (
             <SettingsGroup agents="access" source="host"><div className="py-2">
               <div className="mb-1 text-xs text-muted">{t("users.grant.projects")}</div>
-              {projects.length ? <Checklist label={t("users.grant.projects")} choices={projects} chosen={grant.projects as string[]} onToggle={(id, on) => setGrant((g) => ({ ...g, projects: toggleId(g.projects === "all" ? [] : g.projects, id, on) }))} /> : <p className="text-xs text-subtle">{t("users.grant.noProjects")}</p>}
+              {projects.length ? <Checklist label={t("users.grant.projects")} choices={projects} chosen={grant.projects as string[]} onToggle={(id, on) => (card.changed(), setGrant((g) => ({ ...g, projects: toggleId(g.projects === "all" ? [] : g.projects, id, on) })))} /> : <p className="text-xs text-subtle">{t("users.grant.noProjects")}</p>}
             </div></SettingsGroup>
           )}
           <SettingRow agents="access" source="host" label={t("users.invite.talk")} hint={t("users.invite.talkHint")}>

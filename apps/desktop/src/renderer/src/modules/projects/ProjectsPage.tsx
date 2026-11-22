@@ -78,7 +78,7 @@ function ProjectList({ projects, selected, onSelect, mark }: { projects: HostPro
   const icons = useProjectIcons();
   return (
     <SubNav>
-      <button onClick={() => onSelect(NEW, "")} className={`mb-1 ${SUBNAV_ITEM} ${selected === NEW ? SUBNAV_ON : SUBNAV_OFF}`}>
+      <button onClick={() => onSelect(NEW, "")} className={`press mb-1 ${SUBNAV_ITEM} ${selected === NEW ? SUBNAV_ON : SUBNAV_OFF}`}>
         <Plus size={15} className="mx-0.5 text-subtle" />
         {t("projects.new")}
       </button>
@@ -86,7 +86,7 @@ function ProjectList({ projects, selected, onSelect, mark }: { projects: HostPro
         <button
           key={hostKey(hostId, p.project_id)}
           onClick={() => onSelect(p.project_id, hostId)}
-          className={`${SUBNAV_ITEM} ${selected === hostKey(hostId, p.project_id) ? SUBNAV_ON : SUBNAV_OFF}`}
+          className={`press ${SUBNAV_ITEM} ${selected === hostKey(hostId, p.project_id) ? SUBNAV_ON : SUBNAV_OFF}`}
         >
           <ProjectBadge icon={projectIcon(icons, hostId, p.project_id)} badge={p.presentation.badge_label || p.presentation.display_name.slice(0, 1)} color={p.presentation.color} size="lg" />
           <span className="min-w-0 flex-1">
@@ -185,7 +185,7 @@ function NewProjectForm({ target }: { target: CreateHost }) {
         <div className="mb-3 rounded-lg bg-danger/10 px-3 py-2 text-xs text-danger">
           {partial ? t("projects.directoryFailed", { error }) : error}
           {partial && (
-            <button onClick={() => openProject(partial, "settings", hostId)} className="ml-2 underline">
+            <button onClick={() => openProject(partial, "settings", hostId)} className="press ml-2 rounded-sm underline">
               {t("projects.openSettings")}
             </button>
           )}
@@ -256,7 +256,7 @@ function TabSummary({ entry, props, onOpen }: { entry: ProjectTabEntry; props: P
   // The "·" separators come from CSS, so a phrase that says nothing leaves no stray dot.
   return (
     <span className="before:mr-1.5 before:content-['·'] first:before:content-none">
-      <button onClick={onOpen} className="hover:text-foreground hover:underline">
+      <button onClick={onOpen} className="press rounded-sm hover:text-foreground hover:underline">
         {text}
       </button>
     </span>
@@ -483,8 +483,8 @@ function ProjectDetail({ project, tab, rotate, pick }: { project: ProjectSummary
     }
     return true;
   };
+  // Armed in place (the row's `armed`): a member is added back from the picker; the agent itself stays.
   const detachOne = async (row: Pick<AgentRow, "id" | "name">) => {
-    if (!(await confirmDialog(t("projects.detachConfirm", { name: row.name }), true))) return;
     await run(() => api.projectMutation(id, fresh(), { kind: "detach_member", cutex_session_id: row.id }));
   };
   const memberControls: MemberControls | undefined = owner
@@ -525,7 +525,7 @@ function ProjectDetail({ project, tab, rotate, pick }: { project: ProjectSummary
               title: rotationRunning ? t("projects.directorRotating") : undefined,
               onSelect: () => void makeDirector(row).catch((e) => setError(errorText(e))),
             },
-            { label: t("projects.detach"), icon: <UserMinus size={14} />, danger: true, onSelect: () => void detachOne(row) },
+            { label: t("projects.detach"), icon: <UserMinus size={14} />, danger: true, armed: t("projects.detachArmed", { name: row.name }), onSelect: () => void detachOne(row) },
           ].filter(Boolean) as MenuEntry[];
         },
       }
@@ -560,12 +560,11 @@ function ProjectDetail({ project, tab, rotate, pick }: { project: ProjectSummary
   const dirty = name !== project.presentation.display_name || badge !== project.presentation.badge_label || color !== project.presentation.color;
   const displayName = project.presentation.display_name;
 
-  // Destructive: an empty project archives after a plain confirm; otherwise type its name. With a
-  // live Director the dialog offers 「同时归档主管」 (lib/projectArchive: project first, then the Director).
+  // Archive is restorable (confirm by risk): one plain dialog, no typed name. With a live Director it offers
+  // 「同时归档主管」 (lib/projectArchive: project first, then the Director).
   const archive = async () => {
     const director = directorSession && directorSession.lifecycle !== "retired" ? directorSession : null;
     const answer = await confirmProjectArchive({ displayName, memberCount: members.length, director, hostId, t });
-    if (answer.mismatch) return setError(t("projects.archiveNameMismatch"));
     if (!answer.ok) return;
     setError(null);
     try {
@@ -582,7 +581,7 @@ function ProjectDetail({ project, tab, rotate, pick }: { project: ProjectSummary
         <div className="mb-3 flex items-center gap-2 rounded-lg border border-accent/30 bg-accent/5 px-3 py-2 text-xs">
           <ArrowRightLeft size={13} className="shrink-0 text-accent" />
           <span className="min-w-0 flex-1 truncate">{t("projects.rotation.banner", { from: rotation.predecessor.name, to: rotation.successorSpec.name, state: t(`projects.rotation.state.${rotation.state}` as MessageKey) })}</span>
-          <button onClick={() => setRotating(true)} className="shrink-0 text-accent hover:underline">
+          <button onClick={() => setRotating(true)} className="press shrink-0 rounded-sm text-accent hover:underline">
             {t("projects.rotation.view")}
           </button>
         </div>
@@ -591,7 +590,7 @@ function ProjectDetail({ project, tab, rotate, pick }: { project: ProjectSummary
 
       <nav className="mb-5 flex gap-1 overflow-x-auto border-b border-border text-sm">
         {tabs.map(({ tab: key, titleKey }) => (
-          <button key={key} onClick={() => setTab(key)} className={`-mb-px shrink-0 border-b-2 px-3 py-1.5 whitespace-nowrap ${active === key ? "border-accent text-foreground" : "border-transparent text-muted hover:text-foreground"}`}>
+          <button key={key} onClick={() => setTab(key)} className={`press -mb-px shrink-0 border-b-2 px-3 py-1.5 whitespace-nowrap ${active === key ? "border-accent text-foreground" : "border-transparent text-muted hover:text-foreground"}`}>
             {t(titleKey)}
           </button>
         ))}
@@ -604,12 +603,12 @@ function ProjectDetail({ project, tab, rotate, pick }: { project: ProjectSummary
         {remark ? (
           <>
             <span className="min-w-0 truncate" title={`${remark}\n${t("remark.tooltip")}`}>{remark}</span>
-            <button onClick={editRemark} title={t("remark.edit")} aria-label={t("remark.edit")} className="shrink-0 rounded p-0.5 hover:bg-surface-2 hover:text-foreground">
+            <button onClick={editRemark} title={t("remark.edit")} aria-label={t("remark.edit")} className="press-icon shrink-0 rounded p-0.5 hover:bg-surface-2 hover:text-foreground">
               <Pencil size={12} />
             </button>
           </>
         ) : (
-          <button onClick={editRemark} title={t("remark.tooltip")} className="shrink-0 hover:text-foreground hover:underline">
+          <button onClick={editRemark} title={t("remark.tooltip")} className="press shrink-0 rounded-sm hover:text-foreground hover:underline">
             {t("remark.add")}
           </button>
         )}
@@ -628,7 +627,7 @@ function ProjectDetail({ project, tab, rotate, pick }: { project: ProjectSummary
           <DelegationList projectId={id} only={["needsYou"]} />
           <h3 className="mt-6 mb-2 flex items-center text-sm font-semibold">
             {t("projects.activeTasks")}
-            <button onClick={() => setTab("tasks")} className="ml-auto text-xs font-normal text-accent hover:underline">
+            <button onClick={() => setTab("tasks")} className="press ml-auto rounded-sm text-xs font-normal text-accent hover:underline">
               {t("projects.allTasks")} →
             </button>
           </h3>
@@ -643,13 +642,13 @@ function ProjectDetail({ project, tab, rotate, pick }: { project: ProjectSummary
                 disabled={rotationRunning}
                 title={t(hasDirector ? "projects.changeDirector" : "projects.pickDirector")}
                 aria-label={t(hasDirector ? "projects.changeDirector" : "projects.pickDirector")}
-                className="ml-auto rounded p-1 font-normal text-subtle hover:bg-surface-2 hover:text-foreground disabled:opacity-40"
+                className="press-icon ml-auto rounded p-1 font-normal text-subtle hover:bg-surface-2 hover:text-foreground disabled:opacity-40"
               >
                 <Crown size={13} />
               </button>
             )}
             {owner && (
-              <button onClick={() => setPicker("add")} title={t("projects.addMember")} aria-label={t("projects.addMember")} className={`${canPickDirector ? "" : "ml-auto "}rounded p-1 font-normal text-subtle hover:bg-surface-2 hover:text-foreground`}>
+              <button onClick={() => setPicker("add")} title={t("projects.addMember")} aria-label={t("projects.addMember")} className={`${canPickDirector ? "" : "ml-auto "}press-icon rounded p-1 font-normal text-subtle hover:bg-surface-2 hover:text-foreground`}>
                 <Plus size={13} />
               </button>
             )}
@@ -685,11 +684,11 @@ function ProjectDetail({ project, tab, rotate, pick }: { project: ProjectSummary
               </div>
             </>
           )}
-          <button onClick={() => setTab("memory")} className="mb-2 block w-full rounded-xl border border-border bg-surface px-3 py-2 text-left hover:bg-surface-2/60">
+          <button onClick={() => setTab("memory")} className="press mb-2 block w-full rounded-xl border border-border bg-surface px-3 py-2 text-left hover:bg-surface-2/60">
             <div className="text-sm">{t("projects.memory")}</div>
             <div className="text-xs text-subtle">{memory ? t("projects.memoryCount", { n: memory.entries.length }) : "…"}</div>
           </button>
-          <button onClick={() => setTab("settings")} className="block w-full rounded-xl border border-border bg-surface px-3 py-2 text-left hover:bg-surface-2/60">
+          <button onClick={() => setTab("settings")} className="press block w-full rounded-xl border border-border bg-surface px-3 py-2 text-left hover:bg-surface-2/60">
             <div className="text-sm">{t("projects.mcp")}</div>
             <div className="truncate text-xs text-subtle">{mcp ? Object.keys(mcp.servers).join(" · ") || t("projects.mcpNone") : "…"}</div>
           </button>
@@ -794,7 +793,7 @@ function ProjectDetail({ project, tab, rotate, pick }: { project: ProjectSummary
       {/* Members and the Director are managed on the agent tab (one place, owner 2026-10-14). */}
       <Section title={t("projects.membersTitle")}>
         <SettingsGroup navigation agents="none" source="host">
-          <button onClick={() => setTab("agents")} className="flex items-center gap-1.5 py-2 text-xs text-accent hover:underline" data-members-link="">
+          <button onClick={() => setTab("agents")} className="press flex items-center gap-1.5 rounded-sm py-2 text-xs text-accent hover:underline" data-members-link="">
             <Users size={13} />
             {t("projects.membersElsewhere", { tab: t("projects.tab.agents") })} →
           </button>
@@ -822,7 +821,7 @@ function ProjectDetail({ project, tab, rotate, pick }: { project: ProjectSummary
             <div className="text-sm">{t("projects.archive")}</div>
             <div className="text-xs text-subtle">{t(members.length === 0 ? "projects.archiveHintEmpty" : "projects.archiveHint")}</div>
           </div>
-          <button onClick={() => void archive()} className="flex shrink-0 items-center gap-1 rounded-md bg-danger-solid px-3 py-1 text-xs font-medium text-white hover:brightness-95">
+          <button onClick={() => void archive()} className="press-solid flex shrink-0 items-center gap-1 rounded-md bg-danger-solid px-3 py-1 text-xs font-medium text-white hover:brightness-95">
             <Archive size={13} />
             {t("projects.archive")}
           </button>

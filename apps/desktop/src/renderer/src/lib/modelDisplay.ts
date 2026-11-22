@@ -90,14 +90,30 @@ export function entryName(profile: string | null | undefined, id: string | null 
   return names.get(profile)?.[id] ?? null;
 }
 
-/** The name to show: the entry name, else the catalog display name, else the id ("" when none). */
+/** Names Claude alias / mode ids (lib/claudeModels claudeAliasName, registered by i18n); null = not one. */
+let aliasNamer: ((id: string) => string | null) | null = null;
+export function setAliasNamer(fn: ((id: string) => string | null) | null): void {
+  aliasNamer = fn;
+}
+/** A raw Claude catalog name for an alias ("Opus (alias)") — never shown (owner 2026-11-23: 「Opus」 / 「Opus 5.5」). */
+const rawAliasName = (name: string | null | undefined) => !name || /\(alias\)\s*$/i.test(name);
+
+/** The name to show: the entry name, else the catalog display name, else the id ("" when none). A Claude alias whose
+ *  only name is the catalog's 「Opus (alias)」 shows 「Opus」 (callers with the list fold it themselves and
+ *  pass that name, with the handshake's version). An id-only alias never takes a name from the remembered names:
+ *  another list's 「Opus 5.5」 is that list's handshake or answer, not this caller's (cross-review 8addfc85e #1). */
 export function modelLabel(id: string | null | undefined, displayName: string | null | undefined, entry?: string | null): string {
   const catalog = displayName?.trim();
   // Only fill a gap while rendering: two lists naming one id differently (another profile's catalog
   // beside a session's model list) would otherwise overwrite each other on every render and
   // re-render each other forever (host02 2026-10-23: new-agent page froze on profile Ceobe).
   if (id && catalog && !catalogNames.has(id.trim())) noteCatalogNames([{ id, displayName: catalog }]);
-  return entry?.trim() || catalog || (id ? catalogNames.get(id) : undefined) || id || "";
+  if (entry?.trim()) return entry.trim();
+  if (id && aliasNamer && rawAliasName(catalog)) {
+    const alias = aliasNamer(id);
+    if (alias) return alias;
+  }
+  return catalog || (id ? catalogNames.get(id) : undefined) || id || "";
 }
 
 /** `label(id, catalogDisplayName?, profile?)`: the shown name of a model. */
@@ -151,9 +167,9 @@ export function rawIdTitle(id: string | null | undefined, shown: string): string
   return id && shown !== id ? id : undefined;
 }
 
-/** A model control's tooltip: "模型 · <raw id>" when the shown name differs from the id, else the label. */
-export function modelControlTitle(label: string, id: string | null | undefined, shown: string): string {
-  return id && shown !== id ? `${label} · ${id}` : label;
+/** A model chip's tooltip: just the label (owner 2026-11-18: no alias / raw id on the chips; the model list keeps ids). */
+export function modelControlTitle(label: string, _id?: string | null, _shown?: string): string {
+  return label;
 }
 
 /** Search helper: does `query` (already lower-cased) hit the raw id or the shown name? */

@@ -48,6 +48,22 @@ export function isLanEgressAddress(address: string): boolean {
 export function isAllowedEgressAddress(address: string, lan: boolean): boolean {
   return isPublicEgressAddress(address) || (lan && isLanEgressAddress(address));
 }
+/** 198.18.0.0/15 (IANA "benchmarking"): not routed on LANs; in practice the fake-IP answers a local
+ * proxy client (Clash / Surge / sing-box TUN mode) hands out for public names it then tunnels. */
+export function isFakeIpEgressAddress(address: string): boolean {
+  if (typeof address !== "string" || isIP(address) !== 4) return false;
+  const [a, b] = address.split(".").map(Number) as [number, number];
+  return a === 198 && (b === 18 || b === 19);
+}
+/**
+ * A DNS answer for `hostname` that N2 may dial. A fake-IP answer counts only for a public-looking NAME the
+ * public parser admitted (`lan` false): never for an IP literal (198.18.x.x typed or linked stays reserved),
+ * never for LAN / .local / .lan / single-label names or an owner-admitted LAN authority.
+ */
+export function isAllowedEgressAnswer(address: string, target: { hostname: string; lan: boolean }): boolean {
+  if (isAllowedEgressAddress(address, target.lan)) return true;
+  return !target.lan && !isIP(target.hostname) && !!parsePublicConnectAuthority(`${target.hostname}:443`) && isFakeIpEgressAddress(address);
+}
 
 export interface BrowserEgressTarget {
   protocol: "http:" | "https:" | "ws:" | "wss:";

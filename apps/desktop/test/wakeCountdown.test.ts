@@ -110,3 +110,13 @@ describe("where the deadline comes from (wakeSourceOf)", () => {
     expect(wakeSourceOf({ createdAt: created }, undefined, true)).toBeNull();
   });
 });
+
+describe("wakeSourceOf with per-item admission (stop-answer-admission-v1)", () => {
+  const ride = { id: "a", deliveryKind: "askAnswer", enqueuedAt: "2026-11-17T00:00:00Z" };
+  it("an item with `eligible` carries its own hold; without it the stop hold still applies", () => {
+    expect(wakeSourceOf({ createdAt: ride.enqueuedAt }, { ...ride, eligible: true, held: null }, false, "ownerStop")?.held).toBeUndefined();
+    expect(wakeSourceOf({ createdAt: ride.enqueuedAt }, { ...ride, eligible: false, held: "ownerStop" }, false, undefined)?.held).toBe("ownerStop");
+    expect(wakeSourceOf({ createdAt: ride.enqueuedAt }, ride, false, "ownerStop")?.held).toBe("ownerStop");
+    expect(wakeSourceOf({ createdAt: ride.enqueuedAt }, { ...ride, held: null }, false, "ownerStop")?.held).toBe("ownerStop");
+  });
+});

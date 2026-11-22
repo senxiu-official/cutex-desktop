@@ -162,3 +162,11 @@ are not silently reassigned by a desktop update.
 
 Third-party source attribution and license terms are maintained in the repository LICENSE,
 NOTICE and LICENSES files.
+
+## Browser gestures, permissions and local certificates
+
+A popup requires a native owner gesture in its tab within Chromium's transient activation window. Agent-dispatched input does not count. A blocked popup or download becomes a per-tab notice that only an owner click can redeem; downloads still use a save dialog. Popups remain registered app tabs rather than native child windows.
+
+An owner-tab permission request while its window is hidden can wait for restoration within the same absolute two-minute deadline. Navigation or closing the tab cancels it. Agent-originated and windowless requests are denied.
+
+Certificate verification remains enabled. In the owner browser pool only, a rejected LAN or loopback certificate can offer an explicit Open anyway action. Its exception binds the host connection, HTTPS origin and SHA-256 certificate fingerprint; a changed certificate requires another action. Public origins and agent tabs cannot receive this exception.

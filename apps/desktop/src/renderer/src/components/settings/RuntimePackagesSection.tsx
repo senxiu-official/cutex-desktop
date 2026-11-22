@@ -14,6 +14,8 @@ import { useTargetHostId } from "../../lib/targetHost";
 import { formatAbsolute, formatWhen, useClock } from "../../lib/time";
 import { Button, ErrorNote, Loading, Section, SettingsGroup } from "./Form";
 import { Tag } from "../../components/Tag";
+import { ArmedButton } from "../ArmedButton";
+import { btnFace, btnShape } from "../Button";
 
 const STATE_TONE = { busy: "text-warn", offline: "text-subtle", online: "text-ok-text" } as const;
 const KNOWN_ERRORS = ["run_in_progress", "nothing_to_upgrade", "selected_unavailable", "nothing_to_revert", "run_not_found"];
@@ -188,15 +190,13 @@ function RunBlock({ run, live }: { run: DisplayedRuntimeRun; live: boolean }) {
           )}
         </p>
         {!live && revertable && (
-          <SettingsGroup agents="now" source="host"><Button
-            disabled={starting}
-            title={t("runtimePackages.revertHint")}
-            onClick={() =>
-              void confirmDialog(t("runtimePackages.revertConfirm", { n: revertable.agents }), true, { ok: t("runtimePackages.revertConfirmOk", { n: revertable.agents }), cancel: t("settings.cancel") }).then((yes) => yes && void revertRuntimePackageRun(revertable.runId, hostId))
-            }
+          // 撤销 is itself an undo (busy agents are skipped): confirm by risk = armed in place.
+          <SettingsGroup agents="now" source="host"><ArmedButton shape={btnShape()} idle={btnFace()} disabled={starting} title={t("runtimePackages.revertHint")}
+            hint={t("runtimePackages.revertAgain", { n: revertable.agents })} resetKey={revertable.runId} testId="runtime-packages-revert"
+            onConfirm={() => void revertRuntimePackageRun(revertable.runId, hostId)}
           >
             {t("runtimePackages.revert")}
-          </Button></SettingsGroup>
+          </ArmedButton></SettingsGroup>
         )}
       </div>
       {run.families && <p className="mt-1 text-xs text-muted">{t("runtimePackages.familyCounts", {

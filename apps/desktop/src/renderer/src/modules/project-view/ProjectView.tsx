@@ -128,7 +128,7 @@ function DelegationChip({ d, dir, hostId, data, compact }: { d: AskSummary; dir:
   return (
     <button
       type="button"
-      className="flex w-full min-w-0 items-center gap-1.5 rounded-md px-1 py-0.5 text-left text-meta/[inherit] hover:bg-hover"
+      className="press flex w-full min-w-0 items-center gap-1.5 rounded-md px-1 py-0.5 text-left text-meta/[inherit] hover:bg-hover"
       title={`${who}: ${d.title}`}
       onClick={(e) => {
         e.stopPropagation();
@@ -184,7 +184,7 @@ const MemberRow = memo(function MemberRow({ m, data, now, folded }: { m: Member;
   const open = () => openAgentBeside(m.hostId, m.id);
   if (folded)
     return (
-      <button type="button" onClick={open} title={t("project-view.openBeside")} className="flex w-full min-w-0 items-center gap-2 px-3 py-1 text-left hover:bg-hover">
+      <button type="button" onClick={open} title={t("project-view.openBeside")} className="press flex w-full min-w-0 items-center gap-2 px-3 py-1 text-left hover:bg-hover">
         <MemberAvatar m={m} size={20} />
         <span className="min-w-0 flex-1 truncate text-ui/[inherit] text-muted">{m.name}</span>
         <span className="shrink-0 text-caption/[inherit] text-subtle tabular-nums">{relativeTime(m.lastActivity)}</span>
@@ -198,7 +198,7 @@ const MemberRow = memo(function MemberRow({ m, data, now, folded }: { m: Member;
       onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), open())}
       title={t("project-view.openBeside")}
       data-testid="project-view-member"
-      className="flex min-w-0 cursor-pointer gap-2.5 border-t border-border px-3 py-2 hover:bg-hover"
+      className="press flex min-w-0 cursor-pointer gap-2.5 border-t border-border px-3 py-2 hover:bg-hover"
     >
       <div className="pt-0.5">
         <MemberAvatar m={m} size={28} />
@@ -238,7 +238,7 @@ function DirectorCard({ m, data, now }: { m: Member; data: ProjectData; now: num
       onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), open())}
       title={t("project-view.openBeside")}
       data-testid="project-view-director"
-      className="mx-3 mt-2.5 mb-1 cursor-pointer rounded-xl border border-border bg-surface px-3 py-2.5 hover:bg-hover"
+      className="press mx-3 mt-2.5 mb-1 cursor-pointer rounded-xl border border-border bg-surface px-3 py-2.5 hover:bg-hover"
     >
       <div className="flex min-w-0 items-center gap-2.5">
         <MemberAvatar m={m} size={32} />
@@ -274,7 +274,7 @@ function MemberFold({ kind, list, open, onToggle, data, now }: { kind: "idle" | 
   if (list.length === 0) return null;
   return (
     <section data-member-fold={kind}>
-      <button type="button" onClick={onToggle} className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-meta/[inherit] text-muted hover:bg-hover" aria-expanded={open}>
+      <button type="button" onClick={onToggle} className="press flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-meta/[inherit] text-muted hover:bg-hover" aria-expanded={open}>
         {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
         {t(kind === "idle" ? "project-view.idleFold" : "project-view.offlineFold", { n: list.length })}
         {!open && (
@@ -362,7 +362,7 @@ function activityText(item: ActivityItem, data: ProjectData, t: T): string {
 const ActivityRow = memo(function ActivityRow({ item, hostId, text, when, avatar }: { item: ActivityItem; hostId: string; text: string; when: string; avatar: RowAvatar | null }) {
   const Icon = item.what === "service" ? Globe : KIND_ICON[item.kind];
   return (
-    <button type="button" onClick={() => openTarget(hostId, item.open)} data-testid="project-view-activity-row" className="flex w-full min-w-0 items-start gap-2 px-3 py-1.5 text-left hover:bg-hover">
+    <button type="button" onClick={() => openTarget(hostId, item.open)} data-testid="project-view-activity-row" className="press flex w-full min-w-0 items-start gap-2 px-3 py-1.5 text-left hover:bg-hover">
       <span className="w-8 shrink-0 pt-0.5 text-right text-caption/[inherit] text-subtle tabular-nums">{when}</span>
       <span className="relative mt-px shrink-0">
         {avatar ? (
@@ -404,7 +404,7 @@ function Activity({ data, state, setState }: { data: ProjectData; state: ViewSta
               disabled={state.needsOnly}
               aria-pressed={on}
               onClick={() => setState({ ...state, kinds: toggleKind(state.kinds, k) })}
-              className={`inline-flex items-center gap-1 rounded-full border px-2 py-px text-caption/[inherit] ${on ? "border-accent/40 bg-accent/10 text-accent" : "border-border text-muted hover:bg-hover"} disabled:opacity-60`}
+              className={`press inline-flex items-center gap-1 rounded-full border px-2 py-px text-caption/[inherit] ${on ? "border-accent/40 bg-accent/10 text-accent" : "border-border text-muted hover:bg-hover"} disabled:opacity-60`}
             >
               {t(`project-view.kind.${k}` as MessageKey)}
               <span className="tabular-nums opacity-70">{counts[k]}</span>
@@ -421,7 +421,7 @@ function Activity({ data, state, setState }: { data: ProjectData; state: ViewSta
               <button
                 type="button"
                 onClick={() => setState({ ...state, kinds: [], needsOnly: false })}
-                className="mt-0.5 rounded-md border border-border px-2 py-0.5 text-meta/[inherit] text-muted hover:bg-hover"
+                className="press mt-0.5 rounded-md border border-border px-2 py-0.5 text-meta/[inherit] text-muted hover:bg-hover"
               >
                 {t("project-view.clearFilter")}
               </button>
@@ -463,7 +463,7 @@ function Header({ data, state, setState, onHandoverHistory }: { data: ProjectDat
     <div ref={sizeRef} className="shrink-0 border-b border-border px-3 pt-2.5 pb-2" data-testid="project-view-header">
       <div className="flex min-w-0 items-center gap-2">
         {g && <ProjectBadge badge={g.badge} color={g.color} size="lg" />}
-        <button type="button" onClick={(e) => pick(e.currentTarget)} className="flex min-w-0 items-center gap-1 rounded-md px-1 py-0.5 hover:bg-hover" title={t("project-view.pick")}>
+        <button type="button" onClick={(e) => pick(e.currentTarget)} className="press flex min-w-0 items-center gap-1 rounded-md px-1 py-0.5 hover:bg-hover" title={t("project-view.pick")}>
           <span className="min-w-0 truncate text-title/[inherit] font-semibold">{g?.name ?? t("project-view.pick")}</span>
           <ChevronDown size={14} className="shrink-0 text-subtle" />
         </button>
@@ -499,7 +499,7 @@ function Header({ data, state, setState, onHandoverHistory }: { data: ProjectDat
             type="button"
             aria-pressed={state.needsOnly}
             onClick={() => setState({ ...state, needsOnly: !state.needsOnly })}
-            className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-meta/[inherit] ${state.needsOnly ? "border-warn/40 bg-warn/10 text-warn-text" : "border-border text-muted hover:bg-hover"}`}
+            className={`press inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-meta/[inherit] ${state.needsOnly ? "border-warn/40 bg-warn/10 text-warn-text" : "border-border text-muted hover:bg-hover"}`}
           >
             <CircleAlert size={12} />
             {t("project-view.onlyNeeds")}

@@ -67,6 +67,8 @@ export const OWNER_ONLY_CAPABILITIES: readonly string[] = [
   "session-fork", "session-fork-profile", "session-fork-preview", "session-delete", "session-delete-empty-on-archive", "session-history-revert",
   "asks-pause-v2", "claude-quota-auto-continue", "users", "workflows", "workflow-resume", "backend-upgrade",
   "client-token-rename", "components", "claude-safety-grants", "host-storage",
+  // r289 owner dispositions: the routes are OwnerOnly (a member's delegation commands keep the session path).
+  "owner-ask-disposition-v1", "owner-notify-direct-v1", "agent-bus-owner-end-followup-v1",
 ];
 
 /**

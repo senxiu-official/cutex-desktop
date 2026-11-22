@@ -83,7 +83,9 @@ beforeAll(async () => {
 });
 
 afterAll(() => {
-  rmSync(root, { recursive: true, force: true });
+  // Windows: a git child's handles (or Defender's) on a fresh repository can outlive the call by a moment; rm
+  // retries EBUSY / EPERM / ENOTEMPTY.
+  rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 });
 
 afterEach(() => {

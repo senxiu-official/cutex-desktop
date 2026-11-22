@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compactAt, compactionFor, compactionModelsOf, compactionOf, compactionOfValue, presetOf, validCompaction, WINDOW_PRESETS, windowPresetValue, withModelCompaction } from "../src/shared/claudeCompaction";
+import { compactAt, compactionModelsOf, compactionOf, sameCompaction, validCompaction, withModelCompaction } from "../src/shared/claudeCompaction";
 
 describe("Claude auto-compaction (design 036)", () => {
   it("follows Claude Code 2.1.301's formula", () => {
@@ -10,39 +10,12 @@ describe("Claude auto-compaction (design 036)", () => {
     // A 200K model caps the window.
     expect(compactAt({ window: 533_000, percent: 100 }, 200_000)).toBe(167_000);
   });
-  it("maps 'compact at about N' to window N + 33000 at 100%", () => {
-    for (const n of [300_000, 500_000, 700_000]) {
-      const c = compactionFor(n);
-      expect(compactAt(c)).toBe(n);
-      expect(presetOf(c)).toBe(n);
-    }
-    expect(compactionFor(500_000)).toEqual({ window: 533_000, percent: 100 });
-    expect(presetOf({ window: 500_000, percent: 90 })).toBeNull();
-    expect(presetOf(null)).toBeNull();
-  });
-  it("offers the window × percent grid (400-800K × 75/80/90%), valid, distinct and round-tripping", () => {
-    expect(WINDOW_PRESETS).toHaveLength(15);
-    expect(WINDOW_PRESETS.every(validCompaction)).toBe(true);
-    // Window-major, so the select groups it by window.
-    expect(WINDOW_PRESETS.slice(0, 4).map((c) => [c.window, c.percent])).toEqual([[400_000, 75], [400_000, 80], [400_000, 90], [500_000, 75]]);
-    expect(new Set(WINDOW_PRESETS.map((c) => windowPresetValue(c))).size).toBe(15);
-    // The three earlier presets keep their stored shape and effective points.
+  it("keeps the earlier stored shapes and their points", () => {
+    // 约 N 万 token = window N + 33000 at 100 %; the earlier window × percent presets.
+    for (const n of [300_000, 500_000, 700_000]) expect(compactAt({ window: n + 33_000, percent: 100 })).toBe(n);
     expect(compactAt({ window: 600_000, percent: 75 })).toBe(435_000);
     expect(compactAt({ window: 500_000, percent: 80 })).toBe(384_000);
-    expect(compactAt({ window: 500_000, percent: 90 })).toBe(432_000);
     expect(compactAt({ window: 800_000, percent: 90 })).toBe(702_000);
-    for (const c of WINDOW_PRESETS) {
-      expect(windowPresetValue(c)).toBe(`w${c.window}x${c.percent}`);
-      expect(compactionOfValue(windowPresetValue(c)!)).toEqual(c);
-      expect(presetOf(c)).toBeNull();
-    }
-    // An existing value is not misread: compact-at 500K (533000 × 100%) and a custom one stay what they were.
-    expect(windowPresetValue({ window: 533_000, percent: 100 })).toBeNull();
-    expect(windowPresetValue({ window: 500_000, percent: 91 })).toBeNull();
-    expect(windowPresetValue({ window: 900_000, percent: 80 })).toBeNull();
-    expect(windowPresetValue(null)).toBeNull();
-    expect(compactionOfValue("500000")).toEqual({ window: 533_000, percent: 100 });
-    expect(compactionOfValue("nope")).toBeNull();
   });
   it("validates the cutex ranges", () => {
     expect(validCompaction({ window: 100_000, percent: 1 })).toBe(true);
@@ -51,6 +24,14 @@ describe("Claude auto-compaction (design 036)", () => {
       expect(validCompaction(bad)).toBe(false);
     expect(compactionOf({ window: 533_000, percent: 100 })).toEqual({ window: 533_000, percent: 100 });
     expect(compactionOf({ window: 5 })).toBeNull();
+    // profile-model-context-v1: only the percent (the model's own window).
+    expect(validCompaction({ window: null, percent: 80 })).toBe(true);
+    expect(validCompaction({ percent: 80 })).toBe(true);
+    expect(compactionOf({ percent: 80 })).toEqual({ window: null, percent: 80 });
+    expect(compactionOf({ window: null, percent: 0 })).toBeNull();
+    expect(sameCompaction({ percent: 80 }, { window: null, percent: 80 })).toBe(true);
+    expect(sameCompaction({ window: 400_000, percent: 80 }, { window: null, percent: 80 })).toBe(false);
+    expect(sameCompaction(null, undefined)).toBe(true);
     expect(compactionOf(null)).toBeNull();
   });
 });

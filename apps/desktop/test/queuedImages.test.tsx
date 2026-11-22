@@ -117,13 +117,14 @@ describe("a queued message's images", () => {
     mountPanel([queued("q3", [text("x"), { type: "localImage", path: "/tmp/elsewhere-shot.png" }])]);
     await flush();
     expect(host.hostFile).not.toHaveBeenCalled();
-    expect(el.querySelector('[data-testid="queue-item-images"]')).not.toBeNull();
+    // The image sits after the text inside the message (owner 2026-11-18), as a glyph here.
+    expect(el.querySelector('[data-testid="queued-message-inline"] [data-testid="queued-image-fallback"]')).not.toBeNull();
     expect(el.querySelector('[data-testid="image-thumb"]')).toBeNull();
   });
 
-  it("row text drops image parts only", () => {
+  it("row text drops image parts; a mention reads @name, never [mention]", () => {
     expect(queuedRowText(queued("q", [text("a"), { type: "image", url: PNG }, { type: "localImage", path: "/p.png" }, text("b")]))).toBe("a\nb");
-    expect(queuedRowText(queued("q", [text("a"), { type: "mention", name: "m", path: "app://m" }]))).toBe("a\n[mention]");
+    expect(queuedRowText(queued("q", [text("a"), { type: "mention", name: "m", path: "app://m" }]))).toBe("a @m");
   });
 });
 

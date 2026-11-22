@@ -5,6 +5,7 @@
 // notification-levels, or an older cutex (no notification-presets-no-legacy) whose methods preset is
 // still `legacy` (its legacy matrix is derived from them). Everywhere else the 等级 → 通知方式 table
 // decides and this card shows one line pointing there (cutex removed the legacy preset 2026-10-15).
+import { useSettingsCard } from "../../lib/settingsDrafts";
 import { useState } from "react";
 import { useArchivedAgents } from "../../lib/useArchivedAgents";
 import { X } from "lucide-react";
@@ -152,6 +153,8 @@ export function Overrides({ overrides, onChange }: { overrides: Record<string, O
   const free = (sidebar?.active ?? []).filter((a) => !(a.cutexSessionId in overrides)).sort((a, b) => compareNames(a.displayName, b.displayName) || a.cutexSessionId.localeCompare(b.cutexSessionId));
   const [pick, setPick] = useState("");
   const [mode, setMode] = useState<OwnerNotifyAgentOverride>("mute");
+  // The add row: unsaved from a pick until 添加 (lib/settingsDrafts).
+  const addCard = useSettingsCard();
   const modes = (["mute", "force"] as const).map((v) => ({ value: v, label: t(`owner-notify.override.${v}`) }));
   return (
     <div className="py-2.5">
@@ -172,7 +175,7 @@ export function Overrides({ overrides, onChange }: { overrides: Record<string, O
           </IconButton></SettingsGroup>
         </div>
       ))}
-      <div className="flex items-center gap-2 border-t border-border/60 pt-2">
+      <div ref={addCard.ref} className="flex items-center gap-2 border-t border-border/60 pt-2">
         <SettingsGroup agents="now" source="host"><Select
           value={pick}
           width="min-w-0 flex-1"
@@ -186,6 +189,7 @@ export function Overrides({ overrides, onChange }: { overrides: Record<string, O
           onClick={() => {
             onChange({ ...overrides, [pick]: mode });
             setPick("");
+            addCard.saved();
           }}
         >
           {t("owner-notify.overrideAdd")}

@@ -5,6 +5,7 @@ import { PaneHost } from "./components/PaneHost";
 import { DesktopBackground, TrayFrame } from "./components/ChipTray";
 import { ForetellLayer } from "./components/ForetellLayer";
 import { startTrayOpen } from "./lib/trayOpen";
+import { startQuotaRunOutAlerts } from "./lib/quotaAlert";
 import { startWorkspaceSets } from "./lib/workspaceSets";
 import { startConvStrips } from "./lib/convStrips";
 import { startBackKey } from "./lib/workspaceEffects";
@@ -146,6 +147,8 @@ export function App() {
   useEffect(() => startWorkspaceSets(), []);
   useEffect(() => startConvStrips(), []);
   useEffect(() => startBackKey(), []);
+  // 「快用完」 desktop notification (design 052 §5 item 4): idle unless its switch is on (default off).
+  useEffect(() => startQuotaRunOutAlerts(), []);
   // Desk windows (multi-window, lib/deskSync): only with the 多窗口 setting on (also when switched on later).
   useEffect(() => followDesksSetting((listener) => appModules().subscribe(listener)), []);
   // 多窗口 is main's (desktop-prefs.json): follow it; the renderer's old value goes to main once (lib/multiWindowPref).

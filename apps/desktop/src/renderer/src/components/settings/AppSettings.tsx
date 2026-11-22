@@ -136,6 +136,7 @@ function WindowSection() {
       <CloseBehaviorRow />
       <AllowRemoteCloseRow />
       <MultiWindowRow />
+      <BoardRow />
     </Section>
   );
 }
@@ -198,6 +199,28 @@ export function MultiWindowRow() {
   return (
     <SettingRow agents="none" source="local" label={<span className="inline-flex items-center gap-2">{t("desk.setting")}<Tag>{t("creation.experimental")}</Tag></span>} hint={t("desk.settingHint")}>
       <Toggle checked={on} label={t("desk.setting")} onChange={(v) => void setMultiWindow(bridge.shell, v).catch(() => {})} />
+    </SettingRow>
+  );
+}
+
+/** 项目看板 (main/board.ts): open the board window; 启动时打开 is stored by main. Only in the Electron app. */
+function BoardRow() {
+  const { t } = useI18n();
+  const shell = bridge.shell;
+  const [onLaunch, setOnLaunch] = useState<boolean | null>(null);
+  useEffect(() => {
+    let live = true;
+    void shell?.boardOpenOnLaunch?.().then((v) => { if (live) setOnLaunch(v); }, () => {});
+    return () => { live = false; };
+  }, [shell]);
+  if (!shell?.openBoard || onLaunch === null) return null;
+  return (
+    <SettingRow agents="none" source="local" label={t("board.setting")} hint={t("board.settingHint")}>
+      <span className="flex items-center gap-3">
+        <Toggle checked={onLaunch} label={t("board.openOnLaunch")} onChange={(v) => { setOnLaunch(v); void shell.setBoardOpenOnLaunch?.(v).then(setOnLaunch, () => {}); }} />
+        <span className="text-sm text-muted">{t("board.openOnLaunch")}</span>
+        <Button onClick={() => void shell.openBoard?.()}>{t("board.open")}</Button>
+      </span>
     </SettingRow>
   );
 }
@@ -530,6 +553,10 @@ export function ConversationPage() {
         )}
         <SettingRow agents="none" source="local" label={t("conversation.timelineIntro")} hint={t("conversation.timelineIntroHint")}>
           <Toggle checked={ui.timelineIntro} onChange={(v) => setUiPref("timelineIntro", v)} />
+        </SettingRow>
+        {/* 教学模式 (owner 2026-11-17, docs/design/teaching-mode.md P1): off by default; this device only. */}
+        <SettingRow agents="none" source="local" label={t("conversation.teachingMode")} info={t("conversation.teachingModeHint")}>
+          <Toggle checked={ui.teachingMode} onChange={(v) => setUiPref("teachingMode", v)} />
         </SettingRow>
       </Section>
 

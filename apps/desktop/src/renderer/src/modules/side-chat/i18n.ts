@@ -30,6 +30,8 @@ export const zhCN = {
   "side-chat.description": "使用当前背景进行临时侧边对话，内容不写入主会话",
   "side-chat.settingsHint": "从某一轮次开出的临时对话，不写入主对话。",
   "side-chat.open": "从这一轮开侧边对话",
+  "side-chat.explain": "解释这段",
+  "side-chat.explainPrompt": "请解释下面这段：\n\n{quote}",
   "side-chat.back": "返回主对话",
   "side-chat.end": "结束侧边对话",
   "side-chat.loading": "正在打开侧边对话…",

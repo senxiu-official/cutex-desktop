@@ -1,12 +1,17 @@
 import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
 
 const fx = vi.hoisted(() => ({
   state: { selectedId: "s1", selectedHost: null, hosts: null, sessions: {}, backgroundItems: {}, outbox: {}, features: new Set<string>(), byHost: {} } as Record<string, unknown>,
+  // Daemon calls the real store makes (the composer's stop route): recorded, answered with null.
+  calls: [] as [string, unknown[]][],
 }));
+const daemonApi = vi.hoisted(() => new Proxy({}, { get: (_target, key) => key === "then" ? undefined : (...args: unknown[]) => { fx.calls.push([String(key), args]); return Promise.resolve(null); } }));
 
-vi.mock("../src/renderer/src/bridge", () => ({ api: {}, bridge: { on: () => {} }, onEvent: () => () => {}, cleanIpcMessage: (m: string) => m }));
+vi.mock("../src/renderer/src/bridge", () => ({ api: daemonApi, apiFor: () => daemonApi, bridge: { on: () => {} }, onEvent: () => () => {}, cleanIpcMessage: (m: string) => m }));
 vi.mock("../src/renderer/src/i18n", async (importOriginal) => ({
   ...(await importOriginal<object>()),
   useI18n: () => ({ t: (key: string, p?: Record<string, unknown>) => (p ? `${key}(${Object.values(p).join(",")})` : key), locale: "en" }),
@@ -32,7 +37,7 @@ import { TurnTail } from "../src/renderer/src/components/Timeline";
 import { DelegationTag } from "../src/renderer/src/components/DelegationParts";
 import { DelegationTurnOverlay, DelegationTurnHint } from "../src/renderer/src/components/DelegationComposer";
 import { TimelineViewContext } from "../src/renderer/src/modules/timelineItemsView";
-import { emptyTimeline, timelineFromThreadRead } from "../src/renderer/src/lib/timeline";
+import { applyEvent, emptyTimeline, timelineFromThreadRead } from "../src/renderer/src/lib/timeline";
 import { delivery, T0, iso } from "../src/renderer/src/lib/inputLedger/testkit";
 import { showStandaloneDelivery } from "../src/renderer/src/lib/inputLedger/deliveryPresentation";
 import type { SessionDelivery } from "@cutex-desktop/protocol";
@@ -111,5 +116,115 @@ describe("delegation identity tooltips", () => {
     expect(html).not.toContain(askId);
     expect(html).toContain('title="#privat"');
     expect(html).toContain("data-delegation-tag");
+  });
+});
+
+describe("retry line on the input-ledger path", () => {
+  const T = 2_000_000_000_000;
+  const retained = (extra: Record<string, unknown> = {}) => {
+    const timeline = timelineFromThreadRead({ thread: { id: "th", turns: [{ id: "t", status: "inProgress", items: [] }] } });
+    applyEvent(timeline, { contractVersion: 2, eventId: "e", cursor: "c", streamId: "s", sequence: 1, receivedAt: "2026-11-15T00:00:00Z", cutexSessionId: "s1", hostId: "local", source: "app_server", sensitivity: "owner", correlation: {},
+      native: { kind: "notification", message: { method: "error", params: { threadId: "th", turnId: "t", willRetry: true, message: "Connection interrupted; waiting for network", error: { message: "Connection interrupted; waiting for network", codexErrorInfo: "other", additionalDetails: null }, ...extra } } } } as never);
+    return timeline;
+  };
+  it("shows the retry line, countdown and actions while the delivery already reads idle", () => {
+    vi.useFakeTimers({ now: T });
+    try {
+      const html = renderToStaticMarkup(tail(delivery("idle", 1), "claude", retained({ nextRetryAt: T + 75_000, retryableInput: true })));
+      expect(html).toContain('data-testid="turn-retry-notice"');
+      expect(html).toContain("turn.retry.retained");
+      expect(html).not.toContain("turn.retry.network");
+      expect(html).toContain("turn.retry.next(1:15)");
+      expect(html).toContain('data-testid="turn-retry-now"');
+      expect(html).toContain('data-testid="turn-retry-stop"');
+      expect(html).toContain("turn.retry.hintRetained");
+    } finally { vi.useRealTimers(); }
+  });
+  it("shows it under the running line, without actions or countdown when the runtime does not keep the input", () => {
+    const html = renderToStaticMarkup(tail(delivery("turn", 1, { turn: { ...askTurn, kind: "owner", askId: null } }), "claude", retained()));
+    expect(html).toContain("turn.activity.working");
+    expect(html).toContain('data-testid="turn-retry-notice"');
+    expect(html).not.toContain("turn-retry-countdown");
+    expect(html).not.toContain("turn-retry-now");
+    expect(html).not.toContain("turn-retry-stop");
+  });
+  it("is gone once the turn ends", () => {
+    const timeline = retained({ retryableInput: true });
+    applyEvent(timeline, { contractVersion: 2, eventId: "e2", cursor: "c", streamId: "s", sequence: 2, receivedAt: "2026-11-15T00:00:00Z", cutexSessionId: "s1", hostId: "local", source: "app_server", sensitivity: "owner", correlation: {},
+      native: { kind: "notification", message: { method: "turn/completed", params: { turn: { id: "t", status: "completed", completedAt: 9 } } } } } as never);
+    expect(renderToStaticMarkup(tail(delivery("idle", 1), "claude", timeline))).not.toContain("turn-retry-notice");
+  });
+});
+
+describe("retry line actions", () => {
+  const T = 2_000_000_000_000;
+  const STORE = "../src/renderer/src/store";
+  let host: HTMLDivElement;
+  let root: Root;
+  // The real store (its interrupt / stop route); the mocked useApp above only feeds the components.
+  const realStore = () => vi.importActual<typeof import("../src/renderer/src/store")>(STORE);
+  const nativeEvent = (sequence: number, method: string, params: Record<string, unknown>) => ({ contractVersion: 2, eventId: `e${sequence}`, cursor: "c", streamId: "s", sequence, receivedAt: "2026-11-15T00:00:00Z", cutexSessionId: "s1", hostId: "local", source: "app_server", sensitivity: "owner", correlation: {},
+    native: { kind: "notification", message: { method, params } } }) as never;
+  const retained = () => {
+    const timeline = timelineFromThreadRead({ thread: { id: "th", turns: [{ id: "t", status: "inProgress", items: [] }] } });
+    applyEvent(timeline, nativeEvent(1, "error", { threadId: "th", turnId: "t", willRetry: true, nextRetryAt: T + 30_000, retryableInput: true, error: { message: "Connection interrupted; waiting for network", codexErrorInfo: "other", additionalDetails: null } }));
+    return timeline;
+  };
+  const button = (id: string) => host.querySelector<HTMLButtonElement>(`[data-testid="${id}"]`);
+  const click = async (id: string) => { await act(async () => { button(id)!.click(); }); };
+  async function show(timeline: ReturnType<typeof retained>, features: string[]) {
+    const { useApp } = await realStore();
+    useApp.setState({ hosts: null, features: new Set(features), sessions: { "local\ns1": { timeline } } } as never);
+    act(() => root.render(tail(delivery("idle", 1), "claude", timeline)));
+  }
+  beforeEach(() => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    vi.useFakeTimers({ now: T });
+    fx.calls.length = 0;
+    fx.state.resumeAsks = vi.fn(() => Promise.resolve());
+    host = document.createElement("div");
+    document.body.append(host);
+    root = createRoot(host);
+  });
+  afterEach(() => {
+    act(() => root.unmount());
+    host.remove();
+    delete fx.state.resumeAsks;
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  });
+
+  it("立即重试 resumes asks on exactly this agent and host, and nothing else", async () => {
+    await show(retained(), ["queue-pause"]);
+    await click("turn-retry-now");
+    expect(fx.state.resumeAsks).toHaveBeenCalledTimes(1);
+    expect(fx.state.resumeAsks).toHaveBeenCalledWith("s1", "local");
+    expect(fx.calls).toEqual([]);
+  });
+
+  it("停止 takes the composer's stop route: with queue-pause, cutex stopTurn for this agent", async () => {
+    await show(retained(), ["queue-pause"]);
+    await click("turn-retry-stop");
+    expect(fx.calls.filter(([m]) => m === "stopTurn")).toEqual([["stopTurn", ["s1"]]]);
+    expect(fx.calls.some(([m]) => m === "interrupt")).toBe(false);
+    expect(fx.state.resumeAsks).not.toHaveBeenCalled();
+  });
+
+  it("停止 without queue-pause interrupts this agent's current turn", async () => {
+    await show(retained(), []);
+    await click("turn-retry-stop");
+    expect(fx.calls.filter(([m]) => m === "interrupt")).toEqual([["interrupt", ["s1", "th", "t"]]]);
+    expect(fx.calls.some(([m]) => m === "stopTurn")).toBe(false);
+  });
+
+  it("the buttons are gone once the turn completes", async () => {
+    const timeline = retained();
+    await show(timeline, ["queue-pause"]);
+    expect(button("turn-retry-now")).not.toBeNull();
+    applyEvent(timeline, nativeEvent(2, "turn/completed", { turn: { id: "t", status: "completed", completedAt: 9 } }));
+    act(() => root.render(tail(delivery("idle", 2), "claude", { ...timeline })));
+    expect(button("turn-retry-now")).toBeNull();
+    expect(button("turn-retry-stop")).toBeNull();
+    expect(host.querySelector('[data-testid="turn-retry-notice"]')).toBeNull();
   });
 });

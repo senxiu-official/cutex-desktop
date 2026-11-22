@@ -17,6 +17,8 @@ import { openFile, openFileKept, openHostFile } from "../../../lib/sideOpen";
 import { rootFor, scopeKey } from "../../../lib/workspace";
 import { mentionText, WORKSPACE_PATHS_MIME } from "../../../lib/workspaceDrag";
 import { useSelectedWorkspace, useWorkspace } from "../../../lib/workspaceView";
+import { readIssue, retryDelay, type ReadIssue } from "../../../lib/transientError";
+import { ReadIssueLine } from "../../../components/ReadIssueLine";
 import { selectedSidebar, useApp } from "../../../store";
 import type { SideBodyProps } from "../../slots";
 import { PREVIEW, useCurrentField } from "../shared";
@@ -97,6 +99,9 @@ export function FilesBody({ instance, setState, sessionId, visible }: SideBodyPr
   const rootAbs = rootId === "cwd" ? cwd : defaultAbs;
   const dirs = rootId === "cwd" ? alt.dirs : ws.dirs;
   const git = rootId === "cwd" ? alt.git : ws.git;
+  // Git status only decorates the tree: when it fails the files still show, without git marks (owner 2026-11-16).
+  const gitIssue = rootId === "cwd" ? alt.gitIssue : ws.gitIssue;
+  const reloadGit = rootId === "cwd" ? alt.reloadGit : ws.reloadGit;
   const api = ws.api;
   const roots: Root[] = [];
   if (ws.scope) roots.push({ id: "default", scope: ws.scope, abs: defaultAbs, label: defaultAbs ? baseOf(norm(defaultAbs)) : t("workspace.files") });
@@ -135,6 +140,12 @@ export function FilesBody({ instance, setState, sessionId, visible }: SideBodyPr
   const [search, setSearch] = useState<string | null>(instance.state.q ? instance.state.q : null);
   const [searchSel, setSearchSel] = useState(0);
   const [results, setResults] = useState<string[] | null>(null);
+  // A failed search: transient ones search again by themselves (1, 2, 5, 10, 30 s); 重新加载 bumps `searchTry`.
+  const [searchIssue, setSearchIssue] = useState<ReadIssue | null>(null);
+  const [searchTry, setSearchTry] = useState(0);
+  const searchFailures = useRef(0);
+  /** What `results` answer (scope + query): a transient failure re-reading the same search keeps them. */
+  const resultsFor = useRef<string | null>(null);
   const saved = useRef(instance.state.q ?? "");
   useEffect(() => {
     const q = search ?? "";
@@ -146,26 +157,46 @@ export function FilesBody({ instance, setState, sessionId, visible }: SideBodyPr
     return () => clearTimeout(timer);
   }, [search, instance.state, setState]);
   useEffect(() => {
+    searchFailures.current = 0;
+  }, [api, scope, search]);
+  useEffect(() => {
     if (!scope || search === null || !search.trim()) {
       setResults(null);
+      setSearchIssue(null);
       return;
     }
     let live = true;
+    let retry: ReturnType<typeof setTimeout> | undefined;
     const timer = setTimeout(() => {
       api.fsSearch(scope, search, 200).then(
         (r) => {
           if (!live) return;
+          searchFailures.current = 0;
+          setSearchIssue(null);
+          resultsFor.current = `${scopeKey(scope)}|${search}`;
           setResults(r.results.map((x) => x.path));
           setSearchSel(0);
         },
-        () => live && setResults([]),
+        (e: unknown) => {
+          if (!live) return;
+          // Not 「0 results」: the search did not run (it read as an empty result before).
+          const issue = readIssue(e);
+          setSearchIssue(issue);
+          // A refresh of the same search that will be retried keeps the last good results under the line.
+          if (!issue.retrying || resultsFor.current !== `${scopeKey(scope)}|${search}`) {
+            resultsFor.current = null;
+            setResults(null);
+          }
+          if (issue.retrying) retry = setTimeout(() => live && setSearchTry((n) => n + 1), retryDelay(searchFailures.current++));
+        },
       );
     }, 150);
     return () => {
       live = false;
       clearTimeout(timer);
+      clearTimeout(retry);
     };
-  }, [api, scope, search, ws.revision]);
+  }, [api, scope, search, ws.revision, searchTry]);
 
   // ---------- rows ----------
   const marks = useMemo(() => gitMarks(git), [git]);
@@ -708,8 +739,7 @@ export function FilesBody({ instance, setState, sessionId, visible }: SideBodyPr
 
   // ---------- render ----------
   if (!ws.scope || !scope || !root) return <p className="p-3 text-xs text-subtle">{t("workspace.noScope")}</p>;
-  if (ws.error && rootId === "default") return <p className="p-3 text-xs text-danger">{ws.error}</p>;
-  const button = "grid size-[26px] shrink-0 place-items-center rounded-md text-muted hover:bg-hover hover:text-foreground disabled:pointer-events-none disabled:opacity-35";
+  const button = "press-icon grid size-[26px] shrink-0 place-items-center rounded-md text-muted hover:bg-hover hover:text-foreground disabled:pointer-events-none disabled:opacity-35";
   const thumbKey = `${hostId}|${scopeKey(scope)}`;
   const target: PreviewTarget | null = (() => {
     if (search !== null) {
@@ -727,11 +757,19 @@ export function FilesBody({ instance, setState, sessionId, visible }: SideBodyPr
   const segments = segmentsOf(view.loc);
   const note = (row: Exclude<Row, EntryRow>) => {
     if (row.type === "loading") return "…";
-    if (row.type === "error") return row.text;
+    if (row.type === "error")
+      return (
+        <ReadIssueLine
+          issue={{ code: null, detail: row.text ?? "", retrying: listings.retrying }}
+          retryingText={t("workspace.fx.dirRetrying")}
+          failedText={t("workspace.fx.dirFailed")}
+          onReload={listings.reload}
+        />
+      );
     if (row.type === "more") return t("workspace.fx.moreItems", { n: row.count ?? 0 });
     if (filter.trim())
       return (
-        <button className="text-accent hover:underline" onClick={() => startSearch(filter)}>
+        <button className="press rounded-sm text-accent hover:underline" onClick={() => startSearch(filter)}>
           {t("workspace.fx.noMatch", { q: filter.trim() })}
         </button>
       );
@@ -793,20 +831,20 @@ export function FilesBody({ instance, setState, sessionId, visible }: SideBodyPr
           />
         ) : (
           <div className="flex h-[26px] min-w-0 flex-1 items-center rounded-md hover:bg-surface-2" onClick={(e) => e.target === e.currentTarget && setEditing(true)} title={t("workspace.fx.addressHint")}>
-            <button onClick={() => navigate("")} className={`shrink-0 truncate rounded px-1.5 py-0.5 text-ui/[inherit] hover:bg-hover ${view.loc ? "text-muted" : "font-semibold"}`} title={root.abs ?? undefined} style={{ maxWidth: 140 }}>
+            <button onClick={() => navigate("")} className={`press shrink-0 truncate rounded px-1.5 py-0.5 text-ui/[inherit] hover:bg-hover ${view.loc ? "text-muted" : "font-semibold"}`} title={root.abs ?? undefined} style={{ maxWidth: 140 }}>
               {root.label}
             </button>
-            <button onClick={(e) => (roots.length > 1 ? rootMenu(e.currentTarget) : void folderMenu(e.currentTarget, "", segments[0]?.path ?? null))} className="shrink-0 rounded px-0.5 text-subtle hover:bg-hover hover:text-foreground" title={t("workspace.fx.rootMenu")} aria-label={t("workspace.fx.rootMenu")}>
+            <button onClick={(e) => (roots.length > 1 ? rootMenu(e.currentTarget) : void folderMenu(e.currentTarget, "", segments[0]?.path ?? null))} className="press shrink-0 rounded px-0.5 text-subtle hover:bg-hover hover:text-foreground" title={t("workspace.fx.rootMenu")} aria-label={t("workspace.fx.rootMenu")}>
               <ChevronDown size={12} />
             </button>
             <div className="flex min-w-0 flex-1 items-center justify-end overflow-hidden" onClick={(e) => e.target === e.currentTarget && setEditing(true)}>
               <div className="mr-auto flex min-w-0 items-center">
                 {segments.map((s, i) => (
                   <span key={s.path} className="flex shrink-0 items-center">
-                    <button onClick={(e) => void folderMenu(e.currentTarget, parentOf(s.path), s.path)} className="rounded px-px text-subtle hover:bg-hover hover:text-foreground" title={t("workspace.fx.siblings")} aria-label={t("workspace.fx.siblings")}>
+                    <button onClick={(e) => void folderMenu(e.currentTarget, parentOf(s.path), s.path)} className="press rounded px-px text-subtle hover:bg-hover hover:text-foreground" title={t("workspace.fx.siblings")} aria-label={t("workspace.fx.siblings")}>
                       <ChevronRight size={12} />
                     </button>
-                    <button onClick={() => navigate(s.path)} className={`max-w-[160px] truncate rounded px-1 py-0.5 text-ui/[inherit] hover:bg-hover ${i === segments.length - 1 ? "font-semibold" : "text-muted"}`}>
+                    <button onClick={() => navigate(s.path)} className={`press max-w-[160px] truncate rounded px-1 py-0.5 text-ui/[inherit] hover:bg-hover ${i === segments.length - 1 ? "font-semibold" : "text-muted"}`}>
                       {s.name}
                     </button>
                   </span>
@@ -836,7 +874,9 @@ export function FilesBody({ instance, setState, sessionId, visible }: SideBodyPr
           <MoreHorizontal size={15} />
         </button>
       </div>
-      {listings.stale && <div className="shrink-0 border-b border-border/60 bg-warn/10 px-2.5 py-1 text-meta/[inherit] text-warn">{t("workspace.fx.stale")}</div>}
+      {/* A re-read failed while the last listing stays on screen. */}
+      {listings.stale && <ReadIssueLine className={`shrink-0 border-b border-border/60 px-2.5 py-1 ${listings.retrying ? "" : "bg-warn/10"}`} issue={{ code: null, detail: t("workspace.fx.stale"), retrying: listings.retrying }} retryingText={t("workspace.fx.staleRetrying")} failedText={t("workspace.fx.stale")} onReload={listings.reload} />}
+      {gitIssue && <ReadIssueLine className="shrink-0 border-b border-border/60 px-2.5 py-1" issue={gitIssue} retryingText={t("workspace.git.retrying")} failedText={t("workspace.git.failed")} onReload={reloadGit} />}
       {/* Filter / search */}
       <div className="flex shrink-0 gap-1.5 border-b border-border/60 p-1.5">
         <input
@@ -868,7 +908,7 @@ export function FilesBody({ instance, setState, sessionId, visible }: SideBodyPr
           aria-label={search !== null ? t("workspace.fx.searchAll") : t("workspace.fx.filter")}
           className="h-[26px] min-w-0 flex-1 rounded-md border border-border bg-background px-2 text-xs outline-none focus:border-accent"
         />
-        <button onClick={() => (search !== null ? (setSearch(null), listRef.current?.focus()) : startSearch(filter))} className={`h-[26px] shrink-0 rounded-md border px-2 text-xs hover:bg-hover ${search !== null ? "border-accent text-accent" : "border-border"}`} title={t("workspace.fx.searchAllHint")}>
+        <button onClick={() => (search !== null ? (setSearch(null), listRef.current?.focus()) : startSearch(filter))} className={`press h-[26px] shrink-0 rounded-md border px-2 text-xs hover:bg-hover ${search !== null ? "border-accent text-accent" : "border-border"}`} title={t("workspace.fx.searchAllHint")}>
           {search !== null ? t("workspace.fx.backToTree") : t("workspace.fx.searchAll")}
         </button>
       </div>
@@ -878,6 +918,7 @@ export function FilesBody({ instance, setState, sessionId, visible }: SideBodyPr
           {search !== null ? (
             <SearchList
               results={results}
+              issue={searchIssue ? <ReadIssueLine issue={searchIssue} retryingText={t("workspace.fx.searchRetrying")} failedText={t("workspace.fx.searchFailed")} onReload={() => { searchFailures.current = 0; setSearchTry((n) => n + 1); }} /> : null}
               sel={searchSel}
               marks={marks.files}
               onSelect={setSearchSel}

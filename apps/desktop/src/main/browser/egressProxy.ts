@@ -7,7 +7,8 @@ import { lookup as systemLookup } from "node:dns/promises";
 import { Agent, createServer, request, type IncomingMessage, type OutgoingHttpHeaders, type ServerResponse } from "node:http";
 import { createConnection, isIP, type Socket } from "node:net";
 import { Transform } from "node:stream";
-import { isAllowedEgressAddress, matchesEgressHost, parseLanBrowserUrl, parsePublicBrowserUrl, parsePublicConnectAuthority, type BrowserEgressTarget } from "./egressAddress";
+import { openUpstreamTunnel, type BrowserUpstreamProxy } from "./egressUpstream";
+import { isFakeIpEgressAddress, isAllowedEgressAnswer, matchesEgressHost, parseLanBrowserUrl, parsePublicBrowserUrl, parsePublicConnectAuthority, type BrowserEgressTarget } from "./egressAddress";
 
 export const BROWSER_EGRESS_LIMITS = Object.freeze({ connections: 64, lookups: 16, addresses: 32,
   headerBytes: 16 * 1024, headBytes: 64 * 1024, bodyBytes: 32 * 1024 * 1024,
@@ -51,6 +52,9 @@ export interface BrowserEgressPolicy {
   /** An authority main admitted after an owner navigation (LAN / tailnet). Only such a target may
    * use a LAN-class literal / name or LAN DNS answers; never loopback, link-local or reserved. */
   lanAllowed?: (hostname: string, port: number) => boolean;
+  /** Owner switch 「浏览器通过系统代理上网」 (default off): the system proxy for a PUBLIC target's URL
+   * (null = DIRECT, undefined = unusable -> refused). Never asked for an admitted LAN authority. */
+  upstreamProxy?: (url: string) => Promise<BrowserUpstreamProxy | null | undefined> | BrowserUpstreamProxy | null | undefined;
 }
 export async function startBrowserEgressProxy(options: { lookup?: BrowserEgressLookup; dial?: BrowserEgressDial; onClosed?: () => void } & BrowserEgressPolicy = {}): Promise<BrowserEgressProxy> {
   const publicAllowed = () => { try { return options.publicAllowed?.() ?? true; } catch { return false; } };
@@ -88,28 +92,61 @@ export async function startBrowserEgressProxy(options: { lookup?: BrowserEgressL
     socket.setTimeout(BROWSER_EGRESS_LIMITS.idleMs);
     return context;
   };
-  const upstream = async (target: BrowserEgressTarget & { lan: boolean }, client: Socket, context: Connection): Promise<Socket> => {
+  const resolve = async (hostname: string): Promise<readonly BrowserEgressAddress[]> => {
+    if (isIP(hostname)) return [{ address: hostname, family: isIP(hostname) as 4 | 6 }];
+    if (pendingLookups >= BROWSER_EGRESS_LIMITS.lookups) throw new Error("busy");
+    // getaddrinfo cannot be cancelled. Keep unresolved work counted after timeout;
+    // never let closing a socket turn unbounded DNS work into fresh capacity.
+    pendingLookups++;
+    try { return await lookup(hostname); } finally { pendingLookups--; }
+  };
+  const validAnswers = (addresses: unknown): addresses is readonly BrowserEgressAddress[] => Array.isArray(addresses) && addresses.length > 0
+    && addresses.length <= BROWSER_EGRESS_LIMITS.addresses && addresses.every(item => !!item && isIP(item.address) === item.family);
+  const protectedLoopbackPort = (port: number) => options.protectedAddress?.("127.0.0.1", port) === true || options.protectedAddress?.("::1", port) === true;
+  /** The owner's system proxy for a public target (null = direct). An admitted LAN authority never asks. */
+  const upstreamFor = async (target: BrowserEgressTarget & { lan: boolean }): Promise<BrowserUpstreamProxy | null> => {
+    if (target.lan || !options.upstreamProxy) return null;
+    const scheme = target.protocol === "https:" || target.protocol === "wss:" ? "https" : "http";
+    const proxy = await options.upstreamProxy(`${scheme}://${target.authority}/`);
+    if (proxy === undefined) throw new Error("upstream_unusable");
+    return proxy;
+  };
+  /** tunnel = the caller speaks origin-form / TLS through the result. Only plain HTTP via an HTTP proxy is not a
+   * tunnel: an absolute-form request on the proxy's own socket (the `proxied` flag). */
+  const upstream = async (target: BrowserEgressTarget & { lan: boolean }, client: Socket, context: Connection, tunnel = true): Promise<Socket & { proxied?: true }> => {
     const check = () => { if (closed || client.destroyed || context.controller.signal.aborted) throw new Error("closed"); };
     check();
     const setupTimer = setTimeout(() => { context.controller.abort(); client.destroy(); }, BROWSER_EGRESS_LIMITS.setupMs); setupTimer.unref();
     const cancelTimer = () => clearTimeout(setupTimer);
     context.controller.signal.addEventListener("abort", cancelTimer, { once: true });
     try {
+      const via = await upstreamFor(target); check();
       let addresses: readonly BrowserEgressAddress[];
-      if (isIP(target.hostname)) addresses = [{ address: target.hostname, family: isIP(target.hostname) as 4 | 6 }];
-      else {
-        if (pendingLookups >= BROWSER_EGRESS_LIMITS.lookups) throw new Error("busy");
-        // getaddrinfo cannot be cancelled. Keep unresolved work counted after timeout;
-        // never let closing a socket turn unbounded DNS work into fresh capacity.
-        pendingLookups++;
-        try { addresses = await lookup(target.hostname); } finally { pendingLookups--; }
+      if (via) {
+        // The proxy resolves the public name. N2 still refuses a name that resolves HERE to anything but public /
+        // fake-IP answers, and any public name aimed at a host control endpoint's port (rebinding through the proxy).
+        if (protectedLoopbackPort(target.port)) throw new Error("denied");
+        let local: readonly BrowserEgressAddress[] | undefined;
+        try { local = await resolve(target.hostname); } catch (error) { if ((error as Error)?.message === "busy") throw error; /* Unresolvable here: the proxy resolves it. */ }
+        check();
+        if (local !== undefined && (!validAnswers(local) || local.some(item => !isAllowedEgressAnswer(item.address, target)
+          || options.protectedAddress?.(item.address, target.port) === true))) throw new Error("denied");
+        // The proxy itself is the owner's (often loopback / LAN), but never a host control endpoint or this listener.
+        addresses = await resolve(via.host); check();
+        const self = (server.address() as { port?: number } | null)?.port;
+        if (!validAnswers(addresses) || addresses.some(item => options.protectedAddress?.(item.address, via.port) === true
+          || (via.port === self && (item.address === "127.0.0.1" || item.address === "::1")))) throw new Error("denied");
+      } else {
+        addresses = await resolve(target.hostname);
+        check();
+        // A fake-IP answer hides the real destination (a TUN resolver may route it anywhere, loopback included), so
+        // like the proxy path it never reaches a host control endpoint's port (cross-review 2026-11-18).
+        if (!validAnswers(addresses) || addresses.some(item => !isAllowedEgressAnswer(item.address, target)
+          || options.protectedAddress?.(item.address, target.port) === true
+          || (isFakeIpEgressAddress(item.address) && protectedLoopbackPort(target.port)))) throw new Error("denied");
       }
-      check();
-      if (!Array.isArray(addresses) || !addresses.length || addresses.length > BROWSER_EGRESS_LIMITS.addresses ||
-        addresses.some(item => !item || isIP(item.address) !== item.family || !isAllowedEgressAddress(item.address, target.lan)
-          || options.protectedAddress?.(item.address, target.port) === true)) throw new Error("denied");
       const selected = addresses[0]!;
-      const socket = dial({ address: selected.address, family: selected.family, port: target.port }, context.controller.signal);
+      const socket: Socket & { proxied?: true } = dial({ address: selected.address, family: selected.family, port: via ? via.port : target.port }, context.controller.signal);
       context.upstreams.add(socket);
       socket.on("error", () => client.destroy());
       socket.once("close", () => context.upstreams.delete(socket));
@@ -121,7 +158,10 @@ export async function startBrowserEgressProxy(options: { lookup?: BrowserEgressL
         const gone = () => { socket.off("connect", done); socket.off("error", fail); reject(new Error("closed")); };
         socket.once("connect", done); socket.once("error", fail); socket.once("close", gone);
       });
-      check(); if (socket.destroyed) throw new Error("closed"); return socket;
+      check(); if (socket.destroyed) throw new Error("closed");
+      if (via && (tunnel || via.scheme === "socks5")) { await openUpstreamTunnel(socket, via, target.hostname, target.port); check(); if (socket.destroyed) throw new Error("closed"); }
+      else if (via) socket.proxied = true;
+      return socket;
     } finally { clearTimeout(setupTimer); context.controller.signal.removeEventListener("abort", cancelTimer); }
   };
   const connectStreams = (client: Socket, remote: Socket, clientHead: Buffer, remoteHead = Buffer.alloc(0)) => {
@@ -130,7 +170,7 @@ export async function startBrowserEgressProxy(options: { lookup?: BrowserEgressL
     client.pipe(remote); remote.pipe(client); client.resume(); remote.resume();
   };
   const forward = async (req: IncomingMessage, client: Socket, context: Connection, target: BrowserEgressTarget & { lan: boolean }, response?: ServerResponse, head?: Buffer) => {
-    const remote = await upstream(target, client, context);
+    const remote = await upstream(target, client, context, !!head);
     // A dedicated non-environment Agent, exactly one pinned socket and no retries.
     // https://nodejs.org/docs/latest-v24.x/api/http.html#built-in-proxy-support
     const agent = new Agent({ keepAlive: false, maxSockets: 1, proxyEnv: {} });
@@ -138,7 +178,9 @@ export async function startBrowserEgressProxy(options: { lookup?: BrowserEgressL
     const outgoing = headers(req); outgoing.host = target.authority;
     outgoing.connection = head ? "Upgrade" : "close";
     if (head) outgoing.upgrade = "websocket";
-    const sent = request({ hostname: target.hostname, port: target.port, method: req.method, path: target.path, headers: outgoing,
+    // Through the owner's HTTP proxy, plain HTTP is an absolute-form request on the proxy's own socket.
+    const path = remote.proxied ? `http://${target.authority}${target.path}` : target.path;
+    const sent = request({ hostname: target.hostname, port: target.port, method: req.method, path, headers: outgoing,
       agent, maxHeaderSize: BROWSER_EGRESS_LIMITS.headerBytes, signal: context.controller.signal });
     sent.on("error", () => client.destroy());
     client.once("close", () => { sent.destroy(); agent.destroy(); });

@@ -18,6 +18,11 @@ export interface QuotaContinuePending {
   /** The turn that hit the limit. */
   turnId: string | null;
   scheduledAt: string;
+  /** r289: `at` is an estimate (cutex probes, at most `probeCount` times), not a fixed send time. */
+  estimated?: boolean;
+  probeCount?: number;
+  /** r289: always false while pending (the queued delegation redelivery is a separate outcome). */
+  asksRedelivered?: boolean;
 }
 
 export interface QuotaContinueOutcome {

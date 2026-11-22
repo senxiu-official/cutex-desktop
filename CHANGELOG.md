@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.2.7 "Beautiful World" (2026-11-23)
+
+- Shows reasoning effort as an explicit level and labels Claude aliases with their model family and reported version. Unsupported or unreported values have clear explanations; older hosts use the available fallback.
+  推理强度显示具体档位，Claude 别名显示模型系列和已报告版本；对不支持、未上报的值给出明确说明，旧版主机使用可用的回退信息。
+- Adds a shared Model and context layout across runtimes, with per-field sources and per-model overrides, plus batch model changes with per-agent results.
+  各运行时统一使用「模型与上下文」设置，显示各项来源、支持按模型覆盖，并提供带逐个结果的批量换模型。
+- Makes Next Up delivery state clearer, including message age, note destinations, blocked retries and uncertain outcomes. Interrupt and send preserves all selected unread owner inputs in order on supported hosts.
+  「接下来」显示消息时间、便条去向、重试受阻和结果未确认的原因；支持的主机上，「打断并发送」按顺序携带选中的全部未读用户输入。
+- Adds full Memo details with Markdown, copying and revision-checked status changes. Side chats and notes use the shared Markdown renderer.
+  备忘详情支持完整 Markdown、复制和带版本校验的状态修改；侧聊和便条使用统一的 Markdown 渲染。
+- Improves agent-list group headings and scrolling, including standalone agents on remote hosts.
+  改进智能体列表分组标题与滚动，并正确显示远端主机的独立智能体。
+- HTML file previews can resolve images, style sheets and scripts from their own folder, with bounded reads and the existing opaque-frame security contract.
+  HTML 文件预览可读取同文件夹中的图片、样式和脚本，保留有界读取及原有不透明框架安全规则。
+- Keeps service popups in service tabs, preserves request bodies and retains recent service pages. Panels preserve content and retry temporary host errors.
+  服务弹窗在服务页签中打开，保留请求正文和最近服务页面；面板保留内容并重试临时主机错误。
+- Clarifies delegation waiting, stop and follow-up states; improves approval cards, image rows, tool links, runtime cleanup and update progress.
+  明确委托等待、停止和后续处理状态，并改进审批卡片、图片行、工具链接、运行时清理和更新进度。
+- Requires the corresponding host capabilities for new actions. Backend 0.2.5 includes Job Service 0.1.3; its saved follow-up disposition is a one-way compatibility boundary for Job Service 0.1.2.
+  新操作依赖对应主机能力；后端 0.2.5 提供 Job Service 0.1.3，其已保存的后续处理结束记录对 Job Service 0.1.2 构成单向兼容边界。
+
 ## 0.2.6 "Beautiful World" (2026-11-14)
 
 - Makes upcoming input handling consistent across message sources. On capable hosts, removing or dismissing input uses an authoritative delivery receipt and refreshes pending state before retrying.

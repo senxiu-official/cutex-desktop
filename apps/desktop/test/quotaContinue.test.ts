@@ -30,10 +30,11 @@ describe("continue clock", () => {
     expect(continueClock("not a time", now, "en")).toBe("");
   });
 
-  it("the strip reads 额度用完 · HH:MM 自动继续 · 取消", () => {
-    expect(zhCN["quotaContinue.strip"].replace("{at}", "14:32")).toBe("额度用完 · 14:32 自动继续");
+  it("the strip reads 额度用完 · 预计 HH:MM 尝试继续 · 取消 (W1: a plan, not a promise; an estimate says it checks)", () => {
+    expect(zhCN["quotaContinue.strip"].replace("{at}", "14:32")).toBe("额度用完 · 预计 14:32 尝试继续");
+    expect(zhCN["quotaContinue.stripEstimated"].replace("{at}", "14:32")).toBe("额度用完 · 重置时间未知，预计 14:32 检查");
     expect(zhCN["quotaContinue.cancel"]).toBe("取消");
-    expect(en["quotaContinue.strip"].replace("{at}", "14:32")).toBe("Usage limit reached · continues at 14:32");
+    expect(en["quotaContinue.strip"].replace("{at}", "14:32")).toBe("Usage limit reached · will try to continue around 14:32");
     expect(zhCN["quotaContinue.menu"]).toBe("额度用完后自动继续");
   });
 });

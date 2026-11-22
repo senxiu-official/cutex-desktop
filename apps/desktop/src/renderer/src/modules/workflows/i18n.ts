@@ -73,7 +73,7 @@ export const zhCN = {
   "workflows.step.tokens": "{n} tok",
   "workflows.stop": "停止",
   "workflows.stopConfirm": "再左键点击一次停止",
-  "workflows.resume": "继续",
+  "workflows.resume": "继续运行",
   "workflows.resumeHint": "新开一次运行，已完成的步骤直接复用，不重复花费",
   "workflows.delete": "删除",
   "workflows.deleteConfirm": "再左键点击一次删除",

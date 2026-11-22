@@ -1,4 +1,4 @@
-import type { InputRecord, OwnerJoinDelegation, SessionDelivery, SubmitStrategy } from "@cutex-desktop/protocol";
+import type { InputInterruptSendManyParams, InputRecord, OwnerJoinDelegation, SessionDelivery, SubmitStrategy } from "@cutex-desktop/protocol";
 import { isInputSettled } from "@cutex-desktop/protocol";
 import type { ExtraInput } from "../../../../shared/ipc";
 import { messageImages, messageSkills } from "../../../../shared/input";
@@ -13,6 +13,9 @@ export interface LedgerOwnerOutbox {
   extra: ExtraInput[];
   strategy: SubmitStrategy;
   joinDelegation?: OwnerJoinDelegation;
+  /** interrupt-send-many-v1: the unread 插话 this interrupt takes along before the draft (kept so a retry names the
+   *  same batch; the host answers a replay from its durable batch mark, never interrupting again). */
+  interruptSend?: InputInterruptSendManyParams;
   /** First-request prediction, kept until cutex supplies a record. Never recomputed on a connection change. */
   predictedSurface?: "timeline" | "nextUp";
   createdAt: string;

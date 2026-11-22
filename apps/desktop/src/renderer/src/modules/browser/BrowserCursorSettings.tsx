@@ -3,6 +3,7 @@ import { DEFAULT_BROWSER_CURSOR_COLOR, isBrowserCursorColor } from "../../../../
 import { ResetButton, SettingRow } from "../../components/settings/Form";
 import { useI18n } from "../../i18n";
 import { bridge } from "../../bridge";
+import { settingsControlChanged } from "../../lib/settingsDrafts";
 import { browserErrorKey } from "./browserState";
 
 export function BrowserCursorSettings() {
@@ -30,6 +31,6 @@ export function BrowserCursorSettings() {
     } finally { saving.current = false; if (live.current) setBusy(false); }
   }
   return <><SettingRow agents="none" source="local" label={t("browser.cursorColor")} reset={<ResetButton disabled={busy || color === DEFAULT_BROWSER_CURSOR_COLOR || !bridge.browser} onClick={() => void save(null)} />}>
-    <input type="color" aria-label={t("browser.cursorColor")} value={color} disabled={!bridge.browser} onChange={event => void save(event.currentTarget.value)} className="h-8 w-12 cursor-pointer rounded-md border border-border bg-surface p-1 disabled:opacity-40" />
+    <input type="color" aria-label={t("browser.cursorColor")} value={color} disabled={!bridge.browser} data-settings-control="" onChange={event => settingsControlChanged(event.currentTarget, save(event.currentTarget.value))} className="h-8 w-12 cursor-pointer rounded-md border border-border bg-surface p-1 disabled:opacity-40" />
   </SettingRow>{error && <p role="alert" className="text-xs text-danger">{error}</p>}</>;
 }

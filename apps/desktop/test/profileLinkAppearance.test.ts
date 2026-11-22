@@ -519,6 +519,8 @@ describe("linked profile avatarStyle (design 047)", () => {
 
   it("validates the full style shape exactly, keeps portrait order and canonicalises emoji order", () => {
     expect(cleanAppearanceChanges({ avatarStyle: PORTRAIT })).toEqual({ avatarStyle: PORTRAIT });
+    const catalog = { kind: "portrait", portraitThemes: ["kit-20261029/mountain-city-myriad-layers", "kit-20261029/university-universalis"] };
+    expect(cleanAppearanceChanges({ avatarStyle: catalog })).toEqual({ avatarStyle: catalog });
     expect(cleanAppearanceChanges({ avatarStyle: { kind: "emoji", emojiThemes: ["sea", "birds"] } })).toEqual({ avatarStyle: { kind: "emoji", emojiThemes: ["birds", "sea"] } });
     expect(cleanAppearanceChanges({ avatarStyle: { kind: "emoji", emojiThemes: null } })).toEqual({ avatarStyle: { kind: "emoji", emojiThemes: null } });
     expect(cleanAppearanceChanges({ avatarStyle: { kind: "letter" } })).toEqual({ avatarStyle: { kind: "letter" } });
@@ -629,6 +631,18 @@ describe("linked profile avatarStyle (design 047)", () => {
       expect(reloaded.view(IDENTITY).conflict, `same=${same}`).toBe(!same);
       expect(JSON.parse(f.data.get(PROFILE_LINK_APPEARANCE_STORAGE)!).groups[IDENTITY].members[JSON.stringify(["a", "profile-a"])].marks.avatarStyle.token).not.toBe("?");
     }
+  });
+
+  it("does not acknowledge a portrait style omitted by main as a successful linked write", async () => {
+    connection.epoch = 0;
+    const f = fixture();
+    const before = structuredClone(f.refs[0]!.profile);
+    const api = { getProfile: vi.fn().mockResolvedValue(before), patchProfile: vi.fn().mockResolvedValue({ ...before,
+      portraitProblem: { kind: "invalidReferences", references: ["kit-20261029/mountain-city-myriad-layers"], maxThemeLength: 20 },
+    }) };
+    vi.mocked(apiFor).mockReturnValue(api as never);
+    await expect(profileAppearanceTransport.write({ ...f.refs[0]!, profile: before }, "avatarStyle", PORTRAIT)).rejects.toThrow("invalid_portrait_themes");
+    expect(api.getProfile).toHaveBeenCalledTimes(1);
   });
 
   it("the adapter PATCHes the full style and refreshes the looks cache", async () => {

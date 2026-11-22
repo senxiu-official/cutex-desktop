@@ -10,6 +10,9 @@ export const zhCN = {
   "background-terminals.output": "输出",
   "background-terminals.terminate": "终止",
   "background-terminals.terminateAgain": "再次左键点击终止以确认",
+  "background-terminals.unconfirmed": "结果未确认",
+  "background-terminals.unconfirmedHint": "{{agent}}已断开，读不到这个终端现在的状态：进程可能仍在运行，也可能已经结束。可以结束跟进。",
+  "background-terminals.terminateOffline": "{{agent}}已断开，现在不能终止",
 } as const;
 
 // Adds these keys to MessageKey (modules/i18nCatalog.ts collects the dictionary itself).

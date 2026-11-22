@@ -20,6 +20,7 @@ import { focusDelegation } from "../lib/focusRequest";
 import { ARMED_BUTTON, ARMED_FRAME, useArmed } from "../lib/armedConfirm";
 import { canReply, isFinal, isSystemNotice, notePresentation, OWNER_NOTIFY_DELETE_FEATURE } from "../lib/ownerNotify";
 import { ownerNotifyAct, useHostOwnerNotes } from "../lib/ownerNotifyStore";
+import { ownerNotifyStateWord } from "../lib/ownerNotifyStateLabel";
 import { openJobOutput } from "../lib/jobStore";
 import { JOB_SERVICE_FEATURE } from "../lib/jobs";
 import { formatAbsolute, formatWhen, useClock } from "../lib/time";
@@ -41,8 +42,8 @@ const TONE: Record<OwnerNotification["level"], { frame: string; icon: string; ta
   urgent: { frame: "border-danger/45 bg-danger/5", icon: "text-danger", tag: "danger" as TagTone, dot: "bg-danger" },
 };
 /** Card buttons (bordered) vs. the quiet row's (borderless, hover-revealed). */
-const CARD_BUTTON = "flex items-center gap-1 rounded-lg border border-border bg-background px-2.5 py-1 text-xs hover:bg-surface-2 disabled:opacity-50";
-const ROW_BUTTON = "flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-muted hover:bg-surface-2 hover:text-foreground disabled:opacity-50";
+const CARD_BUTTON = "press flex items-center gap-1 rounded-lg border border-border bg-background px-2.5 py-1 text-xs hover:bg-surface-2 disabled:opacity-50";
+const ROW_BUTTON = "press flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-muted hover:bg-surface-2 hover:text-foreground disabled:opacity-50";
 
 /**
  * `hostId`: the agent's host. Its notices are read from that host (the focus host's `byId`, another
@@ -131,7 +132,7 @@ function Card({ record: r, sessionId, hostId }: { record: OwnerNotification; ses
         <span className="ml-auto flex shrink-0 items-center gap-1 text-subtle">
           {/* A quiet row still says it is unread: a small dot in the level's colour. */}
           {!card && r.state === "open" && <span aria-hidden className={`size-1.5 rounded-full ${tone.dot}`} />}
-          {t(`ownerNotify.state.${r.state}` as MessageKey)}
+          {ownerNotifyStateWord(r) === "awaitingReply" ? <span data-tip={t("ownerNotify.state.awaitingReplyHint")}>{t("ownerNotify.state.awaitingReply")}</span> : t(`ownerNotify.state.${r.state}` as MessageKey)}
         </span>
       </div>
       <ClampBox lines={card ? 12 : 4} resetKey={r.notificationId} className={card ? "mt-1.5 text-title/[inherit]" : "mt-0.5 text-ui/[inherit] text-muted"}>
@@ -150,7 +151,7 @@ function Card({ record: r, sessionId, hostId }: { record: OwnerNotification; ses
             <span className="flex items-center gap-1">
               {t("ownerNotify.aboutJob")}
               {jobs ? (
-                <button onClick={() => openJobOutput(r.job!)} className="font-mono text-caption/[inherit] break-all text-accent hover:underline">
+                <button onClick={() => openJobOutput(r.job!)} className="press rounded font-mono text-caption/[inherit] break-all text-accent hover:underline">
                   {r.job}
                 </button>
               ) : (
@@ -216,7 +217,7 @@ function Card({ record: r, sessionId, hostId }: { record: OwnerNotification; ses
             </button>
           )}
           {r.needsReply && open && !replying && (
-            <button onClick={() => void act("dismiss")} disabled={!!busy} title={t("ownerNotify.dismissHint")} className="flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs text-muted hover:bg-surface-2 hover:text-foreground disabled:opacity-50">
+            <button onClick={() => void act("dismiss")} disabled={!!busy} title={t("ownerNotify.dismissHint")} className="press flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs text-muted hover:bg-surface-2 hover:text-foreground disabled:opacity-50">
               <X size={13} />
               {t("ownerNotify.dismiss")}
             </button>
@@ -227,7 +228,7 @@ function Card({ record: r, sessionId, hostId }: { record: OwnerNotification; ses
               disabled={!!busy}
               title={t("ownerNotify.deleteHint")}
               aria-label={t("ownerNotify.delete")}
-              className={`${card ? "ml-auto" : ""} flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-subtle hover:bg-surface-2 hover:text-danger disabled:opacity-50`}
+              className={`${card ? "ml-auto" : ""} press flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-subtle hover:bg-surface-2 hover:text-danger disabled:opacity-50`}
             >
               <Trash2 size={13} />
               {t("ownerNotify.delete")}

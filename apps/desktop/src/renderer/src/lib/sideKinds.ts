@@ -38,7 +38,7 @@ export const DEFAULT_SIDE_COMPONENTS: readonly ItemId[] = [FILES_COMPONENT, CHAN
 export const STATUS_COMPONENT_PREFIX = "status:";
 
 /** workspace.preview: a workspace-relative path, or with `host` an absolute path on the host (fs-file-read). */
-export type PreviewParams = { path: string; line?: number | null; host?: boolean };
+export type PreviewParams = { path: string; line?: number | null; host?: boolean; /** Another agent's workspace (a side chat / note link): read there, not the selected one. */ scope?: { kind: "session" | "project"; id: string } };
 
 /**
  * diff.view: a git working-tree diff, one turn's changes to a file (text from the timeline; memory

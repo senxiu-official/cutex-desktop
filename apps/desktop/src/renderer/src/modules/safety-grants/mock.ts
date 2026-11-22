@@ -178,8 +178,9 @@ export const mock: ModuleMock = {
   api: (core) => {
     core.ownerNotificationPages.register(notes);
     return {
-    async safetyCheckDecide(agentId, blockId, decision): Promise<SafetyCheckResult> {
-      const n = notes.find((x) => x.agentId === agentId && x.safetyBlock?.blockId === blockId);
+    async safetyCheckDecide(agentId, blockId, decision, notificationId): Promise<SafetyCheckResult> {
+      // Like cutex: the notice (ntf-…) and the runtime's block (sb-…) have their own ids; both must name the same one.
+      const n = notes.find((x) => x.agentId === agentId && x.safetyBlock?.blockId === blockId && x.notificationId === notificationId);
       if (!n?.safetyBlock) return { ok: false, error: { code: "safety_block_not_found", message: "no such safety block" } };
       if (n.safetyBlock.state !== "blocked") return { ok: false, error: { code: "safety_block_closed", message: `already ${n.safetyBlock.state}` }, notification: structuredClone(n) };
       const now = new Date().toISOString();
@@ -209,7 +210,7 @@ export const mock: ModuleMock = {
           core.emitCutex(agentId, "cutex/ownerNotify/updated", { notification: structuredClone(n) });
         }, READ_AFTER_SECS * 1000);
       }
-      return { ok: true, notification: structuredClone(n), submitError: null, ...(notice ? { notice } : {}) };
+      return { ok: true, notification: structuredClone(n), noticeError: null, ...(notice ? { notice } : {}) };
     },
     };
   },

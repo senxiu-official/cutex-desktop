@@ -1,12 +1,15 @@
 // The 后台终端 status category: the agent's background terminals (CPU / memory, terminate). Capsule
 // section and status-row chip share the rows. `/ps` (and the tool row's background chip) opens the
 // list where the category lives; with no terminal it hands over to the sub-agents (`ps` "agents").
+// With the agent disconnected a row reads 结果未确认: 终止 is greyed (with why) and 结束跟进 hides it here (S12).
 import { useState } from "react";
 import { SquareTerminal, Square } from "lucide-react";
 import type { BackgroundTerminal } from "../../../../shared/ipc";
 import { StatusChip } from "../../components/StatusChip";
 import { useI18n } from "../../i18n";
 import { ARMED_BUTTON, ARMED_FRAME, useArmed } from "../../lib/armedConfirm";
+import { LocalEndFollowUp } from "../../components/LocalEndFollowUp";
+import { endLocalFollowUp } from "../../lib/localFollowUp";
 import { useUiSignal } from "../../lib/uiSignal";
 import { convApi, convNotify, convSignal, useConvScope } from "../../lib/conversationScope";
 import { CAPSULE_ROW, CAPSULE_ROW_ACTION, CAPSULE_ROW_ICON, CAPSULE_ROW_META, capsuleRowActions } from "../../lib/capsuleRows";
@@ -20,11 +23,12 @@ function formatRss(kb: number | null): string {
 
 /** One background terminal (lib/capsuleRows): command · CPU / memory; terminate (and the disabled
  *  输出) take the meta's place on hover / focus. Terminate is click-twice (lib/armedConfirm). */
-function TerminalRow({ term, onTerminate, claude, startedAt }: { term: BackgroundTerminal; onTerminate(): Promise<void>; claude?: boolean; startedAt?: number }) {
+function TerminalRow({ term, onTerminate, claude, startedAt, onEndFollowUp }: { term: BackgroundTerminal; onTerminate(): Promise<void>; claude?: boolean; startedAt?: number; onEndFollowUp?(): void }) {
   const { t } = useI18n();
   const [armed, setArmed] = useArmed();
   const usage = [term.cpuPercent !== null && `${term.cpuPercent.toFixed(0)}%`, formatRss(term.rssKb)].filter(Boolean).join(" · ");
   const where = [term.cwd, term.osPid !== null && `pid ${term.osPid}`].filter(Boolean).join(" · ");
+  if (onEndFollowUp) return <UnconfirmedTerminalRow term={term} where={where} onEndFollowUp={onEndFollowUp} />;
   return (
     <div data-capsule-row="" data-tip={`${term.command}\n${where}`} className={`${CAPSULE_ROW} border transition-colors ${armed ? ARMED_FRAME : "border-transparent hover:bg-hover"}`}>
       <span className={CAPSULE_ROW_ICON}>
@@ -58,6 +62,30 @@ function TerminalRow({ term, onTerminate, claude, startedAt }: { term: Backgroun
   );
 }
 
+/** A terminal of a disconnected agent: 结果未确认; 终止 greyed with why; 结束跟进 (click twice). */
+function UnconfirmedTerminalRow({ term, where, onEndFollowUp }: { term: BackgroundTerminal; where: string; onEndFollowUp(): void }) {
+  const { t } = useI18n();
+  return (
+    <div data-capsule-row="" data-terminal-unconfirmed="" data-tip={`${t("background-terminals.unconfirmedHint")}\n${term.command}\n${where}`} className={CAPSULE_ROW}>
+      <span className={CAPSULE_ROW_ICON}>
+        <SquareTerminal size={14} className="text-warn" />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate font-mono text-meta/[inherit] text-foreground">{term.command}</span>
+      </span>
+      <span className={`${CAPSULE_ROW_META} text-warn-text`}>{t("background-terminals.unconfirmed")}</span>
+      <span className={capsuleRowActions(false)}>
+        <span data-tip={t("background-terminals.terminateOffline")}>
+          <button disabled aria-label={t("background-terminals.terminate")} className={CAPSULE_ROW_ACTION}>
+            <Square size={12} />
+          </button>
+        </span>
+        <LocalEndFollowUp onEnd={onEndFollowUp} />
+      </span>
+    </div>
+  );
+}
+
 function TerminalRows({ sessionId, data }: { sessionId: string; data: TerminalsData }) {
   const { t } = useI18n();
   const { threadId, terminals, refresh } = data;
@@ -74,7 +102,14 @@ function TerminalRows({ sessionId, data }: { sessionId: string; data: TerminalsD
   return (
     <div>
       {terminals.map((term) => (
-        <TerminalRow key={term.processId} term={term} claude={data.claude} startedAt={data.startedAt?.[term.processId]} onTerminate={() => terminate(term.processId)} />
+        <TerminalRow
+          key={term.processId}
+          term={term}
+          claude={data.claude}
+          startedAt={data.startedAt?.[term.processId]}
+          onTerminate={() => terminate(term.processId)}
+          onEndFollowUp={data.unconfirmed && data.followUpKey ? () => endLocalFollowUp([data.followUpKey!(term.processId)]) : undefined}
+        />
       ))}
       {data.claude && terminals.length > 0 && <p className="px-2 py-2 text-xs text-subtle">{t("background-terminals.agentOutputOnly")}</p>}
     </div>

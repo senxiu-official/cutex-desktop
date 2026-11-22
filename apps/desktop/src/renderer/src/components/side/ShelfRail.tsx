@@ -20,6 +20,7 @@ import { toggleShelfGrow } from "../../lib/panelGrow";
 import { useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { MoreHorizontal, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Pin, Plus, X } from "lucide-react";
+import { PRESS_AVATAR, PRESS_ICON, PRESS_ROW, REVEAL_ON_FOCUS } from "../Button";
 import { useI18n } from "../../i18n";
 import type { ItemId } from "../../modules/types";
 import { contextMenu, openMenuAt, openMenuFrom } from "../../lib/contextMenu";
@@ -53,7 +54,7 @@ import { useRailScroll } from "../../lib/railScroll";
 /** The owner avatar's wrapper on a horizontal rail (portrait): the avatar, then a short vertical separator. */
 const OWNER_ACROSS = "mr-0.5 flex shrink-0 flex-row items-center gap-1 pl-0.5";
 
-const BTN = "relative flex size-[34px] shrink-0 items-center justify-center rounded-ctl text-muted transition-[background,color,transform] duration-(--motion-short) ease-(--ease-standard) hover:bg-hover hover:text-foreground";
+const BTN = `relative flex size-[34px] shrink-0 items-center justify-center rounded-ctl text-muted transition-[background,color,transform] duration-(--motion-short) ease-(--ease-standard) hover:bg-hover hover:text-foreground ${PRESS_ICON}`;
 
 /** The rename / icon popover beside a page button. */
 function PagePopover({ page, index, anchor, toward }: { page: SidePage; index: number; anchor: HTMLElement; toward: "left" | "right" | "up" | "down" }) {
@@ -99,7 +100,7 @@ function PagePopover({ page, index, anchor, toward }: { page: SidePage; index: n
     >
       <div className="mb-1.5 flex items-center text-xs font-medium text-muted">
         <span className="flex-1">{t("shelf.page.popoverTitle", { n: index })}</span>
-        <button onClick={() => done(false)} aria-label={t("shelf.page.cancel")} className="flex size-5 items-center justify-center rounded text-subtle hover:bg-hover">
+        <button onClick={() => done(false)} aria-label={t("shelf.page.cancel")} className={`flex size-5 items-center justify-center rounded text-subtle hover:bg-hover ${PRESS_ICON}`}>
           <X size={12} />
         </button>
       </div>
@@ -123,7 +124,7 @@ function PagePopover({ page, index, anchor, toward }: { page: SidePage; index: n
           aria-checked={!page.icon}
           data-tip={t("shelf.page.iconAuto")}
           onClick={() => setPageIconTo(page.id, null)}
-          className={`flex size-[26px] items-center justify-center rounded-md text-caption/[inherit] text-subtle hover:bg-hover ${!page.icon ? "bg-accent/15 text-accent ring-1 ring-accent/50" : ""}`}
+          className={`${PRESS_ROW} flex size-[26px] items-center justify-center rounded-md text-caption/[inherit] text-subtle hover:bg-hover ${!page.icon ? "bg-accent/15 text-accent ring-1 ring-accent/50" : ""}`}
         >
           {t("shelf.page.iconAutoShort")}
         </button>
@@ -131,7 +132,7 @@ function PagePopover({ page, index, anchor, toward }: { page: SidePage; index: n
           const I = PAGE_ICON_COMPONENTS[id];
           const on = page.icon === id;
           return (
-            <button key={id} role="radio" aria-checked={on} aria-label={id} onClick={() => setPageIconTo(page.id, id)} className={`flex size-[26px] items-center justify-center rounded-md text-muted hover:bg-hover hover:text-foreground ${on ? "bg-accent/15 text-accent ring-1 ring-accent/50" : ""}`}>
+            <button key={id} role="radio" aria-checked={on} aria-label={id} onClick={() => setPageIconTo(page.id, id)} className={`${PRESS_ROW} flex size-[26px] items-center justify-center rounded-md text-muted hover:bg-hover hover:text-foreground ${on ? "bg-accent/15 text-accent ring-1 ring-accent/50" : ""}`}>
               <I size={15} />
             </button>
           );
@@ -160,7 +161,7 @@ export function RailOwner({ hostId, sessionId, onClick }: { hostId: string; sess
   return (
     <span data-shelf-owner={session.cutexSessionId} data-tip={session.displayName} className={across ? OWNER_ACROSS : "mb-0.5 flex shrink-0 flex-col items-center gap-1 pt-0.5"}>
       {onClick ? (
-        <button type="button" onClick={onClick} aria-label={session.displayName} className="rounded-full">
+        <button type="button" onClick={onClick} aria-label={session.displayName} className={`rounded-full ${PRESS_AVATAR}`}>
           {avatar}
         </button>
       ) : (
@@ -204,7 +205,7 @@ export function ShelfAvatar({ shelfId, owner, collapsed, side = "right", pinned 
           if (peerKey) focusPeer(peerKey);
           openMenuAt(e.clientX, e.clientY, shelfAvatarMenu(shelfId, who));
         }}
-        className="flex size-[26px] items-center justify-center rounded-full text-muted hover:bg-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent/50"
+        className={`flex size-[26px] items-center justify-center rounded-full text-muted hover:bg-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent/50 ${PRESS_ICON}`}
       >
         {who && session ? (
           <Avatar name={session.displayName} avatar={session.avatar} seed={session.cutexSessionId} size={20} />
@@ -331,9 +332,9 @@ export function ShelfRail({ shelf, pages, shown, collapsed = false, at, owner, c
               style={hot === page.id ? hotTint : undefined}
               className={
                 multi && edge
-                  ? `shelf-capsule relative flex h-[30px] shrink-0 flex-row items-center gap-[3px] rounded-card px-1 text-muted transition-[background,color,box-shadow,transform] duration-(--motion-short) ease-(--ease-standard) ${on ? "bg-surface text-foreground" : ""} ${hot === page.id ? hotLook : ""}`
+                  ? `${PRESS_ROW} shelf-capsule relative flex h-[30px] shrink-0 flex-row items-center gap-[3px] rounded-card px-1 text-muted transition-[background,color,box-shadow,transform] duration-(--motion-short) ease-(--ease-standard) ${on ? "bg-surface text-foreground" : ""} ${hot === page.id ? hotLook : ""}`
                   : multi
-                  ? `shelf-capsule relative flex w-[30px] shrink-0 flex-col items-center gap-[3px] rounded-card py-1 text-muted transition-[background,color,box-shadow,transform] duration-(--motion-short) ease-(--ease-standard) ${on ? "bg-surface text-foreground" : ""} ${hot === page.id ? hotLook : ""}`
+                  ? `${PRESS_ROW} shelf-capsule relative flex w-[30px] shrink-0 flex-col items-center gap-[3px] rounded-card py-1 text-muted transition-[background,color,box-shadow,transform] duration-(--motion-short) ease-(--ease-standard) ${on ? "bg-surface text-foreground" : ""} ${hot === page.id ? hotLook : ""}`
                   : `${BTN} ${on ? "bg-surface text-foreground shadow-e1" : ""} ${hot === page.id ? hotLook : ""} ${on && focused === page.id ? "ring-1 ring-accent/30" : ""}`
               }
             >
@@ -384,7 +385,7 @@ export function ShelfRail({ shelf, pages, shown, collapsed = false, at, owner, c
                 data-tip={t(page.shared ? "shelf.page.unpin" : "shelf.page.pin")}
                 aria-label={`${name}: ${t(page.shared ? "shelf.page.unpin" : "shelf.page.pin")}`}
                 onClick={() => togglePagePin(page.id)}
-                className={`absolute -bottom-0.5 -left-0.5 flex size-3.5 items-center justify-center rounded-full bg-background text-subtle ring-1 ring-border transition-opacity duration-(--motion-short) hover:text-foreground focus-visible:opacity-100 ${page.shared ? "opacity-100" : "opacity-0 group-hover/page:opacity-100"}`}
+                className={`absolute -bottom-0.5 -left-0.5 flex size-3.5 items-center justify-center rounded-full bg-background text-subtle ring-1 ring-border transition-opacity duration-(--motion-short) hover:text-foreground focus-visible:opacity-100 ${PRESS_ICON} ${page.shared ? "opacity-100" : `opacity-0 group-hover/page:opacity-100 group-focus-within/page:opacity-100 ${REVEAL_ON_FOCUS}`}`}
               >
                 <Pin size={8} />
               </button>
@@ -403,8 +404,8 @@ export function ShelfRail({ shelf, pages, shown, collapsed = false, at, owner, c
           style={hotAdd ? hotTint : undefined}
           className={
             edge
-              ? `ml-[3px] flex h-[30px] shrink-0 items-center justify-center rounded-ctl border-[1.5px] border-dashed text-subtle transition-[transform,width,border-color] hover:bg-hover hover:text-foreground ${dragging ? "border-accent/70 px-2 text-caption/[inherit] leading-tight text-accent" : "w-[30px] border-subtle/45"} ${hotAdd ? `border-accent ${hotLook}` : ""}`
-              : `mt-[3px] flex w-[30px] shrink-0 items-center justify-center rounded-ctl border-[1.5px] border-dashed text-subtle transition-[transform,height,border-color] hover:bg-hover hover:text-foreground ${dragging ? "h-10 border-accent/70 text-caption/[inherit] leading-tight text-accent" : "h-[30px] border-subtle/45"} ${hotAdd ? `border-accent ${hotLook}` : ""}`
+              ? `ml-[3px] flex h-[30px] shrink-0 items-center justify-center rounded-ctl border-[1.5px] border-dashed text-subtle transition-[transform,width,border-color] hover:bg-hover hover:text-foreground ${PRESS_ICON} ${dragging ? "border-accent/70 px-2 text-caption/[inherit] leading-tight text-accent" : "w-[30px] border-subtle/45"} ${hotAdd ? `border-accent ${hotLook}` : ""}`
+              : `mt-[3px] flex w-[30px] shrink-0 items-center justify-center rounded-ctl border-[1.5px] border-dashed text-subtle transition-[transform,height,border-color] hover:bg-hover hover:text-foreground ${PRESS_ICON} ${dragging ? "h-10 border-accent/70 text-caption/[inherit] leading-tight text-accent" : "h-[30px] border-subtle/45"} ${hotAdd ? `border-accent ${hotLook}` : ""}`
           }
         >
           {/* Design 038: while a page / pane is dragged the ＋ says what a drop there does. */}
@@ -443,7 +444,7 @@ export function EmptyShelfRail({ hostId, sessionId, at, order, focus = null, pan
             aria-label={tip}
             aria-haspopup="menu"
             onClick={(e) => openMenuFrom(e.currentTarget, [...shelfLauncherMenu(focus), ...panelGuideTail({ panel: "shelf", paneId, hostId, sessionId })])}
-            className="ml-[3px] flex size-[30px] shrink-0 items-center justify-center rounded-ctl border-[1.5px] border-dashed border-subtle/45 text-subtle hover:bg-hover hover:text-foreground"
+            className={`ml-[3px] flex size-[30px] shrink-0 items-center justify-center rounded-ctl border-[1.5px] border-dashed border-subtle/45 text-subtle hover:bg-hover hover:text-foreground ${PRESS_ICON}`}
           >
             <Plus size={14} />
           </button>
@@ -460,7 +461,7 @@ export function EmptyShelfRail({ hostId, sessionId, at, order, focus = null, pan
           aria-label={tip}
           aria-haspopup="menu"
           onClick={(e) => openMenuFrom(e.currentTarget, [...shelfLauncherMenu(focus), ...panelGuideTail({ panel: "shelf", paneId, hostId, sessionId })])}
-          className="mt-[3px] flex size-[30px] shrink-0 items-center justify-center rounded-ctl border-[1.5px] border-dashed border-subtle/45 text-subtle hover:bg-hover hover:text-foreground"
+          className={`mt-[3px] flex size-[30px] shrink-0 items-center justify-center rounded-ctl border-[1.5px] border-dashed border-subtle/45 text-subtle hover:bg-hover hover:text-foreground ${PRESS_ICON}`}
         >
           <Plus size={14} />
         </button>

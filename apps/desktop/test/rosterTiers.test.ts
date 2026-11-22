@@ -8,7 +8,8 @@ import { migrateOlderProjectsAfter, nextTierChange, olderAfterMs, placeRoster, R
 import { foldRows, layoutGroup, layoutSidebar, nextRosterChange, type LayoutContext } from "../src/renderer/src/lib/sidebarLayout";
 import { groupMembers, NO_LOAD, tierOf, type MemberInput } from "../src/renderer/src/modules/project-view/model";
 import { migrateRestOpen } from "../src/renderer/src/lib/prefs";
-import type { AgentRow, AgentStatus, ProjectGroup } from "../src/renderer/src/lib/sidebar";
+import type { AgentRow, AgentStatus, IndependentGroup, ProjectGroup } from "../src/renderer/src/lib/sidebar";
+import { hostKey } from "../src/renderer/src/lib/hostKeys";
 
 const MIN = 60_000;
 const DAY = 24 * 60 * MIN;
@@ -179,5 +180,32 @@ describe("pref migration", () => {
     expect(migrateRestOpen({ restOpen: ["x"], offlineOpen: ["a"] })).toEqual(["x"]);
     expect(migrateRestOpen({})).toEqual([]);
     expect(migrateRestOpen({ offlineOpen: "bogus", idleUnfolded: [1, "k"] })).toEqual(["k"]);
+  });
+});
+
+// Owner 2026-11-19: a host's 独立智能体 with nobody online showed as a one-row project (no title band, 「7d」 instead of
+// its counts) next to the local one's title. It is a 系统行: always its title form, whatever is online.
+describe("独立智能体 is never a one-row project", () => {
+  const independent = (hostId: string, rows: AgentRow[]): IndependentGroup => ({ kind: "independent", id: "__independent__", hostId, key: hostKey(hostId, "__independent__"), online: rows.filter((r) => r.status !== "offline"), offline: rows.filter((r) => r.status === "offline") });
+  it("nobody online (a remote host's): full, like the local one; a quiet project still folds to one row", () => {
+    const quietProject = project("p", [row("p1", "offline", NOW - DAY)]);
+    const l = layoutSidebar([quietProject, independent("local", [row("a", "idle", NOW - MIN)]), independent("remote", [row("b", "offline", NOW - 7 * DAY)])], ctx({ prefs: { ...ctx().prefs, olderAfter: "off" } }));
+    expect(l.main.map((x) => [x.group.kind, x.group.hostId ?? "", x.mode])).toEqual([
+      ["project", "", "collapsed"],
+      ["independent", "local", "full"],
+      ["independent", "remote", "full"],
+    ]);
+  });
+
+  // Review: 星标展开 put an unstarred 独立智能体 under 其他项目 as a one-row project (online or not), while 未分组 / 工作
+  // stay titles there.
+  it("星标展开: an unstarred 独立智能体 (online or not, any host) stays a full 系统行, not under 其他项目", () => {
+    const groups = [project("p", [row("p1", "idle", NOW - MIN)]), independent("local", [row("a", "idle", NOW - MIN)]), independent("remote", [row("b", "offline", NOW - 7 * DAY)])];
+    const l = layoutSidebar(groups, ctx({ prefs: { ...ctx().prefs, grouping: "starred" } }));
+    expect(l.others.map((x) => x.group.kind)).toEqual(["project"]);
+    expect(l.main.map((x) => [x.group.kind, x.group.hostId ?? "", x.mode])).toEqual([
+      ["independent", "local", "full"],
+      ["independent", "remote", "full"],
+    ]);
   });
 });

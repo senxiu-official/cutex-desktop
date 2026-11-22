@@ -4,10 +4,18 @@
 // 停止 (`claude/tasks/stop`, click twice), which stops only it, never the agent's turn. `/ps` hands over
 // here when there is no background terminal (`ps` "agents").
 //
+// With the agent offline (disconnected), the sub-agents last heard working read 结果未确认 with a local 结束跟进
+// (state surfaces S12). After 停止 on a Claude background subagent the row says what came of it — 已请求停止 /
+// 停止被拒绝（原因） / 停止结果未确认 (N13, lib/claudeTaskStop) — and keeps running until the task's update ends it.
+//
 // Nothing working: no capsule line and no status-row chip (useStatus is null, so the capsule has no
 // section for it either). The finished ones are then reached through `/ps`: the Bar opens its own panel
 // with just the 最近完成 group instead of saying nothing runs.
 import { useState, type ReactNode } from "react";
+import { LocalEndFollowUp } from "../../components/LocalEndFollowUp";
+import { useAgentOnline } from "../../lib/background";
+import { claudeStopOutcome, recordStopOutcome, stopOutcomeOf, useStopOutcomes, type StopOutcome } from "../../lib/claudeTaskStop";
+import { endLocalFollowUp, subagentFollowUpKey } from "../../lib/localFollowUp";
 import { Bot, ChevronDown, ChevronRight, Square } from "lucide-react";
 import { StatusChip } from "../../components/StatusChip";
 import { useI18n } from "../../i18n";
@@ -22,23 +30,24 @@ import { subAgentTooltip, type SubAgentInfo } from "../../lib/subagents";
 import { useUiSignal } from "../../lib/uiSignal";
 import { useApp } from "../../store";
 import type { StatusBarProps } from "../slots";
-import { useActiveSubAgents, useFinishedSpanReads, useFinishedSubAgents, useFinishedSubAgentsNow } from "./useSubagentsStatus";
+import { useFinishedSpanReads, useFinishedSubAgents, useFinishedSubAgentsNow, useShownSubAgents } from "./useSubagentsStatus";
 import { openSubagentThread } from "../../lib/sideOpen";
-import { convApi, convFeaturesOf, convNotify, useConvScope } from "../../lib/conversationScope";
+import { convApi, convFeaturesOf, convNotify, useConvScope, useConvViewHost } from "../../lib/conversationScope";
 import { CAPSULE_DOT, CAPSULE_LINE, CAPSULE_ROW, CAPSULE_ROW_ACTION, CAPSULE_ROW_ICON, CAPSULE_ROW_MAIN, CAPSULE_ROW_META, CAPSULE_ROW_META_STATIC, capsuleRowActions } from "../../lib/capsuleRows";
 import { useUserLayoutToggle } from "../../lib/userLayoutToggle";
 
 /** A running Claude background subagent's row: opens it (main button) and stops it (停止, click twice:
  *  lib/armedConfirm). Stopping ends only this subagent; the agent hears of it from cutex ("Claude Task"). */
-function BackgroundSubAgentRow({ a, body, tip, onOpen, onStop }: { a: SubAgentInfo; body: ReactNode; tip: string; onOpen(): void; onStop(): Promise<void> }) {
+function BackgroundSubAgentRow({ a, body, tip, onOpen, onStop, outcome }: { a: SubAgentInfo; body: ReactNode; tip: string; onOpen(): void; onStop(): Promise<void>; outcome: StopOutcome | null }) {
   const { t } = useI18n();
   const [armed, setArmed] = useArmed();
+  const said = outcome ? t(`subagents.stopOutcome.${outcome.outcome}`, { reason: outcome.reason ?? t("subagents.stopOutcome.noReason") }) : null;
   return (
-    <div data-capsule-row="" data-background-subagent="" data-tip={tip} className={`${CAPSULE_ROW} border transition-colors ${armed ? ARMED_FRAME : "border-transparent hover:bg-hover"}`}>
+    <div data-capsule-row="" data-background-subagent="" data-stop-outcome={outcome?.outcome} data-tip={outcome ? `${said}\n${t(`subagents.stopOutcome.${outcome.outcome}Hint`)}\n${tip}` : tip} className={`${CAPSULE_ROW} border transition-colors ${armed ? ARMED_FRAME : "border-transparent hover:bg-hover"}`}>
       <button onClick={onOpen} className={CAPSULE_ROW_MAIN}>
         {body}
       </button>
-      {armed ? <span className="shrink-0 text-caption/[inherit] text-danger">{t("subagents.stopAgain")}</span> : <span className={CAPSULE_ROW_META}>{t("subagents.background")}</span>}
+      {armed ? <span className="shrink-0 text-caption/[inherit] text-danger">{t("subagents.stopAgain")}</span> : <span className={`${CAPSULE_ROW_META} ${outcome && outcome.outcome !== "accepted" ? "text-warn-text" : ""}`}>{said ?? t("subagents.background")}</span>}
       <span className={capsuleRowActions(armed)}>
         <button
           onClick={() => {
@@ -64,17 +73,23 @@ function SubAgentRows({ sessionId, agents }: { sessionId: string; agents: SubAge
   const features = useAgentFeatures(sessionId);
   const timeline = useSessionTimeline(sessionId);
   const conv = useConvScope();
+  const hostId = useConvViewHost(sessionId);
+  const online = useAgentOnline(sessionId);
+  useStopOutcomes();
   const canStop = useApp((s) => stopsClaudeTasks(features, convFeaturesOf(conv, s)));
   const background = canStop ? backgroundClaudeRefs(timeline) : null;
   const stop = async (ref: string) => {
     const taskId = claudeTaskIdOf(ref);
     if (!taskId || !timeline?.threadId) return;
     try {
-      await convApi(conv, sessionId).stopClaudeTask(sessionId, timeline.threadId, taskId);
+      // The bridge passes no answer on yet (outcome `unknown` then): see lib/claudeTaskStop.
+      const answer: unknown = await convApi(conv, sessionId).stopClaudeTask(sessionId, timeline.threadId, taskId);
+      recordStopOutcome(sessionId, ref, claudeStopOutcome(answer));
     } catch (e) {
       convNotify(conv, e instanceof Error ? e.message : String(e), "error");
     }
   };
+  if (!online) return <UnconfirmedRows sessionId={sessionId} hostId={hostId} agents={agents} />;
   return (
     <div>
       {agents.map((a) => {
@@ -93,7 +108,7 @@ function SubAgentRows({ sessionId, agents }: { sessionId: string; agents: SubAge
         );
         const tip = [a.task, a.message].filter(Boolean).join("\n");
         if (background?.has(a.threadId) && !starting)
-          return <BackgroundSubAgentRow key={a.threadId} a={a} body={body} tip={subAgentTooltip(a.threadId, a)} onOpen={() => void openSubagentThread(a.threadId, sessionId)} onStop={() => stop(a.threadId)} />;
+          return <BackgroundSubAgentRow key={a.threadId} a={a} body={body} tip={subAgentTooltip(a.threadId, a)} outcome={stopOutcomeOf(sessionId, a.threadId)} onOpen={() => void openSubagentThread(a.threadId, sessionId)} onStop={() => stop(a.threadId)} />;
         // A Claude task of an adapter without transcripts: status only, nothing to open.
         return !canOpenSubAgent(a.threadId, features) ? (
           <div key={a.threadId} data-capsule-row="" data-tip={[t("sub.claudeTask"), tip].filter(Boolean).join("\n")} className={CAPSULE_ROW}>
@@ -105,6 +120,30 @@ function SubAgentRows({ sessionId, agents }: { sessionId: string; agents: SubAge
           </button>
         );
       })}
+    </div>
+  );
+}
+
+/** The agent is offline: its sub-agents last heard working can't be confirmed (结果未确认); 结束跟进 hides one here. */
+function UnconfirmedRows({ sessionId, hostId, agents }: { sessionId: string; hostId: string; agents: SubAgentInfo[] }) {
+  const { t } = useI18n();
+  return (
+    <div>
+      {agents.map((a) => (
+        <div key={a.threadId} data-capsule-row="" data-subagent-unconfirmed="" data-tip={[t("subagents.unconfirmedHint"), a.task].filter(Boolean).join("\n")} className={CAPSULE_ROW}>
+          <span className={CAPSULE_ROW_ICON}>
+            <span aria-hidden className={`${CAPSULE_DOT} bg-warn`} />
+          </span>
+          <span className="min-w-0 flex-1 truncate">
+            <span className="font-medium text-foreground">{a.name}</span>
+            {(a.message || a.task) && <span className="ml-1.5 text-subtle">{a.message || a.task}</span>}
+          </span>
+          <span className={`${CAPSULE_ROW_META} text-warn-text`}>{t("subagents.unconfirmed")}</span>
+          <span className={capsuleRowActions(false)}>
+            <LocalEndFollowUp onEnd={() => endLocalFollowUp([subagentFollowUpKey(hostId, sessionId, a.threadId)])} />
+          </span>
+        </div>
+      ))}
     </div>
   );
 }
@@ -191,7 +230,7 @@ export function SubagentsBody({ sessionId, data }: { sessionId: string; data: Su
 export function SubagentsStatusBar({ sessionId, inline, reveal }: StatusBarProps) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
-  const agents = useActiveSubAgents(sessionId);
+  const agents = useShownSubAgents(sessionId);
   const finishedNow = useFinishedSubAgentsNow(sessionId);
   useUiSignal("ps", (arg) => {
     if (arg !== "agents") return;

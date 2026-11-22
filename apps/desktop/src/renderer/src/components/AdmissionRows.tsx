@@ -34,6 +34,9 @@ import { heldKeys } from "../lib/stopHold";
 import { steerDelivery, type PendingSteer } from "../lib/legacyDelivery/pendingSteers";
 import type { ImageSteering } from "../lib/imageSteer";
 import { QUEUE_ROW, ROW_META, ROW_ACTIONS, rowText } from "../lib/queueRow";
+import { ledgerRowTime, rowTip, useRowTime } from "../lib/queueRowTime";
+import { useAgentMessages } from "../lib/agentMessageStore";
+import { RowAge, RowFullText } from "./RowFullText";
 import type { InputRecord } from "@cutex-desktop/protocol";
 import { InputStatus, useClearedUnknown, type NextUpOverride } from "./InputStatus";
 import { NEXT_UP_DETAILS, fill, langOf, type NextUpContext } from "../lib/inputLedger/nextUpRegistry";
@@ -77,7 +80,13 @@ const KNOWN_KINDS = new Set(["answer", "question", "alarm", "tell", "bus"]);
  * the approval-notice line are add-ons to it and never take the place of its buttons (registry 1.1 / 1.4).
  * A delegation's rows (request, result, question, status) keep its #tag link. `handlers` / `ctx`: the owner queue's
  * own effects (insert / send now / edit / delete) and whether its QueueItem has loaded. */
-export function LedgerAdmissionRow({ record, sessionId, hostId, body, rowProps, grip, media, handlers, ctx }: { record: InputRecord; sessionId: string; hostId?: string; body?: string; rowProps?: React.HTMLAttributes<HTMLDivElement>; grip?: React.ReactNode; media?: React.ReactNode; handlers?: React.ComponentProps<typeof InputStatus>["handlers"]; ctx?: NextUpContext }) {
+/**
+ * `inline`: the message itself in its own order (an owner's queued message: text and image thumbnails), shown after
+ * the kind icon instead of the plain text.
+ * `afterStop` (Next Up registry 2.0, N10): a delegation result the stop does not hold (cutex stop-answer-admission-v1:
+ * its admission item is an eligible answer). Only a note beside the row's state; state and actions stay the host's.
+ */
+export function LedgerAdmissionRow({ record, sessionId, hostId, body, queuedAt, rowProps, grip, media, inline, handlers, ctx, afterStop = false }: { record: InputRecord; sessionId: string; hostId?: string; body?: string; /** The owner's queue item createdAt (its confirmed queue time). */ queuedAt?: string; rowProps?: React.HTMLAttributes<HTMLDivElement>; grip?: React.ReactNode; media?: React.ReactNode; inline?: (textWrap: (text: React.ReactNode) => React.ReactNode) => React.ReactNode; handlers?: React.ComponentProps<typeof InputStatus>["handlers"]; ctx?: NextUpContext; afterStop?: boolean }) {
   const { t } = useI18n();
   const viewHost = useConvHost();
   const rowHost = hostId ?? viewHost;
@@ -96,6 +105,15 @@ export function LedgerAdmissionRow({ record, sessionId, hostId, body, rowProps, 
   const wake = useWakeOverride(record, sessionId, rowHost, statusRef);
   const grant = <GrantNoticeStatus record={record} sessionId={sessionId} hostId={rowHost} />;
   const cleared = useClearedUnknown(record, sessionId, rowHost);
+  // How old it is (owner 2026-11-19: is this note stale?): the message's confirmed time — a note's Agent Bus
+  // queuedAt / sentAt (seconds), a delegation request's createdAt, the owner's queue item createdAt. Without one, only
+  // the record's createdAt as 「记录于」 (a backfilled / repaired record is created long after the message) and no age.
+  const owner = record.kind === "owner";
+  const busAt = useAgentMessages(s => s.byId[record.inputId]?.sentAt ?? null);
+  const messageAt = owner ? queuedAt : busAt !== null ? busAt * 1000 : record.kind === "delegationRequest" ? ask?.createdAt : null;
+  const best = ledgerRowTime(messageAt, record.createdAt, owner ? "queued" : "sent");
+  const time = useRowTime(best.at, best.kind);
+  const full = statusNotice ? text : body ?? record.preview ?? text;
   if (cleared) return null;
   return <div {...rowProps} className={`${QUEUE_ROW} min-h-6 max-h-6 shrink-0 overflow-hidden hover:bg-hover`} data-testid="ledger-queue-row" data-input-id={record.inputId} data-surface={record.surface}>
     {grip}
@@ -104,8 +122,12 @@ export function LedgerAdmissionRow({ record, sessionId, hostId, body, rowProps, 
       : <KindIcon icon={record.kind === "owner" ? CornerDownLeft : record.kind === "alarm" ? AlarmClock : Mail} label={t(record.kind === "owner" ? "queue.delivery.owner" : "queue.delivery.bus")} />}
     {record.kind !== "owner" && <span className="max-w-[25%] shrink truncate text-ui font-medium" title={record.sender.host ?? undefined}>{senderName}</span>}
     {askId && <DelegationTag askId={askId} onJump={openAsk} />}
-    {statusNotice && openAsk ? <button type="button" onClick={openAsk} className="min-w-0 flex-1 truncate text-left text-ui hover:text-accent hover:underline" title={text}>{rowText(text)}</button>
-      : <span className="min-w-0 flex-1 truncate text-ui" title={statusNotice ? text : body ?? record.preview}>{rowText(text)}</span>}
+    {/* The text: the app tip on hover / focus; a status notice opens its delegation, any other row its whole text. */}
+    {statusNotice && openAsk ? <button type="button" onClick={openAsk} className="min-w-0 flex-1 truncate text-left text-ui hover:text-accent hover:underline" data-tip={rowTip(full, time.exact)} data-tip-overflow="" data-testid="row-text">{rowText(text)}</button>
+      : inline && !statusNotice ? inline((words) => <RowFullText full={full} exact={time.exact} className="flex shrink items-center gap-1 overflow-hidden">{words}</RowFullText>)
+      : <RowFullText full={full} exact={time.exact} className="flex-1 truncate text-ui">{rowText(text)}</RowFullText>}
+    {!owner && <RowAge age={time.age} exact={time.exact} />}
+    {afterStop && <TimingMeta label={t("queue.turn.afterStopHint")} text={t("queue.turn.afterStop")} testId="timing-after-stop" />}
     {/* Today's look: the status always shows; an owner's waiting row keeps its queue buttons on hover (owner 2026-11-02). */}
     <span ref={statusRef} className="flex h-5 max-h-5 min-w-0 shrink items-center">
       <InputStatus record={record} sessionId={sessionId} hostId={hostId} handlers={handlers} ctx={ctx} override={{ ...wake, addOn: grant }} buttonsClassName={record.kind === "owner" && record.state === "waiting" ? `${ROW_ACTIONS} h-5 max-h-5` : undefined} />
@@ -182,7 +204,7 @@ export function useWakeOverride(record: Pick<InputRecord, "inputId" | "createdAt
 export function SteerDeliveryNote({ steer, runtime, imageSteering, className = "", onRecheck }: { steer: Pick<PendingSteer, "imageCount" | "extra" | "imageDelivery" | "state" | "checkFailed">; runtime: AgentRuntime; imageSteering?: ImageSteering | null; className?: string; onRecheck?: () => void }) {
   const { t } = useI18n();
   if (steer.state === "checking") return <span className="flex min-w-0 max-w-[45%] shrink items-center gap-1 text-caption text-subtle" data-testid="steer-check-status">
-    <span className="truncate" title={t(steer.checkFailed ? "queue.insert.unknown" : "queue.insert.checking")}>{t(steer.checkFailed ? "queue.insert.unknown" : "queue.insert.checking")}</span>
+    <span className="truncate" data-tip={t(steer.checkFailed ? "queue.insert.unknown" : "queue.insert.checking")} data-tip-overflow="">{t(steer.checkFailed ? "queue.insert.unknown" : "queue.insert.checking")}</span>
     {steer.checkFailed && onRecheck && <button type="button" onClick={onRecheck} className="shrink-0 rounded px-1 hover:bg-surface-2 hover:text-foreground focus-visible:outline focus-visible:outline-accent" data-testid="steer-recheck">{t("steer.recheck")}</button>}
   </span>;
   const nextTurn = steerDelivery(steer, runtime, imageSteering) === "nextTurn";
@@ -345,7 +367,7 @@ function RideAlongAskParts({ d, info, sessionId }: { d: AskSummary; info: RideAl
       </span>
       <DelegationTag askId={d.askId} onJump={show} />
       {info.title ? (
-        <button onClick={show} className="min-w-0 flex-1 truncate text-left text-ui hover:underline" title={info.title} data-testid="ride-along-title">
+        <button onClick={show} className="min-w-0 flex-1 truncate text-left text-ui hover:underline" data-tip={info.title} data-tip-overflow="" data-testid="ride-along-title">
           {info.title}
         </button>
       ) : (
@@ -371,17 +393,18 @@ function useEnqueuedAgo(enqueuedAt: string): string {
  * an action). `stuck` only enables cancellation lookup for older, undelivered messages;
  * elapsed time alone does not establish a delivery failure.
  */
-export function NextStepRow({ item, running, held, order, sessionId, idleNote, stuck, autoRetry }: { item: AdmissionNextStep; running: boolean; held?: AdmissionHeld; order?: RideAlongOrder | null; sessionId?: string; idleNote?: string; stuck?: boolean; autoRetry?: ModelOverloadRetryWait | null }) {
+export function NextStepRow({ item, running, held, order, sessionId, idleNote, stuck, autoRetry, afterStop }: { item: AdmissionNextStep; running: boolean; held?: AdmissionHeld; order?: RideAlongOrder | null; sessionId?: string; idleNote?: string; stuck?: boolean; autoRetry?: ModelOverloadRetryWait | null; afterStop?: boolean }) {
   const { t } = useI18n();
   const view = rideAlongView(item);
   const Icon = DELIVERY_ICONS[view.kind];
   const kindWord = t(view.kind === "bus" && !KNOWN_KINDS.has(item.deliveryKind) ? "queue.delivery.other" : DELIVERY_KEYS[view.kind]);
   const ago = useEnqueuedAgo(item.enqueuedAt);
+  const time = useRowTime(item.enqueuedAt, "queued");
   // The queue is the open agent's: its host's record (a peers delegation has one per host).
   const host = useAgentHost();
   const d = useDelegation(host, item.askId);
   const info = sessionId ? rideAlongAsk(item, d, sessionId) : null;
-  const tip = [view.from, view.text, view.note].filter(Boolean).join("\n") || undefined;
+  const full = [view.from, view.text, view.note].filter(Boolean).join("\n");
   const dismissible = isDismissibleReceipt(item);
   // A message cutex has not handed over can still be withdrawn (lib/cancelSend).
   const cancelable = useCancelableSends(host, sessionId ?? "", !dismissible && !!stuck && !!sessionId && !running && !held);
@@ -393,7 +416,7 @@ export function NextStepRow({ item, running, held, order, sessionId, idleNote, s
         {d && info && sessionId ? (
           <RideAlongAskParts d={d} info={info} sessionId={sessionId} />
         ) : view.text ? (
-          <span className="flex min-w-0 flex-1 items-center gap-1.5" title={tip}>
+          <span className="flex min-w-0 flex-1 items-center gap-1.5">
             {view.from &&
               (view.fromId ? (
                 // Design 040 step 9: the sender as a 16 px avatar + name (a link to the agent), when cutex says who it is.
@@ -401,13 +424,12 @@ export function NextStepRow({ item, running, held, order, sessionId, idleNote, s
                   <Who id={view.fromId} name={view.from} size={16} realAvatar />
                 </span>
               ) : (
-                <span className="max-w-[min(16em,50%)] shrink-0 truncate whitespace-nowrap font-semibold text-foreground" title={view.from} data-testid="ride-along-from">
+                <span className="max-w-[min(16em,50%)] shrink-0 truncate whitespace-nowrap font-semibold text-foreground" data-testid="ride-along-from">
                   {view.from}
                 </span>
               ))}
-            <span className="min-w-0 flex-1 truncate text-muted" data-testid="ride-along-text">
-              {view.text}
-            </span>
+            <RowFullText full={full} exact={time.exact} className="flex-1 truncate text-muted"><span data-testid="ride-along-text">{view.text}</span></RowFullText>
+            <RowAge age={time.age} exact={time.exact} />
           </span>
         ) : (
           // Nothing specific (an older cutex): kind · sender · when — never a lone kind word.
@@ -417,7 +439,10 @@ export function NextStepRow({ item, running, held, order, sessionId, idleNote, s
             {ago && <span className="text-subtle"> · {ago}</span>}
           </span>
         )}
-        {item.settlement?.state === "outcome_unknown" ? <span className={`${ROW_META} text-warn-text`} title={t("agent-bus.settlement.disclaimer")} data-testid="timing-outcome-unknown">{t("agent-bus.settlement.unknown")}</span> : held ? <HeldSymbol held={held} /> : autoRetry && item.waitReason !== "nativeReceipt" ? (
+        {item.settlement?.state === "outcome_unknown" ? <span className={`${ROW_META} text-warn-text`} title={t("agent-bus.settlement.disclaimer")} data-testid="timing-outcome-unknown">{t("agent-bus.settlement.unknown")}</span> : held ? <HeldSymbol held={held} /> : afterStop ? (
+          // N10 (registry v1.9): a delegation result is not held by the stop; it starts a new turn when it arrives.
+          <TimingMeta label={t("queue.turn.afterStopHint")} text={t("queue.turn.afterStop")} testId="timing-after-stop" />
+        ) : autoRetry && item.waitReason !== "nativeReceipt" ? (
           <TimingMeta label={formatAutoRetryWait(t, autoRetry, autoRetry.phase === "pending" ? "queue.autoRetryOwnerOrder" : "queue.autoRetryWaiting")} text={formatAutoRetryWait(t, autoRetry, "queue.autoRetryWaiting")} testId="timing-auto-retry" />
         ) : running ? (
           <TimingSymbol item={item} order={order} />

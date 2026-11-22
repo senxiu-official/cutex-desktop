@@ -19,7 +19,7 @@ vi.mock("../src/renderer/src/lib/workspaceView", () => ({ useSelectedWorkspace: 
 vi.mock("../src/renderer/src/lib/workspace", () => ({ HOST_FILE_READ_FEATURE: "fs-file-read", rootFor: () => "/workspace" }));
 vi.mock("../src/renderer/src/lib/contextMenu", () => ({ openMenuFrom: (_el: unknown, entries: MenuEntry[]) => { fx.menus = entries; }, contextMenu: (entries: () => MenuEntry[]) => () => { fx.menus = entries(); } }));
 vi.mock("../src/renderer/src/lib/menus", () => ({ fileMenu: fx.fileMenu }));
-vi.mock("../src/renderer/src/lib/sideOpen", () => ({ openFolder: vi.fn(), openHostFolder: vi.fn(), revealHostInTree: vi.fn(), revealInTree: vi.fn() }));
+vi.mock("../src/renderer/src/lib/sideOpen", () => ({ openFolder: vi.fn(), openHostFolder: vi.fn(), revealHostInTree: vi.fn(), revealInTree: vi.fn(), otherSource: () => undefined }));
 vi.mock("../src/renderer/src/modules/workspace/FileView", () => ({ FileView: () => h("div", { "data-file-view": "" }) }));
 import { useFileMenu } from "../src/renderer/src/modules/workspace/shared";
 import { PreviewBody } from "../src/renderer/src/modules/workspace/Preview";

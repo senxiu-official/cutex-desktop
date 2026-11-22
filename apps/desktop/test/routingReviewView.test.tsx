@@ -72,3 +72,14 @@ it("typed references coexist with legacy result review and survive omitted event
   expect(askReviewFields({ reviewRef: { kind: "routing", approvalId: "../bad", projectId: "p" } })).toEqual({ reviewRef: null });
   expect(fields).not.toHaveProperty("review");
 });
+it.each([
+  ["stale", "delegation.routing.stale"],
+  ["cancelled", "delegation.routing.cancelled"],
+] as const)("W3: a %s review gets its own label and hover, no decision buttons", (state, key) => {
+  fx.operation = null;
+  fx.record = { ...record, state, allowedActions: { approve: true, deny: true } } as UpgradeApprovalRead;
+  const html = renderToStaticMarkup(createElement(RoutingDecision, { host: "local", record: fx.record }));
+  expect(html).toContain(zhCN[key]);
+  expect(html).toContain(zhCN["delegation.routing.closedHint"]);
+  expect(html).not.toContain("data-routing-decision");
+});

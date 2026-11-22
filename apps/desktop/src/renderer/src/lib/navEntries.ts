@@ -9,6 +9,7 @@ import { pageKind } from "./paneLayout";
 import { useSideView } from "./sideComponents";
 import { useSide } from "./sideLayoutStore";
 import { kindsOnScreen } from "./pageOpener";
+import { leaveCoveringSettings } from "./openSettings";
 
 /** True while the entry's page (or one of its activePages) is open: over the conversation column, or on screen in a Shelf (§24.4). */
 export function useNavActive(item: NavItem): boolean {
@@ -34,4 +35,12 @@ export function runNav(item: NavItem, mods: OpenModifiers = PLAIN_OPEN) {
   const pageParams: Record<string, string> = {};
   for (const [k, v] of Object.entries(params ?? {})) if (typeof v === "string") pageParams[k] = v;
   void openRef({ kind: "page", hostId: useApp.getState().hosts?.active ?? "local", key: page }, "beside", { pageParams });
+}
+
+/**
+ * A window-bar entry clicked (the flat icons, 「⋯ 更多」 and the narrow ⋯ list): Settings in front leaves first, then `runNav`.
+ * `anchor`: the clicked button (or the ⋯ that opened the row), where an unsaved-Settings confirm shows.
+ */
+export function runBarEntry(item: NavItem, mods: OpenModifiers = PLAIN_OPEN, anchor?: HTMLElement | null) {
+  leaveCoveringSettings(() => runNav(item, mods), anchor);
 }

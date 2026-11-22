@@ -1,4 +1,5 @@
 // Pure helpers of the 闹钟 status category: which alarms an agent shows, time labels, who → whom.
+import type { InputRecord } from "@cutex-desktop/protocol";
 import type { AlarmView } from "../../../../shared/alarms";
 import { isTraditionalLocale, localeFallbacks, type AppLocale } from "../../../../shared/locales";
 
@@ -110,4 +111,15 @@ export function keysTouched(keys: readonly string[], hostId: string, ids: readon
     const bar = key.indexOf("|");
     return key.slice(0, bar) === hostId && ids.includes(key.slice(bar + 1));
   });
+}
+
+export type AlarmMessageTarget = { kind: "turn"; turnId: string } | { kind: "row" } | { kind: "none" };
+
+/**
+ * Where a queued alarm's message is (「查看这条消息」, openMessage.ts): the turn that read it, its row (still waiting in
+ * 接下来, or a timeline placeholder), or not known (no input record of that id: older host, or not read yet).
+ */
+export function alarmMessageTarget(record: Pick<InputRecord, "turnId"> | undefined): AlarmMessageTarget {
+  if (!record) return { kind: "none" };
+  return record.turnId ? { kind: "turn", turnId: record.turnId } : { kind: "row" };
 }

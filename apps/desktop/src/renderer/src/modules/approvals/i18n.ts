@@ -117,7 +117,7 @@ export const zhCN = {
   "approvals.state.pending": "待处理",
   "approvals.state.approved": "已批准",
   "approvals.state.denied": "已拒绝",
-  "approvals.state.consumed": "已执行",
+  "approvals.state.consumed": "批准已使用",
   "approvals.state.expired": "已过期",
   "approvals.kind.workflow_run": "运行工作流",
   "approvals.reason.workflow_run": "{{agent}}要运行一个工作流，需要你先批准运行计划",

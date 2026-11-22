@@ -287,10 +287,10 @@ export async function ownerNotifyAct(record: Pick<OwnerNotification, "agentId" |
  * 批准一次 / 不批准 on a safety-block notice (claude-safety-grants) of `hostId`: the returned notice (or, when
  * it was decided elsewhere meanwhile, the one the refusal carries) is applied at once.
  */
-export async function safetyCheckAct(record: Pick<OwnerNotification, "agentId" | "safetyBlock">, decision: SafetyCheckDecision, hostId = focusHost()): Promise<SafetyCheckResult> {
+export async function safetyCheckAct(record: Pick<OwnerNotification, "agentId" | "notificationId" | "safetyBlock">, decision: SafetyCheckDecision, hostId = focusHost()): Promise<SafetyCheckResult> {
   const blockId = record.safetyBlock?.blockId;
   if (!blockId) throw new Error("not a safety block");
-  const r = await daemonOf(hostId).safetyCheckDecide(record.agentId, blockId, decision);
+  const r = await daemonOf(hostId).safetyCheckDecide(record.agentId, blockId, decision, record.notificationId);
   if (r.notification) merge(hostId, [r.notification]);
   else if (!r.ok) scheduleRefresh(hostId);
   return r;

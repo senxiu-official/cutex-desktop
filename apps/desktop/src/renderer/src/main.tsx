@@ -6,7 +6,11 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { ErrorBoundary } from "./components/ErrorBoundary";
-import { I18nProvider, startLocaleReady } from "./i18n";
+import { I18nProvider, startLocaleReady, translate } from "./i18n";
+import { setAliasNamer } from "./lib/modelDisplay";
+import { claudeAliasName } from "./lib/claudeModels";
+// Claude alias ids known only by id show 「Opus」 in every model name (lib/modelDisplay).
+setAliasNamer((id) => claudeAliasName(id, translate));
 import "./styles.css";
 import "./motion.css";
 import { startMotion } from "./lib/motion";

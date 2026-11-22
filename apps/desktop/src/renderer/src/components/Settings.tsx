@@ -56,7 +56,7 @@ function NavRow({ entry, current }: { entry: AppSlotEntry<"settings.page">; curr
         if (!current) holdPageBody();
         openSettings(item.page);
       }}
-      className={`${SUBNAV_ITEM} ${current ? SUBNAV_ON : SUBNAV_OFF} ${disabled && !current ? "opacity-60" : ""} focus-visible:ring-2 focus-visible:ring-accent/60 focus-visible:outline-none`}
+      className={`${SUBNAV_ITEM} ${current ? SUBNAV_ON : SUBNAV_OFF} press ${disabled && !current ? "opacity-60" : ""} focus-visible:ring-2 focus-visible:ring-accent/60 focus-visible:outline-none`}
     >
       <Icon size={15} strokeWidth={1.75} className="shrink-0" />
       <span className="truncate">{t(item.titleKey)}</span>
@@ -99,7 +99,7 @@ export function SettingsNav({ params }: { params: PageParams }) {
   return (
     <nav aria-label={t("settings.title")} className="flex w-52 shrink-0 flex-col bg-transparent select-none">
       <div className={`flex h-10 shrink-0 items-center px-2 [app-region:drag] ${bridge.window?.nativeControls === "left" ? "pl-[76px]" : ""}`}>
-        <button onClick={closePage} className={`${SUBNAV_ITEM} ${SUBNAV_OFF} [app-region:no-drag]`}>
+        <button onClick={closePage} className={`${SUBNAV_ITEM} ${SUBNAV_OFF} press [app-region:no-drag]`}>
           <ArrowLeft size={15} strokeWidth={1.75} className="shrink-0" />
           <span className="truncate">{t("settings.back")}</span>
         </button>
@@ -134,7 +134,7 @@ export function SettingsNav({ params }: { params: PageParams }) {
             aria-label={t("shell.settingsSearch.clear")}
             title={t("shell.settingsSearch.clear")}
             onClick={() => (setQuery(""), input.current?.focus())}
-            className="absolute top-1/2 right-3 mt-0.5 -translate-y-1/2 rounded p-0.5 text-subtle hover:text-foreground"
+            className="press absolute top-1/2 right-3 mt-0.5 -translate-y-1/2 rounded p-0.5 text-subtle hover:text-foreground"
           >
             <X size={12} />
           </button>
@@ -304,7 +304,7 @@ function ResultRow({ index, active, disabled, current, indent, onOpen, onHover, 
       onMouseDown={(e) => e.preventDefault() /* keep the focus in the search box */}
       onMouseEnter={() => !disabled && onHover(index)}
       onClick={() => onOpen(index)}
-      className={`flex w-full cursor-pointer flex-col rounded-md px-2 py-1 text-left text-ui/[inherit] ${indent ? "pl-4" : ""} ${active && !disabled ? "bg-surface-2 text-foreground" : current ? "text-foreground" : "text-muted"} ${disabled ? "cursor-default opacity-50" : "hover:text-foreground"}`}
+      className={`flex w-full cursor-pointer flex-col rounded-md px-2 py-1 text-left text-ui/[inherit] ${indent ? "pl-4" : ""} ${active && !disabled ? "bg-surface-2 text-foreground" : current ? "text-foreground" : "text-muted"} ${disabled ? "cursor-default opacity-50" : "press hover:text-foreground"}`}
     >
       {children}
       {disabled && <span className="truncate text-caption/[inherit] text-subtle">{disabled}</span>}
@@ -338,7 +338,7 @@ function CustomizeButton({ region, page, small }: { region: CustomizeRegion; pag
           e.stopPropagation();
           open(e);
         }}
-        className="mt-0.5 inline-flex w-fit items-center gap-1 rounded text-caption/[inherit] text-accent hover:underline focus-visible:ring-2 focus-visible:ring-accent/60 focus-visible:outline-none"
+        className="press mt-0.5 inline-flex w-fit items-center gap-1 rounded text-caption/[inherit] text-accent hover:underline focus-visible:ring-2 focus-visible:ring-accent/60 focus-visible:outline-none"
       >
         <SlidersHorizontal size={11} aria-hidden />
         {t("customize.openInMain")}
@@ -422,7 +422,7 @@ export function Settings({ params }: { params: PageParams }) {
               page={tab}
               title={sub ? t(sub.titleKey) : pageTitle}
               hint={sub ? (sub.hintKey ? t(sub.hintKey) : undefined) : item.hintKey ? t(item.hintKey) : undefined}
-              back={sub ? <BackLink onClick={() => openSettings(tab)}>{pageTitle}</BackLink> : back ? <BackLink onClick={() => openSettings(back.page)}>{t(back.labelKey)}</BackLink> : undefined}
+              back={sub ? <BackLink onClick={() => openSettings(tab, params.profile ? { profile: params.profile } : undefined)}>{pageTitle}</BackLink> : back ? <BackLink onClick={() => openSettings(back.page)}>{t(back.labelKey)}</BackLink> : undefined}
               link={
                 linked || customize ? (
                   <span className="flex min-w-0 max-w-full items-center gap-3">

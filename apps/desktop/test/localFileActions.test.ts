@@ -3,8 +3,10 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import fs from "node:fs/promises";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+vi.mock("electron", () => ({ dialog: {} }));
 import { localFileAction, localFileOpenInfo, validatedLocalFilePath } from "../src/main/localFiles";
-import { canOpenResolvedFile, isAbsoluteFilePath } from "../src/shared/localFiles";
+import { canOpenResolvedFile, fileNameType, fileOpenKind, isAbsoluteFilePath } from "../src/shared/localFiles";
+import { runFileDialogOptions, runFilePromptText } from "../src/main/localFileRunPrompt";
 
 let root: string;
 let file: string;
@@ -53,9 +55,9 @@ it.each(["\\\\attacker\\share\\file.txt", "//attacker/share/file.txt", "\\\\?\\C
 });
 
 it("refuses executable suffixes and shortcuts but still reveals those files and similarly named folders", async () => {
-  for (const suffix of ["exe", "com", "bat", "cmd", "ps1", "psm1", "vbs", "vbe", "js", "jse", "wsf", "wsh", "msi", "msp", "scr", "pif", "lnk", "url", "reg", "hta", "cpl", "jar", "appref-ms", "app", "command", "sh", "desktop"]) {
+  for (const suffix of ["exe", "com", "bat", "cmd", "ps1", "psm1", "vbs", "vbe", "js", "jse", "wsf", "wsh", "msi", "msp", "scr", "pif", "lnk", "url", "reg", "hta", "cpl", "jar", "appref-ms", "app", "command", "sh", "desktop", "py", "pyw", "rb", "pl", "mjs"]) {
     const target = join(root, `payload.${suffix.toUpperCase()}`); await writeFile(target, "synthetic fixture");
-    expect(await localFileOpenInfo("local", target)).toEqual({ canOpen: false });
+    expect(await localFileOpenInfo("local", target)).toEqual({ canOpen: false, runnable: fileNameType(target) });
     await expect(localFileAction("local", target, "open", shell)).rejects.toThrow("cannot be opened");
     await localFileAction("local", target, "reveal", shell);
     expect(shell.showItemInFolder).toHaveBeenLastCalledWith(target);
@@ -70,7 +72,7 @@ it("checks the real target, so a text-looking link cannot open an executable", a
   const executable = join(root, "payload.exe"); await writeFile(executable, "synthetic executable fixture");
   // A deterministic realpath result also covers Windows without symlink privileges.
   vi.spyOn(fs, "realpath").mockResolvedValue(executable);
-  expect(await localFileOpenInfo("local", file)).toEqual({ canOpen: false });
+  expect(await localFileOpenInfo("local", file)).toEqual({ canOpen: false, runnable: "program" });
   await expect(localFileAction("local", file, "open", shell)).rejects.toThrow("cannot be opened");
   await localFileAction("local", file, "reveal", shell);
   expect(shell.showItemInFolder).toHaveBeenCalledWith(executable);
@@ -85,18 +87,59 @@ it.skipIf(process.platform !== "win32")("rejects a hidden network junction targe
   expect(link).toHaveBeenCalledOnce(); expect(real).not.toHaveBeenCalled(); expect(stat).not.toHaveBeenCalled();
 });
 
-it("honours Unix executable bits and target names on macOS/Linux", () => {
+it("decides by type on macOS/Linux: a document opens whatever its mode; only a name with no known type follows the +x bit", () => {
   for (const platform of ["linux", "darwin"]) {
-    expect(canOpenResolvedFile("/tmp/report.txt", "/tmp/report.txt", platform, 0o644)).toBe(true);
-    for (const mode of [0o744, 0o654, 0o645, 0o755]) expect(canOpenResolvedFile("/tmp/report.txt", "/tmp/report.txt", platform, mode)).toBe(false);
+    // A PDF or spreadsheet copied from Windows (or a git checkout) is often 0755: still a document.
+    for (const mode of [0o644, 0o744, 0o654, 0o645, 0o755]) {
+      expect(canOpenResolvedFile("/tmp/report.txt", "/tmp/report.txt", platform, mode)).toBe(true);
+      expect(canOpenResolvedFile("/mnt/c/Budget.XLSX", "/mnt/c/Budget.XLSX", platform, mode)).toBe(true);
+    }
+    expect(fileOpenKind("/tmp/runme", "/tmp/runme", platform, 0o755)).toBe("program");
+    expect(fileOpenKind("/tmp/data.weird", "/tmp/data.weird", platform, 0o711)).toBe("program");
+    expect(fileOpenKind("/tmp/notes", "/tmp/notes", platform, 0o644)).toBe("document");
     for (const path of ["/tmp/App.app", "/tmp/run.command", "/tmp/run.sh", "/tmp/app.desktop"]) expect(canOpenResolvedFile("/tmp/report.txt", path, platform, 0o644)).toBe(false);
   }
+  // Windows decides by suffix only.
+  expect(fileOpenKind("C:/x/runme", "C:/x/runme", "win32", 0o755)).toBe("document");
+  expect(fileOpenKind("C:/x/a.txt", "C:/x/a.ps1", "win32", 0o644)).toBe("script");
 });
 
-it.skipIf(process.platform === "win32")("refuses an actual executable text target and its symlink on Unix", async () => {
-  const target = join(root, "executable.txt"), link = join(root, "alias.txt");
+it("runs a script or program only after main's dialog says 运行, and checks the file again afterwards", async () => {
+  const script = join(root, "build.ps1"); await writeFile(script, "synthetic fixture");
+  const confirmRun = vi.fn(async () => false);
+  await localFileAction("local", script, "run", shell, confirmRun);
+  expect(confirmRun).toHaveBeenCalledExactlyOnceWith({ path: script, kind: "script" });
+  expect(shell.openPath).not.toHaveBeenCalled();
+  confirmRun.mockResolvedValueOnce(true);
+  await localFileAction("local", script, "run", shell, confirmRun);
+  expect(shell.openPath).toHaveBeenCalledExactlyOnceWith(script);
+  // Changed while the dialog was open: not run.
+  shell.openPath.mockClear();
+  confirmRun.mockImplementationOnce(async () => { await writeFile(script, "synthetic fixture, changed"); return true; });
+  await expect(localFileAction("local", script, "run", shell, confirmRun)).rejects.toThrow("changed");
+  expect(shell.openPath).not.toHaveBeenCalled();
+  // No dialog available, or a document: never run.
+  await expect(localFileAction("local", script, "run", shell)).rejects.toThrow("unavailable");
+  await expect(localFileAction("local", file, "run", shell, async () => true)).rejects.toThrow("only a script or program");
+  await expect(localFileAction("ssh-host", script, "run", shell, async () => true)).rejects.toThrow("remote");
+  expect(shell.openPath).not.toHaveBeenCalled();
+});
+
+it("the run dialog names the full path and type, defaults to Cancel and has no remember box", () => {
+  const zh = runFilePromptText("zh-CN", { path: String.raw`C:\tools\setup.exe`, kind: "program" });
+  expect(zh.detail).toContain(String.raw`C:\tools\setup.exe`); expect(zh.detail).toContain(".exe"); expect(zh.message).toContain("setup.exe");
+  const en = runFilePromptText("en", { path: "/home/me/run.sh", kind: "script" });
+  expect(en.detail).toContain("/home/me/run.sh"); expect(en.detail).toContain("Script (.sh)");
+  expect(runFilePromptText("zh-Hant-TW", { path: "/a/b.sh", kind: "script" }).run).toBe("執行");
+  const options = runFileDialogOptions(en);
+  expect(options.buttons).toEqual(["Cancel", "Run"]); expect(options.defaultId).toBe(0); expect(options.cancelId).toBe(0);
+  expect(options.checkboxLabel).toBeUndefined(); expect(options.type).toBe("warning");
+});
+
+it.skipIf(process.platform === "win32")("refuses an actual executable without a known type and its symlink on Unix", async () => {
+  const target = join(root, "executable"), link = join(root, "alias");
   await writeFile(target, "synthetic fixture"); await fs.chmod(target, 0o755); await fs.symlink(target, link);
-  expect(await localFileOpenInfo("local", link)).toEqual({ canOpen: false });
+  expect(await localFileOpenInfo("local", link)).toEqual({ canOpen: false, runnable: "program" });
   await expect(localFileAction("local", link, "open", shell)).rejects.toThrow("cannot be opened");
   await localFileAction("local", link, "reveal", shell);
   expect(shell.showItemInFolder).toHaveBeenCalledWith(target); expect(shell.openPath).not.toHaveBeenCalled();

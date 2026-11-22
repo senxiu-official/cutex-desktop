@@ -76,7 +76,7 @@ export const en: Record<keyof typeof zhCN, string> = {
   "workflows.step.tokens": "{n} tok",
   "workflows.stop": "Stop",
   "workflows.stopConfirm": "Click again to stop",
-  "workflows.resume": "Continue",
+  "workflows.resume": "Resume run",
   "workflows.resumeHint": "Starts a new run that reuses the finished steps at no extra cost",
   "workflows.delete": "Delete",
   "workflows.deleteConfirm": "Click again to delete",

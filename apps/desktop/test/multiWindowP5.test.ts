@@ -266,11 +266,14 @@ describe("the browser in desk windows: per-window hardening (main/browser/instal
     expect(await ask("media")).toBe(false);
     expect(electron.messageBox).toHaveBeenCalledOnce();
     expect(electron.messageBox.mock.calls[0]![0]).toBe(desk);
-    // The desk minimised (the main window still on screen): no invisible dialog, a notice instead.
+    // The desk minimised (the main window still on screen): no invisible dialog; the owner's request waits for that desk (A7)
+    // and gives up the one-dialog slot meanwhile.
     desk.state.minimized = true;
-    expect(await ask("notifications")).toBe(false);
+    const held = vi.fn(); request(guest, "notifications", held, { requestingUrl: "http://localhost:26180/" });
+    for (let i = 0; i < 50; i++) await Promise.resolve();
+    expect(held).not.toHaveBeenCalled();
     expect(electron.messageBox).toHaveBeenCalledOnce();
-    expect(f.events.at(-1)).toMatchObject({ kind: "blocked", blocked: "permission-hidden", tabKey: "desk-tab" });
+    expect(f.events.at(-1)).toMatchObject({ kind: "blocked", blocked: "permission-held", tabKey: "desk-tab" });
     // A main-window tab still asks over the main window.
     const main = await f.mountIn(f.main, "main-tab");
     const callback = vi.fn(); request(main.guest, "media", callback, { requestingUrl: "http://localhost:26180/", mediaTypes: ["audio"] });

@@ -20,7 +20,7 @@ vi.mock("../src/renderer/src/i18n", () => ({ useI18n: () => ({ locale: "en", t: 
 vi.mock("../src/renderer/src/store", () => ({ useApp: { getState: () => ({ openSettings: fx.open }) } }));
 vi.mock("../src/renderer/src/lib/targetHost", () => {
   const api = { approvalRules: async () => ({ revision: 1, rules: fx.rules }), approvalRuleAudit: async () => ({ audit: fx.audit, nextCursor: fx.next }) };
-  return { useTargetApi: () => api, useTargetSidebar: () => null };
+  return { useTargetApi: () => api, useTargetHostId: () => "local", useTargetSidebar: () => null };
 });
 vi.mock("../src/renderer/src/components/settings/Form", async () => {
   const { createElement: e } = await import("react");

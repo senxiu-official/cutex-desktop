@@ -83,9 +83,10 @@ export const MENTION_AVATAR = 16;
 /**
  * Exact identity; the current authorized sidebar snapshots supply host, name and appearance. An id not in them
  * (archived, host offline) shows a plain @name; while a host's archived agents are not read yet it still opens,
- * reading them first. `host`: the link's host (another host's agent), kept in a copied link.
+ * reading them first. `host`: the link's host (another host's agent), kept in a copied link. `onOpen`: opens it
+ * instead of openAgent (scoped Markdown: never widening the device scope).
  */
-export function AgentMentionChip({ id, name, host = null, interactive = true }: { id: string; name: string; host?: string | null; interactive?: boolean }) {
+export function AgentMentionChip({ id, name, host = null, interactive = true, onOpen }: { id: string; name: string; host?: string | null; interactive?: boolean; onOpen?: (id: string, hostId: string) => void }) {
   const { t } = useI18n();
   const valid = parseAgentMentionHref(`cutex:agent/${id}`) !== null;
   const entry = useApp(state => valid ? agentIndex(state).get(id) ?? null : null);
@@ -100,7 +101,10 @@ export function AgentMentionChip({ id, name, host = null, interactive = true }: 
     // Re-read at the gesture: rename/removal/host changes since render cannot route to a stale host.
     let current = valid ? agentIndex(useApp.getState()).get(id) : null;
     if (interactive && !current && valid && archivedUnread(useApp.getState())) { await useApp.getState().ensureArchived(); current = agentIndex(useApp.getState()).get(id); }
-    if (interactive && current) void useApp.getState().openAgent(id, current.hostId);
+    if (interactive && current) {
+      if (onOpen) onOpen(id, current.hostId);
+      else void useApp.getState().openAgent(id, current.hostId);
+    }
   };
   const presence = entry?.session.runtime.status === "online" ? "online" : entry?.session.runtime.status === "offline" ? "offline" : "unknown";
   return (

@@ -40,6 +40,10 @@ const jobs: JobRow[] = [
   job("eva", "Eva", "cancelled", 5 * 3600, { actionId: "bench-sqlite", command: "cargo bench --bench sqlite_store", tookSeconds: 40 * 60, revision: 4 }),
   job("eva", "Eva", "interrupted", 26 * 3600, { actionId: "build-r208", command: "./build.sh release r208", tookSeconds: 9 * 60, revision: 3 }),
   job("eva", "Eva", "launch_unknown", 30 * 3600, { actionId: "deploy-dry-run", tookSeconds: 1, revision: 2 }),
+  // r289: the owner's 结束跟进 (terminal unconfirmed, no signal sent: the process may still run).
+  job("mika", "Mika", "unconfirmed", 6 * 3600, { actionId: "rebuild-index", command: "python index.py --rebuild", tookSeconds: 2 * 3600, revision: 4, terminalReason: "followUpEnded" } as Partial<JobRow>),
+  // A state this desktop does not know: shown as 结果未确认, not counted in progress, 结束跟进 offered.
+  job("lead", "Lead", "suspended_remote", 2 * 3600, { actionId: "sync-weights", command: "rclone sync s3:weights ./weights", revision: 2 }),
   job("lead", "Lead", "launch_pending", 4, { actionId: "train-small", command: "python train.py --config configs/small.yaml" }),
   job("lead", "Lead", "failed", 3 * 3600, { actionId: "fetch-dataset", command: "rsync -a workstation:/data/ifm ./data", tookSeconds: 12, revision: 3 }),
   job("mika", "Mika", "exited", 20 * 60, { actionId: "vitest", command: "pnpm -C apps/desktop test", exitCode: 0, tookSeconds: 95, revision: 3 }),
@@ -117,7 +121,9 @@ function mockJobApi(byId: Map<string, JobRow>) {
       return ok({ data: page, nextCursor: start + limit < rows.length ? `${rows[start + limit - 1]?.createdAt ?? 0}:${start + limit}` : null });
     },
     async jobServiceCapabilities(): Promise<JobResult<JobServiceCapabilities>> {
-      return ok({ schema: "cutex/job-service-capabilities/v1", humanOperations: ["list", "cancel", "readOutput", "markExternal"], sources: ["nci"], externalNotifyFile: true });
+      // `?jobold`: a Job Service before r289 (no closeFollowUp: 结束跟进 is a local mark on this device).
+      const old = typeof location !== "undefined" && new URLSearchParams(location.search).has("jobold");
+      return ok({ schema: "cutex/job-service-capabilities/v1", humanOperations: ["list", "cancel", "readOutput", "markExternal", ...(old ? [] : ["closeFollowUp"])], sources: ["nci"], externalNotifyFile: true });
     },
     async cancelJob(jobId: string, expectedRevision: number): Promise<JobResult<unknown>> {
       await delay();
@@ -125,6 +131,15 @@ function mockJobApi(byId: Map<string, JobRow>) {
       if (!j) return { ok: false, code: "job_not_found", message: "unknown job" };
       if (j.revision !== expectedRevision) return { ok: false, code: "job_conflict", message: "job revision mismatch" };
       if (j.state === "running" || j.state === "launch_pending") Object.assign(j, { state: "cancelled", updatedAt: now(), revision: j.revision + 1 });
+      return ok(j);
+    },
+    // r289 `POST /v2/job-service/close-follow-up`: terminal unconfirmed, no process signalled (it may still run).
+    async jobCloseFollowUp(jobId: string, expectedRevision: number, _reason: string): Promise<JobResult<unknown>> {
+      await delay();
+      const j = byId.get(jobId);
+      if (!j) return { ok: false, code: "job_not_found", message: "unknown job" };
+      if (j.revision !== expectedRevision) return { ok: false, code: "job_conflict", message: "job revision mismatch" };
+      if (!["exited", "cancelled", "failed", "interrupted", "launch_unknown", "unconfirmed"].includes(j.state)) Object.assign(j, { state: "unconfirmed", terminalReason: "followUpEnded", updatedAt: now(), revision: j.revision + 1 });
       return ok(j);
     },
     async markExternalJob(input: { jobId: string; expectedRevision: number; state: string; exitCode?: number }): Promise<JobResult<unknown>> {
@@ -202,6 +217,12 @@ function mockComponent(name: string, mode: string, windowsHost = false) {
     } } : {}),
     ...mockExternal(name, mode, windowsHost, selected),
     ...mockIndex(name, selected),
+    // `?runtimeEva` (modules/runtimes/mock.ts): host-a's installed Claude runtimes on 2026-11-15, no CLI report.
+    ...(name === "claude-runtime" && QUERY.has("runtimeEva") ? { state: "ready", selected: "claude-r47-source-bd71c6c1e579", origin: "signed", versions: [
+      "claude-r28", "claude-r29", "claude-r30", "claude-r31", "claude-r32-source-a17df7ad4ec6", "claude-r33-source-483a8944c580",
+      "claude-r34-source-546e26b7252d", "claude-r35-source-b202e43a79d6", "claude-r36-source-4739b3fb1e4e", "claude-r37-source-276d002d6b28",
+      "claude-r39-source-c70709ed4cd9", "claude-r42-source-ab14892ee600", "claude-r47-source-bd71c6c1e579", "claude-r49-source-365fe1c1e525",
+    ].map(version => ({ version, pinnedBy: version.startsWith("claude-r47") ? 54 : version.startsWith("claude-r42") ? 89 : 0, sizeBytes: 620_000_000 })) } : {}),
   } as ComponentStatus;
 }
 

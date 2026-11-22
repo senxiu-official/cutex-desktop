@@ -5,6 +5,7 @@
 // typed confirmation) / cancel / roll back (dry-run preview first); the run by phase; history; the
 // automatic-update settings. cutex does all the work (`cutex upgrade …` runner, docs/backend-upgrade.md);
 // this page only reads its state and triggers it. A hand-deployed host (managed: false) is read-only.
+import { useSettingsCard } from "../../lib/settingsDrafts";
 import { useEffect, useMemo, useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { UPGRADE_CHECK_INTERVAL_MAX, UPGRADE_PACKAGE_RUN_BATCH_MAX, UPGRADE_PACKAGE_RUNS, upgradeNoteText, type HostServiceInfo, type UpgradeAvailable, type UpgradeMigration, type UpgradeMode, type UpgradePackageRun, type UpgradeRollbackPreview, type UpgradeSettings, type UpgradeSettingsPatch, type UpgradeStatus } from "../../../../shared/backendUpgrade";
@@ -20,6 +21,7 @@ import { useHostServiceInfo, useUpgradeAction } from "./hooks";
 import { applyRequest, intervalChoices, intervalWords, minutesOf, modeKeys, releaseNative, runActive, runDisplay, unixOf } from "./model";
 import { installedReleaseNotes } from "./releaseNotes";
 import { CommandLine, HistorySection, RunNote, RunSection, When } from "./RunView";
+import { needsOwnerHandled, readHandled, writeHandled } from "./handled";
 import { loadUpgradeRuns, loadUpgradeStatus, putUpgradeStatus, useHostUpgrade } from "./store";
 
 // The run whose "just finished" note the owner dismissed, per host (a per-viewer convenience: an
@@ -89,12 +91,12 @@ function Migrations({ list }: { list: readonly UpgradeMigration[] }) {
 
 // ---------- status ----------
 
-/** The host's update state in one sentence (the 已安装版本 row's hint). */
-function useStateLine(status: UpgradeStatus): { text: string; tone?: "accent" | "warn" } {
+/** The host's update state in one sentence (the 已安装版本 row's hint). `handled`: the owner put the needs-owner card away. */
+function useStateLine(status: UpgradeStatus, handled = false): { text: string; tone?: "accent" | "warn" } {
   const { t, locale } = useI18n();
   const installed = status.installed?.release ?? null;
   const phase = status.run?.phase ?? null;
-  if (phase === "needs-owner") return { text: t("backend-upgrade.state.needsOwner"), tone: "warn" };
+  if (phase === "needs-owner") return handled ? { text: t("backend-upgrade.state.needsOwnerHandled") } : { text: t("backend-upgrade.state.needsOwner"), tone: "warn" };
   if (!status.managed) return { text: t("backend-upgrade.state.unmanaged") };
   if (status.run && runActive(status.run)) return { text: t("backend-upgrade.state.running", { release: status.run.toRelease }), tone: "accent" };
   if (status.staged && status.staged.release !== installed) return { text: t("backend-upgrade.state.staged", { release: status.staged.release }), tone: "accent" };
@@ -104,7 +106,7 @@ function useStateLine(status: UpgradeStatus): { text: string; tone?: "accent" | 
   return { text: t("backend-upgrade.state.upToDateAt", { time: formatWhen(at, Date.now(), locale) }) };
 }
 
-function StatusSection({ status, info, onCheck, checking, checkError, installedNotes }: { status: UpgradeStatus; info: HostServiceInfo | null; onCheck?(): void; checking: boolean; checkError: string | null; installedNotes: boolean }) {
+function StatusSection({ status, info, onCheck, checking, checkError, installedNotes, handled = false }: { status: UpgradeStatus; info: HostServiceInfo | null; onCheck?(): void; checking: boolean; checkError: string | null; installedNotes: boolean; handled?: boolean }) {
   const { t, locale } = useI18n();
   const intervalText = useIntervalText();
   const build = readCutexBuild({ cutexBuild: status.build });
@@ -115,7 +117,7 @@ function StatusSection({ status, info, onCheck, checking, checkError, installedN
   const nativeLabel = native ? native.selected || (native.selectedSha256Prefix ? nativeVersionText(null, native.selectedSha256Prefix, t("runtimes.unknownVersion")) : t("runtimes.noCurrent")) : null;
   const claude = info?.runtimes?.claude;
   const olderNative = native ? native.inUse.filter((u) => !u.selected).reduce((n, u) => n + u.agents, 0) : 0;
-  const state = useStateLine(status);
+  const state = useStateLine(status, handled);
   // What the installed release brought: cutex's own `installed.notes` (capability
   // upgrade-installed-notes), else the notes this desktop saw while it was on offer (./releaseNotes.ts);
   // nothing when neither knows them.
@@ -254,6 +256,8 @@ function UpdateSection({ hostId, status, busyRun }: { hostId: string; status: Up
   const { t } = useI18n();
   const api = useTargetApi();
   const action = useUpgradeAction();
+  // The advanced choices (mode, wait, package run): unsaved from a change until 应用 succeeds (lib/settingsDrafts).
+  const card = useSettingsCard();
   const { available, staged, staging, settings } = status;
   const installed = status.installed?.release ?? null;
   const target = staged ?? null;
@@ -285,7 +289,8 @@ function UpdateSection({ hostId, status, busyRun }: { hostId: string; status: Up
   const apply = async () => {
     if (!target) return;
     const release = target.release;
-    await action.run(
+    const upTo = card.revision();
+    const applied = await action.run(
       () =>
         api.upgradeApply(applyRequest({ release, forceFull: mode === "full", effectiveMode, waitMin: waitPick, packageRun: packageRunPick, oneWay })),
       (r) => {
@@ -293,6 +298,7 @@ function UpdateSection({ hostId, status, busyRun }: { hostId: string; status: Up
         return false;
       },
     );
+    if (applied != null) card.saved(upTo);
     void loadUpgradeStatus(hostId);
   };
 
@@ -352,7 +358,7 @@ function UpdateSection({ hostId, status, busyRun }: { hostId: string; status: Up
               </SettingRow>
             </div>
           )}
-          <div className="border-b border-border/60 py-2">
+          <div ref={card.inSection} className="border-b border-border/60 py-2">
             <button type="button" className="flex items-center gap-1 text-xs text-muted hover:text-foreground" aria-expanded={advanced} onClick={() => setAdvanced((a) => !a)}>
               {advanced ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
               {t("backend-upgrade.advanced")}
@@ -547,10 +553,17 @@ export function BackendUpgradePage() {
   }, [hostId, u.connected, u.supported, showHistory]);
   const [dismissed, setDismissed] = useState<string | null>(() => readDismissed(hostId));
   useEffect(() => setDismissed(readDismissed(hostId)), [hostId]);
-  const display = useMemo(() => runDisplay(run, Date.now(), dismissed), [run, dismissed]);
+  const [handledRun, setHandledRun] = useState<string | null>(() => readHandled(hostId));
+  useEffect(() => setHandledRun(readHandled(hostId)), [hostId]);
+  const handled = needsOwnerHandled(run, handledRun);
+  const display = useMemo(() => (handled ? null : runDisplay(run, Date.now(), dismissed)), [run, dismissed, handled]);
   const dismiss = (runId: string) => {
     writeDismissed(hostId, runId);
     setDismissed(runId);
+  };
+  const markHandled = (runId: string) => {
+    writeHandled(hostId, runId);
+    setHandledRun(runId);
   };
 
   if (!u.connected) {
@@ -585,9 +598,9 @@ export function BackendUpgradePage() {
   return (
     <>
       {u.error && <ErrorNote>{u.error}</ErrorNote>}
-      {run && display === "card" && <RunSection hostId={hostId} run={run} native={releaseNative(status, run.toRelease)} />}
+      {run && display === "card" && <RunSection hostId={hostId} run={run} native={releaseNative(status, run.toRelease)} onHandled={() => markHandled(run.runId)} />}
       {run && display === "note" && <RunNote run={run} onDismiss={() => dismiss(run.runId)} />}
-      <StatusSection status={status} info={info} onCheck={status.managed ? () => void doCheck() : undefined} checking={check.busy} checkError={check.error} installedNotes={u.installedNotes} />
+      <StatusSection status={status} info={info} onCheck={status.managed ? () => void doCheck() : undefined} checking={check.busy} checkError={check.error} installedNotes={u.installedNotes} handled={handled} />
       {!status.managed ? (
         <UnmanagedSection />
       ) : (

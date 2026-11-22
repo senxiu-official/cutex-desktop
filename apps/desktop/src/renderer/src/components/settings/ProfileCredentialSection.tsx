@@ -3,12 +3,13 @@
 // Replace / remove act at once (write-only `PATCH {apiKey}`; the field empties right after the send); a DSH Profile may
 // read a named host variable instead (Advanced; no fallback). Says who is affected: this Profile's bound agents at their
 // next start (running ones keep their key), or — for a Claude account — the other Profiles sharing it.
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { ProfileDetail } from "../../../../shared/ipc";
 import { credentialEnvName } from "../../../../shared/profileVariants";
 import { useI18n, type MessageKey } from "../../i18n";
 import { ARMED_FORM_BUTTON, useArmed } from "../../lib/armedConfirm";
 import { boundAgents } from "../../lib/profileVariants";
+import { useSettingsCard } from "../../lib/settingsDrafts";
 import { useClaudeAccountList } from "../../lib/useClaudeAccountList";
 import { useTargetApi } from "../../lib/targetHost";
 import { Tag } from "../Tag";
@@ -55,20 +56,38 @@ export function ProfileCredentialSection({ detail, onChanged }: { detail: Profil
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<{ text: string; error: boolean } | null>(null);
   const [removeArmed, setRemoveArmed] = useArmed(`${detail.id}:${cred?.version ?? 0}`);
+  // Its key and host-variable fields are Settings cards of their own (lib/settingsDrafts; the Profile page's draft does not
+  // hold them): the key empties when sent; the variable is unsaved from 使用主机变量 until its save succeeds.
+  const keyCard = useSettingsCard();
+  const envCard = useSettingsCard();
+  const editingEnv = envDraft !== null;
+  useEffect(() => {
+    if (editingEnv) envCard.changed();
+  }, [editingEnv, envCard]);
   if (!cred) return null;
   const dsh = detail.cliKind === "dsh";
   const agents = boundAgents(detail);
-  const run = async (patch: Parameters<typeof api.patchProfile>[1], done: string) => {
+  const run = async (patch: Parameters<typeof api.patchProfile>[1], done: string): Promise<boolean> => {
     setBusy(true);
     setStatus(null);
     try {
       const next = await api.patchProfile(detail.id, patch);
       setStatus({ text: done, error: false });
       onChanged(next);
+      return true;
     } catch (e) {
       setStatus({ text: errorText(e), error: true });
+      return false;
     } finally {
       setBusy(false);
+    }
+  };
+  // The host-variable part: settled up to the revision this save carried; a failed one keeps what was typed.
+  const saveEnv = async (patch: Parameters<typeof api.patchProfile>[1], done: string) => {
+    const upTo = envCard.revision();
+    if (await run(patch, done)) {
+      envCard.saved(upTo);
+      setEnvDraft(null);
     }
   };
   const saveKey = () => {
@@ -103,7 +122,7 @@ export function ProfileCredentialSection({ detail, onChanged }: { detail: Profil
         </SettingRow>
         {cred.writable && cred.source !== "env" && (
           <SettingRow agents="next" source="host" label={t(cred.present ? "variants.credential.replace" : "variants.credential.setKey")}>
-            <TextInput mono type="password" width="w-64" label={t("variants.credential.key")} value={key} disabled={busy} placeholder={cred.present ? t("variants.credential.replacePlaceholder") : "sk-…"} onChange={setKey}
+            <TextInput inputRef={keyCard.ref} mono type="password" width="w-64" label={t("variants.credential.key")} value={key} disabled={busy} placeholder={cred.present ? t("variants.credential.replacePlaceholder") : "sk-…"} onChange={setKey}
               onKeyDown={(e) => { if (e.key === "Enter" && key.trim()) saveKey(); }} />
             <Button primary disabled={busy || !key.trim()} onClick={saveKey}>{t(cred.present ? "variants.credential.replace" : "variants.credential.setKey")}</Button>
             {/* Removing is a DSH stored key's action only (cutex cannot clear a Codex profile's key). */}
@@ -123,14 +142,14 @@ export function ProfileCredentialSection({ detail, onChanged }: { detail: Profil
               <Toggle checked={cred.source === "env" || envDraft !== null} disabled={busy} label={t("variants.credential.useEnv")}
                 onChange={(on) => {
                   if (on) setEnvDraft(cred.envName ?? "");
-                  else if (cred.source === "env") void run({ credential: { source: "stored" } }, t("variants.credential.sourceSaved")).then(() => setEnvDraft(null));
+                  else if (cred.source === "env") void saveEnv({ credential: { source: "stored" } }, t("variants.credential.sourceSaved"));
                   else setEnvDraft(null);
                 }} />
             </SettingRow>
             {(envDraft !== null || cred.source === "env") && (
               <SettingRow agents="next" source="host" label={t("variants.credential.envName")} hint={envProblem ? <span className="text-danger">{t("variants.credential.envInvalid")}</span> : undefined}>
-                <TextInput mono width="w-64" label={t("variants.credential.envName")} value={envDraft ?? cred.envName ?? ""} placeholder="DEEPSEEK_API_KEY" disabled={busy} onChange={setEnvDraft} />
-                <Button disabled={busy || envProblem || !(envDraft ?? "").trim() || envDraft?.trim() === cred.envName} onClick={() => void run({ credential: { source: "env", envName: envDraft!.trim() } }, t("variants.credential.sourceSaved")).then(() => setEnvDraft(null))}>{t("variants.credential.envSave")}</Button>
+                <TextInput inputRef={envCard.ref} mono width="w-64" label={t("variants.credential.envName")} value={envDraft ?? cred.envName ?? ""} placeholder="DEEPSEEK_API_KEY" disabled={busy} onChange={setEnvDraft} />
+                <Button disabled={busy || envProblem || !(envDraft ?? "").trim() || envDraft?.trim() === cred.envName} onClick={() => void saveEnv({ credential: { source: "env", envName: envDraft!.trim() } }, t("variants.credential.sourceSaved"))}>{t("variants.credential.envSave")}</Button>
               </SettingRow>
             )}
           </Details>

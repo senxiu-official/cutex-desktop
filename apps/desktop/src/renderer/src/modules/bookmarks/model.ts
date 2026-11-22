@@ -1,3 +1,4 @@
+import { OWNER_PIN_ID } from "../../../../shared/ownerPins";
 import type { CutexRef } from "../slots";
 
 export const BOOKMARK_LIMIT = 500;
@@ -96,9 +97,13 @@ export function groupBookmarks(records: readonly BookmarkRecord[], hostId: strin
   }
   return [...groups.values()].sort((a, b) => Number(b.current) - Number(a.current) || Number(b.hostId === hostId) - Number(a.hostId === hostId) || a.hostId.localeCompare(b.hostId) || (a.sessionId ?? "").localeCompare(b.sessionId ?? ""));
 }
-/** The 备忘 card (owner 2026-11-10): tab 要处理 (agent pins, pins/) or 书签; agentOnly filters 要处理 to the open agent. */
-export type ListState = { query?: string; allHosts?: boolean; tab?: "pins" | "bookmarks"; agentOnly?: boolean };
+/** The 备忘 card (owner 2026-11-10): tab 要处理 (agent pins, pins/) or 书签; agentOnly filters 要处理 to the open agent;
+ *  `pin` (2026-11-19) is the memo whose detail the card shows (null: the list). */
+export type MemoRef = { hostId: string; pinId: string };
+export type ListState = { query?: string; allHosts?: boolean; tab?: "pins" | "bookmarks"; agentOnly?: boolean; pin?: MemoRef | null };
+const memoRef = (v: unknown): MemoRef | null | undefined =>
+  v === null ? null : object(v) && text(v.hostId, 200) && typeof v.pinId === "string" && OWNER_PIN_ID.test(v.pinId) ? { hostId: v.hostId, pinId: v.pinId } : undefined;
 export function parseList(raw: unknown): ListState | null {
   if (!object(raw)) return null;
-  return { ...(typeof raw.query === "string" ? { query: raw.query.slice(0, 500) } : {}), ...(typeof raw.allHosts === "boolean" ? { allHosts: raw.allHosts } : {}), ...(raw.tab === "pins" || raw.tab === "bookmarks" ? { tab: raw.tab } : {}), ...(typeof raw.agentOnly === "boolean" ? { agentOnly: raw.agentOnly } : {}) };
+  return { ...(typeof raw.query === "string" ? { query: raw.query.slice(0, 500) } : {}), ...(typeof raw.allHosts === "boolean" ? { allHosts: raw.allHosts } : {}), ...(raw.tab === "pins" || raw.tab === "bookmarks" ? { tab: raw.tab } : {}), ...(typeof raw.agentOnly === "boolean" ? { agentOnly: raw.agentOnly } : {}), ...(memoRef(raw.pin) !== undefined ? { pin: memoRef(raw.pin) } : {}) };
 }

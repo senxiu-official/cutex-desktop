@@ -1,5 +1,7 @@
 // Final R4 captured replay. Historical C2 files require explicit trace selection.
 import type { InputDisposeResult, InputRecord, InputLease, InputListParams, InputListResult, SessionDelivery, SubmitStrategy, QueueItem, UserInputQueueMergeParams, InputInterruptSendParams, InputInterruptSendResult } from "@cutex-desktop/protocol";
+import { NOTE_DELIVERY_SCENE, noteDeliveryRecords } from "./mockNoteDelivery";
+import { INTERRUPT_MANY_SCENE, interruptManyRecords } from "./mockInterruptMany";
 import { capturedOperations, parseCapturedTrace, replayCapturedTrace } from "../lib/inputLedger/capturedTraces";
 import { emptyInputLedgerSession } from "../lib/inputLedger/alignment";
 import { mergeQueueInputs } from "../../../shared/queueMerge";
@@ -73,6 +75,10 @@ export function createMockInputLedger(scene: LedgerScene = "turn", emit: Emit = 
     s.delivery = syntheticDelivery();
     try { loadCapture(id, capture?.trace ?? DEFAULT_LEDGER_TRACES[scene], capture?.line, capture?.sourceSessionId); }
     catch (error) { sessions.delete(id); provenance.delete(id); throw error; }
+    // ?noteDelivery: SYNTHETIC note-delivery rows over the capture (dev/mockNoteDelivery; marked in details.fixture).
+    if (NOTE_DELIVERY_SCENE) for (const record of noteDeliveryRecords(id, clock(), s.revision)) s.records.set(record.inputId, record);
+    // ?interruptMany: three SYNTHETIC unread 插话 in the running turn (dev/mockInterruptMany).
+    if (INTERRUPT_MANY_SCENE) for (const record of interruptManyRecords(id, s.delivery, clock(), s.revision)) s.records.set(record.inputId, record);
     return s;
   }
   function loadCapture(id: string, trace: string, requestedLine?: number, sourceSessionId?: string) {
@@ -137,6 +143,17 @@ export function createMockInputLedger(scene: LedgerScene = "turn", emit: Emit = 
   }
   const api = {
     async inputInterruptSend(id: string, params: InputInterruptSendParams): Promise<InputInterruptSendResult> {
+      // interrupt-send-many-v1 (SYNTHETIC): one interrupt for the ordered set; the last unread one carries the rest.
+      if ("inputIds" in params) {
+        const s = get(id);
+        const keys = Object.keys(params.expectedRevs);
+        if (!params.inputIds.length || keys.length !== params.inputIds.length || keys.some(key => !params.inputIds.includes(key))) throw new Error("invalid_request: expectedRevs");
+        const records = params.inputIds.map(inputId => cas(id, inputId, params.expectedRevs[inputId]!));
+        if (records.some(record => record.kind !== "owner" || !record.actions?.includes("interruptSend"))) throw new Error("input_not_interruptible");
+        if (s.delivery.turn?.turnId !== params.expectedTurnId || s.delivery.runtimeGeneration !== params.expectedRuntimeGeneration) throw new Error("revision_conflict");
+        const sent = params.inputIds.map(inputId => put(id, inputId, { state: "sending", reason: "interruptSend", surface: "timeline", actions: [], details: { ...s.records.get(inputId)!.details, simulation: "SYNTHETIC interactive interruptSend batch", interruptedTurnId: params.expectedTurnId } }));
+        return { ledgerEpoch: s.epoch, stateRevision: s.revision, outcome: "interrupted", interruptedTurnId: params.expectedTurnId, inputIds: [...params.inputIds], records: sent, carrierInputId: params.inputIds.at(-1) ?? null, alreadyInContext: [], submitted: [...params.inputIds] };
+      }
       const s = get(id), record = cas(id, params.inputId, params.expectedRev);
       if (!record.actions?.includes("interruptSend")) throw new Error("input_not_interruptible");
       if (s.delivery.turn?.turnId !== params.expectedTurnId || s.delivery.runtimeGeneration !== params.expectedRuntimeGeneration) throw new Error("revision_conflict");
@@ -225,7 +242,8 @@ export function createMockInputLedger(scene: LedgerScene = "turn", emit: Emit = 
     s.items = s.items.filter(old => old.queueId !== queueId);
     put(id, item.clientUserMessageId, { state: "discarded", reason: "ownerDiscarded", surface: "none", actions: [] });
   }
-  function submit(id: string, text: string, strategy: SubmitStrategy, inputId: string) {
+  /** `extra`: the message's other input items (images, skills) after its text, as cutex keeps them on the queue item. */
+  function submit(id: string, text: string, strategy: SubmitStrategy, inputId: string, extra: readonly { type: string }[] = []) {
     const s = get(id), previous = s.records.get(inputId);
     if (previous) return { disposition: "deduplicated" as const, turnId: previous.turnId, input: structuredClone(previous) };
     const offline = s.delivery.state === "offline" || s.delivery.state === "starting";
@@ -233,7 +251,7 @@ export function createMockInputLedger(scene: LedgerScene = "turn", emit: Emit = 
     const held = !queued && s.delivery.state === "held";
     const heldNextUp = held && (s.delivery.reason !== "hostBusy" || s.delivery.turn !== null);
     const input = put(id, inputId, { preview: text.slice(0, 80), intent: { strategy, deliveryMode: null, timing: "afterTurn" }, state: queued ? "waiting" : held ? "held" : "accepted", reason: offline ? "agentOffline" : queued ? "explicitQueue" : held ? "hostBusy" : null, surface: queued || heldNextUp ? "nextUp" : "timeline", order: queued ? { admissionKey: inputId, position: s.records.size } : null, deadline: queued || held ? null : new Date(clock() + 60000).toISOString(), actions: strategy === "queue" ? ["cancel", "sendNow", "edit"] : queued ? ["dismiss"] : [] });
-    if (strategy === "queue") s.items.push({ queueId: `synthetic-${inputId}`, clientUserMessageId: inputId, origin: { kind: "other", clientId: "preview-simulation" }, input: [{ type: "text", text }], position: s.items.length, revision: 1, state: "queued", createdAt: iso(), updatedAt: iso() });
+    if (strategy === "queue") s.items.push({ queueId: `synthetic-${inputId}`, clientUserMessageId: inputId, origin: { kind: "other", clientId: "preview-simulation" }, input: [{ type: "text", text }, ...structuredClone(extra)] as never, position: s.items.length, revision: 1, state: "queued", createdAt: iso(), updatedAt: iso() });
     if (offline) setDelivery(id, "starting");
     return { disposition: queued ? "queued" as const : held ? "held" as const : s.delivery.state === "turn" ? "steered" as const : "started" as const, turnId: s.delivery.turn?.turnId ?? null, input };
   }

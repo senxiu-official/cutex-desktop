@@ -3,7 +3,9 @@
 // extra fields cutex, unpinnedAgentCount, releaseDir, latest are not read yet). Every wire field the
 // desktop reads is in this file (`RuntimesWire` + `adaptRuntimes`) and the preview mock (modules/runtimes/mock.ts).
 
-export { RUNTIME_PRUNE_FEATURE, type RuntimePruneKind, type RuntimePruneVersion, type RuntimePrunePlan, type RuntimePruneResult } from "@cutex-desktop/cutex-client";
+/** Error text of a cleanup-plan read main gave up on (~20 s); the renderer shows 「暂时读不出 · 重试」 for it. */
+export const RUNTIME_PRUNE_PLAN_TIMEOUT = "runtime prune plan read timed out";
+export { RUNTIME_PRUNE_FEATURE, type RuntimePruneKind, type RuntimePruneVersion, type RuntimePruneClaudeProcesses, type RuntimePrunePlan, type RuntimePruneResult } from "@cutex-desktop/cutex-client";
 
 /** cutex capability of `GET /v2/runtimes`. */
 export const RUNTIMES_FEATURE = "runtimes-view";
@@ -30,10 +32,16 @@ export interface RuntimesWireEntry {
   selected?: boolean;
   /** Pinned by agents, but its files are gone. */
   missing?: boolean;
+  /** cutex r286: the background digest check of this entry's files has not finished; its SHA (and an unknown version
+   *  derived from it) is not a finding yet. Absent once checked, and on older cutex. */
+  verificationPending?: boolean;
   /** Agents pinned to it (may be omitted when only a count is sent). */
   agents?: RuntimesWireAgent[] | null;
   /** Count of pinned agents; defaults to `agents.length`. */
   agentCount?: number | null;
+  /** Exact split of `agentCount` (cutex B2, 2026-11-15): not archived / archived. Absent on older cutex. */
+  activeAgentCount?: number | null;
+  archivedAgentCount?: number | null;
 }
 
 /** `GET /v2/runtimes` reply. */
@@ -57,21 +65,20 @@ export interface InstalledRuntime {
   path: string | null;
   selected: boolean;
   missing: boolean;
+  /** See RuntimesWireEntry.verificationPending; only present (true) while the check runs. */
+  verificationPending?: true;
   agentCount: number;
-  /** Sorted by name; may be shorter than agentCount when cutex sends only a count. */
+  /** Sorted by name; may be shorter than agentCount (cutex sends at most 20 names). */
   agents: PinnedAgent[];
+  /** cutex's exact split of agentCount into not archived / archived; null when it sends none. */
+  activeAgentCount?: number | null;
+  archivedAgentCount?: number | null;
 }
 
 export interface RuntimesView {
-  /** Newest release first. */
+  /** In cutex's order: its version sort, newest first (the release label is not a version: r260 can be 0.160.0-r52.4). */
   native: InstalledRuntime[];
   claude: InstalledRuntime[];
-}
-
-/** Trailing number of a release label ("r50" → 50, "claude-r5" → 5); -1 when there is none. */
-function releaseNumber(release: string): number {
-  const m = /(\d+)\D*$/.exec(release);
-  return m ? Number(m[1]) : -1;
 }
 
 function adaptEntry(e: unknown): InstalledRuntime | null {
@@ -83,6 +90,10 @@ function adaptEntry(e: unknown): InstalledRuntime | null {
     .map((a) => ({ id: a.cutexSessionId, name: typeof a.name === "string" && a.name ? a.name : a.cutexSessionId }))
     .sort((a, b) => a.name.localeCompare(b.name));
   const count = typeof w.agentCount === "number" && Number.isFinite(w.agentCount) ? Math.max(w.agentCount, agents.length) : agents.length;
+  const whole = (n: unknown) => typeof n === "number" && Number.isSafeInteger(n) && n >= 0 ? n : null;
+  const active = whole(w.activeAgentCount), archived = whole(w.archivedAgentCount);
+  // Only a split that adds up to the count is used.
+  const split = active !== null && archived !== null && active + archived === count;
   return {
     release: w.release,
     version: typeof w.version === "string" ? w.version : null,
@@ -90,17 +101,20 @@ function adaptEntry(e: unknown): InstalledRuntime | null {
     path: typeof w.path === "string" ? w.path : null,
     selected: w.selected === true,
     missing: w.missing === true,
+    ...(w.verificationPending === true ? { verificationPending: true as const } : {}),
     agentCount: count,
     agents,
+    ...(split ? { activeAgentCount: active, archivedAgentCount: archived } : {}),
   };
 }
 
 function adaptList(list: unknown): InstalledRuntime[] {
   if (!Array.isArray(list)) return [];
+  // cutex sorts by version; re-sorting by the release label's last number put r260 (0.160.0-r52.4) above r61 and
+  // claude-r42-source-…600 above claude-r47-source-…579 (EVA, 2026-11-15).
   return list
     .map(adaptEntry)
-    .filter((e): e is InstalledRuntime => !!e)
-    .sort((a, b) => releaseNumber(b.release) - releaseNumber(a.release) || b.release.localeCompare(a.release));
+    .filter((e): e is InstalledRuntime => !!e);
 }
 
 /** The wire reply → RuntimesView; null for anything that is not an object (a missing route is null already). */

@@ -144,10 +144,11 @@ describe("批准一次 / 不批准", () => {
     const { safetyCheckAct, seedOwnerNotes, useOwnerNotify } = await started();
     seedOwnerNotes([rec()]);
     const granted = rec({ state: "acknowledged", safetyBlock: block({ state: "granted", expiresAt: "2026-10-16T01:35:00.000Z" }) });
-    api.safetyCheckDecide.mockResolvedValueOnce({ ok: true, notification: granted, submitError: null });
+    api.safetyCheckDecide.mockResolvedValueOnce({ ok: true, notification: granted, noticeError: null });
     const r = await safetyCheckAct(rec(), "grant");
     expect(r.ok).toBe(true);
-    expect(api.safetyCheckDecide).toHaveBeenCalledWith("eva", "sb-1", "grant");
+    // The block for the session method, the notice's own id for the direct 不批准 route.
+    expect(api.safetyCheckDecide).toHaveBeenCalledWith("eva", "sb-1", "grant", "ntf-sb-1");
     expect(useOwnerNotify.getState().byId["ntf-sb-1"]!.safetyBlock!.state).toBe("granted");
     expect(isPending(useOwnerNotify.getState().byId["ntf-sb-1"]!)).toBe(false);
   });

@@ -283,7 +283,7 @@ function ProfilesBody() {
       model: p.model,
       effort: p.modelReasoningEffort,
       modelName,
-      labels: { current: "✓", effort: t("composer.effortTitle"), effortDefault: t("settings.profile.card.effortDefault"), effortName },
+      labels: { current: "✓", effort: t("composer.effortTitle"), effortDefault: t("settings.profile.card.effortDefault"), effortName, latest: t("claudeModels.latestTag"), oneMName: (model: string) => t("claudeModels.oneMName", { model }) },
       onPick: (patch) => void savePick(p, patch),
     }));
   };

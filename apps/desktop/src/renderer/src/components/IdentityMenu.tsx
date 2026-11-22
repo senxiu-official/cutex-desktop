@@ -6,7 +6,7 @@
 // the initials' color is the cutex user color where it can be read (the owner: `/v2/users`), else a
 // neutral grey. Narrow sidebar: the avatar only (tooltip).
 import { useEffect, useRef, useState } from "react";
-import { BookOpen, Check, ChevronsUpDown, FolderOpen, Gauge, Languages, LogOut, Palette, RefreshCw, Settings } from "lucide-react";
+import { BookOpen, Check, ChevronsUpDown, FolderOpen, Gauge, Languages, LogOut, Palette, RefreshCw, Server, Settings } from "lucide-react";
 import { api, bridge } from "../bridge";
 import { useI18n, type MessageKey } from "../i18n";
 import { openMenuAbove, openMenuFrom, useMenuOwner, type MenuEntry } from "../lib/contextMenu";
@@ -19,12 +19,41 @@ import { openSettingsFromNav } from "../lib/openSettings";
 import { prepareUsage } from "../lib/usagePreparation";
 import { useApp } from "../store";
 import { Avatar } from "./Avatar";
+import { HostMark } from "./HostMark";
+import type { HostLook } from "../lib/hostScope";
+import { setHostConnected, useHostScope } from "../lib/useHostScope";
+import { hostUnreachable, unreachableDot } from "../lib/hostReach";
 import { UsageFlyout } from "./UsageFlyout";
 import { bindingLabel } from "../lib/keybindings";
 import { useOwnerDocument } from "../lib/ownerContext";
 import { useSlot } from "../modules/react";
 
 const MENU_OWNER = "identity";
+
+/** The identity menu with the unreachable hosts' rows under its header (who you are stays first). */
+function withHosts(entries: MenuEntry[], hosts: MenuEntry[]): MenuEntry[] {
+  return hosts.length ? [...entries.slice(0, 2), ...hosts, ...entries.slice(2)] : entries;
+}
+
+/** The switcher's rows for unreachable hosts: each 「name  连不上 · 重连」 (未连接 · 连接 when switched off), then 主机设置. */
+function hostEntries(t: ReturnType<typeof useI18n>["t"], hosts: readonly HostLook[]): MenuEntry[] {
+  if (!hosts.length) return [];
+  return [
+    ...hosts.map((h): MenuEntry => ({
+      label: `${h.label} · ${t(h.connected ? "sidebar.hostOffline" : "sidebar.hostDisconnected")}`,
+      labelNode: (
+        <span className="flex min-w-0 items-center gap-1.5" data-host-unreachable={h.id}>
+          <HostMark host={h} className="min-w-0 shrink" />
+          <span className="shrink-0 text-xs text-subtle">{t(h.connected ? "sidebar.hostOffline" : "sidebar.hostDisconnected")}</span>
+        </span>
+      ),
+      hint: t(h.connected ? "sidebar.hostReconnect" : "sidebar.hostConnect"),
+      onSelect: () => void (h.connected ? api.reconnectHost(h.id).catch(() => {}) : setHostConnected(h.id, true)),
+    })),
+    { label: t("identity.hostSettings"), icon: <Server size={14} />, onSelect: () => useApp.getState().openSettings("hosts") },
+    "separator",
+  ];
+}
 function IdentityAvatar({ identity, size }: { identity: Identity; size: number }) {
   return <Avatar name={identity.name} initial={identityInitials(identity.name)} color={identity.color} picture={identity.picture} size={size} />;
 }
@@ -127,13 +156,18 @@ export function IdentityButton() {
   const title = identity.role === "owner" ? identity.name : `${identity.name} · ${role}`;
 
   const moduleRows = useSlot("identity.menu").map((e) => e.item);
-  const entries = () => identityEntries({ t, locale, setLocale, identity, connected, shell, update, moduleRows });
+  // Hosts of the view that cannot be reached: their 连不上 · 重连 lives here, not in the 花名册 (owner 2026-11-17).
+  const unreachable = useHostScope().hostsInScope.filter(hostUnreachable);
+  const entries = () => withHosts(identityEntries({ t, locale, setLocale, identity, connected, shell, update, moduleRows }), hostEntries(t, unreachable));
+  // Red: a host that should be connected is not; grey: only hosts switched off (⏻).
+  const tone = unreachableDot(unreachable);
+  const dot = tone === null ? null : tone === "danger" ? "bg-danger" : "bg-subtle";
 
   return (
     <button
       ref={ref}
       data-tip={title}
-      aria-label={`${t("identity.menu")}: ${title}`}
+      aria-label={[`${t("identity.menu")}: ${title}`, dot && t("identity.hostsUnreachable")].filter(Boolean).join(" · ")}
       aria-haspopup="menu"
       aria-expanded={open}
       onClick={(e) => {
@@ -145,7 +179,7 @@ export function IdentityButton() {
         const footer = e.currentTarget.closest("footer");
         openMenuAbove(e.currentTarget, entries(), { owner: MENU_OWNER, minWidth: Math.max(224, footer ? footer.getBoundingClientRect().width - 16 : 0) });
       }}
-      className={`flex min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 py-1 text-left outline-none hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-accent/50 group-data-[tight]/footer:flex-none ${open ? "bg-surface-2" : ""}`}
+      className={`[app-region:no-drag] press relative flex min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 py-1 text-left outline-none hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-accent/50 group-data-[tight]/footer:flex-none ${open ? "bg-surface-2" : ""}`}
     >
       <IdentityAvatar identity={identity} size={20} />
       <span className="flex min-w-0 flex-1 items-baseline gap-1.5 group-data-[tight]/footer:hidden">
@@ -153,6 +187,7 @@ export function IdentityButton() {
         {suffix && <span className="shrink-0 text-caption/[inherit] text-subtle">{suffix}</span>}
       </span>
       <ChevronsUpDown size={12} className="shrink-0 text-subtle group-data-[tight]/footer:hidden" />
+      {dot && <span data-host-unreachable-dot="" role="img" aria-label={t("identity.hostsUnreachable")} className={`absolute top-1 right-1 h-1.5 w-1.5 rounded-full ${dot}`} />}
     </button>
   );
 }
@@ -172,6 +207,7 @@ export function IdentityChip() {
   const title = identity.role === "owner" ? identity.name : `${identity.name} · ${t(identity.words.line)}`;
   const hint = update && updateButtonVisible(update);
   const moduleRows = useSlot("identity.menu").map((e) => e.item);
+  const unreachable = useHostScope().hostsInScope.filter(hostUnreachable);
   return (
     <button
       data-titlebar-identity=""
@@ -184,12 +220,13 @@ export function IdentityChip() {
           const host = useApp.getState().hosts?.active ?? "local";
           void prepareUsage(host).catch(() => {});
         }
-        openMenuFrom(e.currentTarget, identityEntries({ t, locale, setLocale, identity, connected, shell, update, moduleRows }), { owner: MENU_OWNER });
+        openMenuFrom(e.currentTarget, withHosts(identityEntries({ t, locale, setLocale, identity, connected, shell, update, moduleRows }), hostEntries(t, unreachable)), { owner: MENU_OWNER });
       }}
-      className={`relative ml-0.5 flex shrink-0 items-center rounded-full p-0.5 hover:bg-surface-2 ${open ? "bg-surface-2" : ""}`}
+      className={`[app-region:no-drag] press-avatar relative ml-0.5 flex shrink-0 items-center rounded-full p-0.5 hover:bg-surface-2 ${open ? "bg-surface-2" : ""}`}
     >
       <IdentityAvatar identity={identity} size={20} />
       {hint && <span aria-hidden className={`absolute -right-0.5 -bottom-0.5 size-2 rounded-full ring-2 ring-[var(--win)] ${update!.state === "error" ? "bg-danger" : "bg-accent"}`} />}
+      {unreachable.length > 0 && <span data-host-unreachable-dot="" role="img" aria-label={t("identity.hostsUnreachable")} className={`absolute -top-0.5 -right-0.5 size-1.5 rounded-full ${unreachableDot(unreachable) === "danger" ? "bg-danger" : "bg-subtle"}`} />}
     </button>
   );
 }

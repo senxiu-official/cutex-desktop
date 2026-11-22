@@ -13,6 +13,7 @@ import { DEFAULT_CLAUDE_ACCOUNT } from "../../../../shared/claudeAccounts";
 import type { ProfileCreateKind, ProfileDetail } from "../../../../shared/ipc";
 import { useI18n, type MessageKey } from "../../i18n";
 import { markGuideSeen } from "../../lib/guides";
+import { useSettingsCard } from "../../lib/settingsDrafts";
 import { choiceFor, choiceForPreset, createKindOf, createPlanOf, defaultChoice, needsClaudeAccount, providerCards, resolveChoice, RUNTIME_LABEL, takesKey, type NewProfileChoice } from "../../lib/newProfileModel";
 import { summaryLine } from "../../lib/newProfileText";
 import { useTargetApi, useTargetFeatures, useTargetHostId } from "../../lib/targetHost";
@@ -44,6 +45,8 @@ export function NewProfileForm({ existing, haveKinds, onCreated, onCancel, initi
   const [claudeAccount, setClaudeAccount] = useState(DEFAULT_CLAUDE_ACCOUNT);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  // Unsaved from the first change until it is created (lib/settingsDrafts): a refused create keeps it so.
+  const card = useSettingsCard();
   const resolved = choice ? resolveChoice(cards, choice) : null;
   const unavailable = !!choice && resolved?.option.id !== choice.option;
   // 「用这个服务商新建」 before the host's presets arrived: pick it once they do (unless the owner chose already).
@@ -55,6 +58,7 @@ export function NewProfileForm({ existing, haveKinds, onCreated, onCancel, initi
   /** Another provider / method / key kind / region: its own address and key (keys don't carry over). */
   const choose = (next: NewProfileChoice | null) => {
     touched.current = true;
+    card.changed();
     setChoice(next);
     setAddress(null);
     setApiKey("");
@@ -70,6 +74,7 @@ export function NewProfileForm({ existing, haveKinds, onCreated, onCancel, initi
       return setError(t(key as MessageKey));
     }
     const { plan } = r;
+    const upTo = card.revision();
     setSaving(true);
     setError(null);
     // The key is in the plan now; the field never keeps it past a submit.
@@ -99,6 +104,7 @@ export function NewProfileForm({ existing, haveKinds, onCreated, onCancel, initi
           setError(t("newProfile.error.colorFailed", { name: detail.name, message: message(e) }));
         }
       }
+      card.saved(upTo);
       onCreated(detail);
     } finally {
       setSaving(false);
@@ -110,7 +116,7 @@ export function NewProfileForm({ existing, haveKinds, onCreated, onCancel, initi
   const status = <p className="h-6 truncate pt-1 text-xs text-danger" title={error ?? undefined} data-new-profile-error="">{error}</p>;
 
   return (
-    <FormFields><Section title={t("settings.profiles.new.title")} hint={t("newProfile.hint")}>
+    <div ref={card.ref} className="contents"><FormFields><Section title={t("settings.profiles.new.title")} hint={t("newProfile.hint")}>
       {kind && kind !== "dsh" && haveKinds !== null && <InlineGuide key={kind} id={`inline.profile.${kind}`} done={haveKinds?.has(kind)} />}
       <StepTitle n={1}>{t("newProfile.step.provider")}</StepTitle>
       {!resolved ? (
@@ -144,8 +150,8 @@ export function NewProfileForm({ existing, haveKinds, onCreated, onCancel, initi
               <TextInput mono type="password" width="w-80" label={t("newProfile.key.label")} value={apiKey} disabled={saving} placeholder="sk-…" onChange={(v) => (setApiKey(v), setError(null))} />
             </SettingRow>
           )}
-          <AddressRow resolved={resolved} value={address} disabled={saving} onChange={(v) => (setAddress(v), setError(null))} />
-          {resolved.option.auth === "claudeSubscription" && features.has("claude-accounts") && <NewClaudeAccountRow value={claudeAccount} disabled={saving} onChange={(v) => (setClaudeAccount(v), setError(null))} />}
+          <AddressRow resolved={resolved} value={address} disabled={saving} onChange={(v) => (v === null && card.changed(), setAddress(v), setError(null))} />
+          {resolved.option.auth === "claudeSubscription" && features.has("claude-accounts") && <NewClaudeAccountRow value={claudeAccount} disabled={saving} onChange={(v) => (card.changed(), setClaudeAccount(v), setError(null))} />}
           {needsClaudeAccount(resolved.option.auth) && <p className="py-2 text-xs text-subtle" data-claude-account-note="">{t("newProfile.claudeAccount.note", { label: name.trim() || "…" })}</p>}
           <StepTitle n={3}>{t("newProfile.step.runtime")}</StepTitle>
           <RuntimeStep resolved={resolved} address={address} hostId={hostId} />
@@ -167,11 +173,11 @@ export function NewProfileForm({ existing, haveKinds, onCreated, onCancel, initi
             </SettingRow>
           )}
           <StepTitle n={5}>{t("newProfile.step.name")}</StepTitle>
-          <NameStep name={name} onName={(v) => (setName(v), setError(null))} color={color} onColor={setColor} placeholder={resolved.card.id === "more" && resolved.group ? resolved.group.key : resolved.card.id} />
+          <NameStep name={name} onName={(v) => (setName(v), setError(null))} color={color} onColor={(c) => (card.changed(), setColor(c))} placeholder={resolved.card.id === "more" && resolved.group ? resolved.group.key : resolved.card.id} />
           {status}
           <SummaryLine text={summaryLine(t, resolved, address)} saving={saving || unavailable} onCancel={onCancel} onCreate={() => void create()} cancelLabel={t("dialog.cancel")} />
         </>
       )}
-    </Section></FormFields>
+    </Section></FormFields></div>
   );
 }

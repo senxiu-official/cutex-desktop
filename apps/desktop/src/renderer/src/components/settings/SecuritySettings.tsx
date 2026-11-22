@@ -5,17 +5,17 @@
 // on the project's settings page (ExternalAgentsSection). Then agent 间消息格式 and the
 // `settings.section` items targeting "collab": policy (轮换主管, 服务审批, 消息投递) first, the
 // agent-bus module's collapsed 「高级」 card (消息总线, 卡住的消息) last.
+import { useSettingsCard } from "../../lib/settingsDrafts";
 import { useRef, useState } from "react";
 import { useArchivedAgents } from "../../lib/useArchivedAgents";
 import { ArrowLeftRight, FolderKanban, User } from "lucide-react";
 import type { AgentSecurity, AgentSecurityPatch, DomainKey } from "../../../../shared/ipc";
 import { useI18n, type MessageKey } from "../../i18n";
-import { closeMenu, openMenuFrom, promptDialog } from "../../lib/contextMenu";
+import { closeMenu, openMenuFrom } from "../../lib/contextMenu";
 import { addGrant, addLink, BOUNDARY_FEATURE, DEFAULT_MAX_EXTERNAL, DEFAULT_MAX_LINKS, domainLabel, domainOptions, EXTERNAL_GRANTS_FEATURE, grantedProjects, grantsFor, removeGrant, removeLink, type ListError } from "../../lib/agentSecurity";
 import { grantPickerOptions, linkPickerOptions, securityProjectIds } from "../../lib/securityPicker";
 import { SearchablePickerBody, SearchableSelect } from "../SearchablePicker";
 import { useRiskAgentSecurity as useAgentSecurity, useSettingsRisk } from "../../lib/useSettingsRisk";
-import { confirmSettingsRisk } from "../../lib/settingsRisk";
 import { settingsRiskText as riskText } from "../../lib/settingsRiskText";
 import { SettingsRiskConfirmation } from "./SettingsRiskConfirmation";
 import { settingsAnchorId } from "../../lib/settingsNav";
@@ -117,7 +117,7 @@ function ProjectGrants({ projectId, security, patch, saving, showProject }: { pr
           <span className="ml-auto">
             <SettingsGroup agents="now" source="host"><SearchableSelect value="" options={picker.options} onChange={picker.pick}
               label={t("security.external.add")} triggerText={`+ ${t("security.external.add")}`} placeholder={t("security.picker.search")} emptyLabel={t("security.picker.empty")}
-              disabled={saving || picker.options.length === 0} triggerClassName="rounded-md px-2 py-1 text-xs text-accent hover:bg-hover disabled:opacity-40" /></SettingsGroup>
+              disabled={saving || picker.options.length === 0} triggerClassName="press rounded-md px-2 py-1 text-xs text-accent hover:bg-hover disabled:opacity-40" /></SettingsGroup>
           </span>
         )}
       </div>
@@ -168,6 +168,8 @@ function LinksEditor({ security, patch, saving }: { security: AgentSecurity; pat
   const sidebar = useTargetSidebar();
   const [a, setA] = useState("");
   const [b, setB] = useState("");
+  // Unsaved while either project is picked (lib/settingsDrafts); a confirmed 添加 clears both.
+  const card = useSettingsCard(!!a || !!b);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState<PendingGrant | null>(null);
   const hostId = useTargetHostId(), host = useTargetHostLabel();
@@ -189,10 +191,10 @@ function LinksEditor({ security, patch, saving }: { security: AgentSecurity; pat
   };
   return (
     <>
-      <div className="flex flex-wrap items-center gap-2 py-2.5">
-        <SettingsGroup agents="now" source="host"><SearchableSelect value={a} options={selectOptions} onChange={setA} width="w-56" label={t("security.links.pick")} triggerText={t("security.links.pick")} placeholder={t("security.picker.search")} emptyLabel={t("security.picker.empty")} /></SettingsGroup>
+      <div ref={card.ref} className="flex flex-wrap items-center gap-2 py-2.5">
+        <SettingsGroup agents="now" source="host"><SearchableSelect value={a} options={selectOptions} onChange={(v) => (card.changed(), setA(v))} width="w-56" label={t("security.links.pick")} triggerText={t("security.links.pick")} placeholder={t("security.picker.search")} emptyLabel={t("security.picker.empty")} /></SettingsGroup>
         <ArrowLeftRight size={13} className="shrink-0 text-subtle" />
-        <SettingsGroup agents="now" source="host"><SearchableSelect value={b} options={selectOptions} onChange={setB} width="w-56" label={t("security.links.pick")} triggerText={t("security.links.pick")} placeholder={t("security.picker.search")} emptyLabel={t("security.picker.empty")} /></SettingsGroup>
+        <SettingsGroup agents="now" source="host"><SearchableSelect value={b} options={selectOptions} onChange={(v) => (card.changed(), setB(v))} width="w-56" label={t("security.links.pick")} triggerText={t("security.links.pick")} placeholder={t("security.picker.search")} emptyLabel={t("security.picker.empty")} /></SettingsGroup>
         <SettingsGroup agents="now" source="host"><Button disabled={saving || !a || !b} onClick={add}>
           {t("security.links.add")}
         </Button></SettingsGroup>
@@ -331,19 +333,14 @@ function BoundarySections() {
   useArchivedAgents(hostId);
   const gate = useSettingsRisk(security);
   const [riskError, setRiskError] = useState<string | null>(null);
-  const [confirming, setConfirming] = useState(false);
-  const changeBoundary = async (value: "isolated" | "host") => {
-    if (!security || saving || confirming || value === security.crossProjectAccess) return;
-    if (value === "isolated") { void patch({ crossProjectAccess: value }); return; }
-    const valid = gate.capture(), target = hostLabel === "—" ? hostId : hostLabel;
-    setConfirming(true); setRiskError(null);
-    try {
-      const result = await confirmSettingsRisk(target, () => promptDialog(riskText("settingsRisk.hostVisibility"), "", {
-        placeholder: target, hint: riskText("settingsRisk.hostVisibilityHint", { host: hostLabel, target }),
-      }), valid);
-      if (result === "confirmed") await applySecurityRisk(hostId, security, { crossProjectAccess: value }, valid, patch, setRiskError);
-      else if (result !== "cancelled") setRiskError(riskText(result === "changed" ? "settingsRisk.changed" : "settingsRisk.typeMismatch"));
-    } finally { setConfirming(false); }
+  // 主机内互通 widens visibility between this owner's own projects and is undone with one click (项目隔离): confirm by
+  // risk = medium, so an inline armed confirmation (no typed host name), bound to the settings in view.
+  const [widen, setWiden] = useState<{ valid(): boolean } | null>(null);
+  const changeBoundary = (value: "isolated" | "host") => {
+    if (!security || saving || value === security.crossProjectAccess) return;
+    if (value === "isolated") { setWiden(null); void patch({ crossProjectAccess: value }); return; }
+    setRiskError(null);
+    setWiden({ valid: gate.capture() });
   };
   if (!boundary)
     return (
@@ -367,14 +364,19 @@ function BoundarySections() {
         <SettingRow agents="now" source="host"
           label={t("security.crossProject")}
           hint={t(host ? "security.crossProject.hostHint" : "security.crossProject.isolatedHint")}
-          reset={<ResetButton disabled={security.crossProjectAccess === def || saving || confirming} onClick={() => void changeBoundary(def)} />}
+          reset={<ResetButton disabled={security.crossProjectAccess === def || saving} onClick={() => changeBoundary(def)} />}
         >
           <Segmented<"isolated" | "host">
             value={security.crossProjectAccess}
             options={(security.crossProjectAccessOptions ?? ["isolated", "host"]).map((v) => ({ value: v, label: t(`security.crossProject.${v}` as MessageKey) }))}
-            onChange={(v) => void changeBoundary(v)}
+            onChange={(v) => changeBoundary(v)}
           />
         </SettingRow>
+        {widen && <SettingsRiskConfirmation message={riskText("settingsRisk.hostVisibilityArmed", { host: hostLabel === "—" ? hostId : hostLabel })} valid={widen.valid} busy={saving}
+          onCancel={() => setWiden(null)} onConfirm={() => {
+            setWiden(null);
+            void applySecurityRisk(hostId, security, { crossProjectAccess: "host" }, widen.valid, patch, setRiskError);
+          }} />}
       </Section>
       {grantsSupported && <ExternalEntry security={security} host={host} />}
       <LinksEntry security={security} host={host} />

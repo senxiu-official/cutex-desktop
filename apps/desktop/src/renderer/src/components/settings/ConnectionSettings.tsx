@@ -35,6 +35,7 @@ import { SettingsDisclosureRow } from "./SettingsDisclosureRow";
 import { HostDetails } from "./HostDetails";
 import { AddHostChooser, ReimportToken, TokenProblemText } from "./HostTokenImport";
 import { isTokenImportHost } from "../../lib/hostTokenImport";
+import { useSettingsCard } from "../../lib/settingsDrafts";
 import { Tag } from "../../components/Tag";
 import { useOwnerWindow } from "../../lib/ownerContext";
 
@@ -323,6 +324,8 @@ function HostRow({ look, shown, member, onRemoved }: { look: HostLook; shown: bo
   const [test, setTest] = useState<HostTestResult | null>(null);
   const [pairError, setPairError] = useState<SshErrorView | null>(null);
   const [editing, setEditing] = useState(false);
+  // The name / address editor: unsaved from the first change until its save closes it (lib/settingsDrafts).
+  const editCard = useSettingsCard();
   const [form, setForm] = useState({ label: host.label, targets: (host.targets?.length ? host.targets : [host.target ?? ""]).map(displaySshTarget), remotePort: String(host.remotePort ?? DEFAULT_REMOTE_PORT), cutexPath: host.cutexPath ?? DEFAULT_CUTEX_PATH });
   const tokenRejected = indicator.problem === "tokenRejected";
   const trouble = look.connected && indicator.status !== "online" && indicator.status !== "connecting";
@@ -443,14 +446,14 @@ function HostRow({ look, shown, member, onRemoved }: { look: HostLook; shown: bo
         <OwnedByMeToggle hostId={host.id} />
       </div>
       {editing && host.kind === "local" && (
-        <div className="mt-3 flex flex-wrap items-center gap-2 pl-6">
+        <div ref={editCard.ref} className="mt-3 flex flex-wrap items-center gap-2 pl-6">
           <TextInput width="w-56" label={t("host.add.label")} value={form.label} placeholder={t("host.renamePlaceholder")} onChange={(label) => setForm((f) => ({ ...f, label }))} />
           <Button primary disabled={busy !== null} onClick={() => void saveName()}>{t("host.save")}</Button>
           <Button onClick={() => setEditing(false)}>{t("dialog.cancel")}</Button>
         </div>
       )}
       {editing && host.kind === "ssh" && (
-        <div className="mt-3 space-y-3 pl-6" data-ssh-address-editor="">
+        <div ref={editCard.ref} className="mt-3 space-y-3 pl-6" data-ssh-address-editor="">
           <div className="flex flex-wrap items-start gap-3">
             <label className="block text-xs text-muted">
               <span className="mb-1 block">{t("host.add.label")}</span>
@@ -474,11 +477,14 @@ function HostRow({ look, shown, member, onRemoved }: { look: HostLook; shown: bo
                 <div className="flex items-center gap-1" key={index}>
                   <span className="w-5 shrink-0 text-center font-mono text-caption/[inherit] text-subtle">{index + 1}</span>
                   <TextInput width="w-full" mono label={`${t("host.targets")} ${index + 1}`} value={target} placeholder="hachimi-lan / me@host:22" onChange={(value) => setForm((current) => ({ ...current, targets: current.targets.map((item, itemIndex) => itemIndex === index ? value : item) }))} />
-                  <IconButton label={t("host.removeAddress")} danger disabled={form.targets.length === 1} onClick={() => setForm((current) => ({ ...current, targets: current.targets.filter((_, itemIndex) => itemIndex !== index) }))}><X size={13} /></IconButton>
+                  <IconButton label={t("host.removeAddress")} danger disabled={form.targets.length === 1} onClick={() => {
+                    editCard.changed();
+                    setForm((current) => ({ ...current, targets: current.targets.filter((_, itemIndex) => itemIndex !== index) }));
+                  }}><X size={13} /></IconButton>
                 </div>
               ))}
             </div>
-            <Button disabled={busy !== null} onClick={() => setForm((current) => ({ ...current, targets: [...current.targets, ""] }))}><Plus size={13} className="mr-1 inline" />{t("host.addAddress")}</Button>
+            <Button disabled={busy !== null} onClick={() => (editCard.changed(), setForm((current) => ({ ...current, targets: [...current.targets, ""] })))}><Plus size={13} className="mr-1 inline" />{t("host.addAddress")}</Button>
           </div>
           <div className="flex items-center gap-2">
             <Button primary disabled={busy !== null || !targetsValid} onClick={() => void save()}>{t("host.save")}</Button>
@@ -594,6 +600,8 @@ function AddHostForm({ onDone }: { onDone(): void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<SshErrorView | null>(null);
   const notify = useApp((s) => s.notify);
+  // Unsaved from the first change until the host is added, which closes it (lib/settingsDrafts).
+  const card = useSettingsCard();
   useEffect(() => {
     api.sshConfigHosts().then(setAliases, () => setAliases([]));
   }, []);
@@ -626,7 +634,7 @@ function AddHostForm({ onDone }: { onDone(): void }) {
     }
   };
   return (
-    <div className="-mx-4 border-b border-border bg-surface-2/40 px-4 py-3">
+    <div ref={card.ref} className="-mx-4 border-b border-border bg-surface-2/40 px-4 py-3">
       <SettingRow agents="none" source="local" label={t("host.add.target")} hint={t("host.add.targetHint")} info={t("host.add.hint")}>
         <input
           list="cutex-ssh-aliases"
@@ -646,7 +654,7 @@ function AddHostForm({ onDone }: { onDone(): void }) {
       {aliases.length > 0 && (
         <div className="flex flex-wrap justify-end gap-1 pb-2">
           {aliases.slice(0, 12).map((a) => (
-            <SettingsGroup agents="none" source="local" key={a}><button key={a} onClick={() => setTarget(a)} className={`rounded-md px-1.5 py-0.5 font-mono text-caption/[inherit] ${target === a ? "bg-accent/15 text-accent" : "bg-surface-2 text-muted hover:text-foreground"}`}>
+            <SettingsGroup agents="none" source="local" key={a}><button key={a} onClick={() => (card.changed(), setTarget(a))} className={`rounded-md px-1.5 py-0.5 font-mono text-caption/[inherit] ${target === a ? "bg-accent/15 text-accent" : "bg-surface-2 text-muted hover:text-foreground"}`}>
               {a}
             </button></SettingsGroup>
           ))}

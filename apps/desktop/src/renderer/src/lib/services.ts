@@ -170,15 +170,43 @@ export function serviceMenu(s: ServiceView, t: T, onError: (e: string) => void, 
     // The modules' `ref.action` items for the service (§19.8; e.g. 固定到主页 / 取消固定).
     ...refActionEntries({ hostId: hostId ?? focusId(), kind: "service", key: s.slug, title: (s.displayName || s.slug).slice(0, 200), params: {} }, true),
     manage && "separator",
+    // Confirm by risk: a stopped, disposable registration arms in place (「移除登记」); a running or persistent one keeps
+    // the dialog. The record is read again at the click: one that started or was kept since gets the dialog.
     manage && {
-      label: t("services.delete"),
+      label: t(serviceDeleteLevel(s) === "armed" ? "services.removeRegistration" : "services.delete"),
       danger: true,
+      ...(serviceDeleteLevel(s) === "armed" ? { armed: t("services.removeRegistrationArmed", { name: s.displayName || s.slug }), info: t("services.removeRegistrationHint") } : {}),
       onSelect: () =>
         void (async () => {
-          if (await confirmDialog(t("services.deleteConfirm", { name: s.displayName || s.slug }), true)) run(() => api.deleteService(s.slug));
+          const fresh = currentService(s, hostId);
+          const now = fresh ?? s;
+          // Not in the host's list (another view's record, or gone): the dialog, never the armed shortcut.
+          if (!fresh || serviceDeleteLevel(now) === "dialog" || serviceDeleteLevel(s) === "dialog") {
+            if (!(await confirmDialog(t("services.deleteConfirm", { name: now.displayName || now.slug }), true))) return;
+          }
+          run(() => api.deleteService(now.slug));
         })(),
     },
   ];
+}
+
+/** Not running under cutex now: stopped (by the owner or idle), crash-looped, or an unsupervised entry that answers nothing. */
+function serviceStopped(s: ServiceView): boolean {
+  if (s.health === "stopped" || s.health === "stoppedIdle" || s.health === "crashLooped") return true;
+  return !isSupervised(s) && s.health === "unreachable";
+}
+
+/**
+ * How 删除 confirms: "armed" for a stopped, ephemeral (disposable, not pinned / kept) registration — removing it loses
+ * only the registration; "dialog" for a running one (it is stopped) or a persistent / pinned one (its configuration).
+ */
+export function serviceDeleteLevel(s: ServiceView): "armed" | "dialog" {
+  return s.lifetime === "ephemeral" && !s.pinned && serviceStopped(s) ? "armed" : "dialog";
+}
+
+/** The host's current record of `s` (null: not in the host's service list now). */
+function currentService(s: ServiceView, hostId: string | undefined): ServiceView | null {
+  return hostData(useApp.getState(), hostId ?? focusId())?.services?.find((x) => x.slug === s.slug) ?? null;
 }
 
 /**
@@ -223,4 +251,20 @@ export function groupServices(services: readonly ServiceView[], projects: readon
   const known = new Set(projects.map((p) => p.project_id));
   groups.push({ project: null, services: services.filter((s) => !s.projectId || !known.has(s.projectId)).sort(byName) });
   return groups.filter((g) => g.services.length > 0);
+}
+
+/**
+ * The hover of a service's 运行中 (state surfaces W11, owner-approved wording): it only says the process is alive
+ * (a background program, `worker`) or the port answers (a web service), never that the service works. Null for the
+ * other health states (their word says enough).
+ */
+export function serviceHealthHint(s: Pick<ServiceView, "runtime" | "health">): MessageKey | null {
+  if (s.health !== "reachable") return null;
+  return s.runtime === "worker" ? "services.health.reachable.workerTip" : "services.health.reachable.webTip";
+}
+
+/** A health word's hover: the word, then the W11 caveat where there is one. */
+export function serviceHealthTitle(word: string, s: Pick<ServiceView, "runtime" | "health">, t: (key: MessageKey) => string): string {
+  const hint = serviceHealthHint(s);
+  return hint ? `${word}\n${t(hint)}` : word;
 }

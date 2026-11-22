@@ -86,7 +86,9 @@ export const SLASH_COMMANDS: readonly SlashCommandSpec[] = [
   { id: "new", pick: "run" },
   { id: "fork", pick: "run", unavailable: "forkGap", enabledBy: "session-fork", agentFeature: "fork", structural: "fork" },
   { id: "side", aliases: ["btw"], pick: "insert", needsThread: true, unavailable: "sideGap", enabledBy: "side-chat", agentFeature: "sideChat" },
-  { id: "archive", pick: "run" },
+  // Picking puts `/archive ` in the composer; sending it archives (confirm by risk: the send is the second step;
+  // a busy agent or one owning services still gets the dialog, lib/menus archiveAgent).
+  { id: "archive", pick: "insert" },
   { id: "memories", pick: "run", needsThread: true, agentFeature: "memoryMode" },
   { id: "experimental", pick: "run" },
   { id: "mcp", pick: "run" },

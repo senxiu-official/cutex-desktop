@@ -4,17 +4,24 @@
 // title, host, progress; per agent its state and why it failed, with 重试 (one, or all failed of an operation). Closing
 // the dialog that started an operation does not lose it. Only operations started here are listed: cutex has no list of
 // its own operations yet, so those started elsewhere (another desktop, the CLI, an agent) need a cutex API first.
+// State surfaces WP-D4 (S8 / L6): a waiting item has 结束跟进 (confirmed in place; it stops waiting, nothing is
+// withdrawn) and a hover with its deadline; past the deadline, or after a restart, it reads 结果未确认; every finished
+// item has its own 清除.
 import { useEffect, useRef, useState, type RefObject } from "react";
-import { Activity, AlertCircle, Check, ChevronDown, ChevronRight, Loader2, RotateCcw } from "lucide-react";
+import { Activity, AlertCircle, Check, ChevronDown, ChevronRight, CircleDashed, Loader2, RotateCcw, X } from "lucide-react";
 import { useI18n, type MessageKey } from "../i18n";
 import { traySide } from "../lib/anchoredPanel";
 import {
   acknowledgeOperations,
+  canStopWaiting,
   clearFinishedOperations,
+  clearOperationItem,
+  itemNeedsLook,
   itemRunning,
   operationItem,
   operationRunning,
   operationsSummary,
+  stopWaitingItem,
   updateOperationItem,
   useBackgroundOperations,
   type BackgroundOperation,
@@ -22,8 +29,9 @@ import {
 } from "../lib/backgroundOperations";
 import { useApp } from "../store";
 import { AnchoredPanel } from "./AnchoredPanel";
+import { ArmedButton } from "./ArmedButton";
 
-const failed = (item: OperationItem) => item.state === "failed" || item.state === "uncertain";
+const failed = itemNeedsLook;
 
 export function BackgroundOperations() {
   const { t } = useI18n();
@@ -110,7 +118,11 @@ function Operation({ op }: { op: BackgroundOperation }) {
   const host = multiHost ? (hosts?.hosts.find((h) => h.id === op.hostId)?.label ?? op.hostId) : null;
   const title = t(op.titleKey, op.titleVars);
   const time = new Date(op.startedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  const status = busy ? `${done}/${op.items.length}` : failures.length ? t("operations.failedCount", { n: failures.length }) : t("operations.allDone");
+  // Unconfirmed and ended follow-up items are neither failed nor done: the operation says its outcome is unconfirmed.
+  const failedNow = failures.filter((item) => item.state !== "unconfirmed");
+  const unsettled = op.items.some((item) => item.state === "unconfirmed" || item.state === "trackingStopped");
+  const status = busy ? `${done}/${op.items.length}` : failedNow.length ? t("operations.failedCount", { n: failedNow.length }) : unsettled ? t("operations.state.unconfirmed") : t("operations.allDone");
+  const unconfirmedTone = op.items.some((item) => item.state === "unconfirmed") ? "text-warn-text" : "text-muted";
   const listed = op.items.filter((item) => item.name);
   return (
     <section data-background-operation={op.id} data-busy={busy ? "" : undefined} className="rounded-ctl px-1.5 py-1.5 [&+&]:mt-0.5">
@@ -123,11 +135,11 @@ function Operation({ op }: { op: BackgroundOperation }) {
         data-tip={listed.length ? t(showItems ? "operations.less" : "operations.more") : undefined}
         className="-mx-1.5 flex w-[calc(100%+0.75rem)] min-w-0 items-center gap-2 rounded-ctl px-1.5 py-1 text-left hover:bg-hover disabled:hover:bg-transparent"
       >
-        <span className={`flex size-4 shrink-0 items-center justify-center ${busy ? "text-accent" : failures.length ? "text-danger" : "text-ok-text"}`}>
-          {busy ? <Loader2 size={14} className="animate-spin motion-reduce:animate-none" aria-hidden /> : failures.length ? <AlertCircle size={14} aria-hidden /> : <Check size={14} aria-hidden />}
+        <span className={`flex size-4 shrink-0 items-center justify-center ${busy ? "text-accent" : failedNow.length ? "text-danger" : unsettled ? unconfirmedTone : "text-ok-text"}`}>
+          {busy ? <Loader2 size={14} className="animate-spin motion-reduce:animate-none" aria-hidden /> : failedNow.length ? <AlertCircle size={14} aria-hidden /> : unsettled ? <CircleDashed size={14} aria-hidden /> : <Check size={14} aria-hidden />}
         </span>
         <span className="min-w-0 flex-1 truncate font-medium">{title}</span>
-        <span className={`shrink-0 text-meta tabular-nums ${failures.length && !busy ? "text-danger" : "text-muted"}`}>{status}</span>
+        <span className={`shrink-0 text-meta tabular-nums ${busy ? "text-muted" : failedNow.length ? "text-danger" : unsettled ? unconfirmedTone : "text-muted"}`}>{status}</span>
         {listed.length > 0 && (showItems ? <ChevronDown size={13} className="shrink-0 text-subtle" /> : <ChevronRight size={13} className="shrink-0 text-subtle" />)}
       </button>
       <div className="flex min-w-0 items-center gap-1.5 pl-6 text-caption/[inherit] text-subtle">
@@ -168,16 +180,30 @@ function retry(op: BackgroundOperation, item: OperationItem) {
     });
 }
 
-const STATE_TONE: Partial<Record<OperationItem["state"], string>> = { failed: "text-danger", uncertain: "text-danger", done: "text-ok-text" };
+const STATE_TONE: Partial<Record<OperationItem["state"], string>> = { failed: "text-danger", uncertain: "text-danger", unconfirmed: "text-warn-text", done: "text-ok-text" };
+
+const clock = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+/** The hover of an item's state: its deadline while it waits, why it is unconfirmed, what 结束跟进 left behind. */
+function stateTip(item: OperationItem, op: BackgroundOperation, t: ReturnType<typeof useI18n>["t"]): string | undefined {
+  const deadline = item.deadline ?? op.deadline;
+  if (itemRunning(item)) return t("operations.waitingTip", { time: clock(deadline) });
+  if (item.state === "unconfirmed") return item.unconfirmedBy === "restart" ? t("operations.unconfirmed.restartTip") : t("operations.unconfirmed.deadlineTip", { time: clock(deadline) });
+  if (item.state === "trackingStopped") return t("operations.trackingStoppedTip");
+  return undefined;
+}
+
+const ROW_BUTTON = "h-6 shrink-0 rounded-ctl px-1.5";
 
 function Result({ item, op, busy }: { item: OperationItem; op: BackgroundOperation; busy: boolean }) {
   const { t } = useI18n();
+  const target = { operationId: op.id, key: item.key };
   return (
     <li data-operation-item={item.state} className="flex min-h-7 min-w-0 items-center gap-2 py-0.5 text-meta">
       <span className="min-w-0 flex-1">
         <span className="flex min-w-0 items-center gap-2">
           <span className="min-w-0 truncate">{item.name}</span>
-          <span className={`flex shrink-0 items-center gap-1 ${STATE_TONE[item.state] ?? "text-muted"}`}>
+          <span className={`flex shrink-0 items-center gap-1 ${STATE_TONE[item.state] ?? "text-muted"}`} data-tip={stateTip(item, op, t)}>
             {itemRunning(item) && item.state === "running" && <Loader2 size={11} className="animate-spin motion-reduce:animate-none" aria-hidden />}
             {t(`operations.state.${item.state}` as MessageKey)}
           </span>
@@ -191,6 +217,18 @@ function Result({ item, op, busy }: { item: OperationItem; op: BackgroundOperati
       {item.retry && (
         <button type="button" disabled={busy} onClick={() => retry(op, item)} className="h-6 shrink-0 rounded-ctl px-1.5 text-accent hover:bg-accent-soft disabled:opacity-40 disabled:hover:bg-transparent">
           {t("operations.retry")}
+        </button>
+      )}
+      {canStopWaiting(item) && (
+        <span className="shrink-0" data-tip={t("followUp.confirm")}>
+          <ArmedButton shape={ROW_BUTTON} idle="text-muted hover:bg-hover hover:text-foreground" hint={t("followUp.confirmButton")} testId="operation-stop-waiting" onConfirm={() => stopWaitingItem(target)}>
+            {t("followUp.end")}
+          </ArmedButton>
+        </span>
+      )}
+      {!itemRunning(item) && (
+        <button type="button" data-operation-clear="" onClick={() => clearOperationItem(target)} aria-label={t("operations.clearItem")} data-tip={t("operations.clearItemTip")} className="flex size-6 shrink-0 items-center justify-center rounded-ctl text-subtle hover:bg-hover hover:text-foreground">
+          <X size={12} aria-hidden />
         </button>
       )}
     </li>

@@ -66,7 +66,9 @@ export function wakeSourceOf(record: { wakeSchedule?: InputWakeSchedule; created
     return { item: { timing, nextStepAt: ws.nextStepAt, enqueuedAt: start }, early: ws.capability === "soon", held: ws.held || undefined, read: false };
   }
   if (!ride) return null;
-  return { item: ride, early: runtimeEarly, held: ride.held ?? ridealongsHeld, read: ride.waitReason === "nativeReceipt" };
+  // stop-answer-admission-v1: an item with `eligible` carries its own hold (lib/stopHold rideAlongHeld).
+  const held = ride.held === "ownerStop" || ride.held === "ownerPause" ? ride.held : typeof ride.eligible === "boolean" ? undefined : ridealongsHeld;
+  return { item: ride, early: runtimeEarly, held, read: ride.waitReason === "nativeReceipt" };
 }
 
 /** 105 → "1:45", 45 → "0:45", 3725 → "62:05" (minutes : seconds). */

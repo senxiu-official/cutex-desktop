@@ -11,11 +11,13 @@ import { pinsFor, splitPinned, togglePinned, withPins } from "../lib/models";
 import { rawIdTitle, useModelName } from "../lib/modelDisplay";
 import { getUiPrefs, setUiPref, useUiPrefs } from "../lib/prefs";
 import { Popover } from "./Menu";
+import { Tag } from "./Tag";
 import { MenuFlyout } from "./MenuFlyout";
 import { useComposerHost } from "../lib/targetHost";
 
-/** `primary` (a folded Claude list, lib/claudeModels): without pins, the primary rows are up front. */
-type Item = Pick<ModelOption, "model" | "displayName" | "description"> & { primary?: boolean };
+/** `primary` (a folded Claude list, lib/claudeModels): without pins, the primary rows are up front. `tag`: a small
+ *  label after the name (Claude alias rows: 「跟随最新」, so an alias and its fixed model of the same version differ). */
+type Item = Pick<ModelOption, "model" | "displayName" | "description"> & { primary?: boolean; tag?: string };
 
 /** `note`: a line under the title (e.g. the agent's runtime is offline: no model list to show yet). */
 export function ModelPicker({ profile, models, current, label, trigger, triggerTitle, header, note, unavailable = false, onOpen, onSelect, openSignal }: { profile: string | null; models: Item[]; current: string | null; label: string; trigger?: ReactNode; triggerTitle?: string; header?: (close: () => void) => ReactNode; note?: string; unavailable?: boolean; onOpen(): void; onSelect(model: string): void; openSignal?: number }) {
@@ -43,7 +45,7 @@ export function ModelPicker({ profile, models, current, label, trigger, triggerT
           className="flex min-w-0 flex-1 items-center gap-2.5 px-2.5 py-1.5 text-left"
         >
           <span className="min-w-0 flex-1">
-            <span className={`block text-sm ${index === null ? "[overflow-wrap:anywhere]" : "truncate"}`} title={rawIdTitle(m.model, shown)}>{shown}</span>
+            <span className={`block text-sm ${index === null ? "[overflow-wrap:anywhere]" : "truncate"}`} title={rawIdTitle(m.model, shown)}>{shown}{m.tag && <Tag className="ml-1.5 align-middle" data-model-tag="">{m.tag}</Tag>}</span>
             {m.description && <span className="block text-xs text-subtle">{m.description}</span>}
           </span>
           <span className="w-3 text-xs text-accent">{m.model === current ? "✓" : ""}</span>

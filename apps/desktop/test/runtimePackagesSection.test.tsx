@@ -57,7 +57,7 @@ it.each(["native", "claude", "mixed"])("labels the actual outdated targets for %
   expect(node.textContent?.includes("claude-r34")).toBe(kind !== "native");
 });
 
-it.each(["zh-CN", "en"])("shows family subtotals and confirms only the native undo count and run (%s)", async locale => {
+it.each(["zh-CN", "en"])("shows family subtotals and arms the undo in place with only the native count (%s)", async locale => {
   fx.locale = locale;
   const native = { runId: "native-run", kind: "upgrade", state: "completed", startedAt: "2026-11-05T00:00:00Z", finishedAt: "2026-11-05T00:01:00Z", counts: { total: 113, pending: 0, moved: 112, skipped: 0, failed: 1 }, items: [], revertedBy: [] } as unknown as RuntimePackageRun;
   const claude = createClaudeRuntimeBatch([], native.runId);
@@ -72,8 +72,13 @@ it.each(["zh-CN", "en"])("shows family subtotals and confirms only the native un
   expect(node.textContent).toContain("159");
   expect(node.textContent).toContain(locale === "en" ? "Undo restores only" : "撤销只会");
   const undo = [...node.querySelectorAll("button")].find(b => b.textContent === (locale === "en" ? "Revert this upgrade" : "撤销这次升级"))!;
+  // Confirm by risk: 撤销 is itself an undo, so it arms in place (no dialog); the second click runs it.
   await act(async () => undo.click());
-  expect(fx.confirm.mock.calls[0]?.[0]).toContain("112");
-  expect(fx.confirm.mock.calls[0]?.[0]).not.toContain("159");
+  expect(fx.undo).not.toHaveBeenCalled();
+  expect(undo.dataset.armed).toBe("true");
+  expect(undo.getAttribute("aria-label")).toContain("112");
+  expect(undo.getAttribute("aria-label")).not.toContain("159");
+  await act(async () => undo.click());
+  expect(fx.confirm).not.toHaveBeenCalled();
   expect(fx.undo).toHaveBeenCalledWith("native-run", "host-a");
 });

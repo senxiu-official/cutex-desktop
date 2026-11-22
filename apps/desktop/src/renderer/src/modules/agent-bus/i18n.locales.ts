@@ -8,6 +8,7 @@ const zhHantCN = {
   "agent-bus.settlement.unknown": "結果不確定",
   "agent-bus.settlement.closed": "已關閉跟進",
   "agent-bus.settlement.close": "關閉卡住訊息",
+  "agent-bus.settlement.closeConfirmed": "確認已結束並關閉",
   "agent-bus.settlement.disclaimer": "關閉跟進，不代表送達或處理成功",
   "agent-bus.settlement.evidence": "檢視服務端證據",
   "agent-bus.settlement.reason": "關閉原因",
@@ -20,7 +21,19 @@ const zhHantCN = {
   "agent-bus.settlement.conflict": "事項的證據或狀態已變化，已刷新。請覈對後重新確認。",
   "agent-bus.settlement.unauthorized": "沒有關閉此事項的權限。",
   "agent-bus.settlement.missing": "服務端未找到此事項，已刷新列表。",
-  "agent-bus.settlement.unavailable": "服務暫不可用，請重新讀取狀態。"
+  "agent-bus.settlement.unavailable": "服務暫不可用，請重新讀取狀態。",
+  "agent-bus.settlement.runtimeGone": "{{agent}}已不在（已歸檔或刪除），無法覈對。可以結束跟進。",
+  "agent-bus.stuck.withdraw": "從隊列撤下",
+  "agent-bus.stuck.withdrawMayRequeue": "從隊列撤下（可能被再次排入）",
+  "agent-bus.stuck.withdrawArmed": "再左鍵點擊一次，從隊列撤下",
+  "agent-bus.stuck.withdrawTip": "這條消息只在內存裏。撤下後主機會記住它，發送方不會再把它排回隊列。",
+  "agent-bus.stuck.withdrawMayRequeueTip": "這條消息只在內存裏。這臺主機的 cutex 較舊，不會記住撤下的消息：發送方可能再次把它排入隊列。",
+  "agent-bus.stuck.ended": "已結束跟進的消息",
+  "agent-bus.stuck.endFailed": "結束跟進失敗：{error}",
+  "agent-bus.stuck.endUncertain": "結束跟進的結果尚未確認（連接中斷）。再左鍵點擊一次會用同一個請求重試，不會重複。",
+  "agent-bus.stuck.endGone": "這條消息已經不在卡住的列表裏，列表已刷新。",
+  "agent-bus.stuck.hint.memoryOnlyTombstone": "只在總線的內存隊列裏，沒有持久記錄；撤下後主機會記住它，不再排回",
+  "agent-bus.stuck.error.live_discard_capacity": "沒有撤下：主機記不下更多已撤下的消息，這條仍在隊列裏。",
 };
 export const locales = { "zh-Hant-CN": zhHantCN };
 declare module "../i18nCatalog" { interface ModuleZhHantMessages extends Record<keyof typeof zhHantCN, string> {} }

@@ -25,3 +25,19 @@ it("restores the immutable intent after renderer restart and requires explicit r
   expect(env.close).toHaveBeenCalledExactlyOnceWith(request);
   expect(JSON.parse(stored.get("cutex-desktop.messageSettlementIntents.v1")!)).toEqual({});
 });
+
+it("keeps the settlement recovery and evidence reads on the full bootstrap (absence there is authoritative)", async () => {
+  vi.resetModules();
+  const request = { messageId: "message", expectedEvidenceToken: "proof", requestId: "request", reason: "reason" };
+  const stored = new Map([["cutex-desktop.messageSettlementIntents.v1", JSON.stringify({ [JSON.stringify(["host", "message"])]: request })]]);
+  vi.stubGlobal("localStorage", { getItem: (k: string) => stored.get(k) ?? null, setItem: (k: string, value: string) => stored.set(k, value) });
+  env.bootstrap.mockReset();
+  const current = settlementFixture();
+  env.list.mockResolvedValue({ messages: [{ messageId: "message", settlement: current }] });
+  env.bootstrap.mockResolvedValue({ cutexState: { agentBusMessages: [{ messageId: "message", settlement: current }] } });
+  const writes = await import("../src/renderer/src/lib/messageSettlementWrites");
+  await writes.recheckSettlement("host", "message", "recipient");
+  expect(env.bootstrap).toHaveBeenCalled();
+  // Never a turn limit or bounded-bus option: the bus lists must be the host's whole lists here.
+  for (const call of env.bootstrap.mock.calls) expect(call).toEqual(["recipient"]);
+});

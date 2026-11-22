@@ -17,7 +17,8 @@ export interface SettlementWrite {
   /** Distinguishes authoritative absence from a cache entry that has never been read. */
   authoritative?: boolean;
   preview?: string;
-  error?: "conflict" | "unauthorized" | "missing" | "unavailable" | "unknown" | "ineligible";
+  /** runtimeGone (N6): the recipient's runtime no longer exists; only 结束跟进 can end the wait. */
+  error?: "conflict" | "unauthorized" | "missing" | "unavailable" | "unknown" | "ineligible" | "runtimeGone";
 }
 
 // Only contracted prewrite refusals resolve an intent. A proxy's http_4xx, a new/unknown code,
@@ -160,6 +161,7 @@ async function collectMessageEvidence(hostId: string, messageId: string, session
   let error: SettlementWrite["error"];
   let preview = before?.preview;
   if (read.status === "rejected") error = "unavailable";
+  else if (!read.value?.ok && read.value?.error?.code === "runtime_gone") error = "runtimeGone";
   else if (!read.value?.ok) error = read.value?.error?.status === 404 ? "missing" : [401, 403].includes(read.value?.error?.status) ? "unauthorized" : "unavailable";
   else if (read.value.result?.messageId !== messageId) error = "unavailable";
   else {
@@ -227,7 +229,9 @@ export async function closeMessageFollowUp(hostId: string, messageId: string, se
       return;
     }
     const { status, code } = result.error;
-    if (!DEFINITIVE_REFUSALS[status]?.includes(code)) {
+    if (status === 409 && code === "runtime_gone") {
+      put(key, { phase: "error", settlement, error: "runtimeGone" });
+    } else if (!DEFINITIVE_REFUSALS[status]?.includes(code)) {
       put(key, { phase: "uncertain", request, settlement, error: "unavailable", checked: false });
     } else {
       put(key, { phase: "error", settlement, error: status === 409 ? "conflict" : status === 403 ? "unauthorized" : status === 404 ? "missing" : "unknown" });

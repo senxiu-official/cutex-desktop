@@ -55,8 +55,13 @@ export function hostSidebarState(look: HostLook, snapshot: SidebarSnapshot | nul
   return snapshot ? "live" : "loading";
 }
 
-/** The merged sidebar of the view scope (one host: today's sidebar, its rows keyed by host). */
-export function useScopedSidebar(): ScopedSidebar {
+/**
+ * The merged sidebar of the view scope (one host: today's sidebar, its rows keyed by host). `reachableOnly`: a host
+ * that cannot be reached lists no rows (not even its last ones) — the 花名册 (owner 2026-11-17: those hosts are in
+ * the footer switcher); it stays in `hosts` as "offline".
+ */
+export function useScopedSidebar(options?: { reachableOnly?: boolean }): ScopedSidebar {
+  const reachableOnly = options?.reachableOnly ?? false;
   const scope = useHostScope();
   const sidebar = useApp((s) => s.sidebar);
   const byHost = useApp((s) => s.byHost);
@@ -75,6 +80,10 @@ export function useScopedSidebar(): ScopedSidebar {
       const current = look.connected ? sidebarOf(source, look.id) : null;
       const snapshot = current ?? lastKnown.get(look.id) ?? null;
       const state = hostSidebarState(look, current);
+      if (reachableOnly && state === "offline") {
+        hosts.push({ look, state, hasRows: false });
+        continue;
+      }
       const focus = look.id === scope.focus;
       const views = viewsOfHost(sessions, look.id);
       parts.push({ hostId: look.id, snapshot, pinned: focus ? pinned : pinnedOn(look.id), needsInput: focus ? new Set(Object.keys(pendingByAgent(views, hostWaiting))) : needsInputIds(views), chats: featuresOf(source, look.id).has("human-create-session"), statusUnknown: state === "loading", liveStatus: state === "loading" ? liveStatuses(views) : undefined });
@@ -82,7 +91,7 @@ export function useScopedSidebar(): ScopedSidebar {
     }
     const stateOf = (hostId: string | undefined) => hosts.find((h) => h.look.id === (hostId ?? scope.focus))?.state ?? "live";
     return { scope, model: mergeHostSidebars(parts), hosts, stateOf };
-  }, [scope, sidebar, byHost, features, hostsState, pinned, sessions, hostWaiting]);
+  }, [scope, sidebar, byHost, features, hostsState, pinned, sessions, hostWaiting, reachableOnly]);
 }
 
 /** Signals / needs-you of the merged rows (keyed by row key), each from its own host's sources. */

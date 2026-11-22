@@ -24,6 +24,9 @@ const AGENT_TOOL_VERB: Record<string, TaskVerb | "close" | "management"> = {
   delegation_wait: "delegationWait",
   agent_wait: "delegationWait",
   delegation_stop: "delegationStop",
+  delegation_reopen: "delegationReopen",
+  delegation_resume: "delegationResume",
+  delegation_await: "delegationAwait",
   delegation_close: "close",
   ask_close: "close",
   delegation_read: "delegationRead",
@@ -67,6 +70,10 @@ export type TaskVerb =
   | "delegationClose"
   | "delegationAccept"
   | "delegationAbandon"
+  | "delegationChanges"
+  | "delegationReopen"
+  | "delegationResume"
+  | "delegationAwait"
   | "delegationRead"
   | "overlengthRead"
   | "delegationProgress"
@@ -94,6 +101,20 @@ export interface TaskRowModel {
   detail?: string | null;
   /** Set when the call did not simply succeed (refused, failed, uncertain, awaiting the owner). */
   outcome?: TaskRowOutcome | null;
+  /**
+   * The delegation the call acts on (owner 2026-11-18: a bare `delegation-536a74` says nothing). The row names it
+   * by title and target (the store's record, else what this transcript said of it) and opens it on click; the id
+   * stays in the tooltip. `label`: the line shows it (false where the row already says it, e.g. agent_delegate).
+   */
+  delegation?: TaskRowDelegation | null;
+}
+
+export interface TaskRowDelegation {
+  id: string;
+  title: string | null;
+  /** The handler: a session reference or a name, as the transcript gave it. */
+  target: string | null;
+  label: boolean;
 }
 
 /**
@@ -130,8 +151,8 @@ const WORKER_VERB: Record<string, TaskVerb> = {
 
 const assignmentTasks = new Map<string, string>();
 const assignmentAssignees = new Map<string, string>();
-/** delegation id → its title (or brief), learned from the delegate call. */
-const delegations = new Map<string, string>();
+/** delegation id → its title (or brief) and handler, learned from the delegate call. */
+const delegations = new Map<string, { title: string; target: string | null }>();
 onHostSwitch(() => {
   assignmentTasks.clear();
   assignmentAssignees.clear();
@@ -208,7 +229,14 @@ function delegationId(a: Record<string, unknown>, r: Record<string, unknown> | n
 
 /** The delegation's title; `id` may be full or short (the delegate result and later calls can differ). */
 function delegationLabel(id: string | null): string | null {
-  return id ? (findById(delegations, id) ?? id) : null;
+  return id ? (findById(delegations, id)?.title ?? id) : null;
+}
+
+/** What this call and this transcript say of the delegation `id` (the row resolves the rest from the store). */
+function delegationRef(id: string | null, r: Record<string, unknown> | null, label = true): TaskRowDelegation | null {
+  if (!id) return null;
+  const seen = findById(delegations, id);
+  return { id, title: str(r?.title) ?? seen?.title ?? null, target: str(r?.target_name) ?? str(r?.target) ?? seen?.target ?? null, label };
 }
 
 function row(verb: TaskVerb, who: { id: string | null; name: string | null }, text: string | null): TaskRowModel {
@@ -235,8 +263,8 @@ function agentToolRow(item: RawItem, tool: string, a: Record<string, unknown>): 
       const brief = str(a.text);
       const id = resultDelegationId(r);
       const label = title ?? brief;
-      if (id && label) delegations.set(id, label);
-      return row("delegate", who, [title, brief].filter(Boolean).join("\n\n") || null);
+      if (id && label) delegations.set(id, { title: label, target: who.name ?? who.id });
+      return { ...row("delegate", who, [title, brief].filter(Boolean).join("\n\n") || null), delegation: delegationRef(id, r, false) };
     }
     case "delegationWait": {
       const list = a.delegations ?? a.asks;
@@ -255,18 +283,22 @@ function agentToolRow(item: RawItem, tool: string, a: Record<string, unknown>): 
     }
     case "close": {
       const outcome = str(a.outcome);
-      const verb: TaskVerb = outcome === "stop" ? "delegationStop" : outcome === "accepted" ? "delegationAccept" : outcome === "abandoned" ? "delegationAbandon" : "delegationClose";
-      return row(verb, none, delegationLabel(delegationId(a, r)));
+      const verb: TaskVerb = outcome === "stop" ? "delegationStop" : outcome === "accepted" ? "delegationAccept" : outcome === "abandoned" ? "delegationAbandon" : outcome === "changes_requested" ? "delegationChanges" : "delegationClose";
+      return { ...row(verb, none, str(a.note)), delegation: delegationRef(delegationId(a, r), r) };
     }
     case "delegationStop":
-      return row(kind, none, delegationLabel(delegationId(a, r)));
+      return { ...row(kind, none, null), delegation: delegationRef(delegationId(a, r), r) };
+    case "delegationReopen":
+    case "delegationResume":
+    case "delegationAwait":
+      return { ...row(kind, none, str(a.note)), delegation: delegationRef(delegationId(a, r), r) };
     case "overlengthRead":
       // The full text of an overlength message (doc- id; r214 name document_read).
       return row(kind, none, str(r?.text) ?? str(a.id) ?? str(a.document_id));
     case "delegationRead":
-      return row(kind, none, str(r?.text) ?? delegationLabel(delegationId(a, r)));
+      return { ...row(kind, none, str(r?.text)), delegation: delegationRef(delegationId(a, r), r) };
     case "delegationProgress":
-      return row(kind, none, str(a.text) ?? delegationLabel(delegationId(a, r)));
+      return { ...row(kind, none, str(a.text)), delegation: delegationRef(delegationId(a, r), r) };
     case "questionAnswer": {
       const answers = Object.values(obj(a.answers) ?? {}).flatMap((entry) => {
         const list = obj(entry)?.answers;
@@ -277,7 +309,9 @@ function agentToolRow(item: RawItem, tool: string, a: Record<string, unknown>): 
     case "tell": {
       const to = party(str(a.to));
       const sent = party(str(r?.to));
-      return row(kind, { id: sent.id ?? to.id, name: str(r?.name) ?? to.name }, str(a.text));
+      // A revision of a delegation goes to its handler: name the delegation too.
+      const revision = str(a.delegation);
+      return { ...row(kind, { id: sent.id ?? to.id, name: str(r?.name) ?? to.name }, str(a.text)), delegation: revision ? delegationRef(revision, null) : null };
     }
     case "alarmSet": {
       const at = str(a.at);
@@ -293,7 +327,7 @@ function agentToolRow(item: RawItem, tool: string, a: Record<string, unknown>): 
       // so later delegation_* rows show the task instead of a bare id.
       const task = str(a.task);
       const delegation = str(obj(created?.delegation)?.delegation);
-      if (delegation && task) delegations.set(delegation, task);
+      if (delegation && task) delegations.set(delegation, { title: task, target: name });
       return { ...row(kind, { id: str(agent?.cutex_session_id) ?? str(r?.cutex_session_id), name }, task), counterpartHint: createHint(a, r) };
     }
     case "agentArchive":

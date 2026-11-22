@@ -13,6 +13,7 @@ export const zhCN = {
   "remote-copies.start": "开始下载",
   "remote-copies.cancel": "取消",
   "remote-copies.open": "打开副本",
+  "remote-copies.openRefused": "脚本和可执行程序不从这里打开（打开可能会运行它）；可以在文件夹中显示。",
   "remote-copies.reveal": "在文件夹中显示",
   "remote-copies.original": "打开远程原件",
   "remote-copies.refresh": "重新下载",

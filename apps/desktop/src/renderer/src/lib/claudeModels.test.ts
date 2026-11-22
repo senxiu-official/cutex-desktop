@@ -25,13 +25,41 @@ describe("claude model ids", () => {
   });
 });
 
+describe("alias names: the version from the SDK handshake (owner 2026-11-23 label 「Opus 5.5」)", () => {
+  const withRes = (over: Record<string, Record<string, string>>) => REFERENCE.map((id) => ({ id, displayName: NAMES[id] ?? null, ...(over[id] ?? {}) }));
+
+  it("a handshake resolution with the host's display version names it; the id is never parsed for the label", () => {
+    const list = withRes({ opus: { resolvedModel: "claude-opus-5-5", resolvedModelSource: "sdkHandshake", resolvedDisplayVersion: "5.5" } });
+    expect(claudeShortName(list, "opus", t as never)).toBe("Opus 5.5");
+    // the version comes from the display field only: a resolved id alone gives no version
+    const bare = withRes({ opus: { resolvedModel: "claude-opus-5-5", resolvedModelSource: "sdkHandshake" } });
+    expect(claudeShortName(bare, "opus", t as never)).toBe("Opus");
+    // a display name alone does not give a version (contract: resolvedDisplayVersion)
+    const named = withRes({ opus: { resolvedModel: "claude-opus-5-5", resolvedModelSource: "sdkHandshake", resolvedDisplayName: "Opus 5.5" } });
+    expect(claudeShortName(named, "opus", t as never)).toBe("Opus");
+  });
+
+  it("any other source (or none) gives 「Opus」", () => {
+    const list = withRes({ opus: { resolvedModel: "claude-opus-5-5", resolvedModelSource: "catalog", resolvedDisplayVersion: "5.5" } });
+    expect(claudeShortName(list, "opus", t as never)).toBe("Opus");
+  });
+
+  it("the reported target is what folds into the alias row (not the catalog's newest)", () => {
+    const list = withRes({ opus: { resolvedModel: "claude-opus-4-8", resolvedModelSource: "sdkHandshake", resolvedDisplayVersion: "4.8" } });
+    const rows = foldClaudeModels(list, (m) => m.id, (m) => m.displayName, "sonnet");
+    expect(rows.find((r) => r.item.id === "opus")!.folded).toEqual(["claude-opus-4-8", "opus[1m]"]);
+    expect(rows.some((r) => r.item.id === "claude-opus-5-5")).toBe(true);
+  });
+});
+
 describe("foldClaudeModels", () => {
   const rows = foldClaudeModels(REFERENCE, (id) => id, (id) => NAMES[id], "sonnet");
 
-  it("keeps one row per real model: the family aliases stand for their newest model", () => {
+  it("keeps one row per real model: the family aliases stand for their newest model, named by family", () => {
     const primary = rows.filter((r) => r.primary);
     expect(ids(primary)).toEqual(["opus", "sonnet", "fable", "haiku"]);
-    expect(primary.map((r) => r.name)).toEqual(["Opus 5.5", "Sonnet 5.5", "Fable 5.1", "Haiku 5.5"]);
+    expect(primary.map((r) => r.name)).toEqual(["Opus", "Sonnet", "Fable", "Haiku"]);
+    expect(primary.map((r) => r.alias)).toEqual([{ version: null }, { version: null }, { version: null }, { version: null }]);
     expect(rows.find((r) => r.item === "opus")!.folded).toEqual(["claude-opus-5-5", "opus[1m]"]);
     // 23 ids → 23 − 4 newest fixed ids − 2 [1m] aliases.
     expect(rows).toHaveLength(17);
@@ -68,11 +96,11 @@ describe("foldClaudeModels", () => {
   it("finds the row an id folded into, and short names for the chip", () => {
     expect(foldedRowFor(rows, (id) => id, "opus[1m]")!.item).toBe("opus");
     const list = REFERENCE.map((id) => ({ id, displayName: NAMES[id] ?? null }));
-    expect(claudeShortName(list, "sonnet", t as never)).toBe("Sonnet 5.5");
-    expect(claudeShortName(list, "opus[1m]", t as never)).toBe('claudeModels.oneMName{"model":"Opus 5.5"}');
+    expect(claudeShortName(list, "sonnet", t as never)).toBe("Sonnet");
+    expect(claudeShortName(list, "opus[1m]", t as never)).toBe(`claudeModels.oneMName${JSON.stringify({ model: "Opus" })}`);
     expect(claudeShortName(list, "default", t as never)).toBe("claudeModels.default");
     const choices = claudeCatalogChoices(list, "sonnet", t as never);
-    expect(choices[0]).toMatchObject({ id: "opus", name: "Opus 5.5", primary: true });
-    expect(choices[0]!.description).toContain("claudeModels.latest");
+    expect(choices[0]).toMatchObject({ id: "opus", name: "Opus", primary: true });
+    expect(choices[0]!.description).toBe(""); // no alias line (owner 2026-11-18)
   });
 });

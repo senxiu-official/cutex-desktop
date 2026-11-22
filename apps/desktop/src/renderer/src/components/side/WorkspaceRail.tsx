@@ -11,6 +11,7 @@
 // a click focuses it, which puts the layout back. Beside two workspaces both Shelves are live (owner 2026-10-21,
 // components/side/SideArea WsShelfBox under lib/shelfSourceContext): this rail is not drawn there any more.
 import { Share2 } from "lucide-react";
+import { PRESS_ICON } from "../Button";
 import { useI18n } from "../../i18n";
 import type { ItemId } from "../../modules/types";
 import { focusConversationPane } from "../../lib/paneStore";
@@ -23,7 +24,7 @@ import { useWorkspaceDrag } from "../../lib/workspaces";
 import { useConvRailPages } from "../../lib/workspaceRowView";
 import { RailOwner } from "./ShelfRail";
 
-const BTN = "relative flex size-[34px] shrink-0 items-center justify-center rounded-ctl text-muted transition-[background,color] duration-(--motion-short) ease-(--ease-standard) hover:bg-hover hover:text-foreground";
+const BTN = `relative flex size-[34px] shrink-0 items-center justify-center rounded-ctl text-muted transition-[background,color] duration-(--motion-short) ease-(--ease-standard) hover:bg-hover hover:text-foreground ${PRESS_ICON}`;
 
 export function WorkspaceRail({ paneId, hostId, sessionId, name, order, at = "right", always = false }: { paneId: string; hostId: string; sessionId: string | null; name: string; order: number; at?: ShelfSide; always?: boolean }) {
   const { t } = useI18n();

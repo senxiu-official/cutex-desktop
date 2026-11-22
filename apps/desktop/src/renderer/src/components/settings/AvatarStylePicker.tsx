@@ -12,6 +12,9 @@ import { FAMILY_LABEL, type PortraitPicture } from "../../lib/portraitPacks";
 import { useSampleUrl, usePortraitThemes, type PortraitThemeInfo } from "../../lib/portraitThemes";
 import { EmojiGlyph } from "../Avatar";
 import { Notice, Segmented } from "./Form";
+import type { ProfilePortraitThemeProblem } from "../../../../shared/profilePortraitThemes";
+import { portraitProblemText } from "../../lib/portraitThemeDraft";
+import { settingsControlChanged } from "../../lib/settingsDrafts";
 
 type Kind = AvatarStyle["kind"] | "inherit";
 
@@ -33,16 +36,16 @@ function Face({ picture }: { picture: PortraitPicture }) {
   );
 }
 
-function ThemeCard({ theme, on, locked, disabled, onToggle }: { theme: PortraitThemeInfo; on: boolean; locked: boolean; disabled?: boolean; onToggle(on: boolean): void }) {
+function ThemeCard({ theme, on, locked, disabled, blocked, onToggle }: { theme: PortraitThemeInfo; on: boolean; locked: boolean; disabled?: boolean; blocked?: boolean; onToggle(on: boolean): void }) {
   const { t } = useI18n();
   // `relative`: the checkbox is `sr-only` (position: absolute); without a positioned label, focusing it on a click scrolled
   // the Settings card (see the note this replaced in PortraitSettings).
   return (
-    <label data-portrait-theme={theme.key} data-on={on ? "" : undefined} title={locked ? t("avatarStyle.portrait.keepOne") : undefined}
-      className={`relative flex min-w-0 items-center gap-2.5 rounded-lg border p-2 ${disabled || locked ? "cursor-default" : "cursor-pointer hover:bg-hover"} ${on ? "border-accent bg-selected" : "border-border"}`}>
+    <label data-portrait-theme={theme.key} data-on={on ? "" : undefined} data-blocked={blocked ? "" : undefined} title={locked ? t("avatarStyle.portrait.keepOne") : undefined}
+      className={`relative flex min-w-0 items-center gap-2.5 rounded-lg border p-2 ${disabled || locked ? "cursor-default" : "cursor-pointer hover:bg-hover"} ${on ? (blocked ? "border-warn bg-selected" : "border-accent bg-selected") : "border-border"}`}>
       <Face picture={theme.cover} />
       <span className="flex min-w-0 flex-1 items-center gap-1.5">
-        <input type="checkbox" checked={on} disabled={disabled || locked} onChange={(e) => onToggle(e.target.checked)} className="peer sr-only" />
+        <input type="checkbox" checked={on} disabled={disabled || locked} data-settings-control="" onChange={(e) => settingsControlChanged(e.currentTarget, onToggle(e.target.checked))} className="peer sr-only" />
         <span aria-hidden className={`flex h-4 w-4 shrink-0 items-center justify-center rounded peer-focus-visible:ring-2 peer-focus-visible:ring-accent ${on ? "bg-accent text-[var(--on-accent)]" : "border border-border bg-background"}`}>{on && <Check size={11} strokeWidth={3} />}</span>
         <span className="min-w-0 truncate text-ui/[inherit] font-medium">{theme.name}</span>
         <span className="ml-auto shrink-0 text-caption/[inherit] text-subtle">{theme.count}</span>
@@ -51,7 +54,7 @@ function ThemeCard({ theme, on, locked, disabled, onToggle }: { theme: PortraitT
   );
 }
 
-function PortraitChooser({ value, disabled, onChange }: { value: readonly string[]; disabled?: boolean; onChange(keys: string[]): void }) {
+function PortraitChooser({ value, disabled, blocked, onChange }: { value: readonly string[]; disabled?: boolean; blocked?: readonly string[]; onChange(keys: string[]): void }) {
   const { t } = useI18n();
   const { themes } = usePortraitThemes();
   // Ticked keys that are not installed here stay in the value (another device may have the pack) but are not counted.
@@ -86,7 +89,7 @@ function PortraitChooser({ value, disabled, onChange }: { value: readonly string
             <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-1.5">
               {list.map((th) => {
                 const ticked = on.has(th.key);
-                return <ThemeCard key={th.key} theme={th} on={ticked} locked={ticked && value.length === 1} disabled={disabled} onToggle={(next) => onChange(order(next ? [...value, th.key] : value.filter((k) => k !== th.key)))} />;
+                return <ThemeCard key={th.key} theme={th} on={ticked} locked={ticked && value.length === 1} disabled={disabled} blocked={blocked?.includes(th.key)} onToggle={(next) => onChange(order(next ? [...value, th.key] : value.filter((k) => k !== th.key)))} />;
               })}
             </div>
           </div>
@@ -139,6 +142,21 @@ function EmojiChooser({ value, disabled, onChange }: { value: readonly AvatarThe
   );
 }
 
+/** The short note for portrait themes a host cannot store (owner 2026-11-18), with their names; `kept`: the draft stays. */
+export function PortraitThemeNote({ problem, kept = false }: { problem: ProfilePortraitThemeProblem; kept?: boolean }) {
+  const { t } = useI18n();
+  const { themes } = usePortraitThemes();
+  const name = (key: string) => themes.find((th) => th.key === key)?.name ?? key;
+  return (
+    <div role="status" data-portrait-theme-problem={problem.kind}>
+      <Notice>
+        {portraitProblemText(problem, name, t)}
+        {kept && <span className="block">{t("avatarStyle.portrait.keptDraft")}</span>}
+      </Notice>
+    </div>
+  );
+}
+
 /** One line for a style (「拟人 · 洛丽塔、办公室」, 「Emoji · 按模型」, 「字母」): Profile rows, the inherited line. */
 export function AvatarStyleLabel({ style }: { style: AvatarStyle }) {
   const { t } = useI18n();
@@ -153,7 +171,7 @@ function styleText(style: AvatarStyle, themes: readonly PortraitThemeInfo[], t: 
   return t("avatarStyle.summary.portrait", { themes: names.length > 3 ? `${names.slice(0, 3).join("、")} +${names.length - 3}` : names.join("、") });
 }
 
-export function AvatarStylePicker({ value, onChange, allowInherit = false, disabled = false, inherited = null }: {
+export function AvatarStylePicker({ value, onChange, allowInherit = false, disabled = false, inherited = null, blocked }: {
   value: AvatarStyle | null;
   onChange(value: AvatarStyle | null): void;
   /** Offer 跟随应用 (value null). */
@@ -161,6 +179,8 @@ export function AvatarStylePicker({ value, onChange, allowInherit = false, disab
   disabled?: boolean;
   /** The style a null value means now (shown under 跟随应用). */
   inherited?: AvatarStyle | null;
+  /** Portrait theme keys the host cannot store: their cards are edged in the warning colour (the note says why). */
+  blocked?: readonly string[];
 }) {
   const { t } = useI18n();
   const { themes } = usePortraitThemes();
@@ -190,7 +210,7 @@ export function AvatarStylePicker({ value, onChange, allowInherit = false, disab
       <Segmented value={kind} options={kinds} onChange={pick} disabled={disabled} label={t("avatarStyle.kind")} />
       {kind === "portrait" && <p className="text-xs leading-relaxed text-subtle">{t("avatarStyle.aiDisclosure")}</p>}
       {kind === "inherit" && inherited && <p className="text-xs text-subtle" data-style-inherited="">{t("avatarStyle.inherited", { style: styleText(inherited, themes, t) })}</p>}
-      {value?.kind === "portrait" && <PortraitChooser value={value.portraitThemes} disabled={disabled} onChange={(keys) => onChange({ kind: "portrait", portraitThemes: keys })} />}
+      {value?.kind === "portrait" && <PortraitChooser value={value.portraitThemes} disabled={disabled} blocked={blocked} onChange={(keys) => onChange({ kind: "portrait", portraitThemes: keys })} />}
       {value?.kind === "emoji" && <EmojiChooser value={value.emojiThemes} disabled={disabled} onChange={(emojiThemes) => onChange({ kind: "emoji", emojiThemes })} />}
       {value?.kind === "letter" && <p className="text-xs text-subtle" data-style-letter="">{t("avatarStyle.letter.hint")}</p>}
     </div>

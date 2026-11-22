@@ -315,7 +315,8 @@ function teardown() {
   fake.daemon?.stop();
   for (const conn of fake.extra) conn.daemon.stop();
   fake.conn?.daemon.stop();
-  rmSync(fake.userData, { recursive: true, force: true });
+  // Windows: main's files in userData can still be open a moment after the stop; rm retries EBUSY / EPERM / ENOTEMPTY.
+  rmSync(fake.userData, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 }
 // Warm-up: one boot before all tests, so the first load of the main + preload graph is not billed to the first test's
 // hook (it neared the limits under the full suite's load); each test still boots fresh modules from the cache.

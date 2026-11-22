@@ -205,6 +205,32 @@ describe("009: a Shelf is one card", () => {
     expect(read("components/side/SidePageView.tsx")).toContain("SHELF_PANE_GAP");
   });
 
+  // Owner 2026-11-17 (portrait): the pane under the Rail kept rounded, bordered corners against the Rail's square
+  // edge — the rule's `> :is(…, div > .contents > .shell-card)` also required the pane to be the body's own child.
+  it("portrait: the pane touching the Rail (rail-top: first, rail-bottom: last) is square and borderless on that edge", () => {
+    const css = read("components/side/shelfCard.css");
+    const rules = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)].map(([, sel = "", body = ""]) => ({ sel: sel.replace(/\/\*[\s\S]*?\*\//g, "").trim(), body }))
+      .filter((r) => r.sel.includes("rail-top") || r.sel.includes("rail-bottom"));
+    const host = document.createElement("div");
+    host.innerHTML = `<div class="shelf-card" data-shelf-card="rail-top"><div data-shelf-body><div class="flex">
+      <div class="contents"><div class="shell-card" id="first"></div></div><div class="contents"><div class="shell-card" id="last"></div></div>
+    </div></div></div>
+    <div class="shelf-card" data-shelf-card="rail-top"><div data-shelf-body><div class="shell-card" id="launcher"></div></div></div>`;
+    const flat = (end: "top" | "bottom", id: string) => {
+      const el = host.querySelector(`#${id}`)!;
+      const card = el.closest("[data-shelf-card]")!;
+      card.setAttribute("data-shelf-card", `rail-${end}`);
+      return rules.some((r) => !r.sel.includes(":is(") && r.sel.split(",").some((s) => el.matches(s.trim()))
+        && new RegExp(`border-${end}: 0;[\\s\\S]*border-${end}-left-radius: 0;[\\s\\S]*border-${end}-right-radius: 0;`).test(r.body));
+    };
+    expect(flat("top", "first")).toBe(true);
+    expect(flat("top", "last")).toBe(false);
+    expect(flat("bottom", "last")).toBe(true);
+    expect(flat("bottom", "first")).toBe(false);
+    expect(flat("top", "launcher")).toBe(true);
+    expect(flat("bottom", "launcher")).toBe(true);
+  });
+
   it("the pane heights leave only the lines between them (cardHeights' gap)", async () => {
     const { cardHeights } = await import("../src/renderer/src/lib/sideLayout");
     const two = [{ size: 1, collapsed: false }, { size: 1, collapsed: false }];

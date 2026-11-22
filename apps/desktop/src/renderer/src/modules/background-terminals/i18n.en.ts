@@ -14,4 +14,7 @@ export const en: Record<keyof typeof zhCN, string> = {
   "background-terminals.output": "Output",
   "background-terminals.terminate": "Terminate",
   "background-terminals.terminateAgain": "Click Terminate again to confirm",
+  "background-terminals.unconfirmed": "Outcome unconfirmed",
+  "background-terminals.unconfirmedHint": "The {{agent}} disconnected, so this terminal's state can't be read: the process may still be running, or may have ended. You can end follow-up.",
+  "background-terminals.terminateOffline": "The {{agent}} is disconnected; it can't be terminated now",
 };

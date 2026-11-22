@@ -28,7 +28,9 @@ export function RuntimeGroup({ hostId: suppliedHost, kind, title, list, currentV
   if (pruneEnabled)
     list = mergeRuntimePruneVersions(list, plan?.versions.filter(v => v.kind === kind) ?? []);
   const current = list.find(r => r.selected);
-  const version = current && kind === "native"
+  // Until cutex has checked the files (verificationPending), the folder name stands in for an unknown version.
+  const version = current && kind === "native" && current.verificationPending ? current.version || current.release
+    : current && kind === "native"
     ? nativeVersionText(current.version, current.sha256Prefix, t("runtimes.unknownVersion"))
     : current?.version || current?.release || currentVersion;
   const unused = list.filter(r => !r.selected && !r.missing && r.agentCount === 0);
@@ -53,13 +55,19 @@ function AgentNames({ agents, more }: { agents: readonly PinnedAgent[]; more: nu
   return <>{agents.map((a, i) => <span key={a.id} title={a.id}>{i > 0 ? locale.startsWith("zh") ? "、" : ", " : ""}{a.name}</span>)}{more > 0 && <span> · {t("runtimes.moreAgents", { n: more })}</span>}</>;
 }
 
+/** 「未登记的构建（r177 目录）· 」: the folder is the only name such a build has (the release label is its folder). */
+function unregisteredLabel(r: InstalledRuntime, t: ReturnType<typeof useI18n>["t"]): string {
+  const label = r.release && r.release !== r.sha256Prefix ? t("runtimes.unregisteredIn", { dir: r.release }) : t("runtimes.unregistered");
+  return label.endsWith("）") ? `${label}· ` : `${label} · `;
+}
+
 function RuntimeRow({ runtime: r, native, lists }: { runtime: InstalledRuntime; native: boolean; lists?: SidebarSnapshot | null }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const expandable = r.agentCount > 0 && r.agents.length > 0;
   const Chevron = open ? ChevronDown : ChevronRight;
   const pinned = splitPinnedAgents(r, lists);
-  const archived = pinned.archived.length;
+  const archived = pinned.archivedCount ?? 0;
   const shown = pinned.agents.slice(0, 60);
   const shownArchived = pinned.archived.slice(0, 60);
   const headline = !archived ? t("runtimes.agents", { n: r.agentCount })
@@ -67,14 +75,21 @@ function RuntimeRow({ runtime: r, native, lists }: { runtime: InstalledRuntime; 
     : t("runtimes.agentsAllArchived", { n: archived });
   return <li className="py-1">
     <button disabled={!expandable} aria-expanded={expandable ? open : undefined} onClick={() => setOpen(!open)} className="flex w-full flex-wrap items-start gap-x-2 gap-y-1 rounded py-1 text-left text-xs enabled:hover:bg-hover focus-visible:ring-2 focus-visible:ring-accent/60 focus-visible:outline-none">
-      <span className="flex min-w-0 flex-1 basis-36 items-start gap-2"><span className="mt-0.5 flex w-3.5 shrink-0 justify-center text-subtle">{expandable && <Chevron size={13} />}</span><span className="min-w-0 font-mono break-all text-foreground" title={r.path ?? undefined}>{native ? nativeVersionText(r.version, r.sha256Prefix, t("runtimes.unknownVersion")) : r.version || r.release}</span></span>
+      <span className="flex min-w-0 flex-1 basis-36 items-start gap-2"><span className="mt-0.5 flex w-3.5 shrink-0 justify-center text-subtle">{expandable && <Chevron size={13} />}</span>{r.verificationPending
+        // cutex has not checked the files yet: no SHA and no 「未登记」 / 「未知版本」 as a finding, only the name and a quiet hint.
+        ? <span className="min-w-0 font-mono break-all text-foreground" title={r.path ?? undefined}>{r.version || r.release}</span>
+        : native && !r.version && r.sha256Prefix
+        // A build cutex's version registry does not know (EVA r177: the file's SHA no longer matches its entry).
+        ? <span className="min-w-0 break-all text-foreground" title={r.path ?? undefined} data-tip={t("runtimes.unregisteredHint")} data-unregistered-build="">{unregisteredLabel(r, t)}<span className="font-mono">{r.sha256Prefix}</span></span>
+        : <span className="min-w-0 font-mono break-all text-foreground" title={r.path ?? undefined}>{native ? nativeVersionText(r.version, r.sha256Prefix, t("runtimes.unknownVersion")) : r.version || r.release}</span>}</span>
+      {r.verificationPending && <span className="shrink-0 text-subtle" data-verification-pending="" data-tip={t("runtimes.verificationPendingHint")}>{t("runtimes.verificationPending")}</span>}
       {r.selected && <Tag tone="accent">{t("runtimes.selected")}</Tag>}
       {r.missing && <Tag tone="attention" title={t("runtimes.missingHint")}>{t("runtimes.missing")}</Tag>}
       <span className="ml-auto shrink-0 text-muted" data-tip={archived ? t("runtimes.archivedHint") : undefined}>{headline}</span>
     </button>
     {open && expandable && <div className="pl-[1.375rem] text-xs leading-relaxed break-words text-muted select-text">
-      {(shown.length > 0 || pinned.agentCount > 0) && <p><AgentNames agents={shown} more={pinned.agentCount - shown.length} /></p>}
-      {archived > 0 && <details data-archived-agents=""><summary className="cursor-pointer text-subtle hover:text-foreground">{t("runtimes.archivedAgents", { n: archived })}</summary><p><AgentNames agents={shownArchived} more={archived - shownArchived.length} /></p></details>}
+      {(shown.length > 0 || pinned.agentCount > 0) && <p><AgentNames agents={shown} more={Math.max(0, pinned.agentCount - shown.length)} /></p>}
+      {archived > 0 && <details data-archived-agents=""><summary className="cursor-pointer text-subtle hover:text-foreground">{t("runtimes.archivedAgents", { n: archived })}</summary><p><AgentNames agents={shownArchived} more={Math.max(0, archived - shownArchived.length)} /></p></details>}
     </div>}
   </li>;
 }

@@ -9,6 +9,19 @@ import { handlePortraitPacksRequest, PortraitPackStore } from "../src/main/portr
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
 const WEBP = Buffer.concat([Buffer.from("RIFF"), Buffer.from([0, 0, 0, 0]), Buffer.from("WEBPVP8 ")]);
 
+it("lists installed long catalog theme ids unchanged and ignores malformed ids", async () => {
+  const theme = "mountain-city-myriad-layers";
+  put("catalog/manifest.json", JSON.stringify({ schemaVersion: 1, entries: [
+    { theme, model: "kimi", avatarPath: "avatars/face/kimi-v1.png" },
+    { theme: "bad\n", model: "kimi", avatarPath: "avatars/face/kimi-v1.png" },
+    { theme: "a".repeat(33), model: "kimi", avatarPath: "avatars/face/kimi-v1.png" },
+  ] }));
+  put("catalog/avatars/face/kimi-v1.png", PNG);
+  const store = new PortraitPackStore(dir);
+  expect((await store.list()).packs[0]!.themes.map(item => item.id)).toEqual([theme]);
+  expect(await store.image("catalog", theme, "kimi-v1", "full")).toMatch(/^data:image\/png;base64,/);
+});
+
 let dir: string;
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "portrait-packs-"));

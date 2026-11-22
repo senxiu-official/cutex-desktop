@@ -4,7 +4,7 @@
 // good. Works with every host that has those lists (asks / owner-approvals): nothing new is read.
 import type { AskExecution, ApprovalRecord } from "../../../shared/ipc";
 import { LOCAL_HOST_ID } from "../../../shared/hosts";
-import { useHostRecords } from "./delegationStore";
+import { hostDelegations, useDelegations } from "./delegationStore";
 import { APPROVALS_LIVE_FEATURE, approvalOfTool, knownApprovalState } from "./approvals";
 import { resultDelegationId, toolResult, type TaskRowOutcome } from "./taskRows";
 import type { RawItem } from "./timeline";
@@ -51,10 +51,16 @@ export function useLiveApproval(hostId: string, subject: ApprovalSubject | null)
   // The host's pending list (lib/hostScope hostData), read narrowly: every task row calls this.
   const pending = useApp((s) => (hostId === (s.hosts?.active ?? LOCAL_HOST_ID) ? s.approvals : s.byHost?.[hostId]?.approvals) ?? null);
   const live = useApp((s) => featuresOf(s, hostId).has(APPROVALS_LIVE_FEATURE));
-  const records = useHostRecords(hostId);
+  // Only this subject's execution (a string), not the host's whole table: an unrelated delegation update re-renders no row.
+  const delegationId = subject?.delegationId ?? null;
+  const execution = useDelegations((s) => {
+    if (!delegationId) return undefined;
+    const records = hostDelegations(s.byKey, hostId);
+    const askId = delegationRecordId(delegationId, records);
+    return askId ? records[askId]?.execution : undefined;
+  });
   if (!subject) return null;
-  const askId = delegationRecordId(subject.delegationId, records);
-  const fromDelegation = askId ? delegationApproval(records[askId]?.execution) : null;
+  const fromDelegation = delegationApproval(execution);
   if (fromDelegation) return fromDelegation;
   const approvalId = subject.approvalId ?? null;
   return ownerApproval(approvalId, pending, approvalId ? knownApprovalState(approvalId) : undefined, live);

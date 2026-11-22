@@ -112,8 +112,8 @@ export function BrowserAgentPicker({ hostId, agents, selected, onSelect, onOpen,
       aria-haspopup="listbox" aria-expanded={open} disabled={disabled} onClick={() => (open ? setOpen(false) : show())}
       onKeyDown={event => { if (!isImeComposing(event) && (event.key === "ArrowDown" || event.key === "Enter" || event.key === " ") && !open) { event.preventDefault(); show(); } }}
       className={look === "grant"
-        ? `flex h-6 min-w-0 shrink items-center gap-1 rounded-ctl px-2 text-meta font-medium transition-colors focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-40 ${open ? "bg-accent text-on-accent" : "bg-accent-soft text-accent enabled:hover:bg-accent enabled:hover:text-on-accent"}`
-        : "flex max-w-36 min-w-0 items-center gap-1 rounded border border-border bg-background px-1.5 py-1 text-xs text-foreground enabled:hover:bg-hover disabled:opacity-40"}>
+        ? `press-solid flex h-6 min-w-0 shrink items-center gap-1 rounded-ctl px-2 text-meta font-medium transition-colors focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-40 ${open ? "bg-accent text-on-accent" : "bg-accent-soft text-accent enabled:hover:bg-accent enabled:hover:text-on-accent"}`
+        : "press flex max-w-36 min-w-0 items-center gap-1 rounded border border-border bg-background px-1.5 py-1 text-xs text-foreground enabled:hover:bg-hover focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-40"}>
       {look === "grant" && <Hand size={12} aria-hidden className="shrink-0" />}
       <span className={`truncate ${chosen || look === "grant" ? "" : "text-subtle"}`}>{look === "grant" ? label : (chosen?.name ?? placeholder)}</span>
       <ChevronDown size={11} className={`shrink-0 ${look === "grant" ? "" : "text-subtle"}`} />
@@ -130,7 +130,7 @@ export function BrowserAgentPicker({ hostId, agents, selected, onSelect, onOpen,
         </div>
         <div ref={list} id="browser-agent-picker-list" role="listbox" aria-label={t("browser.owner.select")} className="float-scroll min-h-0 flex-1 overflow-y-auto p-1">
           {error && <div role="alert" className="px-2.5 py-2 text-xs text-danger">
-            <p>{error}</p><button type="button" data-browser-agent-retry="" disabled={loading} className="mt-2 underline" onClick={onOpen}>{t("browser.refusal.retry")}</button>
+            <p>{error}</p><button type="button" data-browser-agent-retry="" disabled={loading} aria-busy={loading || undefined} className="press mt-2 rounded-sm underline disabled:cursor-default disabled:no-underline disabled:opacity-50" onClick={onOpen}>{t("browser.refusal.retry")}</button>
           </div>}
           {!error && !flat.length && !hiddenChats && <p role="status" className="px-2.5 py-2 text-xs text-subtle">{t(agents.length ? "browser.owner.pickerNoMatch" : loading ? "browser.owner.loadingAgents" : "browser.owner.noAgents")}</p>}
           {groups.map(group => <div key={group.key} role="group" aria-label={groupLabel(group.kind, group.label) ?? undefined}>
@@ -139,7 +139,7 @@ export function BrowserAgentPicker({ hostId, agents, selected, onSelect, onOpen,
               const i = index++;
               return <div key={agent.sessionId} id={`browser-agent-option-${i}`} data-picker-index={i} role="option" aria-selected={agent.sessionId === selected}
                 onMouseEnter={() => setCursor(i)} onMouseDown={event => event.preventDefault()} onClick={() => pick(agent)}
-                className={`flex cursor-default items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs ${i === cursor ? "bg-surface-2" : ""}`}>
+                className={`press flex cursor-default items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs ${i === cursor ? "bg-surface-2" : ""}`}>
                 <span className="min-w-0 flex-1 truncate text-foreground" title={agent.name}>{agent.name}</span>
                 {agent.sessionId === current && <span className="shrink-0 text-caption/[inherit] text-subtle">{t("browser.owner.pickerCurrent")}</span>}
                 {group.kind === "top" && agent.projectName && <span className="max-w-24 shrink-0 truncate text-caption/[inherit] text-subtle">{agent.projectName}</span>}

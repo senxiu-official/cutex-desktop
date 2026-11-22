@@ -205,3 +205,29 @@ describe("composer quota popover", () => {
     expect(chipRings()[1]!.dataset.merged).toBeUndefined();
   });
 });
+
+// Cross-review of the press-feedback branch (night-review 2026-11-18): the ↻'s waiting state was one flag for the
+// component, so after switching Profile while the old Profile's refresh ran, refreshing the new one sent nothing.
+// It is per host + Profile now (lib/usePending key).
+describe("↻ while another Profile's refresh still runs", () => {
+  it("switching Profile: the new Profile's refresh is sent and not shown as waiting for the old one", async () => {
+    let finish!: () => void;
+    const oldRequest = new Promise<void>((resolve) => (finish = resolve));
+    loadQuota.mockImplementation((...args: unknown[]) => (args[0] === "claude" && args[1] === true ? oldRequest : Promise.resolve()));
+    await render();
+    await openPopover();
+    const refresh = () => document.querySelector<HTMLButtonElement>('button[aria-label="composer.quota.refresh"]')!;
+    act(() => refresh().click());
+    expect(loadQuota).toHaveBeenCalledWith("claude", true);
+    expect(refresh().getAttribute("aria-busy")).toBe("true");
+    // A repeat for the same Profile while it runs is still ignored.
+    act(() => refresh().click());
+    expect(loadQuota.mock.calls.filter((args) => (args as unknown[])[1] === true)).toEqual([["claude", true]]);
+    await act(async () => root.render(h(ProfileQuota, { profile: "other-profile", rateLimits: null, rateLimitsAt: null, sessionId: null, busy: false })));
+    expect(refresh().getAttribute("aria-busy")).toBeNull();
+    act(() => refresh().click());
+    const forced = loadQuota.mock.calls.filter((args) => (args as unknown[])[1] === true);
+    await act(async () => finish());
+    expect(forced).toEqual([["claude", true], ["other-profile", true]]);
+  });
+});

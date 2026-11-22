@@ -56,8 +56,10 @@ describe("delegation_await: waiting, never running", () => {
     expect(delegationWait(waiting({ await: { ...waiting().await!, jobs: [] }, hold: { reason: "waitingForEvent" } })).jobs).toBeNull();
   });
 
-  it("a running attempt without the hold is still 运行中; a question still wins", () => {
-    expect(delegationStatus(waiting({ hold: null, await: null })).key).toBe("running");
+  it("without the hold: a yielded attempt is 等待继续, a running one 运行中; a question still wins", () => {
+    // W6c: a yielded attempt (the turn ended) is 等待继续, not 运行中; a running attempt is 运行中.
+    expect(delegationStatus(waiting({ hold: null, await: null })).key).toBe("waiting");
+    expect(delegationStatus(waiting({ hold: null, await: null, attempt: { ...waiting().attempt!, state: "running", endedAt: null } })).key).toBe("running");
     expect(delegationStatus(waiting({ hold: { reason: "waitingForInput" } })).key).toBe("question");
   });
 

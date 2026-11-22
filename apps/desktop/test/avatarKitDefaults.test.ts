@@ -1,6 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from "vitest";
 import { DEFAULT_PORTRAIT_THEMES } from "../src/shared/portraitDefaults";
+// Load the preference graph before the timed assertions; each case still
+// resets its module state to check fresh-install and saved choices.
+import "../src/renderer/src/lib/prefs";
 vi.mock("../src/renderer/src/bridge", () => ({ api: {}, apiFor: () => ({}), bridge: { on: () => () => {} }, onEvent: () => () => {}, cleanIpcMessage: (m: string) => m }));
 afterEach(() => localStorage.clear());
 it("defaults a new install to the owner kit, preserving explicit off and legacy letter choices", async () => {

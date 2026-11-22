@@ -15,7 +15,7 @@ import { btn } from "../../components/Button";
 const XtermView = lazy(() => import("./XtermView").then((m) => ({ default: m.XtermView })));
 const XTERM_PLACEHOLDER = <div className="h-full min-h-0 w-full flex-1 bg-background" />;
 
-const BTN = "flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-subtle hover:bg-hover hover:text-foreground";
+const BTN = "press-icon flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-subtle hover:bg-hover hover:text-foreground";
 
 /** A PTY that ended / that the daemon no longer has: say so, offer a new one or closing the tab. */
 function Ended({ props, code, gone }: { props: SideBodyProps<TerminalState>; code: number | null; gone: boolean }) {

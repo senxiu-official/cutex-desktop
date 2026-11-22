@@ -89,7 +89,11 @@ export class BrowserSitePermissionStore {
 export interface BrowserPermissionGuest { guestId: string; pool: BrowserPool; url: string; agentName?: string }
 export interface BrowserPermissionPrompt { guestId: string; origin: string; permissions: BrowserSitePermission[]; pool: BrowserPool; agentName?: string; agentActing: boolean;
   /** Aborted when the asking page is gone (navigated to another origin, closed): the prompt closes as a deny. */
-  signal?: AbortSignal }
+  signal?: AbortSignal;
+  /** The one-dialog-at-a-time slot this request holds: a request waiting for a hidden window gives it up (other tabs
+   * still get asked) and takes it again before its own dialog. */
+  queue?: BrowserPermissionQueueSlot }
+export interface BrowserPermissionQueueSlot { release(): void; acquire(): Promise<void> }
 export interface BrowserSitePermissionsDeps {
   store: Pick<BrowserSitePermissionStore, "get" | "set">;
   /** The accepted guest behind a webContents id, with its CURRENT main-frame URL. */
@@ -104,7 +108,15 @@ export interface BrowserSitePermissionsDeps {
 /** One serialized owner prompt at a time; identical concurrent requests share it. */
 export function createBrowserSitePermissions(deps: BrowserSitePermissionsDeps): BrowserSessionPermissions {
   const pending = new Map<string, Promise<boolean>>();
-  let queue: Promise<unknown> = Promise.resolve(), waiting = 0;
+  let tail: Promise<void> = Promise.resolve(), waiting = 0;
+  /** FIFO slot for the one native dialog; the returned unlock is idempotent. Call synchronously to keep request order. */
+  const lock = (): Promise<() => void> => {
+    let release!: () => void;
+    const mine = new Promise<void>(resolve => { release = resolve; });
+    const before = tail; tail = before.then(() => mine);
+    let done = false;
+    return before.then(() => () => { if (!done) { done = true; release(); } });
+  };
   const resolve = (webContentsId: number, permission: string, details: BrowserPermissionDetails, requesting?: string) => {
     const guest = deps.guest(webContentsId);
     if (!guest) return null;
@@ -138,21 +150,29 @@ export function createBrowserSitePermissions(deps: BrowserSitePermissionsDeps): 
       waiting++;
       const agentActing = deps.agentInput(guest.guestId);
       const same = () => { const now = deps.guest(webContentsId); return !!now && now.guestId === guest.guestId && browserPermissionOrigin(now.url) === origin; };
-      const run = queue.then(async () => {
-        // Queued behind another prompt: a page that has gone meanwhile is never asked about.
-        if (!same()) return false;
-        const abort = new AbortController();
-        const stop = deps.watch?.(webContentsId, guest.guestId, origin, () => abort.abort());
+      const locked = lock();
+      const run = (async () => {
+        let unlock = await locked, finished = false;
+        let stop: (() => void) | undefined;
         try {
+          // Queued behind another prompt: a page that has gone meanwhile is never asked about.
+          if (!same()) return false;
+          const abort = new AbortController();
+          stop = deps.watch?.(webContentsId, guest.guestId, origin, () => abort.abort());
+          const queue: BrowserPermissionQueueSlot = { release: () => unlock(), acquire: async () => {
+            // A slot granted after this request ended (aborted while waiting) is handed straight on.
+            const next = await lock();
+            if (finished) next(); else unlock = next;
+          } };
           const answer = await deps.prompt({ guestId: guest.guestId, origin, permissions: keys, pool: guest.pool, agentActing, ...(guest.agentName ? { agentName: guest.agentName } : {}),
-            ...(deps.watch ? { signal: abort.signal } : {}) });
+            ...(deps.watch ? { signal: abort.signal } : {}), queue });
           // The page may have navigated (or the tab closed) while the dialog was open.
           if (!answer || abort.signal.aborted || !same()) return false;
           if (answer.remember) for (const permission of keys) deps.store.set(guest.pool, origin, permission, answer.allow);
           return answer.allow;
-        } finally { stop?.(); }
-      }).catch(() => false).finally(() => { waiting--; pending.delete(id); });
-      queue = run; pending.set(id, run);
+        } finally { finished = true; stop?.(); unlock(); }
+      })().catch(() => false).finally(() => { waiting--; pending.delete(id); });
+      pending.set(id, run);
       return run;
     },
   };

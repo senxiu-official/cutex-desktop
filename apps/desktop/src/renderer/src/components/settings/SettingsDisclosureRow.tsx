@@ -28,7 +28,7 @@ export function SettingsDisclosureRow({ title, summary, status, attention = fals
           aria-labelledby={titleId}
           aria-describedby={summary || status ? summaryId : undefined}
           onClick={() => onOpenChange(!open)}
-          className="absolute inset-0 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
+          className="press absolute inset-0 rounded-md outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-accent/60"
         />
         <ChevronRight size={14} aria-hidden className={`pointer-events-none shrink-0 text-subtle ${open ? "rotate-90" : ""}`} />
         <span id={titleId} data-disclosure-title className="pointer-events-none min-w-0 max-w-[55%] shrink-0 truncate text-sm font-normal text-foreground">{title}</span>

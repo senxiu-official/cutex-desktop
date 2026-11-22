@@ -18,6 +18,7 @@ import { refActionEntries } from "../lib/refActions";
 import type { MessageFold } from "../lib/foldView";
 import { useI18n } from "../i18n";
 import { ARMED_BUTTON, useArmed } from "../lib/armedConfirm";
+import { PRESS_ICON } from "./Button";
 import { quoteText, SESSION_FEATURES } from "../lib/menus";
 import { copyQuietly } from "../lib/copyFeedback";
 import type { ReplyBar } from "../lib/replyActions";
@@ -40,7 +41,7 @@ function IconButton({ title, onClick, disabled, children, menu }: { title: strin
       aria-haspopup={menu ? "menu" : undefined}
       disabled={disabled}
       onClick={(e) => (menu ? menu(e.currentTarget) : onClick())}
-      className="flex size-6 items-center justify-center rounded-ctl text-muted hover:bg-hover hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent"
+      className={`${PRESS_ICON} flex size-6 items-center justify-center rounded-ctl text-muted hover:bg-hover hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent`}
     >
       {children}
     </button>

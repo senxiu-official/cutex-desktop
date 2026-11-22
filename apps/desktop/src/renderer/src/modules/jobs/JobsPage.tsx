@@ -9,6 +9,8 @@
 // External (NCI PBS) jobs: a source badge + the PBS job id after the title, a 可能过时 hint when no
 // source event arrived for a while (state unchanged), no output / cancel (they run on Gadi), and
 // 手动标记结果… in the row menu when the job's host has job-external (MarkExternalDialog).
+// 结束跟进 (state surfaces S7) in the row menu of every job the Job Service may still track; the status cell's hover
+// explains 结果未确认 / 已结束跟进 / a local (this device only) mark.
 import { useEffect, useMemo, useState } from "react";
 import { useArchivedAgents } from "../../lib/useArchivedAgents";
 import type { SidebarSnapshot } from "../../../../shared/ipc";
@@ -20,6 +22,7 @@ import { contextMenu, openMenuFrom } from "../../lib/contextMenu";
 import { formatSpan } from "../../lib/delegations";
 import { jobMenu } from "../../lib/jobMenu";
 import { hasLocalOutput, JOB_SERVICE_FEATURE, jobOperations, jobSeconds, jobStatus, jobTitle, sortJobs, type JobGroup } from "../../lib/jobs";
+import { useLocalJobMarks } from "../../lib/jobLocalMarks";
 import { canMarkExternal, NCI_MODULE, sourceLabel } from "../../lib/remoteJobs";
 import { JOB_EXTERNAL_FEATURE } from "../../../../shared/remoteJobs";
 import { MarkExternalDialog } from "./MarkExternalDialog";
@@ -28,7 +31,7 @@ import { componentUsableNow, useComponentStore } from "../../lib/componentStore"
 import { openJobOutput, refreshAllJobs, refreshHostJobs, useHostJobs, useJobs } from "../../lib/jobStore";
 import { useListHosts } from "../../lib/hostLists";
 import { hostKey, type HostKey } from "../../lib/hostScope";
-import { useAllJobs, useJobOps } from "../../lib/jobsView";
+import { useAllJobs } from "../../lib/jobsView";
 import { openHostAgent } from "../../lib/hostLists";
 import { projectColor } from "../../lib/sidebar";
 import { projectIcon } from "../../lib/projectIcons";
@@ -116,7 +119,10 @@ function JobList({ preset, presetScope }: { preset?: string; presetScope?: Scope
   const nextCursor = useJobs((s) => s.nextCursor);
   const loading = useJobs((s) => s.allLoading);
   const error = useJobs((s) => s.error);
-  const focusOps = useJobOps();
+  const focusCaps = useJobs((s) => s.caps);
+  const focusOps = useMemo(() => jobOperations(focusCaps), [focusCaps]);
+  // A local 结束跟进 mark moves a row out of 进行中 at once (jobStatus reads the marks).
+  useLocalJobMarks();
   const hostJobs = useHostJobs((s) => s.byHost);
   // Hosts with a Job Service (only Linux hosts have one; the others are simply not listed).
   // …and whose job-service component is usable (cutex `components`; an unread list counts as not yet).
@@ -218,7 +224,8 @@ function JobList({ preset, presetScope }: { preset?: string; presetScope?: Scope
     {
       key: "status",
       header: t("table.status"),
-      width: hosts.marks ? "9rem" : "8rem",
+      // 已结束 has the long words (已结束跟进 · 进程可能仍在运行); a cut word is whole in the hover.
+      width: scope === "done" ? (hosts.marks ? "11rem" : "10rem") : hosts.marks ? "9rem" : "8rem",
       cell: (j) => (
         <span className={`flex min-w-0 items-center gap-1.5 ${hosts.stale.has(j.hostId) ? "opacity-50" : ""}`}>
           <RowHost host={hosts.look(j.hostId)} show={hosts.marks} />
@@ -235,7 +242,7 @@ function JobList({ preset, presetScope }: { preset?: string; presetScope?: Scope
             onClick={() => output(j) && openJobOutput(j.jobId, j.hostId)}
             disabled={!output(j)}
             title={`${jobTitle(j)}\n${j.jobId}${nciOn && j.remoteId ? `\n${j.remoteId}` : ""}${j.cwd ? `\n${j.cwd}` : ""}`}
-            className={`min-w-0 truncate text-left enabled:hover:underline ${j.command || jobTitle(j) === j.remoteId ? "font-mono text-xs" : ""}`}
+            className={`press min-w-0 truncate rounded-sm text-left enabled:hover:underline disabled:cursor-default ${j.command || jobTitle(j) === j.remoteId ? "font-mono text-xs" : ""}`}
           >
             {jobTitle(j)}
           </button>
@@ -251,7 +258,7 @@ function JobList({ preset, presetScope }: { preset?: string; presetScope?: Scope
       cell: (j) => {
         const w = who(j.hostId, j.sessionId, j.agentName);
         return (
-          <button onClick={() => openHostAgent(j.hostId, j.sessionId)} className="flex min-w-0 items-center gap-1 text-xs text-muted hover:text-foreground">
+          <button onClick={() => openHostAgent(j.hostId, j.sessionId)} className="press flex min-w-0 items-center gap-1 rounded-sm text-xs text-muted hover:text-foreground">
             <Avatar name={w.name} avatar={w.avatar} seed={j.sessionId} size={16} />
             <span className="truncate">{w.name}</span>
           </button>
@@ -272,7 +279,7 @@ function JobList({ preset, presetScope }: { preset?: string; presetScope?: Scope
       header: "",
       width: "2rem",
       cell: (j) => (
-        <button onClick={(e) => openMenuFrom(e.currentTarget, menu(j))} aria-label={t("jobs.more")} className="rounded p-0.5 text-subtle opacity-0 group-hover:opacity-100 hover:bg-surface-2 hover:text-foreground focus-visible:opacity-100">
+        <button onClick={(e) => openMenuFrom(e.currentTarget, menu(j))} aria-label={t("jobs.more")} className="press-icon rounded p-0.5 text-subtle opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 hover:bg-surface-2 hover:text-foreground focus-visible:opacity-100">
           <MoreHorizontal size={14} />
         </button>
       ),
@@ -293,7 +300,7 @@ function JobList({ preset, presetScope }: { preset?: string; presetScope?: Scope
       {loaded && rows.length === 0 && <p className="py-2 text-sm text-subtle">{t(`jobs.none.${scope}` as MessageKey)}</p>}
       {rows.length > 0 && <DataTable columns={shown} groups={groups} rowKey={(j) => j.key} foldPrefix="jobs" onRowContextMenu={(e, j) => contextMenu(() => menu(j))(e)} />}
       {focusServed && nextCursor && scope === "done" && (
-        <button onClick={() => void refreshAllJobs(true)} disabled={loading} className="mt-2 px-2 text-xs text-accent hover:underline disabled:opacity-50">
+        <button onClick={() => void refreshAllJobs(true)} disabled={loading} aria-busy={loading || undefined} className="press mt-2 rounded-sm px-2 text-xs text-accent enabled:hover:underline disabled:cursor-default disabled:opacity-50">
           {loading ? t("delegations.loading") : t("jobs.loadMore")}
         </button>
       )}

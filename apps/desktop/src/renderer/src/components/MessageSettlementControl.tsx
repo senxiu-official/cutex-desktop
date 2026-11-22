@@ -63,7 +63,7 @@ function SettlementControl({ hostId, messageId, settlement: snapshot, sessionId,
     return <div className="flex shrink-0 items-center gap-1 text-xs" data-testid="next-step-actions" onClick={event => event.stopPropagation()}>
       {status && <span tabIndex={0} role="img" aria-label={status} title={status} className="rounded text-subtle focus-visible:outline focus-visible:outline-accent" data-testid="next-step-status"><Info size={12} /></span>}
       <Popover align="right" width="w-80" focusContent keepMounted={retainActions} trigger={<Ellipsis size={15} />} triggerLabel={t("menu.more")} triggerTitle={t("menu.more")}
-        triggerClassName="flex size-6 shrink-0 items-center justify-center rounded-md text-subtle hover:bg-surface-2 hover:text-foreground focus-visible:outline focus-visible:outline-accent">
+        triggerClassName="press-icon flex size-6 shrink-0 items-center justify-center rounded-md text-subtle hover:bg-surface-2 hover:text-foreground focus-visible:outline focus-visible:outline-accent">
         {() => <div className="min-w-0 text-xs" role="group" aria-label={t("menu.more")}>
           {actions}
           {content}
@@ -91,7 +91,7 @@ function SettlementControl({ hostId, messageId, settlement: snapshot, sessionId,
         width="w-72"
         trigger={<span role="status">{t(busy ? "agent-bus.settlement.pending" : write.error === "ineligible" ? "agent-bus.settlement.ineligibleStatus" : "agent-bus.settlement.readFailed")}</span>}
         triggerTitle={t(`agent-bus.settlement.${write.error}`)}
-        triggerClassName="block max-w-full truncate rounded px-1 py-0.5 text-caption font-normal text-subtle hover:bg-surface-2 hover:text-foreground focus-visible:outline focus-visible:outline-accent"
+        triggerClassName="press block max-w-full truncate rounded px-1 py-0.5 text-caption font-normal text-subtle hover:bg-surface-2 hover:text-foreground focus-visible:outline focus-visible:outline-accent"
       >{() => <div className="space-y-2 p-2 text-xs font-normal">
         <p className="whitespace-normal text-muted [overflow-wrap:anywhere]">{t(`agent-bus.settlement.${write.error ?? "unknown"}`)}</p>
         <button type="button" className={button} disabled={busy} onClick={() => {

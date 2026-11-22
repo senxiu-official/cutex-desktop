@@ -4,6 +4,7 @@ import { BROWSER_ZOOM_BOUNDS, type BrowserTabView } from "../../../../shared/bro
 import { browserError, browserTitle, MAX_BROWSER_INPUT, safeBrowserFavicon, safeBrowserUrl } from "./browserState";
 import { browserLoginOrigin } from "./loginHint";
 import { nextBlockedNavigation } from "./blockedNavigation";
+import { nextOwnerNotices } from "./ownerNotices";
 
 export function browserCacheKey(hostId: string, tabKey: string): string {
   return JSON.stringify([hostId, tabKey]);
@@ -32,7 +33,7 @@ export function createBrowserCache() {
         desktopLoopback: view.desktopLoopback === true ? true : undefined,
         lease: view.lease ? Object.freeze({ ...view.lease }) : undefined,
         confirmedOpen: view.confirmedOpen,
-        sitePermission: view.sitePermission && ["waiting", "hidden", "timeout"].includes(view.sitePermission.state) && typeof view.sitePermission.origin === "string"
+        sitePermission: view.sitePermission && ["waiting", "held", "hidden", "timeout"].includes(view.sitePermission.state) && typeof view.sitePermission.origin === "string"
           ? Object.freeze({ state: view.sitePermission.state, origin: browserTitle(view.sitePermission.origin), permissions: view.sitePermission.permissions.slice(0, 4) })
           : undefined,
         cursor: browserCursorView(view.cursor),
@@ -43,6 +44,7 @@ export function createBrowserCache() {
           ? Object.freeze({ playing: view.media.playing === true, audible: view.media.audible === true, muted: view.media.muted === true }) : undefined,
         loginOrigin: view.pool === "agent" ? browserLoginOrigin(view.url, view.loginOrigin) : null,
         blockedNavigation: nextBlockedNavigation(previous, view),
+        ownerNotices: nextOwnerNotices(previous, view),
       }));
       notify();
       return true;

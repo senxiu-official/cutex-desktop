@@ -1,5 +1,6 @@
 // Handoff gpt-side-rework: ephemeral Codex side chats are agent-bound cards, not main pages.
-import { MessageCircle } from "lucide-react";
+import { Lightbulb, MessageCircle } from "lucide-react";
+import { translate } from "../../i18n";
 import { SIDE_CHAT_CAPABILITY } from "../../../../shared/sideChat";
 import { openHostAgent } from "../../lib/hostLists";
 import { sideShowsHost } from "../../lib/sideServices";
@@ -34,6 +35,17 @@ export default defineModule({
         if (!ref.params.sessionId || !ref.params.turnId) return;
         if (!sideShowsHost(ref.hostId)) return openHostAgent(ref.hostId, ref.params.sessionId);
         services.side.open("side-chat.chat", { turnId: ref.params.turnId }, { focus: true, binding: { kind: "agent", hostId: ref.hostId, sessionId: ref.params.sessionId } });
+      },
+    },
+    // 解释这段 (教学模式, docs/design/teaching-mode.md P1): selected Markdown text (lib/selectionMenu) asked about in a side
+    // chat; a new side chat sends it at once, an open one gets it as its draft (state.ts openSideChat).
+    { id: "side-chat.explain", titleKey: "side-chat.explain", icon: Lightbulb, kinds: ["selection"], useState: useFromTurnState,
+      run: ref => {
+        const { sessionId, text, turnId } = ref.params;
+        if (!sessionId || !text?.trim()) return;
+        if (!sideShowsHost(ref.hostId)) return openHostAgent(ref.hostId, sessionId);
+        const quote = text.split("\n").map(line => `> ${line}`).join("\n");
+        services.side.open("side-chat.chat", { text: translate("side-chat.explainPrompt", { quote }), ...(turnId ? { turnId } : {}) }, { focus: true, binding: { kind: "agent", hostId: ref.hostId, sessionId } });
       },
     }],
     // Two cards on 对话 after 长对话和长消息 (owner 2026-10-19): the side chat itself, then saving it as a note.

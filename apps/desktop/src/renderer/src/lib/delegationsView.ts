@@ -6,7 +6,7 @@ import { useApp } from "../store";
 import { convSidebarOf, useConvFeatures, useConvHost, useConvScope, useConvView } from "./conversationScope";
 import { useViewRows, viewRow } from "./viewHost";
 import { agentDelegations, ASKS_FEATURE, awaitingDelegation, fallbackSummary, inferDelegations, needsYouCount, ownerSteeredOf, pendingForAgent, type ContextOf, type DelegateCall, type DelegationStatus } from "./delegations";
-import { loadCardDelegation, loadDelegationDetail, useDelegation, useDelegations, useFocusDelegations, useHostRecords } from "./delegationStore";
+import { hostDelegations, loadCardDelegation, loadDelegationDetail, useDelegation, useDelegations, useFocusDelegations, useHostRecords } from "./delegationStore";
 import { currentDelegationTurn, type DelegationTurn } from "./delegationTurn";
 import { hostKey } from "./hostKeys";
 import { findById, isShortId, parseIdRef, resolveId, sameId } from "./shortIds";
@@ -17,6 +17,7 @@ export function useStatusWord(): (status: DelegationStatus, name: string) => str
   const { t } = useI18n();
   return (status, name) => t(`delegation.status.${status.key}` as MessageKey, { name, n: status.n ?? "", host: status.host ?? "" });
 }
+
 
 /** Display name of an agent id (sidebar), else the id. */
 export function useAgentNames(): (id: string) => string {
@@ -98,10 +99,15 @@ export function useCardDelegation(askId: string, call: DelegateCall, sessionId: 
  */
 export function useResolvedAskId(ref: string, hostId?: string): string {
   const agentHostId = useAgentHost();
-  const records = useHostRecords(hostId ?? agentHostId);
-  const parsed = parseIdRef(ref);
-  if (parsed?.kind === "ask" && parsed.mode === "full") return `ask-${parsed.hex}`;
-  return records[ref] || !isShortId(ref) ? ref : (resolveId(ref, Object.keys(records)) ?? ref);
+  const host = hostId ?? agentHostId;
+  // A string selector (not the host's whole table): a change to any other delegation re-renders nothing here, which
+  // matters for the hundreds of history rows that each resolve one id (components/DelegationRowRef).
+  return useDelegations((s) => {
+    const parsed = parseIdRef(ref);
+    if (parsed?.kind === "ask" && parsed.mode === "full") return `ask-${parsed.hex}`;
+    if (!isShortId(ref) || s.byKey[hostKey(host, ref)]) return ref;
+    return resolveId(ref, Object.keys(hostDelegations(s.byKey, host))) ?? ref;
+  });
 }
 
 /** The sidebar's full session id for a (possibly short) session reference; null when unknown or ambiguous. */

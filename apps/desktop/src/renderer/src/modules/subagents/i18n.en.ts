@@ -36,4 +36,13 @@ export const en: Record<keyof typeof zhCN, string> = {
   "subagents.outcome.completed": "done",
   "subagents.outcome.failed": "failed",
   "subagents.outcome.stopped": "stopped",
+  "subagents.unconfirmed": "Outcome unconfirmed",
+  "subagents.unconfirmedHint": "The {{agent}} disconnected, so whether this {{subagent}} still runs, or how it ended, can't be known. You can end follow-up.",
+  "subagents.stopOutcome.accepted": "Stop requested",
+  "subagents.stopOutcome.refused": "Stop refused ({reason})",
+  "subagents.stopOutcome.unknown": "Stop outcome unconfirmed",
+  "subagents.stopOutcome.noReason": "no reason given",
+  "subagents.stopOutcome.acceptedHint": "The stop request was taken; this {{subagent}} isn't confirmed stopped yet.",
+  "subagents.stopOutcome.refusedHint": "The stop request wasn't accepted; this {{subagent}} is still running.",
+  "subagents.stopOutcome.unknownHint": "The stop request was sent but its outcome couldn't be read: this {{subagent}} may still be running. You can stop it again.",
 };

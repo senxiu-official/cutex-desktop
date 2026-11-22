@@ -138,7 +138,7 @@ export interface UpstreamModelsNotice {
   newer: { cache: string; native: string } | null;
 }
 
-/** Non-null when upstream has models the installed cute-codex doesn't know (needs an update / re-patch). */
+/** Non-null when the bundled offline catalog lacks cached models (benign: the server catalog has them) or the cache is newer than cute-codex. */
 export function upstreamModelsNotice(src: ModelsSource | null | undefined): UpstreamModelsNotice | null {
   if (!src) return null;
   const missing = (src.notInBundled ?? []).filter(Boolean);

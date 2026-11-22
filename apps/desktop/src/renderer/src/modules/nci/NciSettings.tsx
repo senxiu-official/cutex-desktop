@@ -8,6 +8,7 @@
 //   chosen by main (never shown here)
 // ⑤ the PBS mailbox (IMAP; write-only app password) and the address agents get
 // ⑥ test the mailbox, turn the Gadi check on.
+import { useSettingsCard } from "../../lib/settingsDrafts";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Check, ChevronDown, ChevronRight, Circle, Copy } from "lucide-react";
 import type { JobResult } from "../../../../shared/ipc";
@@ -372,7 +373,7 @@ function useFingerprints(keys: readonly string[]): (string | null)[] {
   return prints;
 }
 
-function HostKeysStep({ nci, state, draft, setDraft }: { nci: Status<NciVerificationStatus>; state: NciStepState; draft: IdentityDraft; setDraft(d: IdentityDraft): void }) {
+function HostKeysStep({ nci, state, draft, setDraft, card }: { nci: Status<NciVerificationStatus>; state: NciStepState; draft: IdentityDraft; setDraft(d: IdentityDraft): void; card(el: HTMLElement | null): void }) {
   const { t } = useI18n();
   const status = nci.value ?? null;
   const parsed = parseHostKeys(draft.hostKeys);
@@ -381,7 +382,7 @@ function HostKeysStep({ nci, state, draft, setDraft }: { nci: Status<NciVerifica
   return (
     <Step id="hostKeys" index={2} state={state} title={t("nci.hostKeys.title")} hint={t("nci.hostKeys.hint")}>
       <SettingsGroup agents="now" source="host">
-      <div className="border-b border-border py-2.5">
+      <div ref={card} className="border-b border-border py-2.5">
         <div className="text-sm">{t("nci.hostKeys.label")}</div>
         <div className="mt-1.5">
           <TextArea value={draft.hostKeys} onChange={(v) => setDraft({ ...draft, hostKeys: v, confirmed: false })} placeholder="gadi.nci.org.au ssh-ed25519 AAAA…" mono rows={4} width="w-full" label={t("nci.hostKeys.label")} />
@@ -417,7 +418,7 @@ function HostKeysStep({ nci, state, draft, setDraft }: { nci: Status<NciVerifica
   );
 }
 
-function UsernameStep({ nci, state, draft, setDraft, verification }: { nci: Status<NciVerificationStatus>; state: NciStepState; draft: IdentityDraft; setDraft(d: IdentityDraft): void; verification: boolean }) {
+function UsernameStep({ nci, state, draft, setDraft, verification, card }: { nci: Status<NciVerificationStatus>; state: NciStepState; draft: IdentityDraft; setDraft(d: IdentityDraft): void; card(el: HTMLElement | null): void; verification: boolean }) {
   const { t } = useI18n();
   const api = useTargetApi();
   const codeText = useCodeText();
@@ -456,7 +457,7 @@ function UsernameStep({ nci, state, draft, setDraft, verification }: { nci: Stat
   return (
     <Step id="username" index={3} state={state} title={t("nci.username.title")} hint={t("nci.username.hint")}>
       <SettingRow agents="now" source="host" label={t("nci.username.label")} hint={usernameBad ? <span className="text-danger">{t("nci.username.invalid")}</span> : undefined}>
-        <TextInput value={draft.username} onChange={(v) => setDraft({ ...draft, username: v.trim() })} placeholder="ab1234" mono width="w-40" label={t("nci.username.label")} />
+        <TextInput inputRef={card} value={draft.username} onChange={(v) => setDraft({ ...draft, username: v.trim() })} placeholder="ab1234" mono width="w-40" label={t("nci.username.label")} />
       </SettingRow>
       {verification && (
         <>
@@ -510,6 +511,8 @@ function MailStep({ mail, state, supportsAddress }: { mail: Status<InboundMailSt
   const portOk = Number.isInteger(draft.port) && draft.port > 0 && draft.port < 65536;
   const complete = !!draft.server.trim() && !!draft.username.trim() && portOk && !addressBad && (!needsPassword || !!draft.password);
   const dirty = JSON.stringify({ ...mailboxDraft(status), password: "" }) !== JSON.stringify({ ...draft, password: "" }) || !!draft.password;
+  // Unsaved exactly while it differs from the saved mailbox (lib/settingsDrafts).
+  const card = useSettingsCard(dirty);
   const run = async (kind: "save" | "delete") => {
     const mine = mail.guard();
     setBusy(kind);
@@ -574,7 +577,7 @@ function MailStep({ mail, state, supportsAddress }: { mail: Status<InboundMailSt
           )}
           {view.jobServiceMissing && <Notice>{t("nci.mail.jobServiceMissing", { file: status?.notifyAddressFile ?? "" })}</Notice>}
           <NoteLine note={note} />
-          <div className="flex items-center justify-end gap-2 py-2">
+          <div ref={card.inSection} className="flex items-center justify-end gap-2 py-2">
             {status?.configured && <ArmedRemove title={t("nci.mail.delete")} armedLabel={t("nci.mail.deleteConfirm")} disabled={!!busy} onRemove={() => void run("delete")} />}
             <Button primary onClick={() => void run("save")} disabled={!!busy || !complete || !dirty}>
               {t("nci.save")}
@@ -737,6 +740,8 @@ export function NciSettings() {
   const [draft, setDraft] = useState<IdentityDraft>(() => identityDraft(nci.value));
   const savedIdentity = JSON.stringify([nci.value?.configured, nci.value?.username, nci.value?.hostKeys]);
   useEffect(() => setDraft(identityDraft(nci.value)), [savedIdentity]); // eslint-disable-line react-hooks/exhaustive-deps -- keyed by the saved identity
+  // Unsaved exactly while the identity draft differs from the saved one (lib/settingsDrafts), over both steps.
+  const identityCard = useSettingsCard(JSON.stringify(draft) !== JSON.stringify(identityDraft(nci.value)));
 
   const steps = nciSteps({ mail: hasMail, verification, keygen, mailStatus: hasMail ? mail.value : null, nciStatus: verification ? nci.value : null });
   const stateOf = (id: NciStepId) => steps.find((s) => s.id === id)!.state;
@@ -754,8 +759,8 @@ export function NciSettings() {
         <>
           <KeyStep nci={nci} state={stateOf("key")} keygen={keygen} />
           <GadiStep nci={nci} state={stateOf("gadi")} keygen={keygen} />
-          <HostKeysStep nci={nci} state={stateOf("hostKeys")} draft={draft} setDraft={setDraft} />
-          <UsernameStep nci={nci} state={stateOf("username")} draft={draft} setDraft={setDraft} verification={verification} />
+          <HostKeysStep nci={nci} state={stateOf("hostKeys")} draft={draft} setDraft={setDraft} card={identityCard.inSection} />
+          <UsernameStep nci={nci} state={stateOf("username")} draft={draft} setDraft={setDraft} verification={verification} card={identityCard.inSection} />
         </>
       )}
       {hasMail ? <MailStep mail={mail} state={stateOf("mailbox")} supportsAddress={features.has(NCI_MAIL_ADDRESS_FEATURE)} /> : <Notice>{t("nci.mail.unsupported")}</Notice>}

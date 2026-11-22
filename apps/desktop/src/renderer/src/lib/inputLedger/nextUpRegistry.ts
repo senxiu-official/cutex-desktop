@@ -7,7 +7,7 @@ import type { InputAction, InputKind, InputRecord, InputState, InputWaitingReaso
 import { INPUT_ACTIONS, INPUT_KINDS, INPUT_REASONS_BY_STATE, INPUT_STAGES } from "@cutex-desktop/protocol";
 
 /** docs/design/next-up-registry.md version this table implements. */
-export const REGISTRY_VERSION = "1.9";
+export const REGISTRY_VERSION = "2.5";
 
 export type Lang = "zh" | "en";
 export interface Text { zh: string; en: string }
@@ -125,7 +125,7 @@ export const NEXT_UP_STATES = {
   needsAction: {
     n: 11,
     meaning: { zh: "卡住了，不会自己好（积压太久、对方不支持、版本不对等）。", en: "It is stuck and will not recover by itself (backlog too old, not supported by the agent, version mismatch …)." },
-    tone: "warn", buttons: ["releaseHold", "viewReason", "dismiss", "ignoreNotice", "viewDelegation"], exit: { kind: "owner", disposals: ["dismiss", "ignoreNotice"] },
+    tone: "warn", buttons: ["releaseHold", "retry", "viewReason", "dismiss", "ignoreNotice", "viewDelegation"], exit: { kind: "owner", disposals: ["dismiss", "ignoreNotice"] },
     info: { zh: "它不会自己好。点「查看原因」看卡在哪里；能放行时可以「允许发送」，否则可以放弃。", en: "It will not recover by itself. “View reason” shows where it is stuck; allow sending when the host can release it, otherwise dismiss it." },
   },
   /** A message whose delivery cannot be confirmed: it may or may not have reached the agent. The owner can resend it (it may arrive twice) or dismiss it; it never resends by itself. */
@@ -203,8 +203,10 @@ export const NEXT_UP_PANEL_CONTROLS = {
   grantNotice: { label: { zh: "批准通知等待送达", en: "Approval notice waiting to be delivered" }, buttons: [] },
   cleanupUnconfirmed: { label: { zh: "清理所有未确认（{n}）", en: "Clear all unconfirmed ({n})" }, armed: { zh: "再点一次清理（{n}）", en: "Click again to clear ({n})" }, tip: { zh: "放弃这个 agent 所有送达未确认的消息，包括时间线里的", en: "Dismisses every unconfirmed message of this agent, including those in the timeline" }, buttons: [] },
   releaseLease: { label: { zh: "释放占用", en: "Release" }, tip: { zh: "要点两次确认", en: "Click twice to confirm" }, buttons: [] },
-  /** 1.8: the agent is paused — 继续 resumes the whole agent (kept from before the registry). */
-  agentPaused: { label: { zh: "智能体已暂停", en: "Agent paused" }, buttons: [{ zh: "继续", en: "Resume" }] },
+  /** 1.8: the agent is paused — the button resumes the whole agent (kept from before the registry; 2.0 renamed, W12). */
+  agentPaused: { label: { zh: "智能体已暂停", en: "Agent paused" }, buttons: [{ zh: "继续这个{{agent}}", en: "Resume this {{agent}}" }] },
+  /** 2.0 (W12): new delegations are paused — the button lets new delegations start again (was 继续). */
+  asksPaused: { label: { zh: "新委托已暂停", en: "New delegations paused" }, buttons: [{ zh: "放行新委托", en: "Release new delegations" }] },
   /** 1.8, old hosts only (no input ledger): the queue a stop paused — 继续 sends it in order; 放回输入框 puts the
    *  messages back in the input box in order; 全部放弃 drops it after a second click. */
   legacyPausedQueue: { label: { zh: "暂停中，未发送", en: "Paused, not sent" }, buttons: [{ zh: "继续", en: "Resume" }, { zh: "放回输入框", en: "Back to input box" }, { zh: "全部放弃", en: "Dismiss all" }], armed: { zh: "再点一次全部放弃（{n}）", en: "Click again to dismiss all ({n})" }, legacyOnly: true },
@@ -213,6 +215,24 @@ export type NextUpPanelControlId = keyof typeof NEXT_UP_PANEL_CONTROLS;
 /** Controls a host with the input ledger may show (legacy-only ones are for older hosts). */
 export const isLedgerPanelControl = (id: string | undefined): id is NextUpPanelControlId =>
   !!id && id in NEXT_UP_PANEL_CONTROLS && !("legacyOnly" in NEXT_UP_PANEL_CONTROLS[id as NextUpPanelControlId]);
+
+/**
+ * Registry 2.1 (§三之二): the only words a delegation row in 接下来 may show for a yielded wait (cutex r290 P14
+ * continuationWait). Each form = the status word's i18n key + the trailing text's key(s) (null: none). Approved by
+ * Cutex maintainers on 2026-11-18 because the owner saw a waiting delegation as 运行中; all are sub-forms of the
+ * approved 「等待中 · 约{时间}继续」. 续接已达上限 (limited) is not one: it stays on delegation cards / lists, and a
+ * 接下来 row shows such a wait as plain 等待中 (lib/nextUpDelegation).
+ */
+export const NEXT_UP_DELEGATION_WAITS = {
+  timed: { status: "delegation.status.continuationWait", trailing: ["delegation.cont.inMinutes", "delegation.cont.at"], text: { zh: "等待中 · 约{时间}继续", en: "Waiting · continues ~{time}" } },
+  due: { status: "delegation.status.continuationWait", trailing: ["delegation.cont.soon"], text: { zh: "等待中 · 即将继续", en: "Waiting · continues shortly" } },
+  children: { status: "delegation.status.continuationWait", trailing: ["delegation.cont.children"], text: { zh: "等待中 · 等子委托完成", en: "Waiting · until its delegations finish" } },
+  jobs: { status: "delegation.status.continuationWait", trailing: ["delegation.cont.jobs"], text: { zh: "等待中 · 等作业完成", en: "Waiting · until its jobs finish" } },
+  plain: { status: "delegation.status.continuationWait", trailing: null, text: { zh: "等待中", en: "Waiting" } },
+  ready: { status: "delegation.status.continuationReady", trailing: null, text: { zh: "等待继续", en: "Ready to continue" } },
+} as const satisfies Record<string, { status: string; trailing: readonly string[] | null; text: Text }>;
+/** Who approved the forms above, when and why (registry change log 2.1). */
+export const NEXT_UP_DELEGATION_WAITS_APPROVAL = { by: "Cutex maintainers", date: "2026-11-18", why: "owner saw a waiting delegation as 运行中; sub-forms of the approved 「等待中 · 约{时间}继续」" } as const;
 
 /** Words that must never show again (registry §二); a test checks no Next Up string contains them. */
 export const RETIRED_WORDS = ["对方正忙", "主机正忙", "等待插入时机", "合并结果", "已接收", "已登记", "积压过久等你放行"] as const;
@@ -279,7 +299,9 @@ const BUTTONS_BY_GROUP = {
   awaitingReconnect: { owner: ["viewReason", "dismiss"], request: ["viewReason", "dismiss"], other: ["viewReason", "dismiss"] },
   // Review normally comes only on a delegation request; any other kind gets the same buttons (grey without a known ask).
   review: { owner: ["approve", "reject", "viewDelegation"], request: ["approve", "reject", "viewDelegation"], other: ["approve", "reject", "viewDelegation"] },
-  needsAction: { owner: ["releaseHold", "viewReason", "dismiss"], request: ["viewReason", "dismiss", "viewDelegation"], other: ["releaseHold", "viewReason", "dismiss", "viewDelegation"] },
+  // 2.4: an owner message a batch interrupt definitely did not send (waiting{nativeHeld}, details.interruptBatch.blocked)
+  // gets the existing Resend — only when the host offers it (OFFERED_ONLY): original id, manual, never automatic.
+  needsAction: { owner: ["releaseHold", "retry", "viewReason", "dismiss"], request: ["viewReason", "dismiss", "viewDelegation"], other: ["releaseHold", "viewReason", "dismiss", "viewDelegation"] },
   unconfirmed: { owner: ["retry", "dismiss", "viewReason"], request: ["retry", "dismiss", "viewReason"], other: ["retry", "dismiss", "viewReason"] },
   failed: { owner: ["retry", "moveToComposer", "dismiss", "viewReason"], request: ["retry", "dismiss", "viewReason"], other: ["retry", "dismiss", "viewReason"] },
   // 1.9: Dismiss on 1 and 14 only when the host has input-disposal-v1 (id-only, any state / kind): see DISPOSE_ONLY.
@@ -428,6 +450,8 @@ export interface NextUpButton {
 const HOST_DISPOSALS: ReadonlySet<NextUpEffectId> = new Set(["dismiss", "ignoreNotice", "moveToComposer", "remove"]);
 /** States whose Dismiss exists only through input-disposal-v1 (an older host has no dismiss there at all). */
 const DISPOSE_ONLY: Partial<Record<NextUpStateId, ReadonlySet<NextUpEffectId>>> = { sending: new Set(["dismiss", "ignoreNotice"]), unknown: new Set(["dismiss", "ignoreNotice"]) };
+/** 2.4: buttons a state shows only when the record's host actions offer them (never a grey placeholder there). */
+const OFFERED_ONLY: Partial<Record<NextUpStateId, ReadonlySet<NextUpEffectId>>> = { needsAction: new Set(["retry"]) };
 /** Effects that never change anything (they stay usable while a dispose is pending). */
 const VIEW_ONLY: ReadonlySet<NextUpEffectId> = new Set(["viewDelegation", "viewDetails", "viewReason", "refresh"]);
 
@@ -464,7 +488,10 @@ function available(effect: NextUpEffectId, record: Pick<InputRecord, "actions" |
 
 /** The buttons a row shows now: registered for its state and kind, each enabled or grey with a reason. */
 export function rowButtons(projection: Extract<NextUpProjection, { kind: "state" }>, record: Pick<InputRecord, "actions" | "askId" | "kind">, ctx: NextUpContext = {}): NextUpButton[] {
-  const all = projection.buttons.filter(effect => ctx.disposal || !DISPOSE_ONLY[projection.state]?.has(effect)).map(effect => available(effect, record, ctx));
+  const all = projection.buttons
+    .filter(effect => ctx.disposal || !DISPOSE_ONLY[projection.state]?.has(effect))
+    .filter(effect => !OFFERED_ONLY[projection.state]?.has(effect) || (record.actions ?? []).includes(NEXT_UP_EFFECTS[effect].action as InputAction))
+    .map(effect => available(effect, record, ctx));
   const out: NextUpButton[] = [];
   for (const button of all) {
     const group = ALTERNATIVES.find(g => g.includes(button.effect));

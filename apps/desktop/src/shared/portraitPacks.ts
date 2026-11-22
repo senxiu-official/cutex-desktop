@@ -40,9 +40,12 @@ const STEM = /^[a-z0-9][a-z0-9_-]{0,12}$/;
 const CATALOG_STEM = /^(?:gpt|deepseek|claude|kimi|glm|gemini)\/0[1-6]$/;
 const VALUE = /^portrait:([a-z0-9][a-z0-9-]{0,19})\/([a-z0-9][a-z0-9-]{0,31})\/(.+)$/;
 
-export const isPackId = (id: unknown): id is string => typeof id === "string" && PACK_ID.test(id);
-export const isThemeId = (id: unknown): id is string => typeof id === "string" && THEME_ID.test(id);
-export const isPortraitStem = (id: unknown): id is string => typeof id === "string" && (STEM.test(id) || CATALOG_STEM.test(id));
+// `$` alone also matches before a final newline in JavaScript. Require the
+// entire identifier, matching the daemon's byte-by-byte ASCII validation.
+const fullId = (pattern: RegExp, id: string): boolean => pattern.exec(id)?.[0] === id;
+export const isPackId = (id: unknown): id is string => typeof id === "string" && fullId(PACK_ID, id);
+export const isThemeId = (id: unknown): id is string => typeof id === "string" && fullId(THEME_ID, id);
+export const isPortraitStem = (id: unknown): id is string => typeof id === "string" && (fullId(STEM, id) || fullId(CATALOG_STEM, id));
 
 /** The model families pools are kept in (lib/avatarThemes ModelFamily). */
 export type PortraitFamily = "claude" | "openai" | "gemini" | "deepseek" | "kimi" | "glm" | "other";

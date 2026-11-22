@@ -16,7 +16,7 @@ import { useSizeFlags, widthBelow } from "../../lib/sizeFlags";
 import type { RemoteCopy } from "../../../../shared/remoteCopies";
 import { chooseDownloadFolder, defaultDownloadFolder, dismissCopy, openDownloadFolder, refreshCopies, refreshDownloadFolder, startPrepared, useCopies } from "../../lib/remoteCopies";
 import type { DownloadFolder } from "../../../../shared/remoteCopyRequests";
-import { cancelCopy, copyCaps, copyMenu, downloadAgain, keepCopy, openCopy, openOriginal, removeCopy, revealCopy } from "./menu";
+import { cancelCopy, copyCaps, copyMenu, downloadAgain, keepCopy, openCopy, openOriginal, openRefusedTitle, removeCopy, revealCopy } from "./menu";
 import { COPY_SORTS, SORT_DESC_FIRST, copyDate, filterCopies, pickSort, copyLocation, placeOf, placeOptions, setCopyView, sortCopies, useCopyView, type CopySort, type CopyView, type PlaceNames } from "./view";
 
 /** Host labels and project names as the app knows them now (placeOf falls back to what the copy saved). */
@@ -140,7 +140,7 @@ function CopyRow({ copy }: { copy: RemoteCopy }) {
     {active && <div className="flex items-center gap-2"><progress className="h-1.5 min-w-0 flex-1 accent-accent" value={copy.received} max={Math.max(copy.size, 1)} aria-label={t("remote-copies.downloading")} /><span className="text-xs tabular-nums text-muted">{formatSize(copy.received)} / {formatSize(copy.size)}</span></div>}
     {copy.error && <p className="break-words text-xs text-danger" role="status">{copy.error}</p>}
     <div className="flex flex-wrap gap-1">
-      <Button size="sm" disabled={!openable} onClick={() => openCopy(copy)}>{t("remote-copies.open")}</Button>
+      <Button size="sm" disabled={!openable} title={openRefusedTitle({ local, remote, active, openable }, t)} onClick={() => openCopy(copy)}>{t("remote-copies.open")}</Button>
       <Button size="sm" variant="ghost" disabled={!local} onClick={() => revealCopy(copy)}><FolderOpen size={14} data-icon="inline-start" />{t("remote-copies.reveal")}</Button>
       <Button size="sm" variant="ghost" disabled={!remote} title={!remote ? t("remote-copies.offline") : undefined} onClick={() => openOriginal(copy)}>{t("remote-copies.original")}</Button>
       {active ? <Button size="sm" variant="ghost" onClick={() => cancelCopy(copy)}>{t("remote-copies.cancel")}</Button> : <Button size="sm" variant="ghost" disabled={!remote} title={!remote ? t("remote-copies.offline") : undefined} onClick={() => downloadAgain(copy)}>{t("remote-copies.refresh")}</Button>}
@@ -214,7 +214,7 @@ function CopyList({ copies, names, sort, desc }: { copies: RemoteCopy[]; names: 
       cell: (c) => {
         const caps = capsOf(c);
         return <span className="inline-flex items-center justify-end gap-0.5">
-          <button type="button" className={iconBtn} disabled={!caps.openable} onClick={() => openCopy(c)} aria-label={t("remote-copies.open")} title={t("remote-copies.open")}><ExternalLink size={14} /></button>
+          <button type="button" className={iconBtn} disabled={!caps.openable} onClick={() => openCopy(c)} aria-label={t("remote-copies.open")} title={openRefusedTitle(caps, t) ?? t("remote-copies.open")}><ExternalLink size={14} /></button>
           <button type="button" className={iconBtn} disabled={!caps.local} onClick={() => revealCopy(c)} aria-label={t("remote-copies.reveal")} title={t("remote-copies.reveal")}><FolderOpen size={14} /></button>
           <button type="button" className={iconBtn} onClick={(e) => openMenuFrom(e.currentTarget, menu(c))} aria-label={t("remote-copies.more")} title={t("remote-copies.more")} data-copy-more><MoreHorizontal size={14} /></button>
         </span>;

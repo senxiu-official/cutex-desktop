@@ -16,6 +16,11 @@ const catalog = () => ({ schemaVersion: 1,
 });
 
 describe("owner avatar kit", () => {
+  it("refuses a catalog theme with a trailing newline before importing files", () => {
+    const value = catalog();
+    const bad = { ...value, themes: value.themes.map((theme, index) => ({ ...theme, id: index ? theme.id : `${theme.id}\n` })) };
+    expect(() => normalizeCatalog(bad)).toThrow("Invalid theme id/order/name");
+  });
   it("spreads ten distinct Claude and DeepSeek agents across the whole default pool and repeats after restart", async () => {
     const ids = ["alden", "helper", "ifm-dir", "ifm-figures", "ifm-plot", "ifm-review", "demo-director-r2", "sampler", "writer", "kai"];
     const index = indexPacks(BUNDLED_PORTRAIT_PACKS);

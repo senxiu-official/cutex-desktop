@@ -77,9 +77,9 @@ const enabledNow = (settings: Record<string, unknown>) => ((settings.agentHarnes
 /** claude-code-sources per Claude profile id: `claude` was created after the feature (project on), others predate it. */
 const claudeCode: Record<string, { sources: ClaudeSettingSource[]; connectors: boolean }> = {};
 /** claude-compaction per Claude profile id (the `claude` profile has the 10-22 hand-written file). */
-const compaction: Record<string, { window: number; percent: number } | null> = { claude: { window: 500_000, percent: 90 } };
+const compaction: Record<string, { window: number | null; percent: number } | null> = { claude: { window: 500_000, percent: 90 } };
 /** claude-compaction-models per Claude profile id: sonnet gets its own point, the rest follow the profile. */
-const compactionModels: Record<string, Record<string, { window: number; percent: number }>> = { claude: { "claude-sonnet-5-5": { window: 333_000, percent: 100 } } };
+const compactionModels: Record<string, Record<string, { window: number | null; percent: number }>> = { claude: { "claude-sonnet-5-5": { window: 333_000, percent: 100 } } };
 const codeOf = (p: MockProfileRef) => (claudeCode[p.id] ??= { sources: p.id === "claude" ? ["project"] : [], connectors: false });
 /** The merged MCP layers of the mock host, as cutex reports them for a Claude agent. */
 const CODE_SERVERS: ClaudeCodeServer[] = [
@@ -151,8 +151,14 @@ function previewFork(id: string, afterTurnId: string | null, profile: string | u
     historyBytes: unknownSize ? null : 8 * 1024 ** 2, historyBytesEstimate: unknownSize ? "unavailable" : "upperBound", historyBytesMeaning: "Upper bound includes source turns after the selected point; file bytes, not tokens or quota.", coldCache: !!profile && profile !== source.profile,
     boundaryNote: "Copied delegations, jobs and approvals remain with the source session." };
 }
+/** `?mcv1` / `?mcb` (with dev/mockModelContextV1): cutex profile-model-context-v1 — a Claude percent may come without a window. */
+const MODEL_CONTEXT_V1_SCENE = typeof location !== "undefined" && (new URLSearchParams(location.search).has("mcv1") || new URLSearchParams(location.search).has("mcb")) && !new URLSearchParams(location.search).has("legacy");
+function claudeCompactionOk(v: { window?: unknown; percent?: unknown }): boolean {
+  const windowOk = (MODEL_CONTEXT_V1_SCENE && v.window == null) || (Number.isInteger(v.window) && (v.window as number) >= 100_000 && (v.window as number) <= 1_000_000);
+  return windowOk && Number.isInteger(v.percent) && (v.percent as number) >= 1 && (v.percent as number) <= 100;
+}
 export const mock: ModuleMock = {
-  features: { new: ["session-fork-profile", "session-fork-preview", "session-badge", "project-badge-wide", "agent-harness", "claude-code-sources", "claude-launch-permission-mode", `claude-skills-import`, "claude-runtime-repin", "claude-compaction", "claude-compaction-models", "prompt-cache-key", SESSION_CLAUDE_RUNTIME_FEATURE, SCOPED_MCP_FEATURE, MEMORY_INJECTION_FEATURE] },
+  features: { new: ["session-fork-profile", "session-fork-preview", "session-badge", "project-badge-wide", "agent-harness", "claude-code-sources", "claude-launch-permission-mode", `claude-skills-import`, "claude-runtime-repin", "claude-compaction", "claude-compaction-models", "prompt-cache-key", SESSION_CLAUDE_RUNTIME_FEATURE, SCOPED_MCP_FEATURE, MEMORY_INJECTION_FEATURE, ...(MODEL_CONTEXT_V1_SCENE ? ["profile-model-context-v1"] : [])] },
   // scoped-mcp: 设置 › MCP 服务器… (components/AgentMcpDialog); the live statuses as an agent start would report them.
   start: (core) => { if (!core.legacy) setTimeout(() => mcpStartupReplay(core), 1500); },
   // session-claude-runtime (not under ?legacy): each Claude agent's pin and the host's selected release.
@@ -193,16 +199,16 @@ export const mock: ModuleMock = {
       }
       if ("claudeCompaction" in body) {
         const v = body.claudeCompaction as { window?: unknown; percent?: unknown } | null;
-        const ok = v === null || (Number.isInteger(v.window) && (v.window as number) >= 100_000 && (v.window as number) <= 1_000_000 && Number.isInteger(v.percent) && (v.percent as number) >= 1 && (v.percent as number) <= 100);
+        const ok = v === null || claudeCompactionOk(v);
         if (!ok) throw new Error("invalid_request: claudeCompaction: window must be 100000..1000000, percent 1..100");
-        compaction[profile.id] = v && { window: v.window as number, percent: v.percent as number };
+        compaction[profile.id] = v && { window: (v.window as number | null | undefined) ?? null, percent: v.percent as number };
       }
       if ("claudeCompactionModels" in body) {
         const v = body.claudeCompactionModels as Record<string, { window?: unknown; percent?: unknown }> | null;
         const entries = v === null ? [] : typeof v === "object" && !Array.isArray(v) ? Object.entries(v) : null;
-        const ok = entries !== null && entries.length <= 32 && entries.every(([id, c]) => id !== "" && !/s/.test(id) && !!c && Number.isInteger(c.window) && (c.window as number) >= 100_000 && (c.window as number) <= 1_000_000 && Number.isInteger(c.percent) && (c.percent as number) >= 1 && (c.percent as number) <= 100);
+        const ok = entries !== null && entries.length <= 32 && entries.every(([id, c]) => id !== "" && !/s/.test(id) && !!c && claudeCompactionOk(c));
         if (!ok) throw new Error("invalid_request: claudeCompactionModels: {\"<model id>\": {window 100000..1000000, percent 1..100}}, at most 32");
-        compactionModels[profile.id] = Object.fromEntries(entries!.map(([id, c]) => [id, { window: c.window as number, percent: c.percent as number }]));
+        compactionModels[profile.id] = Object.fromEntries(entries!.map(([id, c]) => [id, { window: (c.window as number | null | undefined) ?? null, percent: c.percent as number }]));
       }
       if ("claudeAiConnectors" in body) {
         if (typeof body.claudeAiConnectors !== "boolean") throw new Error("invalid_request: claudeAiConnectors: must be a boolean");

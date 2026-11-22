@@ -9,9 +9,19 @@
 // reach no bridge; a click reports a failure in the row).
 // `&browserBlocked=open|noopen`: main refused an automatic navigation into a private origin — the in-tab notice, with or
 // without 仍然打开 (which reaches no bridge here: clicking it shows the inline failure).
+// `&browserNotice=certificate[,download,popup]`: main's one-click owner notices (ownerNotices.ts) on that page.
 import type { ModuleMock } from "../../dev/mockTypes";
 import { browserActivation, type BrowserTabView } from "../../../../shared/browser";
 
+function previewNotices(kinds: string[]): BrowserTabView["ownerNotices"] {
+  const all = {
+    certificate: { id: "preview-notice-certificate", kind: "certificate" as const, url: "https://10.0.0.1/cgi-bin/luci",
+      detail: "3F:9A:0C:51:E2:7B:44:D8:19:A6:C3:72:5E:0B:8F:D1:26:4C:9E:B7:03:58:AA:E4:61:1D:F2:89:C5:37:6B:0E" },
+    download: { id: "preview-notice-download", kind: "download" as const, url: "https://example.org/export/report-2026-11.csv", detail: "report-2026-11.csv" },
+    popup: { id: "preview-notice-popup", kind: "popup" as const, url: "https://accounts.example.com/oauth/authorize?client_id=demo" },
+  };
+  return kinds.flatMap(kind => kind in all ? [all[kind as keyof typeof all]] : []);
+}
 function previewChrome(params: URLSearchParams): void {
   const state = params.get("browserChrome");
   if (!state) return;
@@ -25,6 +35,7 @@ function previewChrome(params: URLSearchParams): void {
       url: service ? url : "https://example.org/research/notes", title: service ? "RNA velocity" : "Research notes · Example",
       pool: params.get("browserPool") === "agent" ? "agent" : "owner", zoom: Number(params.get("browserZoom")) || undefined, lease,
       control: lease && state !== "pending" ? { grantee: "Moth", state: state === "paused" ? "paused" : "granted", operating: state === "operating" } : undefined,
+      ownerNotices: params.has("browserNotice") ? previewNotices(params.get("browserNotice")!.split(",")) : undefined,
       blockedNavigation: params.has("browserBlocked") ? { id: "preview-blocked-1", url: "http://10.0.0.20:8123/lovelace/0?kiosk", canOpen: params.get("browserBlocked") !== "noopen" } : undefined,
     };
     // browserCache.ts takes it (dev-only listener): a module mock reaches module state only through events.

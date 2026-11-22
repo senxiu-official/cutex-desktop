@@ -96,9 +96,12 @@ describe("archive confirm", () => {
     await setup("local", "local", {});
     useApp.setState({ services: [{ slug: "web", displayName: "Web", ownerCutexSessionId: "dir" }] as never });
     const { confirmProjectArchive } = await import("../src/renderer/src/lib/projectArchive");
-    mock.prompts = ["P1"];
+    mock.confirms = [true];
     const answer = await confirmProjectArchive({ displayName: "P1", memberCount: 2, director: session("dir", { busy: true }), hostId: "local", t });
-    expect(answer).toEqual({ ok: true, mismatch: false, withDirector: true });
+    expect(answer).toEqual({ ok: true, withDirector: true });
+    // Confirm by risk: a plain dialog naming the member count, never a typed name (archive is restorable).
+    expect(mock.dialogs[0]!.message).toBe("projects.archiveConfirmMembers(P1,2)");
+    expect(mock.dialogs).toHaveLength(1);
     const check = mock.dialogs[0]!.check!;
     expect(check.label).toBe("projects.archiveWithDirector(DIR)");
     expect(check.detail).toContain("projects.archiveDirectorBusy");
@@ -114,12 +117,12 @@ describe("archive confirm", () => {
       check!.checked = false;
       return true;
     });
-    expect(await confirmProjectArchive({ displayName: "P1", memberCount: 0, director: session("dir"), hostId: "local", t })).toEqual({ ok: true, mismatch: false, withDirector: false });
-    mock.prompts = ["P1"];
-    expect(await confirmProjectArchive({ displayName: "P1", memberCount: 1, director: null, hostId: "local", t })).toEqual({ ok: true, mismatch: false, withDirector: false });
+    expect(await confirmProjectArchive({ displayName: "P1", memberCount: 0, director: session("dir"), hostId: "local", t })).toEqual({ ok: true, withDirector: false });
+    mock.confirms = [true];
+    expect(await confirmProjectArchive({ displayName: "P1", memberCount: 1, director: null, hostId: "local", t })).toEqual({ ok: true, withDirector: false });
     expect(mock.dialogs.at(-1)!.check).toBeUndefined();
-    mock.prompts = ["nope"];
-    expect(await confirmProjectArchive({ displayName: "P1", memberCount: 1, director: session("dir"), hostId: "local", t })).toEqual({ ok: false, mismatch: true, withDirector: false });
+    // Cancel archives nothing (and the Director stays).
+    expect(await confirmProjectArchive({ displayName: "P1", memberCount: 1, director: session("dir"), hostId: "local", t })).toEqual({ ok: false, withDirector: false });
   });
 });
 

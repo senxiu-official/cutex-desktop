@@ -33,7 +33,7 @@ export const en: Record<keyof typeof zhCN, string> = {
   "side-chat.title": "Side chat",
   "side-chat.description": "Start temporary side chats with the current context; their content stays out of the main conversation",
   "side-chat.settingsHint": "A temporary chat opened from a turn; it is not written to the main conversation.",
-  "side-chat.open": "Side chat from this turn", "side-chat.back": "Back to main chat", "side-chat.end": "End side chat",
+  "side-chat.open": "Side chat from this turn", "side-chat.explain": "Explain this", "side-chat.explainPrompt": "Please explain this passage:\n\n{quote}", "side-chat.back": "Back to main chat", "side-chat.end": "End side chat",
   "side-chat.loading": "Opening side chat…", "side-chat.temporary": "Temporary · discarded when ended · separate from main chat",
   "side-chat.empty": "Ask a side question without interrupting the main chat.", "side-chat.placeholder": "Ask a side question…",
   "side-chat.send": "Send", "side-chat.stop": "Stop side chat", "side-chat.running": "Answering…", "side-chat.ready": "Ready for a question",

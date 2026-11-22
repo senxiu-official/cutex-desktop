@@ -5,6 +5,7 @@
 // device are the same; the route is only a detail. Allowing a full-control device asks in main's native dialog
 // with the code (main/pairingInvites.ts); chat / read devices take a click-twice confirm here.
 // An older cutex without v2 invites gets today's v1 code in the same panel (no Allow step: that cutex cannot).
+import { useSettingsCard } from "../../lib/settingsDrafts";
 import { useEffect, useRef, useState } from "react";
 import { ChevronRight, Copy, Lock, Smartphone } from "lucide-react";
 import type { CreatedPairingInviteView, PairingCodeView, PairingInviteView } from "../../../../shared/ipc";
@@ -239,6 +240,7 @@ function AddDevicePanel({ support, invites, host, onClose, onChanged }: { suppor
   const withScope = features.has(DEVICE_SCOPE_FEATURE);
   const [path, setPath] = useState<PairPath>("mine");
   const [scope, setScope] = useState<DeviceScope>("full");
+  const scopeCard = useSettingsCard();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [created, setCreated] = useState<{ invite: CreatedPairingInviteView; choice: Choice } | null>(null);
@@ -249,7 +251,8 @@ function AddDevicePanel({ support, invites, host, onClose, onChanged }: { suppor
     setError(null);
     setPath("mine");
     setScope("full");
-  }, [hostId]);
+    scopeCard.discarded();
+  }, [hostId]); // eslint-disable-line react-hooks/exhaustive-deps -- scopeCard is stable
   // An older cutex's v1 code: the device list reloads while it is live (a new device = the phone paired).
   useEffect(() => {
     if (!code) return;
@@ -324,7 +327,7 @@ function AddDevicePanel({ support, invites, host, onClose, onChanged }: { suppor
             <InvitePanel users={users} busy={busy} onCode={(userId, name) => start({ userId, scope: "full", label: name })} />
           ) : (
             <>
-              {withScope && <PairScope value={scope} ownerDevice={ownerDevice} onChange={setScope} labels={{ full: t("users.pair.scope.full") }} />}
+              {withScope && <PairScope value={scope} ownerDevice={ownerDevice} onChange={setScope} labels={{ full: t("users.pair.scope.full") }} card={scopeCard.ref} />}
               {scope === "full" && features.has(OWNER_DEVICE_NOTICE_FEATURE) && <OwnerCodeWarning host={host} title={support === "v2" ? t("users.pair.warning.title", { host }) : undefined} once={support === "v2" ? t("users.pair.warning.once") : undefined} />}
               <div className="-mx-4 flex flex-wrap items-center justify-end gap-2 px-4 pt-2.5">
                 <span className="min-w-0 flex-1 text-sm" data-testid="pair-result">{t("users.pair.result", { scope: scope === "full" ? t("users.pair.scope.full") : scopeLabel(t, scope, true), host })}</span>

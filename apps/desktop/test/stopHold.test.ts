@@ -80,3 +80,23 @@ describe("labels", () => {
     expect(en[keys.button]).toBe("Resume");
   });
 });
+
+// cutex stop-answer-admission-v1: each delegation item carries `eligible` / `held`; a runnable ANSWER is not held even
+// while the snapshot says ridealongsHeld, QUESTION / STATE stay held by their own field. Items without `eligible`
+// (older hosts, other sources) keep the snapshot-wide fallback.
+describe("per-item admission (stop-answer-admission-v1)", () => {
+  const stopped = { ridealongsHeld: "ownerStop" as const };
+  it("an eligible answer with held null is free under a stop; question / state keep their own hold", () => {
+    expect(rideAlongHeld({ ...step("ans", "askAnswer"), eligible: true, held: null }, stopped)).toBeUndefined();
+    expect(rideAlongHeld({ ...step("q", "askQuestion"), eligible: false, held: "ownerStop" }, stopped)).toBe("ownerStop");
+    expect(rideAlongHeld({ ...step("st", "askState"), eligible: false, held: null }, stopped)).toBeUndefined();
+    const { free, held } = splitHeld([{ ...step("ans", "askAnswer"), eligible: true, held: null }, { ...step("q", "askQuestion"), eligible: false, held: "ownerStop" }, step("tell", "tell")], stopped);
+    expect(free.map((i) => i.id)).toEqual(["ans"]);
+    expect(held).toEqual([{ reason: "ownerStop", items: [expect.objectContaining({ id: "q" }), expect.objectContaining({ id: "tell" })] }]);
+  });
+  it("without `eligible` nothing changes", () => {
+    expect(rideAlongHeld(step("ans", "askAnswer"), stopped)).toBe("ownerStop");
+    expect(rideAlongHeld({ ...step("ans", "askAnswer"), held: null }, stopped)).toBe("ownerStop");
+    expect(rideAlongHeld(step("ans", "askAnswer"), null)).toBeUndefined();
+  });
+});

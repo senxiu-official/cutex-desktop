@@ -11,6 +11,7 @@ import type { DesktopWidgetProps } from "../../widgetTypes";
 import { BookmarksList } from "../BookmarksList";
 import { BOOKMARKS, type ListState } from "../model";
 import { PinBoard } from "./Board";
+import { PinDetail } from "./Detail";
 import { useCounts, usePinsAvailable } from "./hooks";
 
 export function MemoCard(props: SideBodyProps<ListState>) {
@@ -38,13 +39,16 @@ export function MemoCard(props: SideBodyProps<ListState>) {
           ))}
         </div>
       )}
-      {tab === "pins" ? (
+      {tab === "pins" && state.pin ? (
+        <PinDetail key={`${state.pin.hostId}
+${state.pin.pinId}`} memo={state.pin} onBack={() => setState({ ...state, pin: null })} />
+      ) : tab === "pins" ? (
         <div className="flex min-h-0 flex-1 flex-col" data-owner-pins-card="">
           <div className="flex items-center gap-1 px-2 py-1.5">
             {chip(!agentOnly, t("bookmarks.memo.filter.all"), false)}
             {selected && chip(agentOnly, t("bookmarks.memo.filter.agent"), true)}
           </div>
-          <div className="min-h-0 flex-1 overflow-auto p-1"><PinBoard agentId={agentOnly ? selected : null} /></div>
+          <div className="min-h-0 flex-1 overflow-auto p-1"><PinBoard agentId={agentOnly ? selected : null} onOpen={(r) => setState({ ...state, pin: { hostId: r.hostId, pinId: r.pin.pinId } })} /></div>
         </div>
       ) : (
         <BookmarksList {...props} />
@@ -61,7 +65,7 @@ export function PinsTrayButton() {
   const board = t("bookmarks.memo.title");
   const label = action ? t("bookmarks.memo.tray", { n: action, board }) : t("bookmarks.memo.trayNotes", { n: notes, board });
   return (
-    <button type="button" data-tray-item="" data-owner-pins-tray="" className="tray-item relative" data-tip={label} aria-label={label} onClick={() => services.side.open(BOOKMARKS, { tab: "pins" }, { binding: { kind: "host", hostId } })}>
+    <button type="button" data-tray-item="" data-owner-pins-tray="" className="tray-item relative" data-tip={label} aria-label={label} onClick={() => services.side.open(BOOKMARKS, { tab: "pins", pin: null }, { binding: { kind: "host", hostId } })}>
       <Pin size={16} aria-hidden className={action ? "text-accent" : undefined} />
       {action > 0 && <CountBadge count={action} tone="accent" className="absolute -top-0.5 -right-0.5" />}
     </button>

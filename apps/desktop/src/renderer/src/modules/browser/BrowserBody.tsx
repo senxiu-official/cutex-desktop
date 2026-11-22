@@ -8,7 +8,7 @@ import { dataFlags, useSizeFlags, widthBelow } from "../../lib/sizeFlags";
 import { bridge } from "../../bridge";
 import { useI18n } from "../../i18n";
 import type { SideBodyProps } from "../slots";
-import { browserAddressUrl, browserError, browserErrorKey, INVALID_ADDRESS, MAX_BROWSER_INPUT, NOT_WEB_ADDRESS, safeBrowserUrl, type BrowserState } from "./browserState";
+import { browserAddressText, browserAddressUrl, browserError, browserErrorKey, INVALID_ADDRESS, MAX_BROWSER_INPUT, NOT_WEB_ADDRESS, safeBrowserUrl, type BrowserState } from "./browserState";
 import { guestLifecycle } from "./guestLifecycle";
 import { useBrowserEnabled, useBrowserView } from "./tabs";
 import { browserSitePermissionList } from "./sitePermissionText";
@@ -30,10 +30,13 @@ import { useApp } from "../../store";
 import { btn } from "../../components/Button";
 import { BrowserLoginPoolPill, BrowserLoginWarning } from "./BrowserLoginHint";
 import { BrowserBlockedNavigation } from "./BrowserBlockedNavigation";
+import { BrowserOwnerNotice } from "./BrowserOwnerNotice";
 import { browserLoginOrigin, openOwnerLoginCopy } from "./loginHint";
 import { browserCache } from "./browserCache";
 import { sideOpenFrom } from "../../lib/shelfTarget";
-import { BROWSER_TAB } from "./browserState";
+import { BROWSER_TAB, SERVICE_TAB } from "./browserState";
+import { registerViewCache } from "./viewCache";
+import { useHostServices } from "../../lib/serviceLinkView";
 import { useServiceStartWait, waitsForService } from "./serviceStartWait";
 
 const BUTTON = "flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-subtle enabled:hover:bg-hover enabled:hover:text-foreground disabled:opacity-35";
@@ -60,7 +63,7 @@ export function BrowserBody(props: SideBodyProps<BrowserState>) {
   const submitted = useRef<string | null>(null);
   const desktopLoopbackRetry = useRef<string | undefined>(undefined);
   const [fixNote, setFixNote] = useState<"browser.refusal.forced" | null>(null);
-  const [address, setAddress] = useState(view?.url ?? instance.state.url);
+  const [address, setAddress] = useState(browserAddressText(view?.url ?? instance.state.url));
   const editing = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const [dismissedError, setDismissedError] = useState<string | null>(null);
@@ -112,6 +115,37 @@ export function BrowserBody(props: SideBodyProps<BrowserState>) {
     };
   }, [hostId, tabKey]);
   useEffect(() => { media.current?.update(playing); }, [playing]);
+  // Service view cache (viewCache.ts, owner 2026-11-18): one of the most recently seen service pages stays mounted when its
+  // card leaves the screen (another page, another conversation); let go, it remembers its place in main first.
+  const cacheable = instance.kind === SERVICE_TAB && !agentPool && !!hostId;
+  const hostServices = useHostServices(cacheable ? hostId : null);
+  const cachedSlug = cacheable ? serviceSlugOf(instance.state.url) : null;
+  const serviceRecord = cachedSlug && hostServices ? hostServices.find(s => s.slug === cachedSlug) : undefined;
+  const serviceGone = !!hostServices && !!cachedSlug && (!serviceRecord || serviceRecord.archived || serviceRecord.health === "stopped");
+  const viewCache = useRef<ReturnType<typeof registerViewCache> | null>(null);
+  useEffect(() => {
+    if (!cacheable || !hostId || !bridge.browser) return;
+    const api = bridge.browser.forHost(hostId);
+    let generation = 0;
+    const handle = registerViewCache(`${hostId}\u0000${tabKey}`, hold => {
+      const mine = ++generation;
+      if (hold) { reasons.current!.set("cache", true); return; }
+      void Promise.race([api.rememberView(tabKey).catch(() => {}), new Promise(done => setTimeout(done, 1500))])
+        .then(() => { if (mine === generation) reasons.current!.set("cache", false); });
+    }, () => api.viewMemory(tabKey));
+    viewCache.current = handle;
+    return () => { generation++; handle.dispose(); if (viewCache.current === handle) viewCache.current = null; reasons.current!.set("cache", false); };
+  }, [cacheable, hostId, tabKey]);
+  useEffect(() => { viewCache.current?.update({ visible: props.visible, gone: serviceGone }); }, [props.visible, serviceGone, cacheable, hostId, tabKey]);
+  // This mount's first loaded page: main puts back the place it remembered when the cache let the page go (no memo: nothing).
+  // Only after this mount saw its own load start: the cached view of the released page still says loaded.
+  const restoredView = useRef(false), sawLoad = useRef(false);
+  useEffect(() => {
+    if (view?.loading === true) sawLoad.current = true;
+    if (!cacheable || restoredView.current || !sawLoad.current || !ready || view?.loading !== false || !hostId || !bridge.browser) return;
+    restoredView.current = true;
+    void bridge.browser.forHost(hostId).restoreView(tabKey).catch(() => {});
+  }, [cacheable, ready, view?.loading, hostId, tabKey]);
   useEffect(() => {
     if (!hostId || !epoch || !bridge.browser || !enabled) return;
     const api = bridge.browser.forHost(hostId);
@@ -129,7 +163,7 @@ export function BrowserBody(props: SideBodyProps<BrowserState>) {
   }, [preview, hostId, tabKey]);
 
   useEffect(() => {
-    if (!editing.current) setAddress(currentUrl);
+    if (!editing.current) setAddress(browserAddressText(currentUrl));
   }, [currentUrl]);
 
   useEffect(() => {
@@ -322,6 +356,8 @@ export function BrowserBody(props: SideBodyProps<BrowserState>) {
   // A refused automatic navigation into a private origin: the page stays, the notice below says so (and offers 仍然打开);
   // the same refusal is not repeated as a red error row.
   const blockedNavigation = view?.status === "attached" ? view.blockedNavigation ?? null : null;
+  // What main stopped that the owner may still allow (untrusted LAN certificate, a page download / popup): one line each.
+  const ownerNotices = view?.status === "attached" ? view.ownerNotices ?? [] : [];
   const rawReason = error ?? (blockedNavigation && view?.error === "private_address_blocked" ? undefined : view?.error);
   const reason = rawReason === dismissedError ? null : rawReason;
   const reasonKey = reason ? browserErrorKey(reason) : null;
@@ -347,6 +383,10 @@ export function BrowserBody(props: SideBodyProps<BrowserState>) {
   async function openBlockedNavigation(id: string): Promise<void> {
     if (!hostId || !bridge.browser) throw Error("browser_unavailable");
     await bridge.browser.forHost(hostId).openBlockedNavigation(tabKey, id);
+  }
+  async function openOwnerNotice(id: string): Promise<void> {
+    if (!hostId || !bridge.browser) throw Error("browser_unavailable");
+    await bridge.browser.forHost(hostId).openOwnerNotice(tabKey, id);
   }
   async function dismissLogin(): Promise<void> {
     if (!hostId || !bridge.browser || !loginOrigin || !loginCurrent() || browserCache.get(hostId, tabKey)?.loginOrigin !== loginOrigin) throw Error("stale_browser");
@@ -410,10 +450,12 @@ export function BrowserBody(props: SideBodyProps<BrowserState>) {
       </form>
       {blockedNavigation && <BrowserBlockedNavigation key={`${hostId}:${tabKey}:${blockedNavigation.id}`} blocked={blockedNavigation}
         disabled={!ready && !preview} open={() => openBlockedNavigation(blockedNavigation.id)} />}
+      {ownerNotices.map(notice => <BrowserOwnerNotice key={`${hostId}:${tabKey}:${notice.id}`} notice={notice}
+        disabled={!ready && !preview} open={() => openOwnerNotice(notice.id)} />)}
       {loginOrigin && <BrowserLoginWarning key={loginScope} disabled={!ready || working} openOwner={openOwner} dismiss={dismissLogin} />}
-      {view?.sitePermission && <p role={view.sitePermission.state === "waiting" ? "status" : "alert"} data-browser-site-permission={view.sitePermission.state}
-        className={`shrink-0 border-b border-border px-3 py-2 text-xs ${view.sitePermission.state === "waiting" ? "text-foreground" : "text-warn"}`}>
-        {t(view.sitePermission.state === "waiting" ? "browser.sitePermission.waiting" : view.sitePermission.state === "hidden" ? "browser.blocked.permissionHidden" : "browser.blocked.permissionTimeout",
+      {view?.sitePermission && <p role={view.sitePermission.state === "waiting" || view.sitePermission.state === "held" ? "status" : "alert"} data-browser-site-permission={view.sitePermission.state}
+        className={`shrink-0 border-b border-border px-3 py-2 text-xs ${view.sitePermission.state === "waiting" || view.sitePermission.state === "held" ? "text-foreground" : "text-warn"}`}>
+        {t(view.sitePermission.state === "waiting" ? "browser.sitePermission.waiting" : view.sitePermission.state === "held" ? "browser.sitePermission.held" : view.sitePermission.state === "hidden" ? "browser.blocked.permissionHidden" : "browser.blocked.permissionTimeout",
           { origin: view.sitePermission.origin, permissions: browserSitePermissionList(view.sitePermission.permissions) })}</p>}
       {granted && captureFailed && <p role="alert" className="shrink-0 border-b border-border px-3 py-2 text-xs text-danger">{t("browser.ownerCaptureFailed")}</p>}
       {serviceWait.state === "waiting" && <p role="status" data-browser-service-wait="" className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2 text-xs text-subtle">

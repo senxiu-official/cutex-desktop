@@ -8,6 +8,7 @@ import type { CutexRefusal, ProfileDetail } from "../../../../shared/ipc";
 import type { ProfileRuntimeVariant, RuntimeCompatibility, VariantDefaults } from "../../../../shared/profileVariants";
 import { useI18n, type MessageKey } from "../../i18n";
 import { addableRuntimes, defaultVariantOf, RUNTIME_LABEL, statusKey, variantsOf, variantStatus } from "../../lib/profileVariants";
+import { useSettingsCard } from "../../lib/settingsDrafts";
 import { useTargetApi } from "../../lib/targetHost";
 import { Tag } from "../Tag";
 import { DSH_EFFORTS } from "../../lib/dshModels";
@@ -27,16 +28,20 @@ function VariantRow({ profile, variant, isDefault, compat, onChanged, onStatus }
   const { t } = useI18n();
   const [draft, setDraft] = useState<Partial<VariantDefaults>>({});
   const [busy, setBusy] = useState(false);
+  // Its default model / effort are unsaved from the first change until a save of this row succeeds (lib/settingsDrafts).
+  const card = useSettingsCard();
   const model = draft.model !== undefined ? draft.model : variant.defaults.model;
   const effort = draft.reasoningEffort !== undefined ? draft.reasoningEffort : variant.defaults.reasoningEffort;
   const dirty = Object.keys(draft).length > 0;
   const act = async (run: () => Promise<{ ok: true; profile?: ProfileDetail } | { ok: false; error: CutexRefusal }>, done: string) => {
     setBusy(true);
     onStatus(null);
+    const upTo = card.revision();
     try {
       const r = await run();
       if (r.ok) {
         setDraft({});
+        card.saved(upTo);
         onStatus({ text: done, error: false });
         onChanged(r.profile);
       } else onStatus({ text: refusalText(t, r.error), error: true });
@@ -59,7 +64,7 @@ function VariantRow({ profile, variant, isDefault, compat, onChanged, onStatus }
   const modelLabel = (id: string) => variant.models?.find((r) => r.id === id)?.displayName || id;
   const acp = isAcpRuntime(variant.runtime) ? ACP_RUNTIME_INFO[variant.runtime] : null;
   return (
-    <div className="border-b border-border/60 py-2.5 last:border-b-0" data-variant-row={variant.id} data-variant-default={isDefault ? "" : undefined}>
+    <div ref={card.ref} className="border-b border-border/60 py-2.5 last:border-b-0" data-variant-row={variant.id} data-variant-default={isDefault ? "" : undefined}>
       <div className="flex min-h-7 flex-wrap items-center gap-1.5">
         <span className="text-sm font-medium">{RUNTIME_LABEL[variant.runtime]}</span>
         {variant.primary && <Tag>{t("variants.primary")}</Tag>}

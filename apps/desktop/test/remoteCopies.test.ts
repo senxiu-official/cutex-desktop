@@ -43,7 +43,7 @@ afterEach(async () => {
   vi.useRealTimers()
   for (const dir of dirs.splice(0)) {
     if (!path.resolve(dir).startsWith(path.resolve(scratch) + path.sep)) throw Error('Unsafe test cleanup')
-    await fs.rm(dir, { recursive: true, force: true })
+    await fs.rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }) // Windows: retries EBUSY / EPERM / ENOTEMPTY
   }
 })
 describe('owned remote copies', () => {
@@ -67,7 +67,7 @@ describe('owned remote copies', () => {
     expect(t.calls()).toBe(3)
     expect(JSON.stringify(await m.list())).not.toContain(scratch)
     expect(await fs.readdir(path.dirname(await m.file(id)))).toEqual(['data.bin'])
-  })
+  }, 30_000) // 11 MiB built, streamed, hashed, written and read back: ~1.5 s alone, the work under full-suite load
   it.each([
     ['offset', (c: TransferChunk) => ({ ...c, offset: c.offset + 1 })],
     ['revision', (c: TransferChunk) => ({ ...c, revision: 'different' })],
@@ -186,7 +186,7 @@ describe('owned remote copies', () => {
     expect((await m.list()).copies.find(c => c.id === forever.id)!.status).toBe('missing')
     await m.keep(kept.id, false); await m.cleanup()
     expect((await m.list()).copies.find(c => c.id === kept.id)!.status).toBe('expired')
-  })
+  }, 30_000) // three real downloads and two managers over one store: fs work, slow under full-suite load
   it('sanitizes remote names and refuses local path ids', async () => {
     const t = transport(new Uint8Array([1])); t.meta.name = '../../CON:bad?.bin'
     const r = await root(), m = manager({ root: r, transport: t.factory }), { id, row } = await download(m)

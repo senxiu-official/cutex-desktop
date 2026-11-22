@@ -82,7 +82,7 @@ export function MemoriesPanel({ sessionId, threadId, onClose }: { sessionId: str
       setStatus({ text: d.text, error: !d.unsupported });
     }
   };
-  const btn = "rounded-md bg-surface-2 px-2 py-1 text-xs hover:text-foreground";
+  const btn = "press rounded-md bg-surface-2 px-2 py-1 text-xs hover:text-foreground";
   return (
     <Panel title={t("slash.memories.title")} onClose={onClose}>
       <p className="mb-2 text-xs text-subtle">{t("slash.memories.hint")}</p>

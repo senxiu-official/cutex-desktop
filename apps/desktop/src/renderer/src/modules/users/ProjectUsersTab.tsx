@@ -90,7 +90,7 @@ function ProjectUsers({ projectId }: { projectId: string }) {
   };
 
   return (
-    <Section title={title} hint={t("users.project.hint")} actions={<RefreshButton label={t("users.refresh")} onClick={() => void load()} />}>
+    <Section title={title} hint={t("users.project.hint")} actions={<RefreshButton label={t("users.refresh")} onClick={() => load()} />}>
       {error && <ErrorNote>{error}</ErrorNote>}
       {users.length === 0 && (
         <p className="py-2 text-xs text-subtle" data-testid="project-users-empty">

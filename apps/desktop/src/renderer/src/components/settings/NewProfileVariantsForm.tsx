@@ -23,6 +23,7 @@ import { NameStep } from "./newProfile/NameStep";
 import { addressSpecOf, choiceFor, choiceForPreset, createPlanOf, defaultChoice, needsClaudeAccount, providerCards, resolveChoice, type NewProfileChoice } from "../../lib/newProfileModel";
 import { NewClaudeAccountRow } from "./ProfileClaudeAccount";
 import { useTargetApi, useTargetFeatures, useTargetHostId } from "../../lib/targetHost";
+import { useSettingsCard } from "../../lib/settingsDrafts";
 import { CLAUDE_RUNTIME_COMPONENT, componentBlocks, DSH_RUNTIME_COMPONENT, KIMI_RUNTIME_COMPONENT } from "../../lib/componentCard";
 import { useComponentState } from "../../lib/componentView";
 import { ComponentNotice } from "../ComponentCard";
@@ -92,6 +93,8 @@ export function NewProfileVariantsForm({ existing, onCreated, onCancel, initialP
   const [color, setColor] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  // Unsaved from the first change (a runtime ticked, a colour, a provider) until it is created (lib/settingsDrafts).
+  const card = useSettingsCard();
   const touched = useRef(false);
   useEffect(() => { if (!touched.current && !choice && initialPreset) setChoice(choiceForPreset(cards, initialPreset)); }, [cards, initialPreset, choice]);
   const accounts = claudeAccountRowShown(features, "claude");
@@ -122,6 +125,7 @@ export function NewProfileVariantsForm({ existing, onCreated, onCancel, initialP
     setDefaults((d) => ({ ...d, [r]: { model: "", reasoningEffort: "", ...d[r], ...patch } }));
   const choose = (next: NewProfileChoice | null) => {
     touched.current = true;
+    card.changed();
     setChoice(next); setUrl(null); setApiKey("");
     setPicked(next?.option === "dshEnv" ? ["dsh"] : null);
     setEnvName(next?.option === "dshEnv" ? "DEEPSEEK_API_KEY" : null);
@@ -136,6 +140,7 @@ export function NewProfileVariantsForm({ existing, onCreated, onCancel, initialP
 
   const create = async () => {
     if (!resolved) return;
+    const upTo = card.revision();
     const accountPlan = needsClaudeAccount(resolved.option.auth) ? createPlanOf(resolved, { name, address: url, apiKey, model: "", color, claudeAccount }, existing) : null;
     if (accountPlan && "error" in accountPlan) return setError(t((accountPlan.error === "accountLabelInvalid" || accountPlan.error === "baseUrlMissing" ? `newProfile.error.${accountPlan.error}` : `agent-config.profiles.new.error.${accountPlan.error}`) as MessageKey));
     const spec = addressSpecOf(resolved);
@@ -203,6 +208,7 @@ export function NewProfileVariantsForm({ existing, onCreated, onCancel, initialP
       catch (e) { partial(t("variants.error.step.color"), e instanceof Error ? e.message : String(e)); }
     }
     setSaving(false);
+    card.saved(upTo);
     onCreated(detail);
   };
 
@@ -213,7 +219,7 @@ export function NewProfileVariantsForm({ existing, onCreated, onCancel, initialP
   // The first ticked runtime whose component this host still needs (its install entry below step 3).
   const needsInstall = (["dsh", "kimi", "claude"] as const).filter((r) => runtimes.includes(r) && rows.some((x) => x.runtime === r && x.status === "componentNotInstalled")).map((r) => (r === "dsh" ? DSH_RUNTIME_COMPONENT : r === "kimi" ? KIMI_RUNTIME_COMPONENT : CLAUDE_RUNTIME_COMPONENT))[0] ?? null;
   return (
-    <FormFields><Section
+    <div ref={card.ref} className="contents"><FormFields><Section
       title={t("settings.profiles.new.title")}
       hint={t("variants.new.hint")}
 
@@ -236,13 +242,13 @@ export function NewProfileVariantsForm({ existing, onCreated, onCancel, initialP
         {provider === "claude" && (
           <>
             <p className="py-2 text-xs text-subtle">{t("variants.credential.claudeNote")}</p>
-            {accounts && !needsClaudeAccount(resolved.option.auth) && <NewClaudeAccountRow value={claudeAccount} disabled={saving} onChange={(v) => (setClaudeAccount(v), setError(null))} />}
+            {accounts && !needsClaudeAccount(resolved.option.auth) && <NewClaudeAccountRow value={claudeAccount} disabled={saving} onChange={(v) => (card.changed(), setClaudeAccount(v), setError(null))} />}
           </>
         )}
         {provider === "kimi" && (
           <>
             <p className="py-2 text-xs text-subtle">{t("variants.credential.kimiNote")}</p>
-            <KimiAccountSelect list={kimiAccounts.list} value={kimiAccount} disabled={saving} onChange={(v) => (setKimiAccount(v), setError(null))} onReload={() => void kimiAccounts.load()} />
+            <KimiAccountSelect list={kimiAccounts.list} value={kimiAccount} disabled={saving} onChange={(v) => (card.changed(), setKimiAccount(v), setError(null))} onReload={() => void kimiAccounts.load()} />
           </>
         )}
         {provider === "apiKey" && (
@@ -267,7 +273,7 @@ export function NewProfileVariantsForm({ existing, onCreated, onCancel, initialP
           </>
         )}
 
-        <AddressRow resolved={resolved} value={url} disabled={saving} onChange={(value) => (setUrl(value), setPicked(null), setError(null))} />
+        <AddressRow resolved={resolved} value={url} disabled={saving} onChange={(value) => (value === null && card.changed(), setUrl(value), setPicked(null), setError(null))} />
         <StepTitle>{t("variants.step.runtimes")}</StepTitle>
         {/* The effect marker sits on the hint line: inside the bordered list it took a row of its own above the first runtime. */}
         <SettingsGroup agents="none" source="host">{({ attributes, marker }) => (
@@ -328,7 +334,7 @@ export function NewProfileVariantsForm({ existing, onCreated, onCancel, initialP
         {!(provider === "apiKey" && runtimes.includes("codex")) && !runtimes.includes("dsh") && !runtimes.includes("kimi") && <p className="py-2 text-xs text-subtle">{t("variants.defaults.hint")}</p>}
 
         <StepTitle>{t("variants.step.name")}</StepTitle>
-        <NameStep name={name} onName={(value) => (setName(value), setError(null))} color={color} onColor={setColor} placeholder={resolved.card.id} />
+        <NameStep name={name} onName={(value) => (setName(value), setError(null))} color={color} onColor={(c) => (card.changed(), setColor(c))} placeholder={resolved.card.id} />
         {provider === "claude" && <ComponentNotice name={CLAUDE_RUNTIME_COMPONENT} hostId={hostId} className="py-2" />}
         {saving && <Notice tone="info">{t("variants.creating")}</Notice>}
         <p className="h-6 truncate pt-1 text-xs text-danger" title={error ?? undefined}>{error}</p>
@@ -339,6 +345,6 @@ export function NewProfileVariantsForm({ existing, onCreated, onCancel, initialP
         </div>
         </>}
       </div>
-    </Section></FormFields>
+    </Section></FormFields></div>
   );
 }

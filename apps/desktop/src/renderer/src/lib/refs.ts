@@ -12,7 +12,7 @@ export const REF_MAX_TITLE = 200;
 export const REF_MAX_KEY = 2000;
 export const REF_MAX_SNIPPET = 500;
 /** Kinds the shell / core open itself (§19 kind table). */
-export const BUILTIN_REF_KINDS: readonly string[] = ["turn", "agent", "main.page", "side.page"];
+export const BUILTIN_REF_KINDS: readonly string[] = ["turn", "agent", "main.page", "side.page", "selection"];
 
 const isRecord = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 const str = (v: unknown, max: number): string | null => (typeof v === "string" && v.length <= max ? v : null);

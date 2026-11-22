@@ -1,5 +1,5 @@
 import type { AuthInfo, Session } from "electron";
-import type { startBrowserEgressProxy } from "./egressProxy";
+import type { BrowserEgressPolicy, startBrowserEgressProxy } from "./egressProxy";
 import { BROWSER_LOCAL_PROXY } from "./network";
 import { queueBrowserSessionProxy } from "./sessionProxy";
 
@@ -13,7 +13,9 @@ export function createBrowserEgress(options: { isEnabled: () => boolean; load?: 
   protectedAddress?: (address: string, port: number) => boolean;
   /** Owner-admitted LAN / tailnet authorities (main's per-tab admissions). The proxy also runs for
    * these while websites are off; it then dials only them, never a public target. */
-  lanAllowed?: (hostname: string, port: number) => boolean; hasLan?: () => boolean }) {
+  lanAllowed?: (hostname: string, port: number) => boolean; hasLan?: () => boolean;
+  /** 「浏览器通过系统代理上网」: the upstream for a public target (egressProxy BrowserEgressPolicy.upstreamProxy). */
+  upstreamProxy?: BrowserEgressPolicy["upstreamProxy"] }) {
   const on = () => { try { return options.isEnabled() === true; } catch { return false; } };
   const lan = () => { try { return options.hasLan?.() === true; } catch { return false; } };
   /** Proxy wanted at all: websites on, or at least one admitted LAN target. */
@@ -50,7 +52,7 @@ export function createBrowserEgress(options: { isEnabled: () => boolean; load?: 
       let proxy: Proxy | undefined;
       proxy = await module.startBrowserEgressProxy({ onClosed() { if (proxy && current === proxy) stop(); },
         publicAllowed: on, lanAllowed: (hostname, port) => options.lanAllowed?.(hostname, port) === true,
-        protectedAddress: options.protectedAddress });
+        protectedAddress: options.protectedAddress, upstreamProxy: options.upstreamProxy });
       if (admitted !== generation) { await proxy.close(); throw new Error("browser_egress_revoked"); }
       current = proxy; return proxy;
     })();

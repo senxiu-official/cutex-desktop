@@ -640,7 +640,8 @@ describe("v3 approval, durable intent and read load regressions", () => {
     await act(async () => { await second.result.current.refresh(); await expect(second.result.current.onAction(intent)).rejects.toThrow("outcome_unknown"); });
     expect(service.delegationUpgradeOperation).toHaveBeenCalledExactlyOnceWith(TEST_ID);
     expect(service.delegationUpgradeAction).toHaveBeenCalledTimes(1); expect(crypto.randomUUID).toHaveBeenCalledTimes(1);
-    expect(second.result.current.readOnly).toBe(true);
+    expect(second.result.current.readOnly).toBe(false); // A1: only the run-control target stays fenced
+    expect(second.result.current.pending.map(op => op.entity)).toEqual(["runControl"]);
   });
   it("clears an uncertain control only for matching committed read receipt; GET never resends", async () => {
     const service = api(); service.delegationUpgradeAction.mockRejectedValueOnce(new Error("connection_lost"));
@@ -710,8 +711,26 @@ describe("R2 exact pre-write adapter refusal recovery", () => {
     await act(async () => view.result.current.refresh());
     await act(async () => { await expect(view.result.current.onAction(intent)).rejects.toThrow("outcome_unknown"); });
     expect(unresolvedUpgradeActions.size).toBe(1);
-    expect(view.result.current.readOnly).toBe(true);
+    expect(view.result.current.readOnly).toBe(false); // A1: the rest of the project stays actionable
     expect(service.delegationUpgradeAction).toHaveBeenCalledTimes(1);
     expect(crypto.randomUUID).toHaveBeenCalledTimes(1);
+  });
+  it("a legacy whole-project marker still makes the panel read-only (A1 compatibility)", async () => {
+    api(); unresolvedUpgradeActions.set(JSON.stringify(["host-a", "project-a"]), { kind: "grant", actionId: "legacy-op" });
+    const view = mount(); await flush();
+    expect(view.result.current.readOnly).toBe(true);
+    expect(view.result.current.pending).toEqual([{ scope: JSON.stringify(["host-a", "project-a"]), entity: null, action: { kind: "grant", actionId: "legacy-op" } }]);
+    await act(async () => { await expect(view.result.current.onAction(intent)).rejects.toThrow("outcome_unknown"); });
+  });
+  it("stop tracking drops only the local fence; the original action is never replayed (A1)", async () => {
+    const service = api(); service.delegationUpgradeAction.mockRejectedValueOnce(new Error("connection_lost"));
+    const view = mount(); await flush();
+    await act(async () => { await expect(view.result.current.onAction(intent)).rejects.toThrow("connection_lost"); });
+    expect(view.result.current.pending).toHaveLength(1);
+    act(() => view.result.current.forget(view.result.current.pending[0]!));
+    expect(unresolvedUpgradeActions.size).toBe(0);
+    expect(view.result.current.pending).toEqual([]);
+    expect(service.delegationUpgradeAction).toHaveBeenCalledTimes(1);
+    expect(service.delegationUpgradeOperation).not.toHaveBeenCalled();
   });
 });

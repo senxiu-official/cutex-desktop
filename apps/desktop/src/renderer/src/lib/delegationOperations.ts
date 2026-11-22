@@ -1,7 +1,7 @@
 import { ownerWindowOf } from "./ownerWindow";
 import type { UpgradeAction, UpgradeResult } from "../../../shared/delegationUpgradePreview";
 
-type PendingAction = Pick<UpgradeAction, "kind" | "actionId">;
+export type PendingAction = Pick<UpgradeAction, "kind" | "actionId">;
 const PENDING_KEY = "cutex.delegation-pending-actions.v1";
 export class PendingActions extends Map<string, PendingAction> {
   private listeners = new Set<() => void>();
@@ -46,6 +46,59 @@ if (typeof window !== "undefined") {
   win.addEventListener("storage", event => {
     if (event.key === PENDING_KEY || event.key === null) unresolvedUpgradeActions.restore();
   });
+}
+
+/**
+ * Uncertain-operation fences are per operation target (r290 P11 / A1): an unknown outcome blocks
+ * only a repeat on the same entity, never the rest of the project. Scope keys are
+ * `[host, project, entity]`; a legacy two-element `[host, project]` marker (older builds) still
+ * fences the whole project until it is resolved or the owner stops tracking it.
+ */
+type EntityIntent =
+  | { kind: "stop" | "resumeContinuation"; nodeId: string; nodeHostId: string }
+  | { kind: "pause" | "resume" | "policy" | "grant" | "revoke" }
+  | { kind: "decision"; approvalId: string }
+  | { kind: "offline" | "archive" | "restore"; memberId: string }
+  | { kind: "retire"; payload: { cutex_session_id: string } };
+export function operationEntity(intent: EntityIntent): string {
+  switch (intent.kind) {
+    case "stop": case "resumeContinuation": return `node:${intent.nodeHostId}:${intent.nodeId}`;
+    case "pause": case "resume": return "runControl";
+    // Routing policy and one-use grants share one table; keep their writes serialized.
+    case "policy": case "grant": case "revoke": return "routing";
+    case "decision": return `approval:${intent.approvalId}`;
+    case "offline": case "archive": case "restore": return `member:${intent.memberId}`;
+    case "retire": return `member:${intent.payload.cutex_session_id}`;
+  }
+}
+export const projectOperationScope = (host: string, project: string) => JSON.stringify([host, project]);
+export const operationScope = (host: string, project: string, entity: string) => JSON.stringify([host, project, entity]);
+export interface TrackedOperation { scope: string; entity: string | null; action: PendingAction }
+/** The marker that blocks `entity` (its own, else a legacy whole-project one). */
+export function blockingOperation(host: string, project: string, entity: string, store: PendingActions = unresolvedUpgradeActions): TrackedOperation | null {
+  const own = operationScope(host, project, entity), legacy = projectOperationScope(host, project);
+  const action = store.get(own) ?? store.get(legacy);
+  return action ? { scope: store.has(own) ? own : legacy, entity: store.has(own) ? entity : null, action } : null;
+}
+/** Every unresolved operation of a project (entity null: a legacy whole-project marker). */
+export function projectOperations(host: string, project: string, store: PendingActions = unresolvedUpgradeActions): TrackedOperation[] {
+  const out: TrackedOperation[] = [];
+  for (const [scope, action] of store) {
+    try {
+      const key: unknown = JSON.parse(scope);
+      if (!Array.isArray(key) || key[0] !== host || key[1] !== project) continue;
+      if (key.length === 2) out.push({ scope, entity: null, action });
+      else if (key.length === 3 && typeof key[2] === "string") out.push({ scope, entity: key[2], action });
+    } catch { /* not a project scope */ }
+  }
+  return out;
+}
+/**
+ * The owner stops tracking an unresolved operation: drops only the local fence. It never replays
+ * or reverses the original write, and claims nothing about its outcome.
+ */
+export function forgetOperation(scope: string, actionId: string, store: PendingActions = unresolvedUpgradeActions): boolean {
+  return store.delete(scope, actionId);
 }
 
 /** These exact backend errors precede durable mutation; other failures remain uncertain. */

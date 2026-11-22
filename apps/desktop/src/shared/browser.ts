@@ -80,9 +80,16 @@ export const BROWSER_ZOOM_BOUNDS = { min: 0.33, max: 3 } as const;
 /** Owner UI only. Product agent tools and leases belong to I3. */
 export const BROWSER_CHANNEL = "cutex-desktop:browser";
 export type BrowserTabStatus = "pending" | "attached" | "unmounted" | "crashed" | "closed";
+export type BrowserOwnerNoticeKind = "certificate" | "download" | "popup";
+/** url: display-safe. detail: certificate = SHA-256 fingerprint (hex), download = suggested file name. */
+export interface BrowserOwnerNoticeView { id: string; kind: BrowserOwnerNoticeKind; url: string; detail?: string }
 export interface BrowserTabView {
   /** Main retains the exact refused URL; the app may redeem this one-use owner retry. Null clears it. */
   blockedNavigation?: { id: string; url: string; canOpen: boolean; /** SSH host: retry explicitly opens this desktop, not that host. */ desktopLoopback?: true } | null;
+  /** What main stopped in this tab that the owner may still allow with one click (an untrusted LAN / loopback
+   * certificate, a page download or popup without a fresh owner click). Main keeps the exact target and decides;
+   * the app redeems one by id (openOwnerNotice). Null clears. */
+  ownerNotices?: BrowserOwnerNoticeView[] | null;
   /** Main-detected owner login input in an agent pool; null clears the inline reminder. */
   loginOrigin?: string | null;
   guestId: string;
@@ -122,7 +129,8 @@ export interface BrowserTabView {
   media?: BrowserMediaView;
 }
 export interface BrowserMediaView { playing: boolean; audible: boolean; muted: boolean }
-export interface BrowserSitePermissionPromptView { state: "waiting" | "hidden" | "timeout"; origin: string; permissions: BrowserSitePermission[] }
+/** held: the app window is minimized / hidden; the native dialog rises when the owner restores it (same 2 min deadline). */
+export interface BrowserSitePermissionPromptView { state: "waiting" | "held" | "hidden" | "timeout"; origin: string; permissions: BrowserSitePermission[] }
 export interface BrowserTabMount {
   guestId: string;
   tabKey: string;
@@ -148,17 +156,19 @@ export type BrowserEvent = HostTag & BrowserTabView & { kind: "changed" | "new-t
   /** new-tab: the host granted it to that agent under the opener's lease (browser-popup-grant). */
   newTabGranted?: true;
   /** blocked: what main stopped without the owner's action (shown once as a notice). */
-  blocked?: "popup" | "download" | "download-hidden" | "permission-waiting" | "permission-hidden" | "permission-timeout"; newTabKey?: string; popupDiscardReason?: string; openIntent?: BrowserOpenIntent; openRequestId?: string;
+  blocked?: "popup" | "download" | "download-hidden" | "permission-waiting" | "permission-held" | "permission-hidden" | "permission-timeout"; newTabKey?: string; popupDiscardReason?: string; openIntent?: BrowserOpenIntent; openRequestId?: string;
   claimOpen?: BrowserClaimOpenIntent; claimGrant?: { agentName: string; reason: BrowserClaimAutoReason } };
 /** Completion of a one-use owner UI mount, not an agent target identifier. */
 export interface BrowserAttachReceipt { src: string; webContentsId: number }
 export type BrowserRequest =
   | { op: "openBlockedNavigation"; tabKey: string; id: string }
+  | { op: "openOwnerNotice"; tabKey: string; id: string }
   | { op: "dismissLoginWarning"; tabKey: string; origin: string }
   | { op: "openOwnerCopy"; tabKey: string }
   | { op: "setEnabled"; enabled: boolean }
   | { op: "resetOrigins" }
   | { op: "externalPages"; enabled?: boolean }
+  | { op: "systemProxy"; enabled?: boolean }
   | { op: "cursorColor"; color?: string | null }
   | { op: "carrierFrameRate"; frameRate?: BrowserCarrierFrameRate }
   | { op: "desktopLoopback"; enabled?: boolean }
@@ -190,11 +200,16 @@ export type BrowserRequest =
   | { op: "setZoom"; tabKey: string; action: BrowserZoomAction }
   | { op: "setMuted"; tabKey: string; muted: boolean }
   | { op: "pauseMedia"; tabKey: string }
+  | { op: "rememberView" | "restoreView" | "viewMemory"; tabKey: string }
   | { op: "back" | "forward" | "reload" | "stop" | "toBackground"; tabKey: string }
   | { op: "close"; tabKey: string; unmount?: boolean };
+/** Service view cache (viewMemory): the page process's private memory in MB (null: unknown) and the machine's memory state. */
+export interface BrowserViewMemory { pid: number | null; privateMB: number | null; pressure: boolean }
 export interface HostBrowserBridge {
   /** Opens the exact navigation main refused, after the owner's explicit retry. */
   openBlockedNavigation(tabKey: string, id: string): Promise<void>;
+  /** Redeems one of the tab's ownerNotices (main checks the id and decides; the owner's click in the app). */
+  openOwnerNotice(tabKey: string, id: string): Promise<void>;
   dismissLoginWarning(tabKey: string, origin: string): Promise<void>;
   /** Fresh owner identity; exact target is retained transiently in main, URL here is display-safe. */
   openOwnerCopy(tabKey: string): Promise<{ tabKey: string; url: string }>;
@@ -240,6 +255,12 @@ export interface HostBrowserBridge {
   setMuted(tabKey: string, muted: boolean): Promise<void>;
   /** The owner's 停止 in 正在播放: main pauses the page's audio / video elements (a fixed main-owned script). */
   pauseMedia(tabKey: string): Promise<void>;
+  /** Service view cache: main remembers where this service page is (top-level scroll) before the card lets it go. */
+  rememberView(tabKey: string): Promise<void>;
+  /** Service view cache: back to the remembered place after the page loaded again at the same address. */
+  restoreView(tabKey: string): Promise<void>;
+  /** Service view cache: this page's process (private MB; pid to count a shared process once) and whether memory is short. */
+  viewMemory(tabKey: string): Promise<BrowserViewMemory>;
   back(tabKey: string): Promise<void>;
   forward(tabKey: string): Promise<void>;
   reload(tabKey: string): Promise<void>;
@@ -256,6 +277,8 @@ export interface BrowserBridge {
   resetOrigins(): Promise<void>;
   /** Owner switch 「允许浏览外部网页」: read (no argument) or set. Host-independent. */
   externalPages(enabled?: boolean): Promise<BrowserExternalPagesView>;
+  /** 「浏览器通过系统代理上网」 (default off): read, or ask main to flip it. */
+  systemProxy?(enabled?: boolean): Promise<{ enabled: boolean }>;
   cursorColor(color?: string | null): Promise<BrowserCursorPreferences>;
   /** 「后台网页帧率」: read (no argument) or set. Host-independent; main applies it to open carriers. */
   carrierFrameRate(frameRate?: BrowserCarrierFrameRate): Promise<BrowserCarrierPreferences>;

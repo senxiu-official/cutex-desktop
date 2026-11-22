@@ -52,6 +52,21 @@ it("multiline rename waits for a committed Ctrl+Enter", async () => {
   expect(settled).toHaveBeenCalledWith("正文");
 });
 
+it("a typed confirmation stays open on a mismatch with a note, and resolves once the text matches exactly", async () => {
+  act(() => root.render(h(Overlays))); const settled = vi.fn();
+  act(() => { void promptDialog("Expand", "", { expect: "Host A" }).then(settled); });
+  const input = node.querySelector("input")!;
+  type(input, "Host A ");
+  await act(async () => { key(input, "Enter"); await Promise.resolve(); });
+  expect(settled).not.toHaveBeenCalled();
+  expect(node.querySelector('[role="dialog"]')).not.toBeNull();
+  expect(node.querySelector('[data-testid="prompt-mismatch"]')?.textContent).toBe("dialog.typeMismatch");
+  type(input, "Host A");
+  expect(node.querySelector('[data-testid="prompt-mismatch"]')).toBeNull();
+  await act(async () => { key(input, "Enter"); await Promise.resolve(); });
+  expect(settled).toHaveBeenCalledWith("Host A");
+});
+
 it("font search retains its composing draft and does not pick or cancel until committed", () => {
   const change = vi.fn(); act(() => root.render(h(FontCombo, { value: "", fonts: ["宋体"], defaultLabel: "Default", onChange: change })));
   const input = node.querySelector("input")!; act(() => input.focus()); type(input, "黑体"); compose(input, "compositionstart");

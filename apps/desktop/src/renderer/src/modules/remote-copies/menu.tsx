@@ -20,6 +20,11 @@ export interface CopyCaps {
   openable: boolean;
 }
 
+/** Why 打开 is off for a copy on this desktop: its type (a script or program is never opened from the app). */
+export function openRefusedTitle(caps: CopyCaps, t: T): string | undefined {
+  return caps.local && !caps.openable ? t("remote-copies.openRefused") : undefined;
+}
+
 export function copyCaps(copy: RemoteCopy, host: Pick<HostView, "conn"> | undefined): CopyCaps {
   const connected = host?.conn?.daemon;
   const remote = (copy.source.artifact ? canSaveArtifact(copy.source.hostId) : canDownload(copy.source.hostId)) && connected?.kind === "connected" && connected.hostId === copy.source.hostIdentity;
@@ -44,7 +49,7 @@ export const downloadAgain = (copy: RemoteCopy) => void requestCopy(copy.source.
 export function copyMenu(copy: RemoteCopy, caps: CopyCaps, t: T): MenuEntry[] {
   const offline = !caps.remote ? t("remote-copies.offline") : undefined;
   return [
-    { label: t("remote-copies.open"), icon: <ExternalLink size={14} />, disabled: !caps.openable, onSelect: () => openCopy(copy) },
+    { label: t("remote-copies.open"), icon: <ExternalLink size={14} />, disabled: !caps.openable, title: openRefusedTitle(caps, t), onSelect: () => openCopy(copy) },
     { label: t("remote-copies.reveal"), icon: <FolderOpen size={14} />, disabled: !caps.local, onSelect: () => revealCopy(copy) },
     "separator",
     { label: t("remote-copies.original"), icon: <Server size={14} />, disabled: !caps.remote, title: offline, onSelect: () => openOriginal(copy) },

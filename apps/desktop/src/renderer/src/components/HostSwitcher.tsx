@@ -129,7 +129,7 @@ export function HostSwitcher() {
                   e.stopPropagation();
                   void setHostConnected(h.id, true);
                 }}
-                className="shrink-0 rounded px-1.5 py-0.5 text-xs text-accent hover:bg-surface"
+                className="press shrink-0 rounded px-1.5 py-0.5 text-xs text-accent hover:bg-surface"
               >
                 {t("host.connect")}
               </button>
@@ -143,7 +143,7 @@ export function HostSwitcher() {
                 setSettingsHost(h.id);
                 openSettings("access");
               }}
-              className="shrink-0 rounded p-1 text-subtle hover:bg-surface hover:text-foreground"
+              className="press-icon shrink-0 rounded p-1 text-subtle hover:bg-surface hover:text-foreground"
             >
               <ChevronRight size={13} />
             </button>
@@ -274,7 +274,7 @@ export function HostSwitcher() {
   }
 
   const sectionTitle = (text: string) => <div className="px-2.5 pt-1.5 pb-0.5 text-caption/[inherit] text-subtle">{text}</div>;
-  const rowClass = (i: number) => `flex w-full cursor-default items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-sm ${i === cursor ? "bg-surface-2" : "hover:bg-surface-2"}`;
+  const rowClass = (i: number) => `press flex w-full cursor-default items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-sm ${i === cursor ? "bg-surface-2" : "hover:bg-surface-2"}`;
   const renderRow = (row: Row, i: number) => (
     <div key={row.key} role="menuitem" tabIndex={-1} onMouseEnter={() => setCursor(i)} onClick={() => activate(row)} className={rowClass(i)}>
       {row.node}
@@ -294,7 +294,7 @@ export function HostSwitcher() {
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => (noHost ? openSettings("hosts", { anchor: "addHost" }) : setOpen((v) => !v))}
-        className={`flex min-w-0 items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted hover:bg-surface-2 hover:text-foreground ${open ? "bg-surface-2 text-foreground" : ""}`}
+        className={`press flex min-w-0 items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted hover:bg-surface-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent ${open ? "bg-surface-2 text-foreground" : ""}`}
       >
         {label}
         <ChevronDown size={12} className="shrink-0" />

@@ -24,7 +24,7 @@ export const en: Record<keyof typeof zhCN, string> = {
   "delegations.viewAll": "View all on the Delegations page",
   "delegations.search": "Search delegations",
   "delegations.bucket.needsYou": "Needs you",
-  "delegations.bucket.waiting": "Waiting / blocked",
+  "delegations.bucket.waiting": "Waiting",
   "delegations.bucket.active": "In progress",
   "delegations.bucket.done": "Finished",
   "delegations.none": "No open delegations",

@@ -168,13 +168,15 @@ export function FileView({ api, hostId, scope, path, host, visible = true, line 
  * An HTML file as a page (owner 2026-10-24): FilePageFrame mounts main's offline document. Over
  * FILE_PAGE_PROMPT_BYTES it asks first (main then reads it in windows, as a large artifact page); over the bound main
  * reports (FILE_PAGE_MAX_BYTES, or one cutex read on a host without windowed reads) it can only show the source.
- * Inline-only: when the page refers to files next to it or to the network, a note says they do not load.
+ * Its own files (in its folder) are written in by main; a note counts what still does not load (web addresses, files
+ * outside its folder or over the limits) — none when everything loaded.
  */
 function HtmlPage({ hostId, scope, path, onSource }: { hostId: string; scope: WorkspaceScope | null; path: string; onSource?(source: boolean): void }) {
   const { t } = useI18n();
   const [large, setLarge] = useState(false);
   const [problem, setProblem] = useState<{ kind: FilePageProblem; bytes?: number; max: number; identity: string | null } | null>(null);
   const [refs, setRefs] = useState(0);
+  const [localFiles, setLocalFiles] = useState(0);
   const [ready, setReady] = useState(false);
   const [navigated, setNavigated] = useState(false);
   const [mount, setMount] = useState(0);
@@ -234,7 +236,7 @@ function HtmlPage({ hostId, scope, path, onSource }: { hostId: string; scope: Wo
     <div className="flex min-h-0 flex-1 flex-col">
       {ready && refs > 0 && !problem && (
         <p data-page-refs="" className="shrink-0 border-b border-border/60 bg-surface px-3 py-1 text-caption/[inherit] text-subtle">
-          {t("workspace.page.refs", { n: refs })}
+          {localFiles > 0 ? t("workspace.page.loadedSome", { loaded: localFiles, n: refs }) : t("workspace.page.notLoaded", { n: refs })}
         </p>
       )}
       <div className="relative min-h-72 flex-1">
@@ -255,8 +257,9 @@ function HtmlPage({ hostId, scope, path, onSource }: { hostId: string; scope: Wo
               if (!large && choice === "source" && onSource) return onSource(true);
               setProblem({ kind, bytes, max, identity });
             }}
-            onReady={(n) => {
+            onReady={(n, local) => {
               setRefs(n);
+              setLocalFiles(local);
               setReady(true);
             }}
             onNavigated={() => setNavigated(true)}

@@ -15,6 +15,8 @@ const fx = vi.hoisted(() => ({
   more: vi.fn(),
   onAction: vi.fn(),
   reviewRetirement: vi.fn(),
+  forget: vi.fn(),
+  pending: [] as { scope: string; entity: string | null; action: { kind: string; actionId: string } }[],
   readOnly: false,
   busy: false,
   notice: null as string | null,
@@ -82,10 +84,11 @@ beforeEach(() => {
   fx.readOnly = false;
   fx.busy = false;
   fx.notice = null;
+  fx.pending = [];
   fx.memberProps = null;
   fx.featuresOf.mockReset().mockImplementation((state: typeof fx.state, hostId: string) => state.features[hostId] ?? new Set());
   fx.useApp.mockReset().mockImplementation((selector: (state: typeof fx.state) => unknown) => selector(fx.state));
-  fx.hook.mockReset().mockImplementation(() => ({ snapshot: fx.snapshot, busy: fx.busy, notice: fx.notice, readOnly: fx.readOnly, refresh: fx.refresh, more: fx.more, onAction: fx.onAction, reviewRetirement: fx.reviewRetirement }));
+  fx.hook.mockReset().mockImplementation(() => ({ snapshot: fx.snapshot, busy: fx.busy, notice: fx.notice, readOnly: fx.readOnly, refresh: fx.refresh, more: fx.more, onAction: fx.onAction, reviewRetirement: fx.reviewRetirement, pending: fx.pending, forget: fx.forget }));
   fx.adapter.mockReset().mockImplementation(() => fx.adapterAvailable ? { delegationUpgradeSnapshot: fx.read } : {});
   container = document.createElement("div");
   document.body.append(container);
@@ -140,6 +143,21 @@ describe("UpgradeWorkspace capability gating", () => {
     expect(container.querySelector('[role="status"]')?.textContent).toBe("delegations.upgrade.tree.incomplete");
     expect(container.textContent).not.toContain(loading);
     for (const name of ["run", "routing", "tree", "members", "continuation"]) expect(marker(name)).toBeNull();
+  });
+
+  it("lists unresolved operations per target and stops tracking one only after a second click (A1)", () => {
+    fx.state.features["host-a"] = new Set([TREE, "agent-archive-kind-v1", ...optional.map(([cap]) => cap)]);
+    const pause = { scope: '["host-a","project-a","runControl"]', entity: "runControl", action: { kind: "pause", actionId: "op-1" } };
+    const legacy = { scope: '["host-a","project-a"]', entity: null, action: { kind: "grant", actionId: "op-2" } };
+    fx.pending = [pause, legacy];
+    render();
+    const rows = [...container.querySelectorAll("[data-unresolved-entity]")];
+    expect(rows.map(row => row.getAttribute("data-unresolved-entity"))).toEqual(["runControl", "project"]);
+    const button = rows[0]!.querySelector<HTMLButtonElement>('[data-testid="delegation-forget-op"]')!;
+    act(() => { button.click(); });
+    expect(fx.forget).not.toHaveBeenCalled();
+    act(() => { button.click(); });
+    expect(fx.forget).toHaveBeenCalledExactlyOnceWith(pause);
   });
 
   // Every subset catches accidental coupling between unrelated optional capabilities.

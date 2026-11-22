@@ -4,7 +4,7 @@
 // comes from the host-keyed store (live); one the store has not loaded comes from the detail.
 import { useEffect, useState } from "react";
 import { ArrowLeft, ArrowLeftRight, ArrowRight, Loader2 } from "lucide-react";
-import type { AskDetail } from "../../../../shared/ipc";
+import type { AskAttemptView, AskDetail } from "../../../../shared/ipc";
 import { DelegationDetailBody } from "../../components/DelegationCard";
 import { DelegationHops, DelegationStatusMark, DelegationTag } from "../../components/DelegationParts";
 import { Who } from "../../components/Parties";
@@ -12,7 +12,7 @@ import { PeerParty } from "../../components/PeerParty";
 import { useI18n } from "../../i18n";
 import { contextMenu } from "../../lib/contextMenu";
 import { delegationMenu } from "../../lib/delegationMenu";
-import { attemptSeconds, delegationStatus, formatSpan, isOwnerRequest, peerSideOf, requesterName, requesterSession } from "../../lib/delegations";
+import { attemptSeconds, attemptStateKey, delegationStatus, formatSpan, isOwnerRequest, peerSideOf, requesterName, requesterSession } from "../../lib/delegations";
 import { hasDelegationViews, loadDelegationDetail, useDelegation, useDelegations } from "../../lib/delegationStore";
 import { useAgentNames, useAgentProfile, useDelegationContext } from "../../lib/delegationsView";
 import { hostKey } from "../../lib/hostKeys";
@@ -131,7 +131,37 @@ function Detail({ hostId, askId }: { hostId: string; askId: string }) {
       </div>
       <div className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto p-2">
         <DelegationDetailBody d={d} brief={detail?.body?.text ?? null} here={null} host={hostId} layout="side" />
+        <AttemptTable attempts={detail?.attempts ?? []} closed={!!d.closed} />
       </div>
     </div>
+  );
+}
+
+/** 每次运行 (state surfaces 4.2): one row per attempt, its own word; the buttons stay the delegation's. */
+function AttemptTable({ attempts, closed }: { attempts: readonly AskAttemptView[]; closed: boolean }) {
+  const { t, locale } = useI18n();
+  if (attempts.length < 1) return null;
+  const when = (iso: string | null | undefined) => {
+    const ms = iso ? Date.parse(iso) : NaN;
+    return Number.isFinite(ms) ? formatWhen(ms / 1000, Date.now(), locale) : "";
+  };
+  return (
+    <section className="mt-2 px-1 text-xs" data-testid="delegation-attempts">
+      <h3 className="mb-1 text-caption/[inherit] font-medium text-subtle">{t("delegation.attempts.title")}</h3>
+      <ul className="flex flex-col gap-0.5">
+        {[...attempts].reverse().map((a, i) => {
+          const key = attemptStateKey(a.state, closed);
+          const word = t(`delegation.attempt.${key}` as Parameters<typeof t>[0], { raw: a.state ?? "" });
+          const error = a.lastError ?? null;
+          return (
+            <li key={a.n ?? i} className="flex min-w-0 items-baseline gap-2" data-attempt-state={key}>
+              <span className="shrink-0 text-subtle tabular-nums">{t("delegation.attempts.n", { n: a.n ?? attempts.length - i })}</span>
+              <span className={`min-w-0 truncate ${key === "failed" ? "text-danger" : key === "running" ? "text-accent" : "text-muted"}`} title={error ?? undefined}>{word}</span>
+              <span className="ml-auto shrink-0 text-subtle tabular-nums" title={a.startedAt ?? undefined}>{when(a.startedAt)}</span>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
   );
 }

@@ -1,15 +1,35 @@
 // cutex Job Service jobs (作业): long-running commands agents submit with `cutex_job.submit`. Pure
 // helpers for the capsule's 作业 category and the 作业 page. Job Service states pass through as-is;
 // JOB_STATES is the one table mapping them to a group, glyph, tone and word, so a future scheduler's
-// states (queued / waiting_for_resources) only need a row here. Unknown states show their raw name.
+// states (queued / waiting_for_resources) only need a row here. A state the table does not know reads 结果未确认
+// (unconfirmed), is not counted as in progress, and still offers 结束跟进 (state surfaces S7).
 import type { JobRow } from "../../../shared/ipc";
+import { jobCanCloseFollowUp } from "../../../shared/ownerDispositions";
 import type { StatusGlyph, StatusTone } from "./delegations";
+import { isJobLocallyEnded } from "./jobLocalMarks";
 
 export const JOB_SERVICE_FEATURE = "job-service";
 
 /** in progress / waiting for a slot (no Job Service scheduler yet) / finished. */
 export type JobGroup = "active" | "queued" | "done";
-export type JobStatusKey = "starting" | "running" | "queued" | "registered" | "succeeded" | "exitCode" | "failed" | "cancelled" | "interrupted" | "unknown" | "other" | "processStopped" | "processExited";
+export type JobStatusKey =
+  | "starting"
+  | "running"
+  | "queued"
+  | "registered"
+  | "succeeded"
+  | "exitCode"
+  | "failed"
+  | "cancelled"
+  | "interrupted"
+  | "processStopped"
+  | "processExited"
+  /** 结果未确认: the Job Service could not tell the outcome (launch_unknown, unconfirmed), or sent a state this table lacks. */
+  | "unconfirmed"
+  /** 已结束跟进 · 进程可能仍在运行: the owner's 结束跟进, recorded by the Job Service. */
+  | "followUpEnded"
+  /** 结果未确认 (this device only): 结束跟进 on an older Job Service, a local mark (lib/jobLocalMarks). */
+  | "localEnded";
 
 interface StateRow {
   group: JobGroup;
@@ -31,28 +51,60 @@ export const JOB_STATES: Record<string, StateRow> = {
   failed: { group: "done", key: "failed", glyph: "cross", tone: "danger" },
   cancelled: { group: "done", key: "cancelled", glyph: "cross", tone: "muted" },
   interrupted: { group: "done", key: "interrupted", glyph: "ring", tone: "warn" },
-  launch_unknown: { group: "done", key: "unknown", glyph: "hollow", tone: "warn" },
+  launch_unknown: { group: "done", key: "unconfirmed", glyph: "hollow", tone: "warn" },
+  // r289 Job Service: terminal, outcome unconfirmed (`terminalReason: followUpEnded` after the owner's 结束跟进).
+  unconfirmed: { group: "done", key: "unconfirmed", glyph: "hollow", tone: "warn" },
 };
 
 export interface JobStatus extends StateRow {
-  /** The wire state (shown for `other`). */
+  /** The wire state (named in the hover of an unrecognized one). */
   raw: string;
   exitCode: number | null;
+  /** The Job Service may still be tracking it: 结束跟进 applies (every non-terminal state, and an unrecognized one). */
+  open: boolean;
+  /** The wire state is not in JOB_STATES (shown as 结果未确认). */
+  unrecognized?: boolean;
 }
 
-/** Status of a job. A non-zero exit is a failure with its code; an unknown state stays "in progress". */
-export function jobStatus(job: Pick<JobRow, "state" | "exitCode"> & Partial<Pick<JobRow, "observedProcessState">>): JobStatus {
+type StatusInput = Pick<JobRow, "state" | "exitCode"> & Partial<Pick<JobRow, "observedProcessState" | "jobId">> & { terminalReason?: unknown; followUpEnded?: unknown };
+
+/** The owner's 结束跟进 recorded by the Job Service (`terminalReason: followUpEnded` or `followUpEnded: true`). */
+const followUpEnded = (job: StatusInput) => job.terminalReason === "followUpEnded" || job.followUpEnded === true;
+
+/**
+ * Status of a job. A non-zero exit is a failure with its code; an unrecognized state reads 结果未确认 (not in
+ * progress) and stays `open`. A job the owner ended locally (older Job Service) reads 结果未确认 until the Job Service
+ * reports a final state.
+ */
+export function jobStatus(job: StatusInput): JobStatus {
   const raw = String(job.state ?? "");
   const exitCode = typeof job.exitCode === "number" ? job.exitCode : null;
   const row = JOB_STATES[raw];
-  if (!row) return { group: "active", key: "other", glyph: "hollow", tone: "muted", raw, exitCode };
-  if (raw === "exited" && exitCode !== null && exitCode !== 0) return { group: "done", key: "exitCode", glyph: "cross", tone: "danger", raw, exitCode };
+  if (!row) {
+    if (isJobLocallyEnded(job.jobId)) return { group: "done", key: "localEnded", glyph: "hollow", tone: "warn", raw, exitCode, open: false, unrecognized: true };
+    return { group: "done", key: "unconfirmed", glyph: "hollow", tone: "warn", raw, exitCode, open: true, unrecognized: true };
+  }
+  if (row.group !== "done" && isJobLocallyEnded(job.jobId)) return { group: "done", key: "localEnded", glyph: "hollow", tone: "warn", raw, exitCode, open: false };
+  if (row.key === "unconfirmed" && followUpEnded(job)) return { ...row, key: "followUpEnded", glyph: "cross", tone: "muted", raw, exitCode, open: false };
+  if (raw === "exited" && exitCode !== null && exitCode !== 0) return { group: "done", key: "exitCode", glyph: "cross", tone: "danger", raw, exitCode, open: false };
   // The observed process only colours a running job: the job stays in progress until Job Service says otherwise.
   const observed = raw === "running" ? job.observedProcessState?.state : undefined;
-  if (observed === "stopped") return { ...row, key: "processStopped", glyph: "ring", tone: "warn", raw, exitCode };
-  if (observed === "exited") return { ...row, key: "processExited", glyph: "ring", tone: "muted", raw, exitCode };
-  return { ...row, raw, exitCode };
+  const open = row.group !== "done";
+  if (observed === "stopped") return { ...row, key: "processStopped", glyph: "ring", tone: "warn", raw, exitCode, open };
+  if (observed === "exited") return { ...row, key: "processExited", glyph: "ring", tone: "muted", raw, exitCode, open };
+  return { ...row, raw, exitCode, open };
 }
+
+/** The hover explanation of a status (module jobs catalog), when it has one beyond its word. */
+export function jobStatusTipKey(status: Pick<JobStatus, "key" | "unrecognized">): "jobs.status.unconfirmed.tip" | "jobs.status.unrecognized.tip" | "jobs.status.followUpEnded.tip" | "jobs.status.localEnded.tip" | "jobs.status.processStopped.tip" | "jobs.status.processExited.tip" | null {
+  if (status.key === "localEnded") return "jobs.status.localEnded.tip";
+  if (status.unrecognized) return "jobs.status.unrecognized.tip";
+  if (status.key === "unconfirmed" || status.key === "followUpEnded" || status.key === "processStopped" || status.key === "processExited") return `jobs.status.${status.key}.tip`;
+  return null;
+}
+
+/** 结束跟进 applies: the Job Service may still be tracking the job. */
+export const canEndJobFollowUp = (job: StatusInput) => jobStatus(job).open;
 
 export const isJobFinished = (job: Pick<JobRow, "state" | "exitCode">) => jobStatus(job).group === "done";
 
@@ -113,9 +165,15 @@ export function mergeJobs(byId: Record<string, JobRow>, rows: readonly JobRow[])
 }
 
 /** Which human operations the running Job Service offers (an older one: list only). */
-export function jobOperations(caps: { humanOperations?: unknown } | null | undefined): { cancel: boolean; output: boolean; markExternal: boolean } {
+export function jobOperations(caps: { humanOperations?: unknown } | null | undefined): { cancel: boolean; output: boolean; markExternal: boolean; closeFollowUp: boolean } {
   const ops = Array.isArray(caps?.humanOperations) ? (caps.humanOperations as unknown[]) : [];
-  return { cancel: ops.includes("cancel"), output: ops.includes("readOutput"), markExternal: ops.includes("markExternal") };
+  return {
+    cancel: ops.includes("cancel"),
+    output: ops.includes("readOutput"),
+    markExternal: ops.includes("markExternal"),
+    // r289 結束跟进 recorded by the Job Service; without it 结束跟进 is a local mark (lib/jobFollowUp).
+    closeFollowUp: jobCanCloseFollowUp({ humanOperations: ops.filter((o): o is string => typeof o === "string") }),
+  };
 }
 
 /** An external (scheduler, e.g. NCI PBS) job; rows of an older Job Service have no `source` = local. */

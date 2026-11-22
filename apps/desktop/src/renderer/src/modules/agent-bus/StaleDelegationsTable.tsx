@@ -11,6 +11,9 @@ import { delegationActions, delegationStatus, interruptReasonOf, requesterName, 
 import { useStatusWord } from "../../lib/delegationsView";
 import { focusDelegation } from "../../lib/focusRequest";
 import { p2AccessNow } from "../../lib/p2Access";
+import { canEndDelegationFollowUp } from "../../lib/delegationMenu";
+import { OWNER_DISPOSITION_UNSUPPORTED } from "../../../../shared/ownerDispositions";
+import { featuresOf, useApp } from "../../store";
 import { isShortId } from "../../lib/shortIds";
 import { useTargetHostId } from "../../lib/targetHost";
 import { CleanupTable } from "./CleanupTable";
@@ -27,6 +30,8 @@ export function StaleDelegationsTable({ state, minAge, nameOf }: { state: StaleD
   const from = (d: AskSummary) => (d.requester.kind === "owner" ? t("agent-bus.stuck.sender.owner") : (requesterName(d.requester) ?? nameOf(requesterSession(d.requester) ?? "")) || t("agent-bus.stuck.unknownParty"));
   const to = (d: AskSummary) => d.targetName ?? nameOf(d.target);
   const owner = p2AccessNow(hostId).delegations;
+  const followUpOk = useApp((s) => canEndDelegationFollowUp(featuresOf(s, hostId)));
+  const refusalText = (code: string) => (code === OWNER_DISPOSITION_UNSUPPORTED ? t("followUp.oldHost") : code === "idempotency_conflict" || code === "action_id_conflict" ? t("followUp.actionConflict") : t("delegation.commandFailed", { error: code }));
   return (
     <>
       {state.error && <ErrorNote>{state.error}</ErrorNote>}
@@ -56,6 +61,11 @@ export function StaleDelegationsTable({ state, minAge, nameOf }: { state: StaleD
                 <ArmedButton shape={`${CLEANUP_ACTION} whitespace-nowrap`} idle={CLEANUP_ACTION_DANGER} hint={`${t("delegation.abandonConfirm")}${t("delegation.again")}`} disabled={busy} resetKey={d.revision} testId="stale-delegation-abandon" onConfirm={() => void state.command(d, "cutex/ask/close", "abandoned")}>
                   {busy ? t("agent-bus.cleanup.working") : t("delegation.abandon")}
                 </ArmedButton>
+              ) : can?.endFollowUp ? (
+                // A stop not confirmed yet / accepted but not started / unknown: 结束跟进 is the only way out (S2).
+                <ArmedButton shape={`${CLEANUP_ACTION} whitespace-nowrap`} idle={CLEANUP_ACTION} hint={`${t("followUp.confirm")}${t("delegation.again")}`} disabled={busy || !followUpOk} title={followUpOk ? t("followUp.confirm") : t("followUp.oldHost")} resetKey={d.revision} testId="stale-delegation-end-follow-up" onConfirm={() => void state.endFollowUp(d)}>
+                  {busy ? t("agent-bus.cleanup.working") : t("followUp.end")}
+                </ArmedButton>
               ) : undefined,
             };
           }}
@@ -74,7 +84,7 @@ export function StaleDelegationsTable({ state, minAge, nameOf }: { state: StaleD
                 </p>
                 {progress && <p className="text-subtle [overflow-wrap:anywhere]">{progress}</p>}
                 {error && <p className="text-danger [overflow-wrap:anywhere]">{t("agent-bus.cleanup.lastError", { error })}</p>}
-                {state.refusals[d.askId] && <p role="status" className="text-warn-text [overflow-wrap:anywhere]">{t("delegation.commandFailed", { error: state.refusals[d.askId]! })}</p>}
+                {state.refusals[d.askId] && <p role="status" className="text-warn-text [overflow-wrap:anywhere]">{refusalText(state.refusals[d.askId]!)}</p>}
                 <p className="text-subtle [overflow-wrap:anywhere]">
                   {from(d)} → {to(d)} · {new Date(d.createdAt).toLocaleString()} · {d.askId}
                 </p>

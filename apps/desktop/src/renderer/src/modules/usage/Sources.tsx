@@ -1,6 +1,7 @@
 // 额外目录 (cutex usage-external-sources): the owner's own Claude Code / Codex CLI / ZCode directories whose
 // runs never went through cutex. cutex reads them (session logs; ZCode: its usage database, model_usage
 // only) and keeps the rows apart; this card only edits the list and shows each one's scan status.
+import { useSettingsCard } from "../../lib/settingsDrafts";
 import { useState, type ReactNode } from "react";
 import type { CutexRefusal } from "../../../../shared/ipc";
 import { USAGE_SOURCE_KIND_DEFAULTS, USAGE_SOURCES_FEATURE, type UsageSource, type UsageSourceBilling, type UsageSourceKind, type UsageSourceResult, type UsageSourcesView } from "../../../../shared/usageSources";
@@ -66,6 +67,8 @@ function AddForm({ view, onDone, onCancel }: { view: UsageSourcesView | null; on
     if (!path || path === suggestedPath(view, kind)) setPath(suggestedPath(view, k));
     setKind(k);
   };
+  // Unsaved from the first change until the source is added, which closes it (lib/settingsDrafts).
+  const card = useSettingsCard();
   const add = async () => {
     setBusy(true);
     setError(null);
@@ -81,7 +84,7 @@ function AddForm({ view, onDone, onCancel }: { view: UsageSourcesView | null; on
   };
   const field = "grid grid-cols-[5.5rem_minmax(0,1fr)] items-center gap-3";
   return (
-    <SettingsGroup agents="none" source="host"><div className="-mx-4 space-y-2 border-t border-border bg-surface-2/40 px-4 py-3 first:border-t-0">
+    <SettingsGroup agents="none" source="host"><div ref={card.ref} className="-mx-4 space-y-2 border-t border-border bg-surface-2/40 px-4 py-3 first:border-t-0">
       <div className={field}>
         <span className="text-xs text-muted">{t("usage.sources.kind")}</span>
         <Select width="w-44" value={kind} options={kinds.map((k) => ({ value: k, label: t(`usage.sources.kind.${k}`) }))} onChange={changeKind} label={t("usage.sources.kind")} />
@@ -162,7 +165,7 @@ function SourceRow({ source, onChanged }: { source: UsageSource; onChanged(): vo
             label={t("usage.sources.billing")}
           />
           <Toggle checked={source.enabled} disabled={busy || !source.supported} onChange={(enabled) => void run(() => api.patchUsageSource(source.id, { enabled }))} label={t("usage.sources.enabled")} />
-          <RefreshButton label={t("usage.sources.rescan")} disabled={busy || !source.enabled || !source.supported || source.status.scanning} onClick={() => void run(() => api.rescanUsageSource(source.id))} />
+          <RefreshButton label={t("usage.sources.rescan")} disabled={busy || !source.enabled || !source.supported || source.status.scanning} onClick={() => run(() => api.rescanUsageSource(source.id))} />
           <ArmedRemove title={t("usage.sources.remove")} armedLabel={t("usage.sources.removeArmed")} disabled={busy} onRemove={() => void run(() => api.deleteUsageSource(source.id, true))} />
         </div>
       </div>

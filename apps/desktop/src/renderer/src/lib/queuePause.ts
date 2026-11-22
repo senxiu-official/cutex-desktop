@@ -6,6 +6,7 @@
 // the store resumes right after sending). Pure helpers, unit-tested.
 import type { QueueItem, QueuePause } from "@cutex-desktop/protocol";
 import type { PendingSteer } from "./legacyDelivery/pendingSteers";
+import { inputPreviewText, type InputPart } from "../../../shared/inputPreview";
 
 /** Between merged messages (steers merged into one turn, texts put back into the composer). */
 export const MESSAGE_SEPARATOR = "\n\n";
@@ -49,17 +50,13 @@ export interface RestorePlan {
   steerIds: string[];
 }
 
-const IMAGE_TYPES = new Set(["image", "localImage"]);
 
 /**
- * A queued message's text as its queue row shows it: its images are thumbnails beside it (not
- * "[image]"); other non-text parts stay `[type]`.
+ * A queued message's text as its queue row shows it (shared/inputPreview): its images are thumbnails beside it,
+ * skills / file mentions read `$name` / `@name`, never an item type such as 「[localImage]」.
  */
 export function queuedRowText(item: QueueItem): string {
-  return (item.input as { type: string; text?: string }[])
-    .filter((p) => !IMAGE_TYPES.has(p.type))
-    .map((p) => (p.type === "text" ? p.text ?? "" : `[${p.type}]`))
-    .join("\n");
+  return inputPreviewText(item.input as InputPart[]);
 }
 
 /** 放回输入框: steers first, then queued items, joined with a blank line. */

@@ -1,7 +1,9 @@
 // Tool and reasoning steps and their folding (DESIGN §4.14): a work group is one summary line, open (nothing after it
 // yet) or closed — while it runs the line carries a spinner and the current step, so it never folds from several rows
-// to one when the next message arrives (owner 2026-10-24: rows above the newest jumped). Its steps are one click away;
-// a failed final tool keeps failures visible under the line.
+// to one when the next message arrives (owner 2026-10-24: rows above the newest jumped). Its steps are one click away.
+// One folding rule (owner 2026-11-14): a group is folded unless the owner opened it — finished or running, failed or
+// not. Failures show only as the header's 「· N 失败」; a running group shows only its live step on the header line;
+// a new step never opens or closes it, and the owner's own toggle stays as they left it.
 import { memo, useEffect, useRef, useState } from "react";
 import { Brain, Check, ChevronDown, ChevronRight, Loader2, ShieldAlert, X } from "lucide-react";
 import { useI18n, type MessageKey } from "../i18n";
@@ -142,20 +144,12 @@ function WorkGroupView({ steps, open: openGroup, summary, sessionId }: { steps: 
         {blocked > 0 && <span className="shrink-0 text-muted">· {t("work.safetyBlocked", { n: blocked })}</span>}
         {summary.durationMs !== null && !live && <span className="shrink-0 text-subtle">· {formatMs(summary.durationMs)}</span>}
       </button>
-      {open ? (
+      {open && (
         <div className="ml-2 min-w-0 border-l border-border pl-2.5">
           {steps.map((e) => (
             <StepRow sessionId={sessionId} key={e.id} step={e} />
           ))}
         </div>
-      ) : (
-        (live || outcome.status === "failed") && failedRows.length > 0 && (
-          <div className={`ml-2 border-l pl-2.5 ${failedCount ? "border-danger/40" : "border-border"}`}>
-            {failedRows.map((e) => (
-              <StepRow sessionId={sessionId} key={e.id} step={e} />
-            ))}
-          </div>
-        )
       )}
     </div>
   );

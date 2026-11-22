@@ -6,7 +6,13 @@ import { useI18n } from "../i18n";
 import type { MenuAction } from "../lib/contextMenu";
 import { showDesktop, useDesktop, useDesktopShown } from "../lib/paneActions";
 import { keyVar } from "../lib/keybindings";
+import { leaveCoveringSettings } from "../lib/openSettings";
 
+
+/** From the window bar: Settings in front leaves first (lib/openSettings leaveCoveringSettings), so the desktop is seen. */
+function showDesktopFromBar(anchor?: HTMLElement | null): void {
+  leaveCoveringSettings(showDesktop, anchor);
+}
 
 /** Its tooltip now: 显示桌面, or (shown, with a layout to put back) 放回 — with the shortcut; `name`: the same without it. */
 function useTip(): { shown: boolean; tip: string; name: string } {
@@ -21,7 +27,7 @@ function useTip(): { shown: boolean; tip: string; name: string } {
 export function ShowDesktopButton({ className }: { className: string }) {
   const { shown, tip } = useTip();
   return (
-    <button onClick={showDesktop} data-tip={tip} aria-label={tip} aria-pressed={shown} data-show-desktop="" data-titlebar-entry="show-desktop" className={`${className} relative shrink-0 ${shown ? "bg-surface-2 text-foreground" : ""}`}>
+    <button onClick={(e) => showDesktopFromBar(e.currentTarget)} data-tip={tip} aria-label={tip} aria-pressed={shown} data-show-desktop="" data-titlebar-entry="show-desktop" className={`${className} relative shrink-0 ${shown ? "bg-surface-2 text-foreground" : ""}`}>
       <Monitor size={16} />
     </button>
   );
@@ -30,5 +36,5 @@ export function ShowDesktopButton({ className }: { className: string }) {
 /** Its row in the narrow bar's ⋯ list: its name only (no row there shows a shortcut; the button's tooltip has it). */
 export function useShowDesktopRow(): MenuAction {
   const { name } = useTip();
-  return { label: name, icon: <Monitor size={14} />, onSelect: showDesktop };
+  return { label: name, icon: <Monitor size={14} />, onSelect: () => showDesktopFromBar() };
 }

@@ -519,7 +519,7 @@ describe("exhaustive settings effect declarations", () => {
         issues.push(`${location(file, node)} page/card effect default`);
     });
     expect(issues).toEqual([]);
-  });
+  }, 30_000); // Walks every production source file; slow under full-suite load on Windows.
   it("keeps row effect types mandatory and rejects page/card defaults as a source of timing or scope", () => {
     const issues: string[] = [];
     let effectType: Node | undefined;

@@ -1,0 +1,7 @@
+import {it,expect} from 'vitest';
+import {inputPreviewText,inputSegments} from '../src/shared/inputPreview';
+import {userText} from '../src/renderer/src/lib/timeline';
+import {restorePlan} from '../src/renderer/src/lib/queuePause';
+it('a longer reference word does not hide a distinct attachment',()=>{expect(inputSegments([{type:'text',text:'Use $reviewer'},{type:'skill',name:'review',path:'/skills/review'}]).filter(x=>x.kind==='ref')).toHaveLength(1);expect(inputSegments([{type:'text',text:'Compare @plan.md.bak'},{type:'mention',name:'plan.md',path:'/w/plan.md'}]).filter(x=>x.kind==='ref')).toHaveLength(1);});
+it('edit and resend and put-back preserve text parts including whitespace and blank parts',()=>{const parts=[{type:'text',text:'  a\n'},{type:'localImage',path:'/a.png'},{type:'text',text:''},{type:'skill',name:'review',path:'/skills/review'},{type:'text',text:' b  '}];expect(userText({id:'u',type:'userMessage',content:parts} as never)).toBe('  a\n\n\n b  ');const p=restorePlan([],[{input:parts} as never]);expect(p.text).toBe('a\n\n\n b');expect(p.extra).toEqual(parts.filter(x=>x.type!=='text'));});
+it('image positions stay between text segments, valid exact refs remain once',()=>{const p=[{type:'text',text:'a'},{type:'localImage',path:'/a.png'},{type:'text',text:'b $review'},{type:'skill',name:'review',path:'/skills/review'}];expect(inputSegments(p).map(s=>s.kind)).toEqual(['text','image','text']);expect(inputPreviewText(p)).toBe('a\nb $review');});

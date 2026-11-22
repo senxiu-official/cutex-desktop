@@ -35,6 +35,10 @@ import { KindTag } from "./AgentMessageParts";
 import { pendingWakeLabel, wakeHintOf, type PendingWakeLabel } from "../lib/wakeBusyWait";
 import { useWakeBusyWait } from "../lib/wakeBusyWaitView";
 import { Tag } from "./Tag";
+import { useRowTime } from "../lib/queueRowTime";
+import { hasNoteDiagnostics } from "../lib/inputLedger/noteDelivery";
+import { diagnosticLines } from "../lib/inputLedger/noteDeliveryView";
+import { RowAge, RowFullText } from "./RowFullText";
 
 function wakeTexts(t: ReturnType<typeof useI18n>["t"], label: PendingWakeLabel): { text: string; hint?: string } {
   const hint = wakeHintOf(label);
@@ -63,20 +67,27 @@ function MessageRow({ message, busy, label, cancel, ranSince, hostId }: { messag
   const target = !failed ? matchCancelable(cancel.list, { fromId: message.from, from: message.senderName, text: message.body }) : null;
   // 清除: it lingers although the agent ran a turn since it was sent — hide it on this desktop only.
   const lingering = !message.settlement && !failed && !target && ranSince;
+  // sentAt is in seconds (Agent Bus queuedAt / sentAt).
+  const time = useRowTime(message.sentAt !== null ? message.sentAt * 1000 : null);
+  // passive-note-diagnostics-v1: where the note is and what it waits for, under its time (hover and full-text view).
+  const diagnosticsOn = useApp((s) => hasNoteDiagnostics(featuresOf(s, hostId)));
+  const delivery = diagnosticsOn && message.delivery && !failed ? diagnosticLines(t, message.delivery) : [];
+  const exact = [time.exact, ...delivery].filter(Boolean).join("\n") || null;
   return (
     <div className="min-w-0">
-      <div className={`flex h-7 min-w-0 max-w-full items-center gap-1.5 rounded-lg px-2 text-xs ${failed ? "bg-danger/5" : ""}`} title={message.body} data-testid="pending-message" data-state={message.state}>
+      <div className={`flex h-7 min-w-0 max-w-full items-center gap-1.5 rounded-lg px-2 text-xs ${failed ? "bg-danger/5" : ""}`} data-testid="pending-message" data-state={message.state}>
         <ArrowDownLeft size={13} className="shrink-0 text-accent" />
         <span className="shrink-0 text-muted">{t("conversation.from")}</span>
         <SenderAvatar id={message.from} sourceKind={peer ? null : message.sourceKind} name={name} size={16} />
-        <span className="min-w-0 max-w-[16em] shrink-0 truncate whitespace-nowrap font-medium" title={name}>{name}</span>
+        <span className="min-w-0 max-w-[16em] shrink-0 truncate whitespace-nowrap font-medium" data-tip={name} data-tip-overflow="">{name}</span>
         {peer && (
           <Tag title={t("agentMsg.remoteHint", { host: peer.host })} data-testid="pending-message-remote">
             {t("agentMsg.remote")}
           </Tag>
         )}
         <KindTag kind={message.kind} wakeHint={wake.hint} />
-        <span className="min-w-0 flex-1 truncate text-subtle">{message.body.replace(/\s+/g, " ")}</span>
+        <RowFullText full={message.body} exact={exact} className="flex-1 truncate text-subtle">{message.body.replace(/\s+/g, " ")}</RowFullText>
+        <RowAge age={time.age} exact={time.exact} />
         {message.settlement?.state === "outcome_unknown" ? <span className="text-warn-text">{t("agent-bus.settlement.unknown")}</span> : failed ? (
           <>
             <span className="flex shrink-0 items-center gap-1 text-caption/[inherit] text-danger" title={message.error ?? undefined}>

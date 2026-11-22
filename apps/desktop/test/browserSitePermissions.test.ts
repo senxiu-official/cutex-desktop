@@ -36,7 +36,8 @@ describe("browser site permission decisions", () => {
   it("asks the owner once, remembers a ticked choice per pool + origin, and answers checks from it", async () => {
     const f = setup();
     expect(await f.permissions.request(7, "media", { mediaTypes: ["video"], requestingUrl: "https://meet.example/room" })).toBe(true);
-    expect(f.prompt).toHaveBeenCalledWith({ guestId: "g1", origin: "https://meet.example", permissions: ["camera"], pool: "owner", agentActing: false });
+    expect(f.prompt).toHaveBeenCalledWith({ guestId: "g1", origin: "https://meet.example", permissions: ["camera"], pool: "owner", agentActing: false,
+      queue: { release: expect.any(Function), acquire: expect.any(Function) } });
     expect(await f.permissions.request(7, "media", { mediaTypes: ["video"] })).toBe(true);
     expect(f.prompt).toHaveBeenCalledOnce();
     expect(f.permissions.check(7, "media", "https://meet.example", { mediaType: "video" })).toBe(true);

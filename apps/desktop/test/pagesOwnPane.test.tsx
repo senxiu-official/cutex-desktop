@@ -229,3 +229,62 @@ describe("新建{{agent}} takes the conversation column (design 038, owner 2026-
     expect(Object.values(useSide.getState().layout.instances).filter((i) => i.kind === `page:${NEW_AGENT_PAGE}`)).toHaveLength(0);
   });
 });
+
+// Owner 2026-11-18: with Settings maximised (the full Settings page) and no agent open, the window bar's entries did
+// nothing visible — they opened their page / Shelf pane under Settings. A window-bar entry now leaves Settings first.
+const { runBarEntry } = await import("../src/renderer/src/lib/navEntries");
+const { useSettingsShelf, openSettingsShelf, setSettingsShelfMaximized, resetSettingsShelfForTest, setSettingsPortraitHook } = await import("../src/renderer/src/lib/settingsShelf");
+const { NEW_AGENT_PAGE: COLUMN_PAGE } = await import("../src/renderer/src/store");
+describe("a window-bar entry with Settings in front", () => {
+  afterEach(() => {
+    setSettingsPortraitHook(() => false);
+    useApp.setState({ customize: null });
+    resetSettingsShelfForTest();
+  });
+
+  it("maximised, no agent open: Settings closes and the page shows (the maximised choice is kept for next time)", () => {
+    openSettingsShelf({ tab: "general" });
+    setSettingsShelfMaximized(true);
+    expect(useApp.getState().selectedId).toBeNull();
+    runBarEntry(NAV[0]!.item as never);
+    expect(useSettingsShelf.getState().open).toBe(false);
+    expect(useSettingsShelf.getState().maximized).toBe(true);
+    expect(pageInstances()[0]![1].state).toEqual({ item: "nav" });
+    expect(kindsOnScreen(useSide.getState().layout, sideViewNow()).has(KIND)).toBe(true);
+  });
+
+  it("a column page (新建{{agent}}) is seen too: Settings closes, the page takes the column", () => {
+    openSettingsShelf({ tab: "general" });
+    setSettingsShelfMaximized(true);
+    runBarEntry({ id: "agent-config.newAgent", icon: DemoIcon, titleKey: "pane.page", target: { page: COLUMN_PAGE } } as never);
+    expect(useSettingsShelf.getState().open).toBe(false);
+    expect(useApp.getState().view).toEqual({ kind: "page", page: COLUMN_PAGE, params: {} });
+  });
+
+  it("a portrait window draws Settings maximised: the same; a live edit there ends", () => {
+    setSettingsPortraitHook(() => true);
+    openSettingsShelf({ tab: "general" });
+    useApp.setState({ customize: { region: "sidebar", back: { open: true, maximized: false, params: { tab: "general" } } } });
+    runBarEntry(NAV[0]!.item as never);
+    expect(useSettingsShelf.getState().open).toBe(false);
+    expect(useApp.getState().customize).toBeNull();
+  });
+
+  it("Settings beside the work row stays open (the page opens beside it); Settings in another app window is not touched", () => {
+    openSettingsShelf({ tab: "general" });
+    runBarEntry(NAV[0]!.item as never);
+    expect(useSettingsShelf.getState().open).toBe(true);
+    expect(pageInstances()).toHaveLength(1);
+    setSettingsShelfMaximized(true);
+    useSettingsShelf.setState({ win: "desk:other" as never });
+    runBarEntry(NAV[0]!.item as never);
+    expect(useSettingsShelf.getState().open).toBe(true);
+  });
+
+  it("runNav itself does not close Settings (the footer ⚙ entry toggles it with runNav)", () => {
+    openSettingsShelf({ tab: "general" });
+    setSettingsShelfMaximized(true);
+    runNav(NAV[0]!.item as never);
+    expect(useSettingsShelf.getState().open).toBe(true);
+  });
+});

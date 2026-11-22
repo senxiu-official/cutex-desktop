@@ -10,7 +10,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const fx = vi.hoisted(() => ({ jumps: [] as unknown[][] }));
 
 vi.mock("../src/renderer/src/bridge", () => {
-  const api = new Proxy({}, { get: (_t, m) => (m === "then" ? undefined : () => Promise.resolve(null)) });
+  // Every call answers null, except git status: a real host always answers it with a status object (lib/gitStatusFlight
+  // reads `status.possiblyStale`), so it gets "not a repository" here.
+  const notRepo = { isRepo: false, branch: null, upstream: null, ahead: null, behind: null, head: null, files: [] };
+  const api = new Proxy({}, { get: (_t, m) => (m === "then" ? undefined : m === "gitStatus" ? () => Promise.resolve(notRepo) : () => Promise.resolve(null)) });
   return { api, apiFor: () => api, bridge: { api, apiFor: () => api, on: () => () => {} }, onEvent: () => () => {}, cleanIpcMessage: (m: string) => m };
 });
 vi.mock("../src/renderer/src/lib/jump", async (importOriginal) => ({

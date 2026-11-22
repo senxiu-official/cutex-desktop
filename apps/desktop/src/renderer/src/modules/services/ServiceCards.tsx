@@ -8,7 +8,7 @@ import type { ServicePatch, ServiceView } from "../../../../shared/ipc";
 import { readServiceTile } from "../../../../shared/home";
 import { apiFor } from "../../bridge";
 import { openMenuFrom, type MenuEntry } from "../../lib/contextMenu";
-import { openService } from "../../lib/services";
+import { openService, serviceHealthTitle } from "../../lib/services";
 import { isWorker, serviceHealthKey } from "../../lib/serviceWorker";
 import { WorkerBadge } from "../../components/WorkerBadge";
 import { useI18n, type MessageKey } from "../../i18n";
@@ -137,7 +137,7 @@ function CompactServiceCard({ row, ownerName, ownerTitle, stale, tileEnabled, ca
         {worker ? <WorkerBadge /> : null}
         {tile?.badge ? <span className="max-w-20 truncate rounded bg-accent/10 px-1 py-0.5 text-caption/[inherit] text-accent">{tile.badge}</span> : null}
       </div>
-      <div className="mt-1 flex min-w-0 items-center gap-1.5 pl-3.5 text-caption/[inherit] text-subtle"><span className="truncate" title={health}>{health}</span><span aria-hidden="true">·</span><span className="truncate" title={ownerTitle} data-service-scope={ownerTitle ? "project" : undefined}>{ownerName}</span></div>
+      <div className="mt-1 flex min-w-0 items-center gap-1.5 pl-3.5 text-caption/[inherit] text-subtle"><span className="truncate" title={serviceHealthTitle(health, service, t)}>{health}</span><span aria-hidden="true">·</span><span className="truncate" title={ownerTitle} data-service-scope={ownerTitle ? "project" : undefined}>{ownerName}</span></div>
     </div>
   );
 }
@@ -312,7 +312,7 @@ export function ServiceCards({ rows, ownerName, ownerTitle, hostName, stale, til
   return (
     <div className="space-y-4" data-service-cards="dense-direct">
       {rows.some((row) => !organizable(row)) && <p role="status" className="text-xs text-muted">{t("services.organize.upgrade", { host: hostName(rows.find((row) => !organizable(row))!) })}</p>}
-      {pendingKeep ? <div data-service-lifetime-confirm="" role="status" className="flex flex-wrap items-center gap-2 rounded-lg border border-accent/40 bg-accent/5 px-3 py-2 text-xs"><span className="mr-auto">{pendingKeep.section === "temporary" ? t("services.temporary.confirm") : t("services.keep.confirm", { section: t(`services.purpose.${pendingKeep.section}`) })}</span><button type="button" disabled={busy} onClick={() => void moveService(pendingKeep.rowKey, pendingKeep.section, pendingKeep.group, pendingKeep.targetKey, pendingKeep.after, true)} className="rounded bg-accent px-2 py-1 text-white">{t(pendingKeep.section === "temporary" ? "services.temporary.confirmAction" : "services.keep.confirmAction")}</button><button type="button" disabled={busy} onClick={() => setPendingKeep(null)} className="rounded border border-border px-2 py-1">{t("dialog.cancel")}</button></div> : null}
+      {pendingKeep ? <div data-service-lifetime-confirm="" role="status" className="flex flex-wrap items-center gap-2 rounded-lg border border-accent/40 bg-accent/5 px-3 py-2 text-xs"><span className="mr-auto">{pendingKeep.section === "temporary" ? t("services.temporary.confirm") : t("services.keep.confirm", { section: t(`services.purpose.${pendingKeep.section}`) })}</span><button type="button" disabled={busy} onClick={() => void moveService(pendingKeep.rowKey, pendingKeep.section, pendingKeep.group, pendingKeep.targetKey, pendingKeep.after, true)} className="press-solid rounded bg-accent px-2 py-1 text-white hover:brightness-110 disabled:opacity-50">{t(pendingKeep.section === "temporary" ? "services.temporary.confirmAction" : "services.keep.confirmAction")}</button><button type="button" disabled={busy} onClick={() => setPendingKeep(null)} className="press rounded border border-border px-2 py-1 hover:bg-surface-2 disabled:opacity-50">{t("dialog.cancel")}</button></div> : null}
       {visibleSections.map((sectionName) => {
         const section = sections.find((candidate) => candidate.section === sectionName) ?? { section: sectionName, groups: [] };
         const sectionHint = `section:${sectionName}`;

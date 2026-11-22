@@ -3,6 +3,8 @@
 // module adds its capability names in its own modules/<id>/mock.ts `features` (appended here), not
 // in these lists.
 import { MODULE_MOCKS } from "./mockModules";
+import { NOTE_DELIVERY_FEATURES } from "./mockNoteDelivery";
+import { INTERRUPT_MANY_FEATURES } from "./mockInterruptMany";
 import { OWNER_IDLE_BUSY_TIMELINE_FEATURE } from "@cutex-desktop/protocol";
 
 /** Every mock cutex reports these. */
@@ -22,7 +24,11 @@ const CORE_BASE_FEATURES: readonly string[] = [
 /** Newer cutex only (absent under `?legacy`). */
 const CORE_NEW_FEATURES: readonly string[] = [
   "session-background-work",
+  // r289: owner notices / safety blocks close by their own id (archived agents too; main/daemon ownerNotifyAction).
+  "owner-notify-direct-v1",
   "user-layout",
+  // design 052 「谁在用」 (GET /v2/usage/quota-attribution); `?nofeat=quota-attribution` drops it.
+  "quota-attribution",
   "user-input-options-v1",
   "dsh-runtime",
   // r264 images in steers; `?noimagesteer` drops it (dev/mockBridge IMAGE_STEER).
@@ -119,8 +125,10 @@ export const MOCK_NEW_FEATURES: readonly string[] = [...CORE_NEW_FEATURES, ...MO
 export function mockScenarioFeatures(search: string): string[] {
   const q = new URLSearchParams(search);
   if (q.has("legacy")) return [];
+  // ?interruptMany (with ?inputLedger): cutex interrupt-send-many-v1 + SYNTHETIC unread 插话 (dev/mockInterruptMany).
+  // ?noteDelivery (with ?inputLedger): cutex fix/nextup-delivery capabilities + SYNTHETIC note rows (dev/mockNoteDelivery).
   // ?inputDisposal (with ?inputLedger): cutex input-disposal-v1 — id-only dispose (dev/mockInputLedger inputDispose).
-  const ledgerFeatures = q.has("inputLedger") ? ["input-ledger-v1", OWNER_IDLE_BUSY_TIMELINE_FEATURE, ...(q.has("inputDisposal") ? ["input-disposal-v1"] : [])] : [];
+  const ledgerFeatures = q.has("inputLedger") ? ["input-ledger-v1", OWNER_IDLE_BUSY_TIMELINE_FEATURE, ...(q.has("inputDisposal") ? ["input-disposal-v1"] : []), ...(q.has("noteDelivery") ? NOTE_DELIVERY_FEATURES : []), ...(q.has("interruptMany") ? INTERRUPT_MANY_FEATURES : [])] : [];
   if (q.has("overloadretry") && !q.has("no-retry-visible")) return ["model-overload-retry-visible", ...ledgerFeatures];
   // ?turnerror: cutex turn-error-surface (dev/mockTurnError.ts). ?variants: cutex profile-runtime-variants (r265; dev/mockProfileVariants.ts).
   // ?rename: cutex formal-agent-name-rename-v1 (dev/mockAgentRename.ts); without it the host lacks it, as today.

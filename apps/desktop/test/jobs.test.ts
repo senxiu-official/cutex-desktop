@@ -15,15 +15,15 @@ describe("jobs", () => {
     expect(jobStatus({ state: "running", observedProcessState: null })).toEqual(plain);
     expect(jobStatus({ state: "failed", observedProcessState: { state: "stopped", ...at } })).toMatchObject({ group: "done", key: "failed" });
   });
-  it("maps Job Service states through one table; unknown states stay in progress with their raw name", () => {
+  it("maps Job Service states through one table; an unrecognized state reads unconfirmed, not in progress", () => {
     expect(jobStatus({ state: "launch_pending" })).toMatchObject({ group: "active", key: "starting" });
     expect(jobStatus({ state: "running" })).toMatchObject({ group: "active", key: "running" });
     expect(jobStatus({ state: "exited", exitCode: 0 })).toMatchObject({ group: "done", key: "succeeded" });
     expect(jobStatus({ state: "exited", exitCode: 2 })).toMatchObject({ group: "done", key: "exitCode", exitCode: 2, tone: "danger" });
     expect(jobStatus({ state: "interrupted" })).toMatchObject({ group: "done", key: "interrupted" });
-    expect(jobStatus({ state: "launch_unknown" })).toMatchObject({ group: "done", key: "unknown" });
+    expect(jobStatus({ state: "launch_unknown" })).toMatchObject({ group: "done", key: "unconfirmed", open: false });
     expect(jobStatus({ state: "waiting_for_resources" })).toMatchObject({ group: "queued" });
-    expect(jobStatus({ state: "teleporting" })).toMatchObject({ group: "active", key: "other", raw: "teleporting" });
+    expect(jobStatus({ state: "teleporting" })).toMatchObject({ group: "done", key: "unconfirmed", raw: "teleporting", open: true, unrecognized: true });
   });
 
   it("titles, ids and times", () => {
@@ -59,8 +59,9 @@ describe("jobs", () => {
     const old = { j: row("j", "running", 1, { revision: 3 }) };
     expect(mergeJobs(old, [row("j", "running", 1, { revision: 2 })]).j?.revision).toBe(3);
     expect(mergeJobs(old, [row("j", "cancelled", 1, { revision: 4 })]).j?.state).toBe("cancelled");
-    expect(jobOperations(null)).toEqual({ cancel: false, output: false, markExternal: false });
-    expect(jobOperations({ humanOperations: ["list", "cancel", "readOutput"] })).toEqual({ cancel: true, output: true, markExternal: false });
+    expect(jobOperations(null)).toEqual({ cancel: false, output: false, markExternal: false, closeFollowUp: false });
+    expect(jobOperations({ humanOperations: ["list", "cancel", "readOutput"] })).toEqual({ cancel: true, output: true, markExternal: false, closeFollowUp: false });
+    expect(jobOperations({ humanOperations: ["list", "closeFollowUp"] }).closeFollowUp).toBe(true);
   });
 });
 

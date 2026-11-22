@@ -1,7 +1,8 @@
 // Host-owned auto-approval rules (design 047). The composer control lives in
 // components/CutexRulesChip; this module owns the complete Settings view.
 import { useEffect, useMemo, useState } from "react";
-import { CircleHelp } from "lucide-react";
+import { CircleHelp, Loader2 } from "lucide-react";
+import { usePending } from "../../lib/usePending";
 import type { ApprovalKind, ApprovalRule, ApprovalRuleAudit, ApprovalRuleAuditPage, ApprovalRuleDraft, ApprovalRulesView, DaemonApi } from "../../../../shared/ipc";
 import { Button } from "../../components/Button";
 import { TypedRuleConfirmation } from "../../components/TypedRuleConfirmation";
@@ -10,7 +11,7 @@ import { settingsAnchorId } from "../../lib/settingsNav";
 import { useI18n, type MessageKey } from "../../i18n";
 import { approvalRuleDraft, isDirectorRoleRule, ruleSaveAction } from "../../lib/approvalRuleKinds";
 import { matchesFilter } from "../../lib/listFilter";
-import { useTargetApi, useTargetSidebar } from "../../lib/targetHost";
+import { useTargetApi, useTargetHostId, useTargetSidebar } from "../../lib/targetHost";
 import { useApp } from "../../store";
 
 const message = (e: unknown) => e instanceof Error ? e.message : String(e);
@@ -141,9 +142,11 @@ export function ApprovalRulesSettings() {
     } catch (e) { setError(message(e)); }
   };
   useEffect(() => { void refresh(); }, [api]);
+  // 刷新 shows the reload running (press-feedback audit 2026-11-18); the loaded rules stay readable.
+  const reloading = usePending(useTargetHostId());
   const longest = Math.max(view?.rules.filter(isDirectorRoleRule).length ?? 0, view?.rules.filter((rule) => !isDirectorRoleRule(rule)).length ?? 0);
   return <div data-approval-rules-settings="">
-    <Section title={t("approvals.rules.settings")} hint={t("approvals.rules.settings.hint")} actions={<div className="flex items-center gap-2"><span title={t("approvals.rules.explainer")} aria-label={t("approvals.rules.explainer")} className="text-subtle"><CircleHelp size={15} aria-hidden /></span><SettingsGroup agents="none" source="host" navigation><Button size="sm" onClick={() => void refresh()}>{t("approvals.rules.refresh")}</Button></SettingsGroup></div>}>
+    <Section title={t("approvals.rules.settings")} hint={t("approvals.rules.settings.hint")} actions={<div className="flex items-center gap-2"><span title={t("approvals.rules.explainer")} aria-label={t("approvals.rules.explainer")} className="text-subtle"><CircleHelp size={15} aria-hidden /></span><SettingsGroup agents="none" source="host" navigation><Button size="sm" aria-busy={reloading.pending || undefined} data-pending={reloading.pending ? "" : undefined} onClick={() => reloading.run(refresh)}>{reloading.pending && <Loader2 size={12} aria-hidden className="animate-spin" />}{t("approvals.rules.refresh")}</Button></SettingsGroup></div>}>
       {error && <ErrorNote>{error}</ErrorNote>}
       {!view && !error && <Loading rows={2} />}
       {view && !view.rules.length && <EmptyState>{t("approvals.rules.none")}</EmptyState>}

@@ -4,12 +4,17 @@
 // `opusplan` and `default`. Shown as is, the newest model appears two or three times.
 //
 // Folding (pure; works on the session `model/list` and on the profile catalog alike, from ids alone):
-// - each family keeps ONE row for its newest model, and that row selects the alias (it keeps following
-//   the newest model, as Claude Code does): label = the newest fixed model's name + 「跟随最新」;
-// - the newest fixed id of the family and the alias's `[1m]` form fold into that row (the current
-//   models already have a 1M window), unless one of them is the current selection;
+// - each family keeps ONE row, and that row selects the alias (it keeps following the newest model, as Claude Code
+//   does): label 「Opus 5.5」 — family + version, no 「最新」 / 「(alias)」 (owner 2026-11-23). The version: the SDK
+//   handshake's display version (shared/modelResolution), else the catalog name of the model that last answered
+//   (`observedVersion`, set by the composer), else none (「Opus」) — never the catalog's newest version. Menus mark
+//   alias rows with the 「跟随最新」 tag (`tag`), so an alias and its fixed model of the same version stay apart;
+// - the alias's target (the reported resolution, else the newest fixed id of the family) and its `[1m]` form fold
+//   into that row (the current models already have a 1M window), unless one of them is the current selection;
 // - older fixed models, `[1m]` forms of fixed ids (labelled with their window), the modes and unknown
 //   ids follow, in that order. The current selection is never folded away.
+
+import { aliasResolutionOf, type AliasFields } from "../../../shared/modelResolution";
 
 export type ClaudeFamily = "opus" | "sonnet" | "fable" | "haiku";
 const FAMILIES: readonly ClaudeFamily[] = ["opus", "sonnet", "fable", "haiku"];
@@ -62,15 +67,23 @@ export interface FoldedModel<T> {
   folded: string[];
   /** false: below the newest model of each family (the picker's 「更多」). */
   primary: boolean;
+  /** A family alias (`opus`, `opus[1m]`): `name` is the family; `version` from the handshake, else the last answer. */
+  alias?: { version: string | null };
 }
+
+/** The alias fields of a list item (model/list option, catalog row); strings carry none. */
+const defaultFields = (item: unknown): AliasFields | null => (item && typeof item === "object" ? (item as AliasFields) : null);
 
 /** Whether a model list is Claude's (aliases or fixed claude-* ids). */
 export function looksClaude(ids: readonly string[]): boolean {
   return ids.some((id) => claudeIdInfo(id).kind === "alias" || claudeIdInfo(id).kind === "pinned");
 }
 
-export function foldClaudeModels<T>(items: readonly T[], idOf: (item: T) => string, nameOf: (item: T) => string | null | undefined, current: string | null): FoldedModel<T>[] {
+export function foldClaudeModels<T>(items: readonly T[], idOf: (item: T) => string, nameOf: (item: T) => string | null | undefined, current: string | null, fieldsOf: (item: T) => AliasFields | null | undefined = defaultFields): FoldedModel<T>[] {
   const infos = items.map((item) => ({ item, id: idOf(item), info: claudeIdInfo(idOf(item)) }));
+  const resolutionOf = (x: (typeof infos)[number] | undefined) => (x ? aliasResolutionOf(fieldsOf(x.item)) : null);
+  // The version an alias row shows: the handshake's display version, else the last answer's catalog version.
+  const versionOf = (x: (typeof infos)[number] | undefined) => (x ? (resolutionOf(x)?.version ?? observedVersionOfItem(x.item)) : null);
   // Newest fixed (non-[1m]) model per family.
   const newest = new Map<ClaudeFamily, (typeof infos)[number]>();
   for (const x of infos) {
@@ -85,8 +98,10 @@ export function foldClaudeModels<T>(items: readonly T[], idOf: (item: T) => stri
   // 1. One row per family: the alias, named after its newest model.
   for (const family of FAMILIES) {
     const alias = infos.find((x) => x.info.kind === "alias" && x.info.family === family && !x.info.oneM);
-    const target = newest.get(family);
     if (!alias) continue;
+    const resolved = resolutionOf(alias);
+    // What the alias stands for in this list: the reported target when listed, else the family's newest fixed id.
+    const target = (resolved && infos.find((x) => x.id.toLowerCase() === resolved.resolvedModel.toLowerCase() && x.info.kind === "pinned")) || newest.get(family);
     const folded: string[] = [];
     if (target && !isCurrent(target.id)) {
       folded.push(target.id);
@@ -98,7 +113,7 @@ export function foldClaudeModels<T>(items: readonly T[], idOf: (item: T) => stri
       used.add(oneM.id);
     }
     used.add(alias.id);
-    out.push({ item: alias.item, name: target ? pinnedName(target.id, nameOf(target.item)) : cap(family), tag: "latest", folded, primary: true });
+    out.push({ item: alias.item, name: cap(family), tag: "latest", folded, primary: true, alias: { version: versionOf(alias) } });
   }
   // A family with only fixed ids: its newest one is primary.
   for (const family of FAMILIES) {
@@ -114,8 +129,12 @@ export function foldClaudeModels<T>(items: readonly T[], idOf: (item: T) => stri
     .sort((a, b) => FAMILIES.indexOf(a.info.family!) - FAMILIES.indexOf(b.info.family!) || (b.info.version && a.info.version ? cmp(b.info.version, a.info.version) : a.info.version ? 1 : -1) || Number(a.info.oneM) - Number(b.info.oneM));
   for (const x of pinnedRest) {
     used.add(x.id);
-    const base = x.info.kind === "alias" ? (newest.get(x.info.family!) ? pinnedName(newest.get(x.info.family!)!.id, nameOf(newest.get(x.info.family!)!.item)) : cap(x.info.family!)) : pinnedName(x.id.replace(/\[1m\]$/i, ""), x.info.oneM ? null : nameOf(x.item));
-    out.push({ item: x.item, name: base, tag: x.info.oneM ? "oneM" : x.info.kind === "alias" ? "latest" : null, folded: [], primary: false });
+    if (x.info.kind === "alias") {
+      const plain = infos.find((y) => y.info.kind === "alias" && y.info.family === x.info.family && !y.info.oneM);
+      out.push({ item: x.item, name: cap(x.info.family!), tag: x.info.oneM ? "oneM" : "latest", folded: [], primary: false, alias: { version: versionOf(x) ?? versionOf(plain) } });
+      continue;
+    }
+    out.push({ item: x.item, name: pinnedName(x.id.replace(/\[1m\]$/i, ""), x.info.oneM ? null : nameOf(x.item)), tag: x.info.oneM ? "oneM" : null, folded: [], primary: false });
   }
   // 3. Modes, then anything else (custom / SDK-only ids keep their own names).
   for (const mode of MODES) {
@@ -147,14 +166,18 @@ export function foldedRowFor<T>(rows: readonly FoldedModel<T>[], idOf: (item: T)
 
 type T = (key: import("../i18n").MessageKey, vars?: Record<string, string | number>) => string;
 
+/** An alias label: 「Opus 5.5」, or 「Opus」 without a version (owner 2026-11-23; the same in every language). */
+export const aliasLabel = (family: string, version: string | null | undefined): string => (version ? `${family} ${version}` : family);
+
 /** The row's name (modes get theirs here) and its one-line explanation. */
 export function presentClaudeRow<I>(row: FoldedModel<I>, t: T): { name: string; description: string } {
-  const family = (name: string) => name.replace(/\s+[\d.]+$/, "");
+  const name = row.alias ? aliasLabel(row.name, row.alias.version) : row.name;
   switch (row.tag) {
     case "latest":
-      return { name: row.name, description: t("claudeModels.latest", { family: family(row.name), model: row.name }) };
+      // No alias explanation line (owner 2026-11-18).
+      return { name, description: "" };
     case "oneM":
-      return { name: t("claudeModels.oneMName", { model: row.name }), description: t("claudeModels.oneM") };
+      return { name: t("claudeModels.oneMName", { model: name }), description: t("claudeModels.oneM") };
     case "mode.best":
       return { name: t("claudeModels.best"), description: t("claudeModels.bestHint") };
     case "mode.opusplan":
@@ -166,16 +189,17 @@ export function presentClaudeRow<I>(row: FoldedModel<I>, t: T): { name: string; 
   }
 }
 
-/** A Claude model list as picker items: folded, ordered, named; `primary` rows first. */
-export function claudePickerItems<I extends { model: string; displayName: string; description?: string }>(models: readonly I[], current: string | null, t: T): (I & { primary: boolean })[] {
+/** A Claude model list as picker items: folded, ordered, named; `primary` rows first; alias rows tagged 「跟随最新」. */
+export function claudePickerItems<I extends { model: string; displayName: string; description?: string }>(models: readonly I[], current: string | null, t: T): (I & { primary: boolean; tag?: string })[] {
   return foldClaudeModels(models, (m) => m.model, (m) => m.displayName, current).map((row) => {
     const shown = presentClaudeRow(row, t);
-    return { ...row.item, displayName: shown.name, description: shown.description, primary: row.primary };
+    return { ...row.item, displayName: shown.name, description: shown.description, primary: row.primary, ...(row.alias ? { tag: t("claudeModels.latestTag") } : {}) };
   });
 }
 
-/** Short name for `id` within a Claude list (the composer chip): "Sonnet 5.5" for `sonnet`. */
-export function claudeShortName(ids: readonly { id: string; displayName?: string | null }[], id: string | null, t: T): string | null {
+/** Short name for `id` within a Claude list (the composer chip): 「Sonnet 5.5」 for `sonnet` with a handshake or
+ *  last-answer version in the item's fields, else 「Sonnet」. */
+export function claudeShortName(ids: readonly ({ id: string; displayName?: string | null; observedVersion?: string | null } & AliasFields)[], id: string | null, t: T): string | null {
   if (!id) return null;
   const rows = foldClaudeModels(ids.some((x) => x.id === id) ? ids : [...ids, { id, displayName: null }], (x) => x.id, (x) => x.displayName, id);
   const row = foldedRowFor(rows, (x) => x.id, id);
@@ -187,7 +211,68 @@ export function isClaudeCatalog(view: { modelsSource?: { kind?: string | null } 
   return !!view?.modelsSource?.kind?.startsWith("claude");
 }
 
-/** Catalog rows as folded choices: `{id, name, description, primary}` in display order. */
-export function claudeCatalogChoices(models: readonly { id: string; displayName?: string | null }[], current: string | null, t: T): { id: string; name: string; description: string; primary: boolean }[] {
-  return foldClaudeModels(models, (m) => m.id, (m) => m.displayName, current).map((row) => ({ id: row.item.id, ...presentClaudeRow(row, t), primary: row.primary }));
+/** Catalog rows as folded choices in display order. `tag`: 「跟随最新」 on alias rows (for menus). `option`: the text
+ *  for a plain select — the name, with 「 · 跟随最新」 only where an alias and a fixed model would read the same. */
+export function claudeCatalogChoices(models: readonly ({ id: string; displayName?: string | null } & AliasFields)[], current: string | null, t: T): { id: string; name: string; description: string; primary: boolean; tag?: string; option: string }[] {
+  const rows = foldClaudeModels(models, (m) => m.id, (m) => m.displayName, current).map((row) => ({ id: row.item.id, ...presentClaudeRow(row, t), primary: row.primary, ...(row.alias ? { tag: t("claudeModels.latestTag") } : {}) }));
+  return rows.map((r) => ({ ...r, option: r.tag && rows.some((o) => o !== r && !o.tag && o.name === r.name) ? `${r.name} · ${r.tag}` : r.name }));
+}
+
+/** Every alias item of a list (`opus`, `opus[1m]`) by the alias rule, whether or not folding keeps it as a row of
+ *  its own (menus that list the raw items): the family label with the item's handshake / last-answer version — a
+ *  `[1m]` alias without one takes its plain alias's (as `foldClaudeModels`). `oneM`: the caller wraps the name. */
+export function claudeAliasLabels<I>(items: readonly I[], idOf: (item: I) => string, fieldsOf: (item: I) => AliasFields | null | undefined = defaultFields): Map<string, { name: string; oneM: boolean }> {
+  const versionOf = (item: I | undefined) => (item === undefined ? null : (aliasResolutionOf(fieldsOf(item))?.version ?? observedVersionOfItem(item)));
+  const out = new Map<string, { name: string; oneM: boolean }>();
+  for (const item of items) {
+    const info = claudeIdInfo(idOf(item));
+    if (info.kind !== "alias") continue;
+    const plain = info.oneM ? items.find((y) => { const x = claudeIdInfo(idOf(y)); return x.kind === "alias" && x.family === info.family && !x.oneM; }) : undefined;
+    out.set(idOf(item), { name: aliasLabel(cap(info.family!), versionOf(item) ?? versionOf(plain)), oneM: info.oneM });
+  }
+  return out;
+}
+
+/** The name of a Claude family alias (or the best / opusplan mode) known only by id — no list row with its handshake
+ *  at hand: the family alone (「Opus」; never a version borrowed from elsewhere). null for any other id. */
+export function claudeAliasName(id: string, t: T): string | null {
+  const info = claudeIdInfo(id);
+  if (info.kind === "alias") {
+    const name = cap(info.family!);
+    return info.oneM ? t("claudeModels.oneMName", { model: name }) : name;
+  }
+  if (info.mode === "best") return t("claudeModels.best");
+  if (info.mode === "opusplan") return t("claudeModels.opusplan");
+  return null;
+}
+
+/** The last-answer version a list item carries (`observedVersion`, composer only). */
+function observedVersionOfItem(item: unknown): string | null {
+  const v = item && typeof item === "object" ? (item as { observedVersion?: unknown }).observedVersion : null;
+  return typeof v === "string" && v.trim() ? v.trim() : null;
+}
+
+/** The catalog row of a fixed model id (same family and version; a date suffix or `[1m]` does not matter). */
+export function catalogRowFor<R extends { id: string }>(rows: readonly R[], id: string | null | undefined): R | undefined {
+  if (!id) return undefined;
+  const exact = rows.find((r) => r.id === id);
+  if (exact) return exact;
+  const info = claudeIdInfo(id);
+  if (info.kind !== "pinned") return undefined;
+  const same = (r: R) => { const x = claudeIdInfo(r.id); return x.kind === "pinned" && x.family === info.family && cmp(x.version!, info.version!) === 0; };
+  return rows.find((r) => same(r) && !claudeIdInfo(r.id).oneM) ?? rows.find(same);
+}
+
+/**
+ * The version an alias of `family` shows from the model that last answered (`lastObservedModel`): that model's catalog
+ * name without the family word (「Opus 5.5」 → 「5.5」). Null when it is another family, not a fixed model, or has no
+ * catalog name — the raw id is never shown.
+ */
+export function observedVersionFor(observed: string | null | undefined, family: string | null | undefined, rows: readonly { id: string; displayName?: string | null }[]): string | null {
+  if (!observed || !family) return null;
+  const info = claudeIdInfo(observed);
+  if (info.kind !== "pinned" || info.family !== family.toLowerCase()) return null;
+  const name = catalogRowFor(rows, observed)?.displayName?.replace(/\s*\(alias\)\s*$/i, "").replace(/\s*(?:\(1M\)|·\s*1M\b.*|\b1M)\s*$/i, "").trim();
+  if (!name || !name.toLowerCase().startsWith(`${family.toLowerCase()} `)) return null;
+  return name.slice(family.length).trim() || null;
 }

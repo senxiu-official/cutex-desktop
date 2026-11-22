@@ -11,6 +11,7 @@ import { lazyPage } from "../../lib/lazyPage";
 const NewAgentPage = lazyPage(() => import("./NewAgentPage").then((m) => m.NewAgentPage));
 const ProfilesPage = lazyPage(() => import("../../components/settings/ProfilesSettings").then((m) => m.ProfilesPage));
 const KimiAccountsSubPage = lazyPage(() => import("../../components/settings/ProfilesSettings").then((m) => m.KimiAccountsSubPage));
+const ProfileModelsSubPage = lazyPage(() => import("../../components/settings/ProfileModelsSubPage").then((m) => m.ProfileModelsSubPage));
 const DefaultsPage = lazyPage(() => import("../../components/settings/GlobalSettings").then((m) => m.DefaultsPage));
 const InstructionsPage = lazyPage(() => import("../../components/settings/GlobalSettings").then((m) => m.InstructionsPage));
 const CollabPage = lazyPage(() => import("../../components/settings/SecuritySettings").then((m) => m.CollabPage));
@@ -31,7 +32,10 @@ export default defineModule({
     "main.page": [{ id: "agent-config.newAgent", Page: NewAgentPage, useTitle: pageTitle("agent-config.newAgent.title") }],
     "settings.page": [
       { id: "agent-config.profiles", page: "profiles", group: "agents", order: 100, icon: Boxes, titleKey: "agent-config.profiles", hintKey: "settings.pageHint.profiles", source: "host", Page: ProfilesPage, ...PROFILES_SEARCH,
-        subPages: { kimi: { titleKey: "kimi-accounts.section", hintKey: "kimi-accounts.sectionHint", Page: KimiAccountsSubPage, anchors: ["kimi-accounts.all"] } } },
+        subPages: {
+          kimi: { titleKey: "kimi-accounts.section", hintKey: "kimi-accounts.sectionHint", Page: KimiAccountsSubPage, anchors: ["kimi-accounts.all"] },
+          models: { titleKey: "settings.modelContext.catalog", hintKey: "settings.modelContext.subPageHint", Page: ProfileModelsSubPage, anchors: ["models-all"] },
+        } },
       { id: "agent-config.defaults", page: "defaults", group: "agents", order: 200, icon: Sparkles, titleKey: "agent-config.defaults", source: "host", hintKey: "settings.pageHint.defaults", Page: DefaultsPage, ...DEFAULTS_SEARCH },
       { id: "agent-config.instructions", page: "instructions", group: "agents", order: 300, icon: ScrollText, titleKey: "agent-config.instructions", source: "host", hintKey: "settings.pageHint.instructions", Page: InstructionsPage, ...INSTRUCTIONS_SEARCH },
       { id: "agent-config.collab", page: "collab", group: "agents", order: 400, icon: Users, titleKey: "agent-config.collab", hintKey: "settings.pageHint.collab", source: "host", Page: CollabPage, ...COLLAB_SEARCH,

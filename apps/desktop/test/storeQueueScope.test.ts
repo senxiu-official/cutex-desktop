@@ -728,7 +728,7 @@ describe("插话 outcome unknown (owner 2026-10-26): the desktop resyncs and dec
   };
   const sends = () => mock.calls.filter((c) => c.method === "submit" || c.method === "queuePromote" || c.method === "queueMergeInsert");
   /** `after`: cutex's state the resync will read (queue list, thread/read). */
-  async function steerUnknown(after: () => void = () => {}, text = "hello") {
+  async function steerUnknown(after: () => void = () => {}, text = "hello", input?: unknown[]) {
     await start();
     mock.responses.set("bootstrap", running());
     await store.getState().select("a1");
@@ -736,7 +736,8 @@ describe("插话 outcome unknown (owner 2026-10-26): the desktop resyncs and dec
     mock.responses.set("queuePromote", unknownAnswer);
     after();
     mock.calls.length = 0;
-    await store.getState().queueSendNow(queueItem("q-u", "cm-u", text), "a1", "local");
+    const item = queueItem("q-u", "cm-u", text);
+    await store.getState().queueSendNow((input ? { ...(item as object), input } : item) as never, "a1", "local");
   }
   /** Promise callbacks only (no timers: the backoff and the delivered expiry wait). */
   const flush = async () => { for (let i = 0; i < 30; i++) await Promise.resolve(); };
@@ -852,6 +853,19 @@ describe("插话 outcome unknown (owner 2026-10-26): the desktop resyncs and dec
     expect(id).toBeTruthy();
     expect(id).not.toBe("cm-u");
     expect(await feedback()).toEqual([]);
+  });
+
+  it("再发一次 sends the queued text byte for byte: blank text parts and line breaks kept, not the row preview", async () => {
+    const input = [{ type: "text", text: "a" }, { type: "text", text: "" }, { type: "text", text: "b" }];
+    await steerUnknown(() => mock.responses.set("queueList", () => ({ items: [] })), "hello", input);
+    await drain();
+    const [f] = await feedback();
+    mock.responses.set("submit", (...args: unknown[]) => ({ disposition: "steered", turnId: "t1", clientUserMessageId: (args[4] as { clientUserMessageId: string }).clientUserMessageId }));
+    await store.getState().queueInsertDecide(f!.token, "resend", "a1", "local");
+    await settle();
+    const submits = mock.calls.filter((c) => c.method === "submit");
+    expect(submits).toHaveLength(1);
+    expect(submits[0]!.args[1]).toBe("a\n\nb");
   });
 
   it("still listed but its send unresolved (delivery unknown) → stays unsure, never a plain queued row", async () => {

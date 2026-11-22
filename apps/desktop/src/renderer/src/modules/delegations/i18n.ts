@@ -21,7 +21,7 @@ export const zhCN = {
   "delegations.viewAll": "在委托页查看全部",
   "delegations.search": "搜索委托",
   "delegations.bucket.needsYou": "需要你",
-  "delegations.bucket.waiting": "等待 / 受阻",
+  "delegations.bucket.waiting": "等待中",
   "delegations.bucket.active": "进行中",
   "delegations.bucket.done": "已结束",
   "delegations.none": "没有未结束的委托",

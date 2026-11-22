@@ -16,7 +16,7 @@
 import type { SessionResource } from "@cutex-desktop/protocol";
 import type { MessageKey } from "../i18n";
 import { hostApi, sidebarOf, useApp, viewHostOf } from "../store";
-import { confirmDialog, promptDialog, type DialogCheck } from "./contextMenu";
+import { confirmDialog, type DialogCheck } from "./contextMenu";
 import { ownedServicesNote, restoreArchived, retireAgent } from "./menus";
 import { archivedProjectOf } from "./archivedAgent";
 import { getUiPrefs, setProjectDirector } from "./prefs";
@@ -35,24 +35,20 @@ export function directorArchiveCheck(director: SessionResource, t: T, hostId: st
 export interface ArchiveConfirm {
   /** Archive the project. */
   ok: boolean;
-  /** The typed name did not match (nothing archived). */
-  mismatch: boolean;
   /** Retire the Director afterwards. */
   withDirector: boolean;
 }
 
-/** The archive confirmation: a plain confirm for an empty project, else type its name; plus the Director box. */
+/**
+ * The archive confirmation: one plain dialog (archive is restorable: confirm by risk, no typed name), saying how
+ * many members it has, with the 「同时归档主管」 box when there is a live Director.
+ */
 export async function confirmProjectArchive(o: { displayName: string; memberCount: number; director: SessionResource | null; hostId: string; t: T }): Promise<ArchiveConfirm> {
   const { t } = o;
   const check = o.director ? directorArchiveCheck(o.director, t, o.hostId) : undefined;
-  if (o.memberCount === 0) {
-    const ok = await confirmDialog(t("projects.archiveConfirm", { name: o.displayName }), true, undefined, check);
-    return { ok, mismatch: false, withDirector: ok && !!check?.checked };
-  }
-  const typed = await promptDialog(t("projects.archiveTypeName", { name: o.displayName, n: o.memberCount }), "", { placeholder: o.displayName, check });
-  if (typed === null) return { ok: false, mismatch: false, withDirector: false };
-  if (typed.trim() !== o.displayName) return { ok: false, mismatch: true, withDirector: false };
-  return { ok: true, mismatch: false, withDirector: !!check?.checked };
+  const message = o.memberCount === 0 ? t("projects.archiveConfirm", { name: o.displayName }) : t("projects.archiveConfirmMembers", { name: o.displayName, n: o.memberCount });
+  const ok = await confirmDialog(message, true, undefined, check);
+  return { ok, withDirector: ok && !!check?.checked };
 }
 
 /**

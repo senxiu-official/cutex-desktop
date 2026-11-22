@@ -16,7 +16,7 @@ export function RoutingDecision({ record, host, dense = false, onDecision }: { r
   const { t } = useI18n();
   const access = useHostAccess(host);
   const features = useApp(s => featuresOf(s, host));
-  const operation = useRoutingOperation(host, record.projectId);
+  const operation = useRoutingOperation(host, record.projectId, `approval:${record.id}`);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const allowed = access.isOwner && features.has(ROUTING_REVIEW_FEATURE) && canDecideApprovals(features, access);
@@ -27,13 +27,14 @@ export function RoutingDecision({ record, host, dense = false, onDecision }: { r
     finally { setBusy(false); }
   };
   return <div className={`flex items-center gap-1.5 ${dense ? "shrink-0 flex-nowrap text-caption/[inherit]" : "flex-wrap text-xs"}`} data-routing-review={record.id}>
-    <span className="text-warn" title={record.state === "approved" ? t("delegation.routing.waitingGrant") : undefined}>{t(record.state === "approved" ? "delegation.routing.approved" : record.state === "denied" ? "delegation.routing.denied" : "delegation.routing.title")}</span>
+    {/* W3: a stale / cancelled review says so (no decision buttons: those are for pending only). */}
+    <span className="text-warn" title={record.state === "approved" ? t("delegation.routing.waitingGrant") : record.state === "stale" || record.state === "cancelled" ? t("delegation.routing.closedHint") : undefined}>{t(record.state === "approved" ? "delegation.routing.approved" : record.state === "denied" ? "delegation.routing.denied" : record.state === "stale" ? "delegation.routing.stale" : record.state === "cancelled" ? "delegation.routing.cancelled" : "delegation.routing.title")}</span>
     {record.state === "pending" && allowed && (['approve', 'deny'] as const).map(decision => record.allowedActions[decision] && <button key={decision} type="button" data-routing-decision={decision}
       disabled={busy || !!operation} title={t(decision === "approve" ? "delegation.routing.approveHint" : "delegation.routing.denyHint")}
       onClick={event => { event.stopPropagation(); void run(decision); }}
       className={`rounded px-2 py-0.5 disabled:opacity-50 ${decision === "approve" ? "bg-accent text-white hover:opacity-90" : "border border-border text-muted hover:text-danger"}`}>{t(decision === "approve" ? "delegation.routing.approve" : "delegation.routing.deny")}</button>)}
     {operation && (record.state !== "approved" || operation.kind !== "grant") && <><span className="text-warn">{t("delegation.routing.unknown")}</span><button type="button" className="text-accent hover:underline" disabled={busy || !allowed} onClick={event => {
-      event.stopPropagation(); setBusy(true); void checkRoutingOutcome(host, record.projectId).catch(() => setError(t("delegation.routing.unknown"))).finally(() => setBusy(false));
+      event.stopPropagation(); setBusy(true); void checkRoutingOutcome(host, record.projectId, `approval:${record.id}`).catch(() => setError(t("delegation.routing.unknown"))).finally(() => setBusy(false));
     }}>{t("delegation.routing.check")}</button></>}
     {error && <span role="alert" className="text-danger">{error}</span>}
   </div>;

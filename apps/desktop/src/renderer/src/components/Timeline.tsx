@@ -1,3 +1,4 @@
+import { MarkdownTurn } from "../lib/markdownTurn";
 import { useAgentPause } from "../lib/agentPause";
 import { useAgentPauseHint } from "./AgentPauseParts";
 import { viewKey } from "../lib/viewKey";
@@ -44,12 +45,13 @@ import { pendingTail, pendingUserEntry, sendRowKey, timelineRowKey, timelineTail
 import { LedgerPendingStatus, SessionDeliveryStatus, PendingStatus } from "./PendingSends";
 import type { OlderHistory } from "../lib/historyPages";
 import { OlderHistoryRow } from "./OlderHistoryRow";
+import { BusHydrationRow } from "./BusHydrationRow";
 import { MessageImages } from "./ImageThumbs";
 import { ItemMedia } from "./ItemMedia";
 import { reasoningPreview } from "../lib/reasoning";
 import { liveReasoning, turnActivity } from "../lib/turnActivity";
 import { nextProgressAt, silentGapSeconds, turnProgressMark } from "../lib/silentGap";
-import { agentState, useApp } from "../store";
+import { agentState, interruptWithFeedback, useApp } from "../store";
 import { convNotify, useConvFeatures, useConvHost, useConvScope, useConvView } from "../lib/conversationScope";
 import { CodeBlockScope } from "../lib/codeBlockScope";
 import { isArchived } from "../lib/archivedAgent";
@@ -86,7 +88,7 @@ import { turnErrorPlacement, turnInterruptedPlacement } from "../lib/turnErrors"
 import { foldAutomaticRetryRows, type AutomaticRetryLink } from "../lib/autoRetryRows";
 import { turnRefusedToolSchema } from "../lib/toolSchemaHint";
 import { ToolSchemaHint } from "./ToolSchemaHint";
-import { retryNoticeText } from "../lib/retryNotice";
+import { retryCountdown, retryNoticeText, type RetryNotice } from "../lib/retryNotice";
 import { useActingUser } from "../lib/actingUsers";
 import { identityInitials } from "../lib/identity";
 import { useUserAvatar } from "../lib/userAvatars";
@@ -181,6 +183,10 @@ export function TurnTail({ timeline, sessionId, thread = "agent" }: { timeline: 
   const delivery = useApp(s => ledgerEnabled ? agentState(s.inputs, hostId, sessionId)?.delivery ?? null : null);
   const turnId = ledgerEnabled ? delivery?.turn?.turnId : timeline.activeTurnId;
   const turn = turnId ? timeline.turns.findLast((x) => x.id === turnId) : undefined;
+  // A retrying request (lib/retryNotice), also on the input-ledger path: the delivery may already read idle while
+  // the runtime keeps the input and retries it, so the timeline's own running turn counts too.
+  const retryTurn = turn?.retry ? turn : timeline.activeTurnId ? timeline.turns.findLast((x) => x.id === timeline.activeTurnId && !!x.retry) : undefined;
+  const retryLine = retryTurn?.retry ? <RetryNoticeLine notice={retryTurn.retry} sessionId={thread === "agent" ? sessionId : null} hostId={hostId} /> : null;
   const now = useNow(!!turn);
   const activity = turnActivity(timeline, background, (item) => toolRendererFor(item, tools)?.item.activity?.(item) ?? null);
   // When the turn last showed progress (lib/silentGap): a mark change restarts the quiet clock.
@@ -195,11 +201,14 @@ export function TurnTail({ timeline, sessionId, thread = "agent" }: { timeline: 
   </div>;
   if (ledgerEnabled) {
     const running = delivery?.state === "turn";
-    if (!running && !showStandaloneDelivery(delivery, false)) return null;
-    return <div className="mt-1.5 flex h-4 items-center gap-2" data-testid="turn-working">
-      {running ? <><BusyDots /><span className="text-caption text-subtle">{t("turn.activity.working")}</span></>
-        : <SessionDeliveryStatus delivery={delivery} sessionId={sessionId} hostId={hostId} />}
-    </div>;
+    if (!running && !showStandaloneDelivery(delivery, false)) return retryLine;
+    return <>
+      <div className="mt-1.5 flex h-4 items-center gap-2" data-testid="turn-working">
+        {running ? <><BusyDots /><span className="text-caption text-subtle">{t("turn.activity.working")}</span></>
+          : <SessionDeliveryStatus delivery={delivery} sessionId={sessionId} hostId={hostId} />}
+      </div>
+      {retryLine}
+    </>;
   }
   if (!turn || !activity) return null;
   const waiting = activity === "approval" || activity === "question";
@@ -235,19 +244,37 @@ export function TurnTail({ timeline, sessionId, thread = "agent" }: { timeline: 
         </>
       )}
     </div>
-    {turn.retry && <RetryNoticeLine text={retryNoticeText(turn.retry, t)} />}
+    {retryLine}
     </>
   );
 }
 
 /** Native is retrying the model request (lib/retryNotice): a quiet warning under the live line, gone
- *  with the next output or the turn's end. */
-function RetryNoticeLine({ text }: { text: string }) {
+ *  with the next output or the turn's end. With `nextRetryAt`: m:ss to the next attempt. An input the runtime keeps
+ *  and retries (`retryableInput`, agent thread only): 立即重试 = the owner's asks resume, 停止 = the composer's stop
+ *  (the same route and feedback). */
+function RetryNoticeLine({ notice, sessionId, hostId }: { notice: RetryNotice; sessionId: string | null; hostId: string }) {
   const { t } = useI18n();
+  const now = useNow(notice.nextAt != null);
+  const [pending, setPending] = useState(false);
+  const countdown = retryCountdown(notice, now);
+  const actions = notice.retryableInput && sessionId;
+  const retryNow = async () => {
+    if (!sessionId) return;
+    setPending(true);
+    try { await useApp.getState().resumeAsks(sessionId, hostId); }
+    catch (error) { useApp.getState().notify(error instanceof Error ? error.message : String(error), "error", { hostId, sessionId }); }
+    finally { setPending(false); }
+  };
   return (
-    <div role="status" data-testid="turn-retry-notice" title={t("turn.retry.hint")} className="mt-1 flex h-4 min-w-0 items-center gap-1.5 text-xs text-warn">
+    <div role="status" data-testid="turn-retry-notice" title={t(notice.retryableInput ? "turn.retry.hintRetained" : "turn.retry.hint")} className="mt-1 flex h-4 min-w-0 items-center gap-1.5 text-xs text-warn">
       <AlertTriangle size={12} className="shrink-0" />
-      <span className="min-w-0 truncate">{text}</span>
+      <span className="min-w-0 truncate">{retryNoticeText(notice, t)}</span>
+      {countdown && <span className="shrink-0 tabular-nums" data-testid="turn-retry-countdown">· {t("turn.retry.next", { t: countdown })}</span>}
+      {actions && <>
+        <button type="button" className="h-4 shrink-0 rounded px-1 text-muted hover:bg-surface-2 hover:text-foreground" disabled={pending} onClick={() => void retryNow()} data-testid="turn-retry-now">{t("turn.retry.now")}</button>
+        <button type="button" className="h-4 shrink-0 rounded px-1 text-muted hover:bg-surface-2 hover:text-foreground" disabled={pending} onClick={() => void interruptWithFeedback(t, sessionId, hostId)} data-testid="turn-retry-stop">{t("composer.stop")}</button>
+      </>}
     </div>
   );
 }
@@ -321,7 +348,12 @@ function StrandedNote({ noteKey, sentAt }: { noteKey: "inputLedger.stranded.inte
   </div>;
 }
 
-const MemoEntry = memo(Entry, (a, b) => a.entry === b.entry && a.pending === b.pending && a.nameOf === b.nameOf && a.sessionId === b.sessionId && a.readOnly === b.readOnly && a.actionable === b.actionable && a.dropped === b.dropped && a.foldRole === b.foldRole && sameFields(a.bar, b.bar) && a.changes?.signature === b.changes?.signature && a.reply === b.reply);
+// Each row tells its Markdown which turn it belongs to (lib/markdownTurn): the scroll anchor `data-turn-id` is only on
+// a turn's first row.
+function TurnEntry(props: Parameters<typeof Entry>[0]) {
+  return <MarkdownTurn.Provider value={props.entry.turnId ?? null}><Entry {...props} /></MarkdownTurn.Provider>;
+}
+const MemoEntry = memo(TurnEntry, (a, b) => a.entry === b.entry && a.pending === b.pending && a.nameOf === b.nameOf && a.sessionId === b.sessionId && a.readOnly === b.readOnly && a.actionable === b.actionable && a.dropped === b.dropped && a.foldRole === b.foldRole && sameFields(a.bar, b.bar) && a.changes?.signature === b.changes?.signature && a.reply === b.reply);
 
 /**
  * A live agent reply: its code blocks may carry `timeline.codeBlockAction` items (§22), on the agent's host.
@@ -531,6 +563,7 @@ export function TimelineBody({ timeline, entries: suppliedEntries, version, sess
   const loading = useConvView(sessionId, (v) => v?.loading ?? false);
   // The session view's failed load gates the opening too (below); TimelineBody's own error row is Conversation's.
   const failed = useConvView(sessionId, (v) => !!v?.error);
+  const busIncomplete = useConvView(sessionId, (v) => v?.busHydration === "incomplete");
   // Older pages this focus request has fetched (a target before every loaded turn pages history in).
   const paged = useRef({ nonce: 0, pages: 0 });
   useEffect(() => {
@@ -783,6 +816,7 @@ export function TimelineBody({ timeline, entries: suppliedEntries, version, sess
         </button>
       )}
       {hiddenTurns === 0 && older?.cursor && onLoadOlder && <OlderHistoryRow older={older} onLoad={onLoadOlder} />}
+      {!readOnly && busIncomplete && <BusHydrationRow onContinue={() => void useApp.getState().continueBusHydration(sessionId, view.hostId)} />}
       {ownerNotify && <OwnerNotificationHistory hostId={view.hostId} agentId={sessionId} />}
       {revealedSafetyId && <OwnerNotifyCard notificationId={revealedSafetyId} sessionId={sessionId} hostId={view.hostId} />}
       {noteCards(placed.head)}

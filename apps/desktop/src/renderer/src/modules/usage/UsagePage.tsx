@@ -9,6 +9,7 @@
 // 「全部主机」 (header picker, lib/settingsHost useAllHostsTarget): every included host's quotas and
 // ledger merged (./merge.ts, ./allHosts.ts), with a 「主机」 split; the price table, model map and
 // 额外目录 are still edited on one host, picked in place (the edit host).
+import { useSettingsCard } from "../../lib/settingsDrafts";
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { AlertTriangle, ArrowRight, ArrowRightLeft, Info, X } from "lucide-react";
 import type { UsagePrices, UsageReport, UsageSourceFilter } from "../../../../shared/ipc";
@@ -126,7 +127,7 @@ function Quotas({ providers, settled }: { providers: ProfileProviders; settled: 
   return (
     <Section title={t("usage.quotas")} actions={<>
       {observed && <span className="text-xs text-subtle">{t("usage.updatedAt", { time: observedClock(observed) })}</span>}
-      <RefreshButton label={t("usage.refresh")} onClick={() => profiles.forEach((p) => void loadQuota(p, true))} />
+      <RefreshButton label={t("usage.refresh")} onClick={() => Promise.all(profiles.map((p) => loadQuota(p, true)))} />
     </>}>
       <div className="divide-y divide-border">
         {!shown.current && <Loading rows={Math.min(Math.max(profiles.length, 2), 6)} />}
@@ -192,7 +193,7 @@ function AllQuotas({ view }: { view: AllView }) {
     <Section title={t("usage.quotas")} actions={<>
       {observed && <span className="text-xs text-subtle">{t("usage.updatedAt", { time: observedClock(observed) })}</span>}
       {/* A refresh only re-reads the providers' quota (no setting changes): every included host. */}
-      <RefreshButton label={t("usage.all.refresh")} onClick={() => entries.forEach((e) => void loadHostQuota(e.hostId, e.name, true))} />
+      <RefreshButton label={t("usage.all.refresh")} onClick={() => Promise.all(entries.map((e) => loadHostQuota(e.hostId, e.name, true)))} />
     </>}>
       <div className="divide-y divide-border">
         {!shown.current && <Loading rows={Math.min(Math.max(cards.length, 2), 6)} />}
@@ -901,6 +902,8 @@ function PricesDialog({ prices, host, add, usedModels, unpriced, canMap, onClose
   const set = (i: number, key: keyof PriceDraft, v: string) => setDraft(draft.map((r, j) => (j === i ? { ...r, [key]: v } : r)));
   // AUD / CNY / USD; a host already set to something else keeps showing it.
   const currencies = [...new Set<string>([...CURRENCIES, currency])];
+  // Unsaved from the first change until 保存 succeeds, which closes it (lib/settingsDrafts).
+  const card = useSettingsCard();
   const save = async () => {
     const models: UsagePrices["models"] = {};
     for (const r of kept) {
@@ -922,7 +925,7 @@ function PricesDialog({ prices, host, add, usedModels, unpriced, canMap, onClose
   const mapCols = "grid grid-cols-[minmax(0,1fr)_1rem_minmax(0,1fr)_4.5rem] items-center gap-2";
   return (
     <SettingsGroup agents="none" source="host"><div className="fixed inset-0 z-[150] flex items-center justify-center bg-black/40" onMouseDown={onClose}>
-      <div className="flex max-h-[85vh] w-[640px] flex-col rounded-2xl border border-border bg-surface p-5 shadow-2xl" onMouseDown={(e) => e.stopPropagation()}>
+      <div ref={card.ref} className="flex max-h-[85vh] w-[640px] flex-col rounded-2xl border border-border bg-surface p-5 shadow-2xl" onMouseDown={(e) => e.stopPropagation()}>
         <div className="mb-1 flex items-center">
           <h3 className="font-semibold">{host ? t("usage.all.pricesOn", { host }) : t("usage.prices")}</h3>
           <span className="ml-auto">
@@ -963,11 +966,11 @@ function PricesDialog({ prices, host, add, usedModels, unpriced, canMap, onClose
                 <input className={CELL_INPUT} inputMode="decimal" aria-label={t("usage.output")} value={r.output} onChange={(e) => set(i, "output", e.target.value)} />
                 <span className="flex items-center justify-end gap-0.5">
                   {canMap && !r.orig && r.model.trim() && (
-                    <IconButton label={t("usage.map.convert")} onClick={() => toMap(i)}>
+                    <IconButton label={t("usage.map.convert")} onClick={() => (card.changed(), toMap(i))}>
                       <ArrowRightLeft size={13} />
                     </IconButton>
                   )}
-                  <ArmedRemove title={t("usage.removePrice")} onRemove={() => setDraft(draft.filter((_, j) => j !== i))} />
+                  <ArmedRemove title={t("usage.removePrice")} onRemove={() => (card.changed(), setDraft(draft.filter((_, j) => j !== i)))} />
                 </span>
               </div>
             );
@@ -1007,7 +1010,7 @@ function PricesDialog({ prices, host, add, usedModels, unpriced, canMap, onClose
                       <input className={`${CELL_INPUT} font-mono text-xs`} list={`${ID}-map-to`} placeholder="model" aria-label={t("usage.map.to")} value={r.to} onChange={(e) => setMap(i, "to", e.target.value)} />
                     </span>
                     <span className="flex justify-end">
-                      <ArmedRemove title={t("usage.map.remove")} onRemove={() => setMaps(maps.filter((_, j) => j !== i))} />
+                      <ArmedRemove title={t("usage.map.remove")} onRemove={() => (card.changed(), setMaps(maps.filter((_, j) => j !== i)))} />
                     </span>
                   </div>
                   {problems.get(i) && (tried || problems.get(i) !== "empty") && <div className="mt-1 text-xs text-warn">{t(MAP_PROBLEM_KEY[problems.get(i)!])}</div>}
@@ -1018,8 +1021,8 @@ function PricesDialog({ prices, host, add, usedModels, unpriced, canMap, onClose
         </div>
         {error && <ErrorNote>{error}</ErrorNote>}
         <div className="mt-4 flex items-center gap-2">
-          <AddButton onClick={() => setDraft([...draft, { model: "", input: "", cachedInput: "", output: "" }])}>{t("usage.addPrice")}</AddButton>
-          {canMap && <AddButton onClick={() => setMaps([...maps, { from: "", to: "" }])}>{t("usage.map.add")}</AddButton>}
+          <AddButton onClick={() => (card.changed(), setDraft([...draft, { model: "", input: "", cachedInput: "", output: "" }]))}>{t("usage.addPrice")}</AddButton>
+          {canMap && <AddButton onClick={() => (card.changed(), setMaps([...maps, { from: "", to: "" }]))}>{t("usage.map.add")}</AddButton>}
           <span className="ml-auto" />
           <Button onClick={onClose}>{t("settings.cancel")}</Button>
           <Button primary onClick={() => void save()}>

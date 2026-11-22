@@ -27,7 +27,7 @@ describe("every shipped locale in the shell", () => {
   it("has tray, overlay, edit-menu and close-notice text for all 15 locales", () => {
     for (const id of APP_LOCALES) {
       const tray = trayMenuLabels(id);
-      expect(tray.show && tray.newChat && tray.quit).toBeTruthy();
+      expect(tray.show && tray.newChat && tray.board && tray.quit).toBeTruthy();
       expect(trayTooltip(2, id)).toContain("2");
       expect(overlayDescription(2, id)).toContain("2");
       expect(Object.values(editMenuLabels(id)).every(Boolean)).toBe(true);
@@ -37,8 +37,8 @@ describe("every shipped locale in the shell", () => {
 
   it("keeps a stored regional locale and the zh-Hant-CN / zh-CN defaults unchanged", () => {
     for (const id of REGIONAL) expect(parsePrefs({ locale: id }).locale).toBe(id);
-    expect(trayMenuLabels("zh-CN")).toEqual({ show: "显示窗口", newChat: "快速启动", quit: "退出" });
-    expect(trayMenuLabels("zh-Hant-CN")).toEqual({ show: "顯示視窗", newChat: "快速啟動", quit: "退出" });
+    expect(trayMenuLabels("zh-CN")).toEqual({ show: "显示窗口", newChat: "快速启动", board: "项目看板", quit: "退出" });
+    expect(trayMenuLabels("zh-Hant-CN")).toEqual({ show: "顯示視窗", newChat: "快速啟動", board: "項目看板", quit: "退出" });
     expect(editMenuLabels("zh-Hant-CN").paste).toBe("粘貼");
     expect(trayNoticeText("zh-Hant-CN").message).toBe("Cutex 仍在系統托盤中運行");
     expect(resolveLocale(null, "zh-CN")).toBe("zh-CN");
@@ -47,7 +47,7 @@ describe("every shipped locale in the shell", () => {
 
   it("uses Taiwan words for TW and lets HK / MO inherit them", () => {
     for (const id of REGIONAL) {
-      expect(trayMenuLabels(id)).toEqual({ show: "顯示視窗", newChat: "快速啟動", quit: "結束" });
+      expect(trayMenuLabels(id)).toEqual({ show: "顯示視窗", newChat: "快速啟動", board: "專案看板", quit: "結束" });
       expect(editMenuLabels(id)).toMatchObject({ undo: "復原", cut: "剪下", paste: "貼上", addToDictionary: "加入字典" });
       expect(trayNoticeText(id).message).toBe("Cutex 仍在系統匣中執行");
       expect(trayNoticeText(id).detail).toContain("設定 → 通用 → 關閉視窗時");

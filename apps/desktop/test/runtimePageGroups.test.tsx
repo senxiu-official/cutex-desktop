@@ -81,10 +81,12 @@ it.each(["zh-CN", "en"])("labels unregistered native SHAs in current and install
   const native = node.querySelector('[data-runtime-group="cute-codex"]')!;
   const unknown = locale === "en" ? "Unknown version" : "未知版本";
   expect(native.querySelector("strong")?.textContent).toBe(`${unknown} · abc123def456`);
-  expect(native.querySelector("li")?.textContent).toContain(`${unknown} · abc123def456`);
-  expect(native.textContent).toContain(`${unknown} · def456abc123`);
-  expect(native.querySelector("details")?.textContent).toContain(`${unknown} · fed987cba654`);
-  expect(native.textContent).not.toContain("r52");
+  // Rows name the folder of a build cutex has not registered (2026-11-15: 「未登记的构建（r177 目录）· ecf43c…」).
+  const row = (dir: string, sha: string) => locale === "en" ? `Unregistered build (folder ${dir}) · ${sha}` : `未登记的构建（${dir} 目录）· ${sha}`;
+  expect(native.querySelector("li")?.textContent).toContain(row("r52", "abc123def456"));
+  expect(native.textContent).toContain(row("missing-sha", "def456abc123"));
+  expect(native.querySelector("details")?.textContent).toContain(row("unused-sha", "fed987cba654"));
+  expect(native.querySelector("strong")?.textContent).not.toContain("r52");
   const claude = node.querySelector('[data-runtime-group="Claude"]')!;
   expect(claude.querySelector("strong")?.textContent).toBe("claude-r29");
   expect(claude.textContent).not.toContain(unknown);
@@ -199,6 +201,80 @@ it("Kimi: the same Node line (range from external, observed version)", async () 
   expect(node.querySelector("[data-runtime-node]")!.textContent).toBe("Node ≥ 24.9.0, < 25 · 当前 v24.10.0");
 });
 
+describe("Settings → 运行时 on host-a (2026-11-15 study)", () => {
+  it("an unregistered native build names its folder and SHA, with a hint", async () => {
+    const list = adaptRuntimes({ native: [
+      { release: "r61", version: "0.167.0-r61", selected: true, agentCount: 1, agents: [{ cutexSessionId: "a", name: "Amy" }] },
+      { release: "r177", version: null, sha256Prefix: "ecf43c49808f", agentCount: 2, agents: [] },
+      { release: "dddddddddddd", version: null, sha256Prefix: "dddddddddddd", agentCount: 1, agents: [] },
+    ] })!.native;
+    await act(async () => root.render(h(RuntimeGroup, { kind: "native", title: "cute-codex", list })));
+    const rows = [...node.querySelectorAll("[data-unregistered-build]")];
+    expect(rows.map(r => r.textContent)).toEqual(["未登记的构建（r177 目录）· ecf43c49808f", "未登记的构建 · dddddddddddd"]);
+    expect(rows[0]!.getAttribute("data-tip")).toContain("SHA-256");
+    expect(node.textContent).not.toContain("未知版本");
+  });
+  it("while cutex has not checked a runtime's files (verificationPending): 尚未核对, no SHA, no 未登记 / 未知版本", async () => {
+    const entries = [
+      { release: "r61", version: "0.167.0-r61", selected: true, agentCount: 1, verificationPending: true },
+      { release: "r177", version: null, sha256Prefix: "ecf43c49808f", agentCount: 2, verificationPending: true },
+      { release: "r178", version: null, sha256Prefix: "aaaabbbbcccc", agentCount: 1 },
+    ];
+    const list = adaptRuntimes({ native: entries })!.native;
+    await act(async () => root.render(h(RuntimeGroup, { kind: "native", title: "cute-codex", list })));
+    const rows = [...node.querySelectorAll("li")];
+    expect(rows[0]!.textContent).toContain("0.167.0-r61");
+    expect(rows[0]!.querySelector("[data-verification-pending]")!.textContent).toBe("尚未核对");
+    expect(rows[1]!.textContent).toContain("r177");
+    expect(rows[1]!.textContent).toContain("尚未核对");
+    expect(rows[1]!.textContent).not.toContain("ecf43c49808f");
+    expect(rows[1]!.textContent).not.toContain("未登记");
+    expect(rows[1]!.textContent).not.toContain("未知版本");
+    expect(rows[1]!.querySelector("[data-verification-pending]")!.getAttribute("data-tip")).toContain("核对");
+    // Without the field: exactly as before.
+    expect(rows[2]!.querySelector("[data-verification-pending]")).toBeNull();
+    expect(rows[2]!.textContent).toContain("未登记的构建（r178 目录）· aaaabbbbcccc");
+    // A pending selected build without a version: the header names its folder, not 「未知版本 · sha」.
+    const pendingCurrent = adaptRuntimes({ native: [{ release: "r177", version: null, sha256Prefix: "ecf43c49808f", selected: true, verificationPending: true }] })!.native;
+    await act(async () => root.render(h(RuntimeGroup, { kind: "native", title: "cute-codex", list: pendingCurrent })));
+    expect(node.querySelector("strong")!.textContent).toBe("r177");
+    // Claude rows get the same hint.
+    const claude = adaptRuntimes({ claude: [{ release: "claude-r43", agentCount: 1, verificationPending: true }] })!.claude;
+    await act(async () => root.render(h(RuntimeGroup, { kind: "claude", title: "Claude", list: claude })));
+    expect(node.querySelector("[data-verification-pending]")!.textContent).toBe("尚未核对");
+  });
+  it("keeps cutex's version order, not the release label's number", async () => {
+    const list = adaptRuntimes({ native: [
+      { release: "r61", version: "0.167.0-r61", selected: true, agentCount: 1 },
+      { release: "0.167.0", version: "0.167.0", agentCount: 1 },
+      { release: "r260", version: "0.160.0-r52.4", agentCount: 1 },
+      { release: "r52", version: "0.160.0-r52", agentCount: 1 },
+    ] })!.native;
+    await act(async () => root.render(h(RuntimeGroup, { kind: "native", title: "cute-codex", list })));
+    expect([...node.querySelectorAll("li")].map(li => li.querySelector("button span span:last-child")!.textContent)).toEqual(["0.167.0-r61", "0.167.0", "0.160.0-r52.4", "0.160.0-r52"]);
+  });
+  it("a bundled-CLI runtime with no CLI report reads as the runtime's own CLI; older ones keep 未报告", async () => {
+    delete fx.components["claude-runtime"].claudeCli;
+    fx.view = adaptRuntimes({ native: [], claude: [{ release: "claude-r47-source-bd71c6c1e579", selected: true, agentCount: 1 }] });
+    await act(async () => root.render(h(RuntimesSection)));
+    expect(node.textContent).toContain("随运行时自带的 Claude CLI（版本未登记）");
+    expect(node.textContent).not.toContain("主机未报告 Claude CLI");
+    fx.view = adaptRuntimes({ native: [], claude: [{ release: "claude-r27", selected: true, agentCount: 1 }] });
+    await act(async () => root.render(h(RuntimesSection)));
+    expect(node.textContent).toContain("主机未报告 Claude CLI");
+  });
+  it("installed Claude runtimes no session uses come from the component report, without the cleanup plan", async () => {
+    fx.components["claude-runtime"].versions = ["claude-r28", "claude-r42-source-ab14892ee600", "claude-r47-source-bd71c6c1e579", "claude-r49-source-365fe1c1e525"].map(version => ({ version, pinnedBy: 0, sizeBytes: 1 }));
+    fx.view = adaptRuntimes({ native: [], claude: [{ release: "claude-r47-source-bd71c6c1e579", selected: true, agentCount: 54 }, { release: "claude-r42-source-ab14892ee600", agentCount: 89 }] });
+    await act(async () => root.render(h(RuntimesSection)));
+    const claude = node.querySelector('[data-runtime-group="Claude"]')!;
+    expect([...claude.querySelectorAll("ul:not([data-unused-runtimes] ul) > li")].length).toBe(2);
+    const unused = claude.querySelector<HTMLDetailsElement>("[data-unused-runtimes]")!;
+    expect(unused.querySelector("summary")!.textContent).toContain("2 个旧版本未使用");
+    expect([...unused.querySelectorAll("li")].map(li => li.querySelector(".font-mono")!.textContent)).toEqual(["claude-r49-source-365fe1c1e525", "claude-r28"]);
+  });
+});
+
 describe("version rows: active and archived agents apart", () => {
   const session = (id: string, lifecycle = "active") => ({ cutexSessionId: id, displayName: id, lifecycle });
   const lists = (over: Record<string, unknown> = {}) => ({ active: [session("amy"), session("bea")], retired: [session("old-1", "retired"), session("old-2", "retired")], ...over });
@@ -210,6 +286,7 @@ describe("version rows: active and archived agents apart", () => {
   };
   const row = () => node.querySelector("li")!;
   const headline = () => row().querySelector("button")!.textContent!;
+  const count = () => row().querySelector("button > span.ml-auto")!.textContent!;
   it("a version held only by archived agents says so instead of counting them as agents on it", async () => {
     await draw([{ release: "claude-r29", ...pin("old-1", "old-2") }], lists());
     expect(headline()).toContain("2 个已归档");
@@ -251,13 +328,41 @@ describe("version rows: active and archived agents apart", () => {
     await draw([{ release: "claude-r29", ...pin("old-1", "old-2") }], lists());
     expect(headline()).toContain("2 个已归档");
   });
-  it("an agent the lists don't have (hidden) and pins sent only as a count are not called archived", async () => {
-    await draw([{ release: "claude-r35", agentCount: 4, ...pin("ghost", "old-1") }], lists());
-    expect(headline()).toContain("3 个");
+  it("an agent the lists don't have (hidden) is not called archived", async () => {
+    await draw([{ release: "claude-r35", ...pin("ghost", "old-1") }], lists());
+    expect(headline()).toContain("1 个");
     expect(headline()).toContain("1 个已归档");
     await act(async () => row().querySelector("button")!.click());
     expect(row().querySelector("p")!.textContent).toContain("GHOST");
+  });
+  it("a sample of the pins (cutex sends at most 20 names) shows only the total, never a split derived from it", async () => {
+    // EVA 2026-11-15: 84 pins, 80 archived, but the 20 sampled names held 5 archived ones → 「79 个 · 5 个已归档」.
+    await draw([{ release: "0.167.0", agentCount: 4, ...pin("ghost", "old-1") }], lists());
+    expect(count()).toBe("4 个{{agent}}");
+    expect(row().querySelector("[data-tip]")).toBeNull();
+    await act(async () => row().querySelector("button")!.click());
+    expect(row().querySelector("[data-archived-agents]")).toBeNull();
+    expect(row().querySelector("p")!.textContent).toContain("GHOST");
+    expect(row().querySelector("p")!.textContent).toContain("OLD-1");
     expect(row().querySelector("p")!.textContent).toContain("还有 2 个");
+  });
+  it("cutex's exact counts are shown as they are, whatever the sampled names say", async () => {
+    await draw([{ release: "0.167.0", agentCount: 84, activeAgentCount: 4, archivedAgentCount: 80, ...pin("ghost", "old-1") }], lists());
+    expect(count()).toBe("4 个{{agent}} · 80 个已归档");
+    await act(async () => row().querySelector("button")!.click());
+    expect(row().querySelector("p")!.textContent).toContain("GHOST");
+    expect(row().querySelector("p")!.textContent).toContain("还有 3 个");
+    const part = row().querySelector("[data-archived-agents]")!;
+    expect(part.querySelector("summary")!.textContent).toContain("（80）");
+    expect(part.textContent).toContain("OLD-1");
+    expect(part.textContent).toContain("还有 79 个");
+    await draw([{ release: "r260", agentCount: 16, activeAgentCount: 0, archivedAgentCount: 16, ...pin("old-1") }], lists());
+    expect(count()).toBe("16 个已归档{{agent}}");
+    await draw([{ release: "r61", agentCount: 149, activeAgentCount: 149, archivedAgentCount: 0, ...pin("amy") }], null);
+    expect(count()).toBe("149 个{{agent}}");
+    // A split that does not add up to the count is not used.
+    await draw([{ release: "r52", agentCount: 5, activeAgentCount: 1, archivedAgentCount: 1, ...pin("amy", "old-1") }], lists());
+    expect(count()).toBe("5 个{{agent}}");
   });
   it("in English too", async () => {
     fx.locale = "en";

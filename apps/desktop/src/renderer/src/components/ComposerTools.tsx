@@ -34,7 +34,7 @@ function Row({ icon, label, hint, oneLine, right, chevron, active, disabled, onC
           onClick?.();
         }
       }}
-      className={`flex w-full cursor-default items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left outline-none ${disabled ? "opacity-40" : "hover:bg-surface-2 focus-visible:bg-surface-2"} ${active ? "bg-surface-2" : ""}`}
+      className={`press flex w-full cursor-default items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left outline-none ${disabled ? "opacity-40" : "hover:bg-surface-2 focus-visible:bg-surface-2"} ${active ? "bg-surface-2" : ""}`}
     >
       <span className="flex w-4 justify-center text-muted">{icon}</span>
       <span className="min-w-0 flex-1">

@@ -13,7 +13,7 @@ vi.mock("../src/renderer/src/store", () => ({
 }));
 vi.mock("../src/renderer/src/i18n", () => ({ useI18n: () => ({ t: (key: string) => key, locale: "en" }) }));
 vi.mock("../src/renderer/src/lib/delegationsView", () => ({ useAgentHost: () => transport.host, useAgentNames: () => (id: string) => id }));
-vi.mock("../src/renderer/src/lib/time", () => ({ useClock: () => 0, useNow: () => 0, formatWhen: () => "" }));
+vi.mock("../src/renderer/src/lib/time", () => ({ useClock: () => 0, useNow: () => 0, formatWhen: () => "", formatAbsolute: () => "" }));
 import { NextStepRow } from "../src/renderer/src/components/AdmissionRows";
 import { dismissReceipt, isDismissibleReceipt, useHiddenReceiptIds } from "../src/renderer/src/lib/legacyDelivery/busReceiptVisibility";
 

@@ -11,7 +11,7 @@ import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from "
 import { Ellipsis, Pin, PinOff } from "lucide-react";
 import { useI18n, type MessageKey } from "../i18n";
 import { contextMenu, openMenuFrom, useMenuOwner, type MenuAction, type MenuEntry } from "../lib/contextMenu";
-import { runNav, useNavActive } from "../lib/navEntries";
+import { runBarEntry, useNavActive } from "../lib/navEntries";
 import { newInstanceKey, openModifiers } from "../lib/openModifiers";
 import { layoutNav, withNavPin } from "../lib/navPins";
 import { conversationPanes } from "../lib/paneLayout";
@@ -49,6 +49,11 @@ export function badgeCount(badge: Badge): number | null {
   return m ? Number(m[0]) : null;
 }
 
+/** Why an entry is greyed out (its tooltip / menu row title): the host's capabilities not known yet, or the ones it lacks. */
+export function unavailableWhy(t: T, entry: Pick<Entry, "waiting" | "missing">): string {
+  return entry.waiting ? t("modules.waitingHost") : t("modules.needsCapability", { list: entry.missing.join(", ") });
+}
+
 function setPinned(id: string, on: boolean) {
   setUiPref("navPins", withNavPin(getUiPrefs().navPins, id, on));
 }
@@ -63,7 +68,7 @@ export const middleOpen = (run: () => void) => ({
   onMouseDown: (e: React.MouseEvent) => e.button === 1 && e.preventDefault(),
 });
 
-const altOpen = (item: NavItem) => middleOpen(() => runNav(item, openModifiers({ ctrlKey: false, metaKey: false, shiftKey: false, button: 1 })));
+const altOpen = (item: NavItem) => middleOpen(() => runBarEntry(item, openModifiers({ ctrlKey: false, metaKey: false, shiftKey: false, button: 1 })));
 
 /** Reports an entry's badge (rendered for every entry, shown or folded). */
 const BadgeProbe = memo(function BadgeProbe({ entry, report }: { entry: Entry; report(id: string, badge: Badge): void }) {
@@ -107,7 +112,7 @@ function useNavLayout() {
 }
 
 /** 「⋯ 更多」's menu: every entry (pinned first, in pin order) with a pin toggle each. */
-function moreMenu(t: T, entries: readonly Entry[], pinned: readonly string[], badges: Record<string, Badge>): MenuEntry[] {
+function moreMenu(t: T, entries: readonly Entry[], pinned: readonly string[], badges: Record<string, Badge>, anchor: HTMLElement): MenuEntry[] {
   const row = (entry: Entry, on: boolean): MenuAction => {
     const { item } = entry;
     const Icon = item.icon;
@@ -117,8 +122,8 @@ function moreMenu(t: T, entries: readonly Entry[], pinned: readonly string[], ba
       icon: <Icon size={14} />,
       hint: disabled ? undefined : (badges[item.id]?.text ?? undefined),
       disabled,
-      title: disabled && !entry.waiting ? t("modules.needsCapability", { list: entry.missing.join(", ") }) : undefined,
-      onSelect: () => runNav(item),
+      title: disabled ? unavailableWhy(t, entry) : undefined,
+      onSelect: () => runBarEntry(item, undefined, anchor),
       toggle: {
         on,
         onIcon: <Pin size={13} className="fill-current" />,
@@ -165,14 +170,14 @@ function FlatEntry({ entry, pinned, badge, btn }: { entry: Entry; pinned: boolea
   const label = item.title ?? t(titleKey);
   const n = badgeCount(badge);
   const tip = disabled
-    ? [label, !entry.waiting && t("modules.needsCapability", { list: entry.missing.join(", ") })]
+    ? [label, unavailableWhy(t, entry)]
     : [n ? t("titlebar.entries.waiting", { name: label, n }) : label, !n && (badge?.title ?? badge?.text), hint && t(hint), item.menu && t(item.menu.hintKey)];
   return (
     <button
       disabled={disabled}
       data-tip={tip.filter(Boolean).join("\n")}
       aria-label={n ? t("titlebar.entries.waiting", { name: label, n }) : label}
-      onClick={(e) => runNav(item, openModifiers(e))}
+      onClick={(e) => runBarEntry(item, openModifiers(e), e.currentTarget)}
       {...altOpen(item)}
       onContextMenu={
         item.menu && !disabled
@@ -185,7 +190,7 @@ function FlatEntry({ entry, pinned, badge, btn }: { entry: Entry; pinned: boolea
       }
       data-titlebar-entry={item.id}
       data-nav-active={active ? "" : undefined}
-      className={`${btn} relative shrink-0 disabled:opacity-50 ${active ? "bg-surface-2 text-foreground" : ""}`}
+      className={`${btn} relative shrink-0 ${active ? "bg-surface-2 text-foreground" : ""}`}
     >
       <Icon size={16} />
       {!disabled && <IconBadge badge={badge} />}
@@ -203,7 +208,7 @@ function MoreButton({ entries, pinned, badges, attention, btn }: { entries: read
   return (
     <button
       ref={ref}
-      onClick={(e) => openMenuFrom(e.currentTarget, moreMenu(t, entries, pinned, badges), { owner: MORE_MENU })}
+      onClick={(e) => openMenuFrom(e.currentTarget, moreMenu(t, entries, pinned, badges, e.currentTarget), { owner: MORE_MENU })}
       aria-haspopup="menu"
       aria-expanded={open}
       aria-label={label}
@@ -241,13 +246,13 @@ function FoldButton({ folded, extra, entries, pinned, badges, attention, btn }: 
         icon: <Icon size={14} />,
         hint: n ? String(n) : undefined,
         disabled,
-        title: disabled && !e.waiting ? t("modules.needsCapability", { list: e.missing.join(", ") }) : undefined,
-        onSelect: () => runNav(e.item),
+        title: disabled ? unavailableWhy(t, e) : undefined,
+        onSelect: () => runBarEntry(e.item, undefined, anchor),
       };
     }),
     extra,
     "separator",
-    { label: t("titlebar.entries.more"), icon: <Ellipsis size={14} />, onSelect: () => void ownerWindowOf(anchor).requestAnimationFrame(() => openMenuFrom(anchor, moreMenu(t, entries, pinned, badges), { owner: MORE_MENU })) },
+    { label: t("titlebar.entries.more"), icon: <Ellipsis size={14} />, onSelect: () => void ownerWindowOf(anchor).requestAnimationFrame(() => openMenuFrom(anchor, moreMenu(t, entries, pinned, badges, anchor), { owner: MORE_MENU })) },
   ];
   return (
     <button

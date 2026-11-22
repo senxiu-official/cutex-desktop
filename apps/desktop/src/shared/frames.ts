@@ -41,8 +41,31 @@ export const FILE_PAGE_WINDOW_BYTES = 10 * 1024 * 1024;
  */
 export const FILE_PAGE_MAX_BYTES = ARTIFACT_PAGE_MAX_BYTES;
 export type FilePageRefusal = "not-found" | "host-offline" | "not-text" | "too-large";
+/**
+ * A file page's own files (main/filePageAssets.ts, owner 2026-11-20): images, style sheets, scripts and fonts it names
+ * by a relative path inside its folder (as the host resolves it) are read by main and written into the document — at
+ * most this many files, each whole and at most this big (one cutex read), and this much read together; the rest stay
+ * out (counted).
+ */
+export const FILE_PAGE_ASSETS_MAX = 300;
+export const FILE_PAGE_ASSET_MAX_BYTES = 10 * 1024 * 1024;
+export const FILE_PAGE_ASSETS_TOTAL_BYTES = 64 * 1024 * 1024;
+/**
+ * At most this much is written into the page (UTF-8 bytes), every reference counted (one picture used 500 times is
+ * written 500 times); references past it stay as written. With the page (≤ FILE_PAGE_WINDOW_BYTES) it stays well
+ * under FILE_PAGE_MAX_BYTES.
+ */
+export const FILE_PAGE_INLINE_MAX_BYTES = 96 * 1024 * 1024;
+
 export type FilePageResult =
-  | { ok: true; frame: FrameResource; /** references to files next to it / the network that the page cannot load (inline-only) */ externalRefs: number }
+  | {
+      ok: true;
+      frame: FrameResource;
+      /** References the page still cannot load: web addresses, files outside its folder or over the limits. */
+      externalRefs: number;
+      /** Its own files main wrote into it (absent: an older main, which wrote none). */
+      localFiles?: number;
+    }
   | {
       ok: false;
       reason: FilePageRefusal;

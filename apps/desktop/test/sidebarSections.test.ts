@@ -127,10 +127,11 @@ describe("section prefs", () => {
       }
     });
 
-    it("系统行样式: 虚线 (line) by default, 灰底条 (band) kept, anything else back to line", async () => {
-      for (const [stored, want] of [[undefined, "line"], ["band", "band"], ["line", "line"], ["dots", "line"]] as const) {
+    it("系统行样式: 无线 (plain) by default; the old default 虚线 moves to 无线 once, a 虚线 chosen since stays; 灰底条 kept", async () => {
+      const cases: [unknown, unknown, string][] = [[undefined, undefined, "plain"], ["band", undefined, "band"], ["line", undefined, "plain"], ["line", 1, "line"], ["plain", 1, "plain"], ["dots", undefined, "plain"]];
+      for (const [stored, rev, want] of cases) {
         vi.resetModules();
-        storage.set("cutex-desktop.ui", JSON.stringify(stored === undefined ? {} : { systemRows: stored }));
+        storage.set("cutex-desktop.ui", JSON.stringify(stored === undefined ? {} : { systemRows: stored, ...(rev === undefined ? {} : { systemRowsRev: rev }) }));
         const prefs = await import("../src/renderer/src/lib/prefs");
         expect(prefs.getUiPrefs().systemRows).toBe(want);
       }

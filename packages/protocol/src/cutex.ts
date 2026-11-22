@@ -390,8 +390,12 @@ export interface AdmissionNextStep {
   nextStepAt?: string | null;
   /** admission-wait-reasons: actual idle batching deadline, or native receipt still pending. */
   waitReason?: "resultCoalescing" | "nativeReceipt" | (string & {});
-  /** stop-holds-ridealongs: held until released (absent = not held / older cutex). */
-  held?: AdmissionHeld;
+  /** stop-holds-ridealongs: held until released (absent = not held / older cutex). stop-answer-admission-v1: null = not
+   *  held, and then only this item's own field counts (no snapshot-wide `ridealongsHeld` fallback). */
+  held?: AdmissionHeld | null;
+  /** stop-answer-admission-v1: whether this item may run now (a runnable delegation ANSWER is true with `held` null;
+   *  QUESTION and STATE stay held `ownerStop`). Its presence means the host sends per-item admission. */
+  eligible?: boolean;
   /** The delegation an answer / question / delegation-status ride-along belongs to (absent = another
    *  source, or an older cutex). admission-ridealong-detail: also a Job completion bound to one. */
   askId?: string;
@@ -551,6 +555,8 @@ export interface SessionBootstrap {
     agentBusMessages: unknown[];
     /** The agent's latest sent agent-bus messages, compact (agent-messages-v2); absent on older cutex. */
     agentBusSentMessages?: unknown[];
+    /** bootstrap-bounded-bus: present only on a `bus=bounded` read; older rows come from `bus-messages` pages. */
+    busMessagesPage?: { received?: { hasMore: boolean }; sent?: { hasMore: boolean } } | null;
     /** The thread's last accepted `update_plan` (session-latest-plan); absent on older cutex. */
     latestPlan?: LatestPlan | null;
     /** The thread's newest token usage recovered from the rollout (bootstrap-token-usage); absent on older cutex. */
@@ -875,6 +881,8 @@ export interface UserInputSubmitParams {
   startIfOffline?: boolean;
   /** Opt in only with owner-admission-held-v1; delivery then belongs to the daemon worker. */
   allowHeld?: boolean;
+  /** interrupt-send-many-v1, `strategy: "interrupt"` only: the unread owner inputs that go along, before the draft. */
+  interruptSend?: InputInterruptSendManyParams;
 }
 
 /** One page of native turns: pages go newest first, turns within a page oldest first. */
@@ -1391,19 +1399,41 @@ export interface InputListResult {
 }
 
 /** Owner action on an existing input: daemon owns interrupt, receipt check and same-id delivery. */
-export interface InputInterruptSendParams {
+export interface InputInterruptSendSingleParams {
   inputId: string;
   expectedRev: number;
   expectedTurnId: string;
   expectedRuntimeGeneration: number;
 }
-export interface InputInterruptSendResult {
+/** interrupt-send-many-v1 (r292): one interrupt for an ordered set of owner inputs, each under its own rev CAS. Also
+ *  the `interruptSend` selection of a submit with `strategy: "interrupt"` (there max 99, the draft goes last). */
+export interface InputInterruptSendManyParams {
+  inputIds: string[];
+  expectedRevs: Record<string, number>;
+  expectedTurnId: string;
+  expectedRuntimeGeneration: number;
+}
+export type InputInterruptSendParams = InputInterruptSendSingleParams | InputInterruptSendManyParams;
+export interface InputInterruptSendSingleResult {
   ledgerEpoch: string;
   stateRevision: number;
   outcome: "interrupted" | "alreadyInContext" | "held" | "agentOffline";
   interruptedTurnId: string | null;
   record: InputRecord;
 }
+/** The batch answer: `records` are authoritative per id; `submitted` = the new turn's initial input (not "handled"). */
+export interface InputInterruptSendManyResult {
+  ledgerEpoch: string;
+  stateRevision: number;
+  outcome: "interrupted" | "alreadyInContext" | "held" | "agentOffline";
+  interruptedTurnId: string | null;
+  inputIds: string[];
+  records: InputRecord[];
+  carrierInputId: string | null;
+  alreadyInContext: string[];
+  submitted: string[];
+}
+export type InputInterruptSendResult = InputInterruptSendSingleResult | InputInterruptSendManyResult;
 
 /** `cutex/input/retry`: failed / uncertain → waiting{ownerRetry}. */
 export interface InputRetryParams {
@@ -1472,4 +1502,16 @@ export interface QueueMutationResult {
   affectedQueueIds: string[];
   /** input-ledger-v1: the record of this request's input. */
   input?: InputRecord;
+}
+
+/** bootstrap-bounded-bus: one direction of an agent's bus messages. */
+export type BusMessagesDirection = "received" | "sent";
+/** `GET /v2/sessions/{id}/bus-messages`: a newest-first slice (rows oldest first) of all of that direction's messages. */
+export interface BusMessagesPage {
+  contractVersion: number;
+  cutexSessionId: string;
+  direction: BusMessagesDirection;
+  /** Same row shape as the bootstrap `agentBusMessages` / `agentBusSentMessages`. */
+  messages: unknown[];
+  page: { limit: number; nextCursor: string | null; hasMore: boolean };
 }

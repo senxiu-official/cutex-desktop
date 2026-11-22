@@ -8,12 +8,15 @@ import { ArrowDownLeft, Hourglass } from "lucide-react";
 import { HoverActions, Rail, RailRow } from "./QueueRail";
 import type { AskSummary } from "../../../shared/ipc";
 import { useI18n } from "../i18n";
+import { rowTip, useRowTime } from "../lib/queueRowTime";
+import { RowAge } from "./RowFullText";
 import { contextMenu } from "../lib/contextMenu";
 import { delegationMenu } from "../lib/delegationMenu";
 import { delegationStatus, isOwnerRequest, peerSideOf, requesterName, requesterSession } from "../lib/delegations";
 import { hasDelegationViews } from "../lib/delegationStore";
 import { useAgentHost, useAgentNames } from "../lib/delegationsView";
 import { openDelegationDetail } from "../lib/delegationOpen";
+import { nextUpDelegationStatus } from "../lib/nextUpDelegation";
 import { useApp } from "../store";
 import { convFeaturesOf, convViewOf, useConvScope, useConvView, useConvViewHost } from "../lib/conversationScope";
 import { ASKS_PAUSE_FEATURE, asksPauseAction } from "../lib/asksPause";
@@ -34,19 +37,23 @@ export function DelegationRow({ d, sessionId, dense = false, children }: { d: As
   // #tag: the detail on the right side; 跳到委托卡片 is in the right-click menu.
   const show = () => openDelegationDetail(host, d.askId, { title: d.title });
   const peer = peerSideOf(d);
+  const time = useRowTime(d.createdAt);
   return (
     <div className={`flex ${dense ? "h-6 pr-1 pl-0.5" : "h-7 px-2"} min-w-0 flex-1 items-center gap-1.5 rounded-lg text-xs text-muted hover:bg-surface-2/60`} onContextMenu={contextMenu(() => delegationMenu(d, t, nameOf, { host, here: sessionId, views }))} data-testid="queue-delegation">
       <ArrowDownLeft size={13} className="shrink-0 text-accent" />
       <span className="inline-flex min-w-0 max-w-[30%] shrink-0">{peer?.side === "requester" ? <PeerParty text={peer.name} label={peer.label} size={16} /> : isOwnerRequest(d.requester) ? <span className="font-medium text-foreground">{t("delegation.you")}</span> : <Who id={requester} name={requesterName(d.requester) ?? (requester ? nameOf(requester) : null)} size={16} />}</span>
       <span className="shrink-0 text-subtle">·</span>
       <DelegationTag askId={d.askId} onJump={show} />
-      <span className="min-w-0 flex-1 truncate text-sm text-foreground" title={d.title}>
+      {/* The title opens the delegation's detail (its whole title and brief), like the #tag; the tip previews it. */}
+      <button type="button" onClick={show} className="min-w-0 flex-1 truncate rounded-sm text-left text-sm text-foreground hover:underline focus-visible:outline focus-visible:outline-accent" data-tip={rowTip(d.title, time.exact)} data-tip-overflow="" data-testid="row-text">
         {d.title}
-      </span>
+      </button>
+      <RowAge age={time.age} exact={time.exact} />
       {children}
       {/* Waiting for this owner's review (local or an incoming cross-host one): 批准 / 拒绝 right here. */}
       <DelegationReviewActions d={d} host={host} variant="row" />
-      <DelegationStatusMark status={delegationStatus(d)} name={d.targetName ?? nameOf(d.target)} className="shrink-0" />
+      {/* Registry 1.10: only registered wait words here (续接已达上限 reads 等待中; lib/nextUpDelegation). */}
+      <DelegationStatusMark status={nextUpDelegationStatus(delegationStatus(d))} name={d.targetName ?? nameOf(d.target)} className="shrink-0" />
     </div>
   );
 }

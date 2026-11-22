@@ -4,7 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { RuntimePrunePlan, RuntimePruneVersion } from "../src/shared/runtimes";
 const env = vi.hoisted(() => ({ host: "a", enabled: true, get: vi.fn(), post: vi.fn(), runtimes: vi.fn(), components: vi.fn(), calls: [] as string[] }));
-vi.mock("../src/renderer/src/bridge", () => ({ api: {}, apiFor: (host: string) => ({ runtimePrunePlan: () => { env.calls.push(`GET:${host}`); return env.get(host); }, pruneRuntimes: (ids: string[]) => { env.calls.push(`POST:${host}`); return env.post(host, ids); } }) }));
+vi.mock("../src/renderer/src/bridge", () => ({ api: {}, apiFor: (host: string) => ({ runtimePrunePlan: () => { env.calls.push(`GET:${host}`); return env.get(host); }, cancelRuntimePrunePlan: () => { env.calls.push(`CANCEL:${host}`); }, pruneRuntimes: (ids: string[]) => { env.calls.push(`POST:${host}`); return env.post(host, ids); } }) }));
 vi.mock("../src/renderer/src/lib/useArchivedAgents", () => ({ useArchivedAgents: () => {} }));
 vi.mock("../src/renderer/src/store", () => ({ useApp: { getState: () => ({ hosts: { active: env.host }, daemon: { kind: "connected" }, features: new Set(env.enabled ? ["runtime-prune-v1"] : []), byHost: { a: { daemon: { kind: "connected" }, features: new Set(["runtime-prune-v1"]) }, b: { daemon: { kind: "connected" }, features: new Set(["runtime-prune-v1"]) } } }) } }));
 vi.mock("../src/renderer/src/lib/runtimesStore", () => ({ refreshRuntimes: (host: string) => env.runtimes(host) }));
@@ -14,7 +14,8 @@ vi.mock("../src/renderer/src/lib/targetHost", () => ({ useTargetHostId: () => en
 vi.mock("../src/renderer/src/i18n", () => ({ useI18n: () => ({ locale: "en", t: (key: string, vars?: object) => key + (vars ? JSON.stringify(vars) : "") }) }));
 const CAPS = new Set(["runtime-prune-v1"]);
 const NO_CAPS = new Set<string>();
-const { useRuntimePruneStore, refreshRuntimePrune, pruneRuntimeVersions } = await import("../src/renderer/src/lib/runtimePruneStore");
+const { useRuntimePruneStore, refreshRuntimePrune, pruneRuntimeVersions, RUNTIME_PRUNE_PLAN_WAIT_MS } = await import("../src/renderer/src/lib/runtimePruneStore");
+const { RUNTIME_PRUNE_PLAN_TIMEOUT } = await import("../src/shared/runtimes");
 const { captureHostAction, fireHostReset } = await import("../src/renderer/src/lib/hostSwitch");
 const { RuntimeGroup } = await import("../src/renderer/src/components/RuntimeVersions");
 const version = (id: string, extra: Partial<RuntimePruneVersion> = {}): RuntimePruneVersion => ({ id, kind: "native", release: `release-${id}`, bytes: 1024, canPrune: true, blockedReasons: [], ...extra });
@@ -32,6 +33,81 @@ afterEach(() => { act(() => root.unmount()); node.remove(); });
 async function render() { await act(async () => root.render(h(RuntimeGroup, { kind: "native", title: "native", list: [] }))); }
 const btn = (key: string) => [...node.querySelectorAll("button")].find(b => b.textContent?.startsWith(key))!;
 
+// EVA 2026-11-15: the plan read never answered; the panel said 清理（0） and 正在检查清理计划… for as long as it was open.
+it("while the plan loads the action reads 正在检查… and is disabled, never 清理（0）", async () => {
+  const a = deferred<RuntimePrunePlan>(); env.get.mockReturnValue(a.promise);
+  await render();
+  const action = btn("runtimes.prune.checking");
+  expect(action.textContent).toBe("runtimes.prune.checking"); expect(action.disabled).toBe(true);
+  expect(node.textContent).not.toContain("runtimes.prune.action");
+  await act(async () => { a.resolve(plan(version("one"))); await a.promise; });
+  expect(btn("runtimes.prune.action").textContent).toBe('runtimes.prune.action{"n":1}');
+});
+it("gives up after ~20 s: 暂时读不出 · 重试, main's request is dropped, and 重试 reads again", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    const late = deferred<RuntimePrunePlan>(); env.get.mockReturnValueOnce(late.promise).mockResolvedValue(plan(version("one")));
+    await render();
+    expect(RUNTIME_PRUNE_PLAN_WAIT_MS).toBe(20_000);
+    await act(async () => { await vi.advanceTimersByTimeAsync(19_999); });
+    expect(node.querySelector("[data-prune-timeout]")).toBeNull(); expect(env.calls).not.toContain("CANCEL:a");
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(node.querySelector("[data-prune-timeout]")!.textContent).toBe("runtimes.prune.timeout");
+    expect(env.calls).toContain("CANCEL:a");
+    expect(btn("runtimes.prune.action")).toBeUndefined(); expect(btn("runtimes.prune.checking")).toBeUndefined();
+    expect(node.querySelector("[role=alert]")).toBeNull();
+    // A late answer to the abandoned read changes nothing.
+    await act(async () => { late.resolve(plan(version("late"))); await late.promise; });
+    expect(useRuntimePruneStore.getState().byHost.a?.plan).toBeNull();
+    await act(async () => btn("runtimes.prune.retry").click());
+    expect(env.get).toHaveBeenCalledTimes(2);
+    expect(node.querySelector("[data-prune-timeout]")).toBeNull();
+    expect(btn("runtimes.prune.action").textContent).toBe('runtimes.prune.action{"n":1}');
+  } finally { vi.useRealTimers(); }
+});
+it("main's own timeout reads as 暂时读不出, not as a failed cleanup", async () => {
+  env.get.mockRejectedValue(new Error(`Error invoking remote method 'daemon': Error: ${RUNTIME_PRUNE_PLAN_TIMEOUT}`));
+  await render();
+  expect(node.querySelector("[data-prune-timeout]")).not.toBeNull();
+  expect(node.querySelector("[role=alert]")).toBeNull();
+});
+it("closing the panel drops a read still waiting, so it holds no slot; reopening reads again", async () => {
+  const a = deferred<RuntimePrunePlan>(); env.get.mockReturnValueOnce(a.promise).mockResolvedValue(plan(version("one")));
+  // Two groups (cute-codex and Claude) share one read: closing one keeps it.
+  const groups = (...kinds: ("native" | "claude")[]) => act(async () => root.render(h("div", null, ...kinds.map(kind => h(RuntimeGroup, { key: kind, kind, title: kind, list: [] })))));
+  await groups("native", "claude");
+  expect(env.get).toHaveBeenCalledTimes(1);
+  await groups("native");
+  expect(env.calls).not.toContain("CANCEL:a");
+  await act(async () => root.render(h("div")));
+  expect(env.calls).toContain("CANCEL:a");
+  expect(useRuntimePruneStore.getState().byHost.a?.loading).toBe(false);
+  await act(async () => { a.resolve(plan(version("late"))); await a.promise; });
+  expect(useRuntimePruneStore.getState().byHost.a?.plan).toBeNull();
+  await render();
+  expect(env.get).toHaveBeenCalledTimes(2);
+  expect(btn("runtimes.prune.action").textContent).toBe('runtimes.prune.action{"n":1}');
+});
+// cutex B1 (2026-11-15): directories whose size was not computed come as bytes 0 + bytesEstimated.
+it("an uncomputed size reads 未计算, never 0 B, and totals that include one say 至少 / 大小未计算", async () => {
+  env.get.mockResolvedValue(plan(version("known"), version("dir", { release: "claude-r0", bytes: 0, bytesEstimated: true })));
+  await render();
+  const planRows = [...node.querySelectorAll("details li")].map(li => li.textContent);
+  expect(planRows.find(r => r!.includes("claude-r0"))).toContain("runtimes.prune.sizeUnknown");
+  expect(node.textContent).not.toContain("0 B");
+  await act(async () => btn("runtimes.prune.action").click());
+  const confirm = node.querySelector("[data-prune-confirm]")!;
+  expect(confirm.querySelector("p")!.textContent).toMatch(/runtimes\.prune\.atLeast.*1\.0 KiB/);
+  expect([...confirm.querySelectorAll("li")].map(li => li.textContent)).toEqual(["release-known · 1.0 KiB", "claude-r0 · runtimes.prune.sizeUnknown"]);
+  await act(async () => btn("runtimes.prune.cancel").click());
+  // Only uncomputed sizes: no number at all.
+  await act(async () => [...node.querySelectorAll<HTMLButtonElement>("details button")].find(b => b.closest("li")!.textContent!.includes("claude-r0"))!.click());
+  expect(node.querySelector("[data-prune-confirm] p")!.textContent).toContain("runtimes.prune.totalUnknown");
+  // The POST result's freed bytes stay exact.
+  env.post.mockResolvedValue({ freedBytes: 4096, results: [{ id: "dir", status: "deleted", freedBytes: 4096 }] });
+  await act(async () => btn("runtimes.prune.delete").click());
+  expect(node.textContent).toContain('runtimes.prune.freed{"size":"4.0 KiB"}');
+});
 it("keeps old hosts read-only", async () => {
   env.enabled = false; await render(); expect(env.get).not.toHaveBeenCalled(); expect(node.querySelector("[data-runtime-cleanup]")).toBeNull();
 });

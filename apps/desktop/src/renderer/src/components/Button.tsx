@@ -9,7 +9,7 @@ export type ButtonSize = "md" | "sm";
 
 const BASE = "inline-flex shrink-0 items-center justify-center gap-1 rounded-ctl font-medium whitespace-nowrap transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent disabled:cursor-default disabled:opacity-40";
 const VARIANT: Record<ButtonVariant, string> = {
-  primary: "bg-accent text-on-accent hover:brightness-110 active:brightness-95",
+  primary: "bg-accent text-on-accent hover:brightness-110 active:brightness-90",
   secondary: "bg-surface-2 text-foreground hover:bg-hover active:bg-pressed",
   ghost: "text-muted hover:bg-hover hover:text-foreground active:bg-pressed",
 };
@@ -17,6 +17,22 @@ const SIZE: Record<ButtonSize, { text: string; icon: string }> = {
   md: { text: "h-7 px-3 text-ui", icon: "size-7" },
   sm: { text: "h-6 px-2 text-meta", icon: "size-6" },
 };
+
+/**
+ * Press feedback for a control that is not a Button (owner 2026-11-18; styles.css `@utility press*`): append to its
+ * own classes — size, colours and selected / armed states stay. PRESS_ROW: rows, menu items, tabs, chips, links;
+ * PRESS_ICON: icon buttons (pressed fill, press-in, accent focus ring, no hover face while disabled); PRESS_SOLID:
+ * filled buttons and colour swatches; PRESS_AVATAR: avatars / tiles (press-in, focus ring); REVEAL_ON_FOCUS: an action
+ * hidden until its row is hovered shows on keyboard focus too.
+ */
+export const PRESS_ROW = "press";
+export const PRESS_ICON = "press-icon";
+export const PRESS_SOLID = "press-solid";
+export const PRESS_AVATAR = "press-avatar";
+export const REVEAL_ON_FOCUS = "reveal-focus";
+
+/** A bar's ghost icon button (window bar, Rails): the shared shape (28 px square) with PRESS_ICON. */
+export const ICON_GHOST = `${btnShape({ icon: true })} text-muted hover:bg-hover hover:text-foreground ${PRESS_ICON}`;
 
 export function btn({ variant = "secondary", size = "md", icon = false, danger = false }: { variant?: ButtonVariant; size?: ButtonSize; icon?: boolean; danger?: boolean } = {}): string {
   return `${btnShape({ size, icon })} ${btnFace({ variant, danger })}`;

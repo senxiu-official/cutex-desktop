@@ -154,6 +154,8 @@ export function attentionCount(value: unknown): number {
 interface ShellText {
   show: string;
   newChat: string;
+  /** Tray menu: open the 项目看板 window (main/board.ts). */
+  board: string;
   quit: string;
   waiting: (n: number, w?: ShellTermForms) => string;
   overlay: (n: number, w?: ShellTermForms) => string;
@@ -163,6 +165,7 @@ interface ShellText {
 const TEXT: Partial<Record<ShellLocale, ShellText>> & { en: ShellText } = {
   "zh-CN": {
     show: "显示窗口",
+    board: "项目看板",
     newChat: "快速启动",
     quit: "退出",
     waiting: (n: number, w?: ShellTermForms) => `Cutex — ${n} 个${w?.many ?? "智能体"}等待处理`,
@@ -170,6 +173,7 @@ const TEXT: Partial<Record<ShellLocale, ShellText>> & { en: ShellText } = {
   },
   en: {
     show: "Show window",
+    board: "Project board",
     newChat: "Quick launch",
     quit: "Quit",
     waiting: (n: number, w?: ShellTermForms) => `Cutex — ${n} ${n === 1 ? (w?.one ?? "agent") : (w?.many ?? "agents")} waiting`,
@@ -177,6 +181,7 @@ const TEXT: Partial<Record<ShellLocale, ShellText>> & { en: ShellText } = {
   },
   "zh-Hant-CN": {
     show: "顯示視窗",
+    board: "項目看板",
     newChat: "快速啟動",
     quit: "退出",
     waiting: (n: number, w?: ShellTermForms) => `Cutex — ${n} 個${w?.many ?? "智能體"}等待處理`,
@@ -185,6 +190,7 @@ const TEXT: Partial<Record<ShellLocale, ShellText>> & { en: ShellText } = {
   // Taiwan wording; zh-Hant-HK / zh-Hant-MO inherit it.
   "zh-Hant-TW": {
     show: "顯示視窗",
+    board: "專案看板",
     newChat: "快速啟動",
     quit: "結束",
     waiting: (n: number, w?: ShellTermForms) => `Cutex — ${n} 個${w?.many ?? "智能體"}等待處理`,
@@ -192,6 +198,7 @@ const TEXT: Partial<Record<ShellLocale, ShellText>> & { en: ShellText } = {
   },
   "en-AU": {
     show: "Show window",
+    board: "Project board",
     newChat: "Quick launch",
     quit: "Quit",
     waiting: (n: number, w?: ShellTermForms) => `Cutex — ${n} ${n === 1 ? (w?.one ?? "agent") : (w?.many ?? "agents")} waiting`,
@@ -199,6 +206,7 @@ const TEXT: Partial<Record<ShellLocale, ShellText>> & { en: ShellText } = {
   },
   "ru-RU": {
     show: "Показать окно",
+    board: "Доска проектов",
     newChat: "Быстрый запуск",
     quit: "Выход",
     waiting: (n: number, w?: ShellTermForms) => `Cutex — ${w ? (n === 1 ? w.one : w.many) : "агент(ов)"} в ожидании: ${n}`,
@@ -206,6 +214,7 @@ const TEXT: Partial<Record<ShellLocale, ShellText>> & { en: ShellText } = {
   },
   "fr-FR": {
     show: "Afficher la fenêtre",
+    board: "Tableau des projets",
     newChat: "Lancement rapide",
     quit: "Quitter",
     waiting: (n: number, w?: ShellTermForms) => `Cutex — ${n} ${n === 1 ? (w?.one ?? "agent") : (w?.many ?? "agents")} en attente`,
@@ -213,6 +222,7 @@ const TEXT: Partial<Record<ShellLocale, ShellText>> & { en: ShellText } = {
   },
   "es-ES": {
     show: "Mostrar ventana",
+    board: "Tablero de proyectos",
     newChat: "Inicio rápido",
     quit: "Salir",
     waiting: (n: number, w?: ShellTermForms) => `Cutex — ${n} ${w ? (n === 1 ? w.one : w.many) : "agente(s)"} en espera`,
@@ -220,6 +230,7 @@ const TEXT: Partial<Record<ShellLocale, ShellText>> & { en: ShellText } = {
   },
   "pt-BR": {
     show: "Mostrar janela",
+    board: "Painel de projetos",
     newChat: "Início rápido",
     quit: "Sair",
     waiting: (n: number, w?: ShellTermForms) => `Cutex — ${n} ${w ? (n === 1 ? w.one : w.many) : "agente(s)"} aguardando`,
@@ -227,6 +238,7 @@ const TEXT: Partial<Record<ShellLocale, ShellText>> & { en: ShellText } = {
   },
   "it-IT": {
     show: "Mostra finestra",
+    board: "Bacheca dei progetti",
     newChat: "Avvio rapido",
     quit: "Esci",
     waiting: (n: number, w?: ShellTermForms) => `Cutex — ${n} ${w ? (n === 1 ? w.one : w.many) : n === 1 ? "agente" : "agenti"} in attesa`,
@@ -234,6 +246,7 @@ const TEXT: Partial<Record<ShellLocale, ShellText>> & { en: ShellText } = {
   },
   "de-DE": {
     show: "Fenster anzeigen",
+    board: "Projektübersicht",
     newChat: "Schnellstart",
     quit: "Beenden",
     waiting: (n: number, w?: ShellTermForms) => `Cutex — ${n} ${w ? (n === 1 ? w.one : w.many) : `Agent${n === 1 ? "" : "en"}`} warten`,
@@ -241,6 +254,7 @@ const TEXT: Partial<Record<ShellLocale, ShellText>> & { en: ShellText } = {
   },
   "ja-JP": {
     show: "ウィンドウを表示",
+    board: "プロジェクトボード",
     newChat: "クイック起動",
     quit: "終了",
     waiting: (n: number, w?: ShellTermForms) => `Cutex — 待機中の${w?.many ?? "エージェント"}: ${n}`,
@@ -248,6 +262,7 @@ const TEXT: Partial<Record<ShellLocale, ShellText>> & { en: ShellText } = {
   },
   "ko-KR": {
     show: "창 표시",
+    board: "프로젝트 보드",
     newChat: "빠른 시작",
     quit: "종료",
     waiting: (n: number, w?: ShellTermForms) => `Cutex — 대기 중 ${w?.many ?? "에이전트"}: ${n}`,
@@ -268,9 +283,9 @@ const text = (locale: ShellLocale): ShellText => shellEntry(TEXT, locale) ?? TEX
 const agentWords = (locale: ShellLocale, terms?: ShellTermsPref | null): ShellTermForms | undefined =>
   (terms?.locale === locale ? terms.terms.agent : undefined) ?? (locale === "zh-Hant-TW" ? { one: "智慧體", many: "智慧體" } : undefined);
 
-export function trayMenuLabels(locale: ShellLocale): { show: string; newChat: string; quit: string } {
+export function trayMenuLabels(locale: ShellLocale): { show: string; newChat: string; board: string; quit: string } {
   const t = text(locale);
-  return { show: t.show, newChat: t.newChat, quit: t.quit };
+  return { show: t.show, newChat: t.newChat, board: t.board, quit: t.quit };
 }
 
 export function trayTooltip(count: number, locale: ShellLocale, terms?: ShellTermsPref | null): string {

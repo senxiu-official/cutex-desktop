@@ -1,61 +1,18 @@
 // Channel A of agent pages, owner side (docs/design/004-artifact-page-bridge.md): what each page saved on
 // this computer (main/pageStorage.ts, limits there), cleared only by the owner — from the artifact's ⋯ menu
 // or 设置 → 右侧栏与留白 → 页面数据. Nothing is ever evicted automatically.
-import { useCallback, useEffect, useState } from "react";
-import type { ArtifactSummary } from "../../../../shared/artifactStore";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { PageDataUsage } from "../../../../shared/pageBridge";
 import { bridge } from "../../bridge";
+import { ArmedButton } from "../../components/ArmedButton";
 import { Section, SettingsGroup } from "../../components/settings/Form";
-import { translate, useI18n } from "../../i18n";
-import { promptDialog } from "../../lib/contextMenu";
-import { confirmSettingsRisk, SettingsRiskGate, settingsRiskFingerprint } from "../../lib/settingsRisk";
+import { useI18n } from "../../i18n";
 import { useSettingsRisk } from "../../lib/useSettingsRisk";
-import { settingsRiskText as riskText } from "../../lib/settingsRiskText";
 import { useApp } from "../../store";
-import { services } from "../app";
 import { formatBytes } from "./model";
+import { clearPageData, pageDataClearArmedText, pageDataClearFingerprint } from "./pageDataClear";
 
 const frames = () => bridge?.frames ?? null;
-
-/** ⋯ menu 「清除这个页面的数据」: confirm with the size, then clear (all versions share it). */
-export async function clearPageData(hostId: string, a: Pick<ArtifactSummary, "artifactId" | "name">, valid: () => boolean = () => true): Promise<void> {
-  const f = frames();
-  if (!f) return;
-  const gate = new SettingsRiskGate();
-  const artifact = { ...a };
-  const scope = () => settingsRiskFingerprint([useApp.getState().hosts?.active,
-    useApp.getState().hosts?.hosts.find(host => host.id === hostId)?.label, a]);
-  const initialScope = scope();
-  gate.update(initialScope);
-  const unsubscribe = useApp.subscribe(() => gate.update(scope()));
-  const alive = gate.capture();
-  const current = () => alive() && valid() && frames() === f && scope() === initialScope;
-  try {
-    const usage = await f.pageDataUsage();
-    if (!current()) return;
-    const entry = usage.items.find((item) => item.hostId === hostId && item.artifactId === artifact.artifactId);
-    if (!entry) return services.ui.notice(translate("artifacts.pageData.none", { name: artifact.name }));
-    const name = artifact.name || entry.name || translate("artifacts.pageData.unnamed");
-    const host = useApp.getState().hosts?.hosts.find(item => item.id === hostId)?.label ?? hostId;
-    const result = await confirmSettingsRisk(name, () => promptDialog(riskText("settingsRisk.pageClear"), "", {
-      placeholder: name,
-      hint: riskText("settingsRisk.pageClearHint", { name, target: name, host, size: formatBytes(entry.bytes) }),
-    }), current);
-    if (result !== "confirmed") {
-      if (result !== "cancelled") services.ui.notice(riskText(result === "changed" ? "settingsRisk.changed" : "settingsRisk.typeMismatch"));
-      return;
-    }
-    const latest = await f.pageDataUsage();
-    const latestEntry = latest.items.find(item => item.hostId === hostId && item.artifactId === artifact.artifactId);
-    if (!current() || settingsRiskFingerprint(entry) !== settingsRiskFingerprint(latestEntry)) {
-      services.ui.notice(riskText("settingsRisk.changed")); return;
-    }
-    await f.pageDataClear(hostId, artifact.artifactId);
-    services.ui.notice(translate("artifacts.pageData.cleared", { name }));
-  } catch (e) {
-    services.ui.notice(String(e), "error");
-  } finally { unsubscribe(); gate.invalidate(); }
-}
 
 export function PageDataSettings() {
   const { t } = useI18n();
@@ -63,6 +20,9 @@ export function PageDataSettings() {
   const [usage, setUsage] = useState<PageDataUsage | null>(null);
   const gate = useSettingsRisk([usage, hosts], true);
   const [clearing, setClearing] = useState(false);
+  // Per row, what its 清除 armed on: the settings in view (useSettingsRisk) and the data shown; a change before the
+  // second click cancels it.
+  const armedOn = useRef(new Map<string, { valid(): boolean; expected: string }>());
   const reload = useCallback(() => {
     const f = frames();
     if (f) void f.pageDataUsage().then(setUsage, () => setUsage(null));
@@ -70,10 +30,12 @@ export function PageDataSettings() {
   useEffect(reload, [reload]);
   if (!frames()) return null;
   const hostLabel = (id: string) => hosts?.find((h) => h.id === id)?.label ?? id;
-  const clear = async (hostId: string, artifactId: string, name: string) => {
-    if (clearing) return;
-    const valid = gate.capture(); setClearing(true);
-    try { await clearPageData(hostId, { artifactId, name }, valid); }
+  const rowKey = (item: PageDataUsage["items"][number]) => `${item.hostId}\n${item.artifactId}`;
+  const clear = async (item: PageDataUsage["items"][number], name: string) => {
+    const armed = armedOn.current.get(rowKey(item));
+    if (clearing || !armed) return;
+    setClearing(true);
+    try { await clearPageData(item.hostId, { artifactId: item.artifactId, name }, armed.expected, armed.valid); }
     finally { setClearing(false); reload(); }
   };
   return (
@@ -94,9 +56,12 @@ export function PageDataSettings() {
                     <div className="truncate text-foreground" title={item.artifactId}>{name}</div>
                     <div className="truncate text-subtle">{t("artifacts.pageData.row", { size: formatBytes(item.bytes), host: hostLabel(item.hostId) })}</div>
                   </div>
-                  <button disabled={clearing} onClick={() => void clear(item.hostId, item.artifactId, name)} className="shrink-0 rounded-md border border-border px-2 py-0.5 text-foreground hover:bg-hover disabled:opacity-40">
+                  <ArmedButton shape="shrink-0 rounded-md border border-border px-2 py-0.5 disabled:opacity-40" idle="text-foreground hover:bg-hover" disabled={clearing}
+                    hint={pageDataClearArmedText(item.hostId, name, item.bytes)} resetKey={`${item.hostId}\n${item.artifactId}\n${item.bytes}\n${item.updatedAt}`}
+                    testId="page-data-clear" onArmedChange={(on) => { if (on) armedOn.current.set(rowKey(item), { valid: gate.capture(), expected: pageDataClearFingerprint(item.hostId, item) }); }}
+                    onConfirm={() => void clear(item, name)}>
                     {t("artifacts.pageData.clearOne")}
-                  </button>
+                  </ArmedButton>
                 </li>
               );
             })}

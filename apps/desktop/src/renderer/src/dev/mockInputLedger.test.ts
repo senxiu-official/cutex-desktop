@@ -167,7 +167,7 @@ describe("Current R4 preview; explicit synthetic interactive mutations/absent-de
     await expect(m.api.inputInterruptSend("eva", { ...params, expectedRuntimeGeneration: -1 })).rejects.toThrow("revision_conflict");
     expect(m.snapshot("eva")).toEqual(before);
     const response = await m.api.inputInterruptSend("eva", params);
-    expect(response.record).toMatchObject({ inputId: original.inputId, state: "sending", reason: "interruptSend", details: { simulation: "SYNTHETIC interactive interruptSend" } });
+    expect("record" in response ? response.record : null).toMatchObject({ inputId: original.inputId, state: "sending", reason: "interruptSend", details: { simulation: "SYNTHETIC interactive interruptSend" } });
     expect(m.snapshot("eva").delivery).toEqual(before.delivery);
   });
   it("is opt-in and legacy wins", () => {

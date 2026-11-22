@@ -7,20 +7,23 @@ import { openGitDiff, openPath } from "../../lib/sideOpen";
 import { useSelectedWorkspace } from "../../lib/workspaceView";
 import type { SideBodyProps } from "../slots";
 import { useCurrentField, useFileMenu } from "./shared";
+import { ReadIssueLine } from "../../components/ReadIssueLine";
 
 const STATUS_LETTER: Record<string, string> = { modified: "M", added: "A", deleted: "D", renamed: "R", copied: "C", typechange: "T", conflicted: "!", untracked: "U" };
 
 export function ChangesBody(_props: SideBodyProps<null>) {
   const { t } = useI18n();
-  const { scope, git, error } = useSelectedWorkspace();
+  const { scope, git, gitIssue, reloadGit } = useSelectedWorkspace();
   const menu = useFileMenu(scope);
   const current = useCurrentField(DIFF_COMPONENT, "path");
+  // A failed git status read: a plain line with 重新加载 (transient ones retry by themselves); the last list stays.
+  const issue = gitIssue && <ReadIssueLine className="border-b border-border/60 px-3 py-1.5" issue={gitIssue} retryingText={t("workspace.changes.retrying")} failedText={t("workspace.changes.failed")} onReload={reloadGit} />;
   if (!scope) return <p className="p-3 text-xs text-subtle">{t("workspace.noScope")}</p>;
-  if (error) return <p className="p-3 text-xs text-danger">{error}</p>;
-  if (!git) return <p className="p-3 text-xs text-subtle">…</p>;
+  if (!git) return issue || <p className="p-3 text-xs text-subtle">…</p>;
   if (!git.isRepo) return <p className="p-3 text-xs text-subtle">{t("workspace.notRepo")}</p>;
   return (
     <div className="flex h-full min-h-0 flex-col">
+      {issue}
       <div className="border-b border-border/60 px-3 py-2 text-xs text-muted">
         ⎇ {git.branch ?? "HEAD"}
         {git.ahead ? ` ↑${git.ahead}` : ""}

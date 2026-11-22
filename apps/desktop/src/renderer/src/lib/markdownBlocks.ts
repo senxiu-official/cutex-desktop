@@ -19,7 +19,8 @@ export function settledCount(blocks: readonly string[]): number {
   return 0;
 }
 
-export function createBlockParser(split: (markdown: string) => string[] = parseMarkdownIntoBlocks): (markdown: string) => string[] {
+export function createBlockParser(splitBlocks: (markdown: string) => string[] = parseMarkdownIntoBlocks): (markdown: string) => string[] {
+  const split = (markdown: string) => mergeOpenDisplayMath(splitBlocks(markdown));
   let last: { input: string; blocks: string[] } | null = null;
   return (markdown) => {
     if (last?.input === markdown) return last.blocks;
@@ -46,4 +47,32 @@ export function createBlockParser(split: (markdown: string) => string[] = parseM
 export function withoutPartialFence(markdown: string): string {
   const at = markdown.lastIndexOf("\n") + 1;
   return /^ {0,3}(?:`+|~+)$/.test(markdown.slice(at)) ? markdown.slice(0, at) : markdown;
+}
+
+// Display math opening a line (`\[` … `\]`, lib/markdownMath) is one block for the math parser, but the block
+// split does not know it: a line of only `=` inside it ends a Setext heading there, so the formula would be
+// parsed in two halves (owner report 2026-11-17). streamdown already keeps `$$` pairs together; this keeps a
+// block whose last line-start `\[` has no `\]` after it joined with the blocks that follow, until it closes or a
+// blank line ends it (display math does not span paragraphs). Code fences and code spans are not looked at.
+const FENCE_START = /^ {0,3}(?:`{3}|~{3})/;
+const DISPLAY_OPEN = /(?:^|\n)[ \t>]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+)?\\\[/g;
+const ENDS_IN_BLANK_LINE = /\n[ \t]*\n\s*$/;
+
+function opensDisplayMath(block: string): boolean {
+  if (FENCE_START.test(block) || ENDS_IN_BLANK_LINE.test(block)) return false;
+  const text = block.replace(/(`+)[^`]*?\1/g, "");
+  let after = -1;
+  for (const match of text.matchAll(DISPLAY_OPEN)) after = match.index + match[0].length;
+  return after >= 0 && !text.slice(after).includes("\\]");
+}
+
+export function mergeOpenDisplayMath(blocks: string[]): string[] {
+  const merged: string[] = [];
+  let open = false;
+  for (const block of blocks) {
+    if (open) merged[merged.length - 1] += block;
+    else merged.push(block);
+    open = opensDisplayMath(merged[merged.length - 1]!);
+  }
+  return merged;
 }

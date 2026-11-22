@@ -100,7 +100,7 @@ export function ClaudeSkillsImportDialog({ hostId, onClose, onImported }: { host
               </ul>
             )}
             <div className="mt-3 flex justify-end">
-              <button autoFocus onClick={onClose} className={`${button} bg-accent text-white`}>
+              <button autoFocus onClick={onClose} className={`${button} press-solid bg-accent text-white hover:brightness-110`}>
                 {t("claudeSkillsImport.close")}
               </button>
             </div>
@@ -130,7 +130,7 @@ export function ClaudeSkillsImportDialog({ hostId, onClose, onImported }: { host
                   }}
                   className="min-w-0 flex-1 rounded-md border border-border bg-background px-2.5 py-1.5 font-mono text-xs outline-none focus:border-accent"
                 />
-                <button type="button" disabled={busy || loading} title={t("claudeSkillsImport.reload")} onClick={() => load(source.trim())} className="rounded-md border border-border px-2 text-muted hover:bg-surface-2 disabled:opacity-50">
+                <button type="button" disabled={busy || loading} title={t("claudeSkillsImport.reload")} onClick={() => load(source.trim())} className="press rounded-md border border-border px-2 text-muted hover:bg-surface-2 disabled:opacity-50">
                   <RefreshCw size={13} />
                 </button>
               </span>
@@ -177,10 +177,10 @@ export function ClaudeSkillsImportDialog({ hostId, onClose, onImported }: { host
             )}
             {error && <p role="alert" className="text-xs text-danger break-words">{error}</p>}
             <div className="flex justify-end gap-2">
-              <button type="button" onClick={onClose} disabled={busy} className={`${button} text-muted hover:bg-surface-2`}>
+              <button type="button" onClick={onClose} disabled={busy} className={`${button} press text-muted hover:bg-surface-2`}>
                 {t("claudeSkillsImport.cancel")}
               </button>
-              <button type="submit" disabled={!names.length || busy} className={`${button} bg-accent text-white`} data-testid="claude-skills-import-run">
+              <button type="submit" disabled={!names.length || busy} className={`${button} press-solid bg-accent text-white enabled:hover:brightness-110`} data-testid="claude-skills-import-run">
                 {busy ? t("claudeSkillsImport.importing") : t("claudeSkillsImport.submit", { n: names.length })}
               </button>
             </div>

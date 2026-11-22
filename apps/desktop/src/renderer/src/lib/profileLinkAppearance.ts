@@ -7,6 +7,8 @@ import { hostData } from "./hostScope";
 import { accountLinkHostAllowed, accountLinkIdentity, accountProfilesSnapshot, captureAccountLinkAction, refreshAccountProfiles, subscribeAccountProfiles, type LinkedProfileRef } from "./profileAccountLinks";
 import { patchProfileLook } from "./profileLooks";
 import { updateCachedProfile } from "./profileSnapshot";
+import { ProfilePortraitThemeError } from "../../../shared/profilePortraitThemes";
+import { isPortraitThemeKey } from "../../../shared/portraitDefaults";
 
 export const LOOK_FIELDS = ["color", "avatarThemes", "introGreeting", "avatar", "introPortrait", "avatarStyle"] as const;
 export type LookField = typeof LOOK_FIELDS[number];
@@ -71,7 +73,7 @@ function cleanAvatarStyle(v: unknown): AvatarStyle | undefined {
   let style: AvatarStyle | undefined;
   if (raw.kind === "letter" && exactKeys(raw, ["kind"])) style = { kind: "letter" };
   else if (raw.kind === "emoji" && exactKeys(raw, ["kind", "emojiThemes"]) && (raw.emojiThemes === null || uniqueList(raw.emojiThemes, 64, (x) => /^[a-z][a-z0-9_-]{0,31}$/.test(x)))) style = { kind: "emoji", emojiThemes: raw.emojiThemes === null ? null : [...raw.emojiThemes as string[]].sort() };
-  else if (raw.kind === "portrait" && exactKeys(raw, ["kind", "portraitThemes"]) && uniqueList(raw.portraitThemes, 128, (x) => /^[a-z0-9][a-z0-9-]{0,19}\/[a-z0-9][a-z0-9-]{0,19}$/.test(x))) style = { kind: "portrait", portraitThemes: [...raw.portraitThemes] };
+  else if (raw.kind === "portrait" && exactKeys(raw, ["kind", "portraitThemes"]) && uniqueList(raw.portraitThemes, 128, isPortraitThemeKey)) style = { kind: "portrait", portraitThemes: [...raw.portraitThemes] };
   return style && new TextEncoder().encode(JSON.stringify(style)).length <= 8192 ? style : undefined;
 }
 
@@ -568,7 +570,9 @@ export const profileAppearanceTransport: AppearanceTransport = {
     } else {
       // Only the mutation response identifies our own revision. A later read may
       // already contain another owner edit and must never become our undo fence.
-      receipt = await api.patchProfile(id, { [field]: value } as ProfilePatch);
+      const patched = await api.patchProfile(id, { [field]: value } as ProfilePatch);
+      if (patched.portraitProblem) throw new ProfilePortraitThemeError(patched.portraitProblem);
+      receipt = patched;
       if (receipt.id !== id || accountLinkIdentity(receipt) !== identity) throw Error("appearance outcome needs refresh");
     }
     if (!isCurrent()) throw Error("appearance outcome needs refresh");

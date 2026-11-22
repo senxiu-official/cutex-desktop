@@ -11,7 +11,8 @@ import { useI18n } from "../../i18n";
 import { approvalSubject, useLiveApproval } from "../../lib/liveApproval";
 import { TimelineRowFallback } from "../TimelineRowFallback";
 import { openDelegationDetail } from "../../lib/delegationOpen";
-import { useResolvedAskId } from "../../lib/delegationsView";
+import { useResolvedAskId, useResolvedSessionId } from "../../lib/delegationsView";
+import { sidebarOf, useApp } from "../../store";
 
 const statusKeys = { busy: "status.running", idle: "status.idle", offline: "status.offline", error: "status.error" } as const;
 const icons = { read: BookOpen, search: Search, tools: Wrench, agents: Users, memberRuntime: ServerCog, taskStop: CircleStop, artifactRead: FileText, actionStatus: ScanLine };
@@ -59,11 +60,18 @@ export function StandardToolRow({ item }: { item: RawItem; sessionId: string }) 
   // checks don't stack rows that still read 调用等待审批 after the approval.
   const waiting = model?.kind === "actionStatus" && model.state === "awaitingApproval";
   const live = useLiveApproval(hostId, waiting ? approvalSubject(item) : null);
+  // member_runtime names the agent by session id: show its name (the id stays in the details).
+  const memberId = useResolvedSessionId(model?.kind === "memberRuntime" ? model.summary : null);
+  const memberName = useApp((s) => {
+    if (!memberId) return null;
+    const sb = sidebarOf(s, hostId);
+    return [...(sb?.active ?? []), ...(sb?.retired ?? [])].find((x) => x.cutexSessionId === memberId)?.displayName ?? null;
+  });
   if (!model) return <TimelineRowFallback />;
   const decided = waiting && live !== null && live !== "pending";
   const notices = model.pendingNotices;
   const noticeText = notices ? [t("conversation.tools.pendingNotices", { n: notices.total }), ...NOTICE_KINDS.filter(k => notices.counts[k] > 0).map(k => `${t(`conversation.tools.pendingNotices.${k}`)} ${notices.counts[k]}`)].join(" · ") : null;
-  const detail = model.kind === "agents" && model.agentCount !== null ? [t("conversation.tools.agentCount", { n: model.agentCount }), model.summary, noticeText].filter(Boolean).join(" · ") : model.summary;
+  const detail = model.kind === "agents" && model.agentCount !== null ? [t("conversation.tools.agentCount", { n: model.agentCount }), model.summary, noticeText].filter(Boolean).join(" · ") : model.kind === "memberRuntime" && memberName ? memberName : model.summary;
   const key = model.kind === "memberRuntime" && model.operation ? `conversation.tools.memberRuntime.${model.operation}` as const : `conversation.tools.${model.kind}` as const;
   const state = decided ? t(`conversation.tools.actionStatus.approval.${live}`) : model.state ? t(`conversation.tools.actionStatus.${model.state}`) : null;
   const summary = [detail, state].filter(Boolean).join(" · ");

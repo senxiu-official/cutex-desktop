@@ -21,8 +21,8 @@ import { fileURLToPath } from "node:url";
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const BUNDLED_FILES = join(repo, "apps/desktop/src/renderer/public/avatars/portraits");
 const BUNDLED_MANIFESTS = join(repo, "apps/desktop/src/renderer/src/assets/avatars/portraits");
-const PACK_ID = /^[a-z0-9][a-z0-9-]{0,19}$/;
-const THEME_ID = /^[a-z0-9][a-z0-9-]{0,19}$/;
+const PACK_ID = /^[a-z0-9][a-z0-9-]{0,19}$(?![\s\S])/;
+const THEME_ID = /^[a-z0-9][a-z0-9-]{0,31}$(?![\s\S])/;
 const STEM = /^[a-z0-9][a-z0-9_-]{0,12}$/;
 const IMAGE_PATH = /^(?!\/)(?!.*(?:^|\/)\.\.?(?:\/|$))[A-Za-z0-9_./-]{1,200}\.(png|jpe?g|webp)$/i;
 

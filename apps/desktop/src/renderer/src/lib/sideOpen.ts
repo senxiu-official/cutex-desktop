@@ -5,7 +5,7 @@
 import { translate, type MessageKey } from "../i18n";
 import type { SideOpenOptions, SideOpenResult } from "../modules/slots";
 import type { ItemId, Json } from "../modules/types";
-import { agentHost, hostApi, selectedSidebar, useApp } from "../store";
+import { agentHost, hostApi, selectedSidebar, sidebarOf, useApp } from "../store";
 import { agentFeaturesFor } from "./agentFeaturesView";
 import { canOpenSubAgent } from "./claudeTasks";
 import { getUiPrefs } from "./prefs";
@@ -32,9 +32,30 @@ import { isTurnDiffPage, turnDiffPage } from "./turnDiffPage";
 import { showShelfToast } from "./shelves";
 import { resolveFileHref, rootFor, scopeFor } from "./workspace";
 
-/** services.side.open + a notice when it cannot open (unknown / off / capability / agent …). */
-export function openSide(kind: ItemId, params: Json = null, opts: SideOpenOptions = {}): SideOpenResult {
-  const result = sideOpen(kind, params, opts);
+/**
+ * The agent a file open belongs to when it is not the selected one: Markdown under an AgentMarkdownScope (a side chat, a
+ * note). Its workspace resolves the path; the preview card is bound to it and reads that workspace / host
+ * (sessionId null: that host only). Absent, or the selected agent itself: the selected agent, as always.
+ */
+export type OpenSource = { hostId: string; sessionId: string | null };
+
+/** `source` when it is not the selected agent (that one needs nothing special). */
+export function otherSource(source: OpenSource | undefined): OpenSource | undefined {
+  if (!source) return undefined;
+  const s = useApp.getState();
+  return source.hostId === agentHost(s) && source.sessionId !== null && source.sessionId === s.selectedId ? undefined : source;
+}
+
+/** The 文件 tree and the diff view show the selected agent's workspace only: another agent's folder cannot open there. */
+function treeUnavailable(): SideOpenResult {
+  useApp.getState().notify(translate("workspace.folderOutside"), "info");
+  return { status: "unavailable", reason: "bad-params" };
+}
+
+/** services.side.open + a notice when it cannot open (unknown / off / capability / agent …). With `source`: bound to that agent / host. */
+export function openSide(kind: ItemId, params: Json = null, opts: SideOpenOptions = {}, source?: OpenSource): SideOpenResult {
+  const bound = source ? { ...opts, binding: source.sessionId ? { kind: "agent" as const, hostId: source.hostId, sessionId: source.sessionId } : { kind: "host" as const, hostId: source.hostId } } : opts;
+  const result = sideOpen(kind, params, bound);
   if (result.status === "unavailable") {
     const entry = sideRegistry().get(kind);
     const what = entry ? translate(entry.item.titleKey) : kind;
@@ -57,18 +78,22 @@ export function previewOpts(from: FileOpenFrom, mods: OpenModifiers = PLAIN_OPEN
 }
 
 /** A workspace file (file links, tool rows, the file tree): the preview. */
-export function openFile(path: string, line: number | null = null, from: FileOpenFrom = "link", mods: OpenModifiers = PLAIN_OPEN): SideOpenResult {
-  return openSide(PREVIEW_COMPONENT, { path, line } satisfies PreviewParams, previewOpts(from, mods));
+export function openFile(path: string, line: number | null = null, from: FileOpenFrom = "link", mods: OpenModifiers = PLAIN_OPEN, source?: OpenSource): SideOpenResult {
+  const other = otherSource(source);
+  // Another agent's file: the preview reads that workspace (its `scope`, on the card's bound host).
+  const scope = other ? selectedWorkspace(other).scope : null;
+  if (other && !scope) return treeUnavailable();
+  return openSide(PREVIEW_COMPONENT, { path, line, ...(scope ? { scope: { kind: scope.kind, id: scope.id } } : {}) } satisfies PreviewParams, previewOpts(from, mods), other);
 }
 
 /** An absolute path on the active host outside the workspace root (cutex fs-file-read). */
-export function openHostFile(path: string, line: number | null = null, mods: OpenModifiers = PLAIN_OPEN): SideOpenResult {
-  return openSide(PREVIEW_COMPONENT, { path, line, host: true } satisfies PreviewParams, previewOpts("link", mods));
+export function openHostFile(path: string, line: number | null = null, mods: OpenModifiers = PLAIN_OPEN, source?: OpenSource): SideOpenResult {
+  return openSide(PREVIEW_COMPONENT, { path, line, host: true } satisfies PreviewParams, previewOpts("link", mods), otherSource(source));
 }
 
 /** A workspace folder: the 文件 tree, expanded down to it, the folder highlighted and scrolled into view. */
-export function openFolder(path: string): SideOpenResult {
-  return revealInTree(path);
+export function openFolder(path: string, source?: OpenSource): SideOpenResult {
+  return revealInTree(path, source);
 }
 
 /**
@@ -76,7 +101,8 @@ export function openFolder(path: string): SideOpenResult {
  * the item selected and scrolled to the middle; outside the explorer's current folder it goes to the
  * item's folder (a history step). The explorer of this agent's own Shelf (017) is used, else one opens.
  */
-export function revealInTree(path: string): SideOpenResult {
+export function revealInTree(path: string, source?: OpenSource): SideOpenResult {
+  if (otherSource(source)) return treeUnavailable();
   return openSide(FILES_COMPONENT, { reveal: path }, { focus: true });
 }
 
@@ -113,9 +139,15 @@ export function openFileKept(path: string, mods: OpenModifiers = PLAIN_OPEN): Si
   return openSide(PREVIEW_COMPONENT, { path, line: null } satisfies PreviewParams, mods.newInstance ? newInstanceOpts(mods) : { pin: true });
 }
 
-/** The selected agent's workspace (what the preview and the 文件 tree read). */
-function selectedWorkspace() {
+/** The selected agent's workspace (what the preview and the 文件 tree read); with `source`: that agent's. */
+function selectedWorkspace(source?: OpenSource) {
   const s = useApp.getState();
+  source = otherSource(source);
+  if (source) {
+    const sidebar = sidebarOf(s, source.hostId);
+    const scope = source.sessionId ? scopeFor(sidebar, source.sessionId) : null;
+    return { hostId: source.hostId, api: hostApi(source.hostId), scope, root: scope ? rootFor(sidebar, scope) : null };
+  }
   const sidebar = selectedSidebar(s);
   const scope = scopeFor(sidebar, s.selectedId);
   const hostId = agentHost(s);
@@ -126,26 +158,27 @@ function selectedWorkspace() {
  * A workspace path that may be a folder (file links, tool rows, the turn summary, menus, search
  * results): the daemon says which (lib/pathKind.ts); a folder opens in the 文件 tree, a file as `openFile`.
  */
-export async function openPath(path: string, line: number | null = null, from: FileOpenFrom = "link", mods: OpenModifiers = PLAIN_OPEN): Promise<void> {
-  const { hostId, api, scope } = selectedWorkspace();
-  if (scope && (await isWorkspaceDir(api, hostId, scope, path))) openFolder(path);
-  else openFile(path, line, from, mods);
+export async function openPath(path: string, line: number | null = null, from: FileOpenFrom = "link", mods: OpenModifiers = PLAIN_OPEN, source?: OpenSource): Promise<void> {
+  const { hostId, api, scope } = selectedWorkspace(source);
+  if (scope && (await isWorkspaceDir(api, hostId, scope, path))) openFolder(path, source);
+  else openFile(path, line, from, mods, source);
 }
 
 /**
  * An absolute host path that may be a folder: inside the workspace root it opens in the 文件 tree;
  * outside, the tree cannot show it, so a notice says so (never a preview of an error).
  */
-export async function openHostPath(path: string, line: number | null = null, mods: OpenModifiers = PLAIN_OPEN): Promise<void> {
-  const { hostId, api, root } = selectedWorkspace();
-  if (await isHostDir(api, hostId, path)) openHostFolder(path, root);
-  else openHostFile(path, line, mods);
+export async function openHostPath(path: string, line: number | null = null, mods: OpenModifiers = PLAIN_OPEN, source?: OpenSource): Promise<void> {
+  const { hostId, api, root } = selectedWorkspace(source);
+  if (await isHostDir(api, hostId, path)) openHostFolder(path, root, source);
+  else openHostFile(path, line, mods, source);
 }
 
 /** A host folder (known to be one): the 文件 tree when inside the workspace root, else a notice. */
-export function openHostFolder(path: string, root: string | null = selectedWorkspace().root): void {
+export function openHostFolder(path: string, root: string | null = selectedWorkspace().root, source?: OpenSource): void {
+  if (otherSource(source)) return void treeUnavailable();
   const rel = root ? relativeTo(path, root) : null;
-  if (rel !== null) openFolder(rel);
+  if (rel !== null) openFolder(rel, source);
   else useApp.getState().notify(translate("workspace.folderOutside"), "info");
 }
 

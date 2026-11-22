@@ -8,6 +8,7 @@
 // every token with its user, 待分配 first, the 新设备先待分配 switch). cutex `person-identity` (P2,
 // docs/research/person-identity-p2-20261014.md §5): each user lists the person keys it is known by
 // (fingerprint, remove) and the unknown keys its devices brought (「认作此用户」).
+import { useSettingsCard } from "../../lib/settingsDrafts";
 import { isImeComposing } from "../../lib/ime";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { create as createStore } from "zustand";
@@ -156,7 +157,7 @@ function UsersSection({ list, write, reload, onShowDevices, onShowPeers }: { lis
 
       actions={
         <>
-          <RefreshButton label={t("users.refresh")} onClick={() => void reload()} />
+          <RefreshButton label={t("users.refresh")} onClick={() => reload()} />
           {!onlyOwner && <AddButton primary onClick={() => setAdding((v) => !v)}>{t("users.add")}</AddButton>}
         </>
       }
@@ -361,6 +362,8 @@ function GrantEditor({ user, onSave }: { user: UserRecord; onSave(grant: UserGra
   const [keptProjects, setKeptProjects] = useState<string[]>(saved.projects === "all" ? [] : [...saved.projects]);
   const [busy, setBusy] = useState(false);
   const dirty = !sameGrant(draft, saved);
+  // Unsaved exactly while it differs from the saved grant (lib/settingsDrafts).
+  const card = useSettingsCard(dirty);
   const all = draft.projects === "all";
   const projects = all ? [] : (draft.projects as string[]);
   const save = async () => {
@@ -369,7 +372,7 @@ function GrantEditor({ user, onSave }: { user: UserRecord; onSave(grant: UserGra
     setBusy(false);
   };
   return (
-    <div className="rounded-lg border border-border px-3 py-2.5" data-testid="grant-editor">
+    <div ref={card.ref} className="rounded-lg border border-border px-3 py-2.5" data-testid="grant-editor">
       <div className="mb-2 flex items-baseline justify-between gap-3">
         <div>
           <div className="text-sm font-medium">{t("users.grant")}</div>

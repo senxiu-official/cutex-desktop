@@ -41,6 +41,8 @@ import { useShortPaneFold } from "../lib/shortPane";
 import type { QueueItem } from "@cutex-desktop/protocol";
 import { RailStripContext, useStripInside } from "../lib/railStrip";
 import { useI18n, type MessageKey } from "../i18n";
+import { useRowTime } from "../lib/queueRowTime";
+import { RowFullText } from "./RowFullText";
 import type { InputActionResult } from "../lib/inputLedger/actionResult";
 import { type NextUpPanelControlId, isLedgerPanelControl, NEXT_UP_PANEL_CONTROLS, fill, NEXT_UP_EFFECTS, NEXT_UP_STATES, langOf, stateLabelKey, type Lang, type NextUpEffectId, type NextUpStateId } from "../lib/inputLedger/nextUpRegistry";
 import { LEGACY_FAILED_SEND_EFFECTS, legacyItemState, legacyOutboxState, legacySteerState } from "../lib/inputLedger/legacyNextUp";
@@ -58,6 +60,8 @@ import { META_YIELDS, QUEUE_ROW, ROW_ACTIONS, ROW_META, ROW_TEXT, rowText } from
 import { LocalSendStatus } from "./LocalSendStatus";
 import { KindIcon, SteerDeliveryNote } from "./AdmissionRows";
 import { QueuedImages } from "./ImageThumbs";
+import { QueuedMessageInline } from "./QueuedMessageInline";
+import type { InputPart } from "../../../shared/inputPreview";
 import { messageImages } from "../../../shared/input";
 import { Rail, RailRow } from "./QueueRail";
 import { useUserLayoutToggle } from "../lib/userLayoutToggle";
@@ -73,6 +77,7 @@ import { btn } from "./Button";
 import { insertFeedbackOf, insertFinished, insertLocked, insertUnsure, useQueueInsertFeedback } from "../lib/queueInsertFeedback";
 import { QueueInsertStatus, QueueInsertUnsureHint } from "./QueueInsertStatus";
 import { isElement, isNode, ownerDocumentOf, ownerWindowOf, resizeObserverFor } from "../lib/ownerWindow";
+import { withinOwned } from "../lib/ownedPopover";
 
 const NO_NEXT_STEP: AdmissionNextStep[] = [];
 
@@ -84,8 +89,8 @@ const SECTION = "flex flex-col gap-0.5 py-0.5";
 const SECTION_RULES = "[&>[data-queue-section]~[data-queue-section]]:border-t [&>[data-queue-section]~[data-queue-section]]:border-border/60";
 /** A group's heading: a small muted label (not a box), its actions at the end. */
 const HEADING = "flex h-6 min-w-0 items-center gap-1.5 pr-1 pl-0.5 text-caption/[inherit] text-subtle";
-const ICON_BUTTON = "rounded-md p-1 text-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none disabled:opacity-30";
-const ICON_BUTTON_DANGER = "rounded-md p-1 text-muted hover:text-danger focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none";
+const ICON_BUTTON = "press rounded-md p-1 text-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none disabled:opacity-30";
+const ICON_BUTTON_DANGER = "press rounded-md p-1 text-muted hover:text-danger focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none";
 
 /** An extra section: its content and the chip it shows while the card is compact. */
 export interface QueueSection {
@@ -163,7 +168,7 @@ function OutboxRow({ entry, kind, actions, hostId }: { entry: OutboxEntry; kind:
             </span>
           )}
           {LEGACY_FAILED_SEND_EFFECTS.map(effect => { const w = effectWord(effect, lang); return effect === "retry"
-            ? <button key={effect} onClick={run[effect]} title={w.tip} data-effect={effect} className="shrink-0 rounded-md bg-surface-2 px-2 py-0.5 text-xs hover:text-accent">{w.label}</button>
+            ? <button key={effect} onClick={run[effect]} title={w.tip} data-effect={effect} className="press shrink-0 rounded-md bg-surface-2 px-2 py-0.5 text-xs hover:text-accent">{w.label}</button>
             : <button key={effect} onClick={run[effect]} title={w.tip} aria-label={w.label} data-effect={effect} className={effect === "dismiss" ? ICON_BUTTON_DANGER : ICON_BUTTON}>{effect === "dismiss" ? <X size={12} aria-hidden /> : <Pencil size={12} aria-hidden />}</button>; })}
         </>
       ) : (
@@ -391,7 +396,8 @@ function LegacyQueuePanel({
   useEffect(() => {
     if (!overlay || drag) return;
     const down = (e: PointerEvent) => {
-      if (!isNode(e.target) || !tray.current?.contains(e.target)) closeOverlay(false);
+      // A popover a row opened (its full text, 查看原因) is part of the tray (lib/ownedPopover).
+      if (!withinOwned(tray.current, e.target)) closeOverlay(false);
     };
     const doc = ownerDocumentOf(tray.current);
     doc.addEventListener("pointerdown", down, true);
@@ -446,13 +452,12 @@ function LegacyQueuePanel({
     <div
       key={item.clientUserMessageId || item.queueId}
       {...extra.rowProps}
-      className={`${QUEUE_ROW} min-h-6 max-h-6 shrink-0 hover:bg-hover ${extra.rowProps ? "focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none" : ""}`}
+      className={`${QUEUE_ROW} min-h-6 max-h-6 shrink-0 hover:bg-hover ${extra.rowProps ? "press focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none" : ""}`}
       data-testid="queue-item"
     >
       {extra.grip}
       <KindIcon icon={UserRound} label={t("queue.delivery.owner")} />
-      <QueuedImages images={messageImages(item.input as { type: string }[])} hostId={hostId} />
-      <span className={`${ROW_TEXT} text-foreground`}>{rowText(mentionPlainText(queuedRowText(item)))}</span>
+      <LegacyQueuedText item={item} hostId={hostId} />
       {feedback && !feedback.hidden ? insertStatus(item.clientUserMessageId) : extra.paused ? (
         // The ❚❚ glyph is the section's (rail / divider); the row just says it.
         <span data-testid="queue-item-paused" className="contents"><StateWord state={legacyItemState({ paused: true })} className={META_YIELDS} /></span>
@@ -470,7 +475,7 @@ function LegacyQueuePanel({
             onClick={() => onSendNow(item)}
             disabled={locked}
             title={feedback?.hidden && feedback.state === "unknown" ? t("queue.insert.unknown") : effectWord(sendNowStartsTurn ? "sendNow" : "insertNow", lang).tip}
-            className="rounded-md bg-surface-2 px-2 py-0.5 text-xs hover:text-accent focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none"
+            className="press rounded-md bg-surface-2 px-2 py-0.5 text-xs hover:text-accent focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none"
             data-testid="queue-send-now"
           >
             {effectWord(sendNowStartsTurn ? "sendNow" : "insertNow", lang).label}
@@ -537,7 +542,7 @@ function LegacyQueuePanel({
       } : undefined}
       // Tab out of the card (or any other way the focus leaves it) closes the overlay.
       onBlur={overlayOpen ? (e) => {
-        if (!drag && isNode(e.relatedTarget) && !e.currentTarget.contains(e.relatedTarget)) closeOverlay(false);
+        if (!drag && isNode(e.relatedTarget) && !withinOwned(e.currentTarget, e.relatedTarget)) closeOverlay(false);
       } : undefined}
     >
       <div
@@ -565,7 +570,7 @@ function LegacyQueuePanel({
             title={t(autoFold ? "queue.overlay.foldedHint" : "queue.header.expand")}
             aria-expanded={autoFold ? overlayOpen : undefined}
             aria-controls={autoFold ? overlayId : undefined}
-            className="-ml-1 flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden rounded-md px-1 text-left hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none"
+            className="press -ml-1 flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden rounded-md px-1 text-left hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none"
             data-testid="queue-chips"
           >
             <span className="shrink-0 font-semibold text-foreground">{t("queue.header.title")}</span>
@@ -591,7 +596,7 @@ function LegacyQueuePanel({
         <span ref={setActionSlot} className="flex items-center empty:hidden" data-merge-slot="" />
         {!folded && ordered?.actions}
         {headerResume && (
-          <button onClick={onResumePaused} title={t(stopHold ? "paused.resumeHintStop" : "paused.resumeHint")} className="rounded-md px-1.5 py-0.5 text-xs text-warn hover:bg-warn/10 focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none" data-testid="queue-header-resume">
+          <button onClick={onResumePaused} title={t(stopHold ? "paused.resumeHintStop" : "paused.resumeHint")} className="press rounded-md px-1.5 py-0.5 text-xs text-warn hover:bg-warn/10 focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none" data-testid="queue-header-resume">
             {t("paused.resume")}
           </button>
         )}
@@ -604,7 +609,7 @@ function LegacyQueuePanel({
             aria-controls={overlayId}
             aria-label={t(overlayOpen ? "queue.overlay.close" : "queue.overlay.open")}
             title={t(overlayOpen ? "queue.overlay.close" : "queue.overlay.foldedHint")}
-            className="rounded-md p-0.5 text-subtle hover:bg-surface-2 hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none"
+            className="press rounded-md p-0.5 text-subtle hover:bg-surface-2 hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none"
             data-testid="queue-collapse"
             data-short-fold-toggle=""
           >
@@ -616,7 +621,7 @@ function LegacyQueuePanel({
           aria-expanded={!collapsed}
           aria-label={t(collapsed ? "queue.header.expand" : "queue.header.collapse")}
           title={t(collapsed ? "queue.header.expand" : "queue.header.collapse")}
-          className="rounded-md p-0.5 text-subtle hover:bg-surface-2 hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none"
+          className="press rounded-md p-0.5 text-subtle hover:bg-surface-2 hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none"
           data-testid="queue-collapse"
         >
           {collapsed ? <ChevronRight size={14} aria-hidden /> : <ChevronDown size={14} aria-hidden />}
@@ -644,7 +649,7 @@ function LegacyQueuePanel({
               {t("steer.pending")}
             </span>
             {waiting.some(p => (p.state ?? "waiting") === "waiting") && (
-              <button onClick={onInterruptSendSteers} title={effectWord("interruptSend", lang).tip} className="rounded-md px-1.5 py-0.5 text-xs text-danger hover:bg-danger/10">
+              <button onClick={onInterruptSendSteers} title={effectWord("interruptSend", lang).tip} className="press rounded-md px-1.5 py-0.5 text-xs text-danger hover:bg-danger/10">
                 {effectWord("interruptSend", lang).label}
               </button>
             )}
@@ -673,14 +678,14 @@ function LegacyQueuePanel({
             <button onClick={onResumePaused} title={t(stopHold ? "paused.resumeHintStop" : "paused.resumeHint")} className={btn({ size: "sm" })}>
               {LEGACY_PAUSED.buttons[0][lang]}
             </button>
-            <button onClick={onRestorePaused} title={t("paused.restoreHint")} className="rounded-md px-1.5 py-0.5 text-xs text-muted hover:text-foreground" data-testid="paused-restore">
+            <button onClick={onRestorePaused} title={t("paused.restoreHint")} className="press rounded-md px-1.5 py-0.5 text-xs text-muted hover:text-foreground" data-testid="paused-restore">
               {LEGACY_PAUSED.buttons[1][lang]}
             </button>
             </>)}
             <button
               onClick={() => (clearArmed ? (setClearArmed(false), onClearPaused()) : setClearArmed(true))}
               title={LEGACY_PAUSED.buttons[2][lang]}
-              className={clearArmed ? ARMED_BUTTON : "rounded-md px-1.5 py-0.5 text-xs text-muted hover:text-danger"}
+              className={clearArmed ? ARMED_BUTTON : "press rounded-md px-1.5 py-0.5 text-xs text-muted hover:text-danger"}
               data-testid="paused-clear"
             >
               {LEGACY_PAUSED.buttons[2][lang]}
@@ -796,7 +801,8 @@ function LedgerQueuePanel(props: React.ComponentProps<typeof LegacyQueuePanel>) 
   useEffect(() => {
     if (!overlay) return;
     const doc = frame.current?.ownerDocument;
-    const outside = (event: MouseEvent) => { if (isNode(event.target) && !frame.current?.contains(event.target)) setOverlay(false); };
+    // A popover a row opened (its full text, 查看原因) is part of the tray (lib/ownedPopover), not "elsewhere".
+    const outside = (event: MouseEvent) => { if (isNode(event.target) && !withinOwned(frame.current, event.target)) setOverlay(false); };
     doc?.addEventListener("pointerdown", outside);
     return () => doc?.removeEventListener("pointerdown", outside);
   }, [overlay]);
@@ -819,18 +825,18 @@ function LedgerQueuePanel(props: React.ComponentProps<typeof LegacyQueuePanel>) 
   const showDelivery = showStandaloneDelivery(ledger?.delivery) && (ledger?.delivery?.state === "held" || !!ledger?.delivery?.lease);
   if (!count && !uncertain.length && !showDelivery && !sections.length) return null;
   const folded = collapsed || shortPane.fold;
-  return <div ref={frame} className="relative flex min-h-0 flex-col rounded-t-inner border border-b-0 border-border bg-surface px-1 pt-0.5 pb-1" data-queue-tray="" data-testid="queue-tray" data-collapsed={folded || undefined} data-short-fold={shortPane.fold || undefined} onKeyDown={e => { if (e.key === "Escape") { setOverlay(false); setArmed(false); } }} onBlur={e => { if (isNode(e.relatedTarget) && !e.currentTarget.contains(e.relatedTarget)) setOverlay(false); }}>
+  return <div ref={frame} className="relative flex min-h-0 flex-col rounded-t-inner border border-b-0 border-border bg-surface px-1 pt-0.5 pb-1" data-queue-tray="" data-testid="queue-tray" data-collapsed={folded || undefined} data-short-fold={shortPane.fold || undefined} onKeyDown={e => { if (e.key === "Escape") { setOverlay(false); setArmed(false); } }} onBlur={e => { if (isNode(e.relatedTarget) && !withinOwned(e.currentTarget, e.relatedTarget)) setOverlay(false); }}>
     <div className="flex h-6 min-w-0 items-center gap-1.5 px-1.5 text-meta text-subtle" data-testid="queue-header">
       <span className="font-semibold text-foreground">{t("queue.header.title")}</span>
       {count > 0 && <CountBadge tone="neutral" count={count} data-testid="queue-count" />}
-      <button type="button" className="flex h-5 w-5 items-center justify-center rounded text-subtle hover:bg-surface-2 hover:text-foreground" aria-label={t("nextUp.help.open")} data-tip={t("nextUp.help.open")} data-testid="next-up-help" onClick={() => useApp.getState().openSettings("next-up-states")}><CircleHelp size={12} aria-hidden /></button>
+      <button type="button" className="press flex h-5 w-5 items-center justify-center rounded text-subtle hover:bg-surface-2 hover:text-foreground" aria-label={t("nextUp.help.open")} data-tip={t("nextUp.help.open")} data-testid="next-up-help" onClick={() => useApp.getState().openSettings("next-up-states")}><CircleHelp size={12} aria-hidden /></button>
       <span className="flex-1" />
-      {mergePlan && props.onMergeInsert && props.onSendNow && <button type="button" disabled={merging} className="h-5 rounded px-1 text-caption hover:bg-surface-2 disabled:opacity-50" data-testid="queue-merge-insert" title={t("queue.merge.hint", { n: mergePlan.items.length })} onClick={() => {
+      {mergePlan && props.onMergeInsert && props.onSendNow && <button type="button" disabled={merging} className="press h-5 rounded px-1 text-caption hover:bg-surface-2 disabled:opacity-50" data-testid="queue-merge-insert" title={t("queue.merge.hint", { n: mergePlan.items.length })} onClick={() => {
         setMerging(true);
         void props.onMergeInsert!(mergePlan.items).catch(error => { const text = queueActionNotice(error, t); if (text) useApp.getState().notify(text, "error", { hostId, sessionId }); }).finally(() => setMerging(false));
       }}>{t("queue.merge.action")}</button>}
-      {uncertain.length > 0 && <button type="button" disabled={clearing} onBlur={() => setArmed(false)} onClick={() => void clean()} className={`h-5 rounded px-1 text-caption ${armed ? "bg-danger/10 text-danger-text" : "hover:bg-surface-2"}`} data-testid="input-cleanup-all" title={NEXT_UP_PANEL_CONTROLS.cleanupUnconfirmed.tip[langOf(locale)]}>{fill(NEXT_UP_PANEL_CONTROLS.cleanupUnconfirmed[armed ? "armed" : "label"][langOf(locale)], { n: uncertain.length })}</button>}
-      <button type="button" className="h-5 rounded px-1 hover:bg-surface-2" aria-label={t(folded ? "queue.header.expand" : "queue.header.collapse")} aria-expanded={!folded || overlay} data-testid="queue-collapse" onClick={() => { if (shortPane.fold) setOverlay(!overlay); else { setCollapsed(!collapsed); setQueueView(sessionId, { collapsed: !collapsed }); } }}>{folded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</button>
+      {uncertain.length > 0 && <button type="button" disabled={clearing} onBlur={() => setArmed(false)} onClick={() => void clean()} className={`press h-5 rounded px-1 text-caption ${armed ? "bg-danger/10 text-danger-text" : "hover:bg-surface-2"}`} data-testid="input-cleanup-all" title={NEXT_UP_PANEL_CONTROLS.cleanupUnconfirmed.tip[langOf(locale)]}>{fill(NEXT_UP_PANEL_CONTROLS.cleanupUnconfirmed[armed ? "armed" : "label"][langOf(locale)], { n: uncertain.length })}</button>}
+      <button type="button" className="press h-5 rounded px-1 hover:bg-surface-2" aria-label={t(folded ? "queue.header.expand" : "queue.header.collapse")} aria-expanded={!folded || overlay} data-testid="queue-collapse" onClick={() => { if (shortPane.fold) setOverlay(!overlay); else { setCollapsed(!collapsed); setQueueView(sessionId, { collapsed: !collapsed }); } }}>{folded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</button>
     </div>
     {(!collapsed || shortPane.fold) && <div className={`flex min-h-0 flex-col overflow-y-auto overscroll-contain ${SECTION_RULES} ${shortPane.fold ? `absolute bottom-full left-[-1px] right-[-1px] z-20 max-h-[var(--short-pane-overlay-max,240px)] rounded-t-inner border border-border bg-surface p-1 shadow-lg ${overlay ? "" : "pointer-events-none invisible"}` : ""}`} {...(shortPane.fold ? { role: "dialog", "aria-label": t("queue.header.title"), "aria-hidden": !overlay || undefined } : {})} data-queue-body="" data-testid={shortPane.fold ? "queue-overlay" : undefined}>
       {showDelivery && ledger?.delivery && <div className={HEADING}><DeliveryStatus delivery={ledger.delivery} sessionId={sessionId} hostId={hostId} /></div>}
@@ -851,4 +857,10 @@ function LedgerOutboxRow({ entry, sessionId, hostId }: { entry: LedgerOwnerOutbo
     <QueuedImages images={messageImages(entry.extra)} hostId={hostId} />
     <LocalSendStatus entry={entry} sessionId={sessionId} hostId={hostId} />
   </div>;
+}
+
+/** An older host's queued owner message: a focusable trigger (tip + the whole text on click), its queue time in both. */
+function LegacyQueuedText({ item, hostId }: { item: QueueItem; hostId?: string }) {
+  const time = useRowTime(item.createdAt, "queued");
+  return <QueuedMessageInline input={item.input as InputPart[]} hostId={hostId} className="text-foreground" textWrap={(text) => <RowFullText full={queuedRowText(item)} exact={time.exact} className="flex shrink items-center gap-1 overflow-hidden">{text}</RowFullText>} />;
 }

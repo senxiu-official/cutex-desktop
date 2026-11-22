@@ -29,9 +29,14 @@ export function asksPauseKind(pause: AsksPause | null | undefined): "stop" | "ow
   return pause.origin === "ownerStop" ? "stop" : "owner";
 }
 
-/** Why ride-along `item` is held (undefined = it is not): its own `held`, else the snapshot-wide stop hold. */
-export function rideAlongHeld(item: AdmissionNextStep, admission: Pick<QueueAdmission, "ridealongsHeld"> | null | undefined): AdmissionHeld | undefined {
+/**
+ * Why ride-along `item` is held (undefined = it is not): its own `held`, else the snapshot-wide stop hold. An item that
+ * carries `eligible` (cutex stop-answer-admission-v1) says it all itself: a runnable delegation ANSWER (`eligible: true`,
+ * `held: null`) is not held even under `ridealongsHeld`; QUESTION / STATE keep their own `held: "ownerStop"`.
+ */
+export function rideAlongHeld(item: Pick<AdmissionNextStep, "held" | "eligible">, admission: { ridealongsHeld?: string | null } | null | undefined): AdmissionHeld | undefined {
   if (item.held === "ownerStop" || item.held === "ownerPause") return item.held;
+  if (typeof item.eligible === "boolean") return undefined;
   return admission?.ridealongsHeld === "ownerStop" ? "ownerStop" : undefined;
 }
 
@@ -50,9 +55,27 @@ export function splitHeld(items: readonly AdmissionNextStep[], admission: Pick<Q
   return { free, held };
 }
 
-/** The words of a held group / row: strip (short), tooltip (what releases it). */
-export function heldKeys(reason: AdmissionHeld): { strip: MessageKey; hint: MessageKey } {
-  return reason === "ownerStop" ? { strip: "queue.turn.heldStop", hint: "queue.turn.heldStopHint" } : { strip: "queue.turn.heldPause", hint: "queue.turn.heldPauseHint" };
+/**
+ * The words of a held group / row: strip (short), tooltip (what releases it). `perItem`: the host sends per-item admission
+ * (stop-answer-admission-v1), so a stop holds questions and status updates but not delegation results (Next Up registry
+ * v1.9, N10, Director-approved 2026-11-18).
+ */
+export function heldKeys(reason: AdmissionHeld, perItem = false): { strip: MessageKey; hint: MessageKey } {
+  if (reason !== "ownerStop") return { strip: "queue.turn.heldPause", hint: "queue.turn.heldPauseHint" };
+  return { strip: "queue.turn.heldStop", hint: perItem ? "queue.turn.afterStopHint" : "queue.turn.heldStopHint" };
+}
+
+/** Whether these ride-alongs carry per-item admission (stop-answer-admission-v1: `eligible` on each item). */
+export function perItemAdmission(items: readonly Pick<AdmissionNextStep, "eligible">[]): boolean {
+  return items.some((i) => typeof i.eligible === "boolean");
+}
+
+/**
+ * N10 (Next Up registry v1.9): a delegation result that runs under a stop. The host's stop holds ride-alongs, but with
+ * stop-answer-admission-v1 an eligible ANSWER is not held: it starts a new turn when it arrives. Its row says so.
+ */
+export function answerStartsAfterStop(item: Pick<AdmissionNextStep, "eligible" | "held" | "deliveryKind">, admission: { ridealongsHeld?: string | null } | null | undefined): boolean {
+  return admission?.ridealongsHeld === "ownerStop" && item.deliveryKind === "answer" && item.eligible === true && !item.held;
 }
 
 /** The asks-paused section's words and its resume button (继续发送 for a stop hold, 继续 for 暂停新委托). */

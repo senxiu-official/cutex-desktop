@@ -3,12 +3,11 @@ import { DebugErrorDetails } from "../../components/DebugErrorDetails";
 import { isImeComposing } from "../../lib/ime";
 import { useEffect, useMemo, useRef } from "react";
 import { ArrowUp, Loader2, StickyNote, Square } from "lucide-react";
-import { Streamdown } from "streamdown";
-import { BARE_STREAMDOWN_REHYPE } from "../../lib/markdownPathText";
+import { Markdown } from "../../components/Markdown";
+import { AgentMarkdownScope } from "../../components/AgentMarkdownScope";
 import { InteractionDock } from "../../components/InteractionDock";
 import { ModelName } from "../../components/ModelName";
 import { useI18n } from "../../i18n";
-import { useStreamdownTranslations } from "../../lib/streamdownTranslations";
 import { orderedEntries, type TimelineEntry } from "../../lib/timeline";
 import { toolDetail, toolOutput } from "../../lib/workGroups";
 import { services } from "../app";
@@ -19,13 +18,13 @@ import { sideError, sideTimeline, SUMMARY_PROMPT } from "./model";
 import { interruptSide, loadSide, respondSide, sendSide, setSideDraft, sideKey, summarizeSide, useSides } from "./state";
 import { btn } from "../../components/Button";
 
-function SideEntry({ entry }: { entry: TimelineEntry }) {
+/** Replies use the conversation renderer (components/Markdown: math, highlighted code, CJK, file / cutex links). */
+export function SideEntry({ entry }: { entry: TimelineEntry }) {
   const { t } = useI18n();
-  const translations = useStreamdownTranslations();
   if (entry.kind === "user") return <div className="selectable ml-auto max-w-[90%] rounded-2xl bg-surface-2 px-4 py-3 whitespace-pre-wrap break-words text-sm">{entry.text}</div>;
-  if (entry.kind === "agent" || entry.kind === "plan" || entry.kind === "review") return <div className="min-w-0 text-sm"><Streamdown mode="static" className="markdown" rehypePlugins={BARE_STREAMDOWN_REHYPE} translations={translations}>{entry.text}</Streamdown></div>;
+  if (entry.kind === "agent" || entry.kind === "plan" || entry.kind === "review") return <div className="min-w-0" data-side-markdown=""><Markdown text={entry.text} streaming={entry.kind !== "review" && entry.streaming} /></div>;
   if (entry.kind === "tool" || entry.kind === "other") return <details className="min-w-0 rounded-lg border border-border px-3 py-2 text-xs text-muted"><summary className="cursor-pointer truncate">{toolDetail(entry.item) || entry.item.type}</summary><pre className="selectable mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words">{toolOutput(entry.item) ?? JSON.stringify(entry.item, null, 2)}</pre></details>;
-  if (entry.kind === "reasoning") return <details className="text-xs text-subtle"><summary className="cursor-pointer">{t("side-chat.reasoning")}</summary><div className="selectable mt-2 whitespace-pre-wrap">{[...entry.summary, ...entry.content].join("\n")}</div></details>;
+  if (entry.kind === "reasoning") return <details className="text-xs text-subtle"><summary className="cursor-pointer">{t("side-chat.reasoning")}</summary><div className="mt-2"><Markdown text={[...entry.summary, ...entry.content].join("\n\n")} streaming={entry.streaming} compact /></div></details>;
   return null;
 }
 
@@ -64,7 +63,7 @@ export function SideChatBody({ hostId: host, sessionId, chatId, revealed, visibl
         {chat.anchorTurnId && <div className="truncate text-xs text-subtle" title={chat.anchorTurnId}>{t("side-chat.source", { turn: chat.anchorTurnId })}</div>}
         {chat.truncated && <p className="text-xs text-muted">{t("side-chat.truncated")}</p>}
         {entries.length === 0 && <p className="py-8 text-center text-sm text-subtle">{t("side-chat.empty")}</p>}
-        {entries.map(entry => <SideEntry key={entry.id} entry={entry} />)}
+        <AgentMarkdownScope paneId={`side-chat:${chatId}`} hostId={host} sessionId={sessionId} visible={visible}>{entries.map(entry => <SideEntry key={entry.id} entry={entry} />)}</AgentMarkdownScope>
         {busy && <div className="flex items-center gap-2 text-xs text-subtle"><Loader2 size={13} className="animate-spin" />{t("side-chat.running")}</div>}
         {error && <div role="alert" data-error-source={view.error ? "request" : "runtime"} className="rounded-lg border border-danger/30 p-3 text-xs text-danger">{view.error ? sideErrorText(error, t) : t("side-chat.runtimeError", { message: sideErrorText(error, t) ?? error })}<button className="ml-3 underline" onClick={() => void loadSide(host, sessionId, chatId).catch(() => {})}>{t("side-chat.retry")}</button><DebugErrorDetails error={error} source={view.error ? "side-chat.request" : "side-chat.runtime"} /></div>}
         {chat.status === "stale" && <p className="text-sm text-muted">{t("side-chat.stale")}</p>}

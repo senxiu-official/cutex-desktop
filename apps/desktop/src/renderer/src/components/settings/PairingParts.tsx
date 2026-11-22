@@ -27,17 +27,17 @@ export function QrCode({ text, label, size = "h-48 w-48" }: { text: string; labe
 }
 
 /** 设备权限 at pairing: one radio per scope with what it means (the owner's default: 完全控制). */
-export function PairScope({ value, ownerDevice, onChange, labels }: { value: DeviceScope; ownerDevice: boolean; onChange(scope: DeviceScope): void; /** Plainer labels by scope (添加设备 v2: 完全控制，可以运行命令). */ labels?: Partial<Record<DeviceScope, string>> }) {
+export function PairScope({ value, ownerDevice, onChange, labels, card }: { value: DeviceScope; ownerDevice: boolean; onChange(scope: DeviceScope): void; /** The form's Settings card (lib/settingsDrafts useSettingsCard): a choice here is its draft. */ card?(el: HTMLElement | null): void; /** Plainer labels by scope (添加设备 v2: 完全控制，可以运行命令). */ labels?: Partial<Record<DeviceScope, string>> }) {
   const { t } = useI18n();
   return (
     // A row group of radios (the rights need a line each), like every other in-card group.
     <SettingsGroup agents="access" source="host"><RowGroup title={t("ownerDev.scope")}>
-      <RadioList name="pair-scope" label={t("ownerDev.scope")} value={value} onChange={onChange} options={scopeOptions(t, ownerDevice, true).map((o) => ({
+      <div ref={card}><RadioList name="pair-scope" label={t("ownerDev.scope")} value={value} onChange={onChange} options={scopeOptions(t, ownerDevice, true).map((o) => ({
         value: o.value,
         label: (ownerDevice && labels?.[o.value]) || o.label,
         extra: o.value === "full" && ownerDevice ? <span className="ml-1 text-xs text-subtle">{t("ownerDev.scope.ownerDefault")}</span> : undefined,
         hint: o.value === "full" && !ownerDevice ? t("ownerDev.scope.byUser.hint") : o.title,
-      }))} />
+      }))} /></div>
     </RowGroup></SettingsGroup>
   );
 }

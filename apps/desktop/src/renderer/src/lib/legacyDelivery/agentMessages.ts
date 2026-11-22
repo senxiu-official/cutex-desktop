@@ -8,6 +8,7 @@
 // Pure and framework-free; lib/agentMessageStore.ts holds the state.
 
 import type { MessageSettlement } from "@cutex-desktop/protocol";
+import { noteDiagnostics, type NoteDiagnostics } from "../inputLedger/noteDelivery";
 import { MESSAGE_SETTLEMENT_EVENT, mergeMessageSettlement, readMessageSettlement } from "../../../../shared/messageSettlement";
 
 /** The capability that turns all of this on (`agentMessagesV2` in cutex MANAGEMENT_FEATURES). */
@@ -72,6 +73,8 @@ export interface AgentMessageRecord {
    * recipient's panel: the snapshot carries every old failed / quarantined message.
    */
   failedLive: boolean;
+  /** passive-note-diagnostics-v1: the source's delivery diagnostics (where it is, what it waits for); absent on older hosts. */
+  delivery?: NoteDiagnostics | null;
 }
 
 /** cutex `remote` of a cross-host note: this host's label for the sending host, its instance id and the sender's session id there. */
@@ -86,6 +89,10 @@ export type MessageMap = Readonly<Record<string, AgentMessageRecord>>;
 const RANK: Record<MessageState, number> = { pending: 0, failed: 1, delivered: 2 };
 
 const str = (v: unknown): string | null => (typeof v === "string" && v ? v : null);
+/** A source row's `deliveryDiagnostics` as a record patch (nothing when absent: an older host, or a row without it). */
+const deliveryOf = (m: Record<string, unknown>): { delivery?: NoteDiagnostics | null } =>
+  m.deliveryDiagnostics && typeof m.deliveryDiagnostics === "object" ? { delivery: noteDiagnostics({ details: { deliveryDiagnostics: m.deliveryDiagnostics } }) } : {};
+
 const time = (v: unknown): number | null => {
   if (typeof v === "number" && Number.isFinite(v)) return v > 1e12 ? v / 1000 : v;
   if (typeof v !== "string") return null;
@@ -262,7 +269,7 @@ export function applyMessageEvent(map: MessageMap, method: string, params: Recor
     default:
       // A live failure (shows in the recipient's panel), unless it was read in already.
       if (map[id]?.state === "delivered") return map;
-      return merge(map, id, { ...base, state: "failed", error: errorText(params.error), failedLive: true });
+      return merge(map, id, { ...base, state: "failed", error: errorText(params.error), failedLive: true, ...deliveryOf(params) });
   }
 }
 
@@ -270,8 +277,11 @@ export function applyMessageEvent(map: MessageMap, method: string, params: Recor
  * Bootstrap of agent `sessionId`: `received` = cutexState.agentBusMessages (its incoming messages,
  * all states), `sent` = cutexState.agentBusSentMessages (its latest sent ones, compact). Absent on
  * older cutex. Snapshot failures are not "live" (see `failedLive`).
+ * `authoritativeSettlement` false (bus-messages pages, read at another moment than the bootstrap and the
+ * live events): a row's settlement only replaces a newer-observed one, a closure stays, a missing one is no
+ * news. Delivery only moves forward either way.
  */
-export function seedMessages(map: MessageMap, sessionId: string, received: unknown[] | null | undefined, sent: unknown[] | null | undefined): MessageMap {
+export function seedMessages(map: MessageMap, sessionId: string, received: unknown[] | null | undefined, sent: unknown[] | null | undefined, authoritativeSettlement = true): MessageMap {
   let next = map;
   for (const raw of received ?? []) {
     const m = (raw ?? {}) as Record<string, unknown>;
@@ -296,7 +306,8 @@ export function seedMessages(map: MessageMap, sessionId: string, received: unkno
       turnId: str(m.contextTurnId),
       error: errorText(m.error),
       state: stateOf(m.state),
-    }, true);
+      ...deliveryOf(m),
+    }, authoritativeSettlement);
   }
   for (const raw of sent ?? []) {
     const m = (raw ?? {}) as Record<string, unknown>;
@@ -316,7 +327,7 @@ export function seedMessages(map: MessageMap, sessionId: string, received: unkno
       turnId: str(m.contextTurnId),
       error: errorText(m.error),
       state: stateOf(m.state),
-    }, true);
+    }, authoritativeSettlement);
   }
   return next;
 }

@@ -5,7 +5,7 @@ import { MoreHorizontal } from "lucide-react";
 import type { ServiceView } from "../../../shared/ipc";
 import { useI18n } from "../i18n";
 import { contextMenu, openMenuFrom } from "../lib/contextMenu";
-import { openService, serviceMenu } from "../lib/services";
+import { openService, serviceHealthTitle, serviceMenu } from "../lib/services";
 import { serviceStatus } from "../lib/status";
 import { useTargetHostId } from "../lib/targetHost";
 import { ServiceOwnerFlyout } from "./ServiceOwnerFlyout";
@@ -25,7 +25,7 @@ export function ServiceLine({ s, onError, hostId }: { s: ServiceView; onError(e:
   return (
     <div className="group border-b border-border/60 py-1.5 last:border-b-0" onContextMenu={contextMenu(menu)}>
       <div className="flex items-center gap-2 text-sm">
-        <span title={t(serviceHealthKey(s))}>
+        <span title={serviceHealthTitle(t(serviceHealthKey(s)), s, t)}>
           <StatusIcon kind={serviceStatus(s)} size={13} />
         </span>
         {/* A background service has no page: its name shows the logs. */}
@@ -33,7 +33,7 @@ export function ServiceLine({ s, onError, hostId }: { s: ServiceView; onError(e:
           {s.displayName || s.slug}
         </button>
         {isWorker(s) ? <WorkerBadge /> : s.port ? <span className="shrink-0 font-mono text-caption/[inherit] text-subtle">:{s.port}</span> : null}
-        <button onClick={(e) => openMenuFrom(e.currentTarget, menu())} className="shrink-0 rounded p-0.5 text-subtle opacity-0 group-hover:opacity-100 hover:bg-surface-2 hover:text-foreground">
+        <button onClick={(e) => openMenuFrom(e.currentTarget, menu())} aria-label={t("services.more")} aria-haspopup="menu" data-service-more="" className="press-icon reveal-focus shrink-0 rounded p-0.5 text-subtle opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 hover:bg-surface-2 hover:text-foreground">
           <MoreHorizontal size={14} />
         </button>
       </div>

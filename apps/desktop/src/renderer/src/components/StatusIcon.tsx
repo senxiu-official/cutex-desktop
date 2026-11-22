@@ -55,9 +55,9 @@ export function StatusIcon({ kind, size = 14 }: { kind: StatusKind; size?: numbe
   );
 }
 
-export function StatusCell({ kind, label }: { kind: StatusKind; label: string }) {
+export function StatusCell({ kind, label, title }: { kind: StatusKind; label: string; title?: string }) {
   return (
-    <span className="flex min-w-0 items-center gap-1.5">
+    <span className="flex min-w-0 items-center gap-1.5" title={title}>
       <StatusIcon kind={kind} />
       <span className="truncate text-xs text-muted">{label}</span>
     </span>

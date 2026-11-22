@@ -8,6 +8,7 @@ import type { ConfigEdit, HookMetadata, HooksListResponse, ListMcpServerStatusRe
 import type { DaemonApi, FsFile } from "../../../../shared/ipc";
 import { useI18n, type MessageKey } from "../../i18n";
 import { settingsAnchorId } from "../../lib/settingsNav";
+import { useSettingsDraft } from "../../lib/settingsDrafts";
 import {
   emptyMcpDraft,
   groupHooks,
@@ -160,19 +161,29 @@ function McpServerForm({ name: editing, original, tools, taken, onDone }: { name
   const problems = mcpDraftErrors(draft);
   const nameProblem = editing ? null : !/^[A-Za-z0-9_-]+$/.test(name) ? "invalid" : taken.includes(name) ? "taken" : null;
   const toolNames = [...new Set([...tools, ...(draft.enabledTools ?? []), ...draft.disabledTools])].sort();
-  const save = async () => {
+  const save = async (): Promise<boolean> => {
     setBusy(true);
     setError(null);
     try {
       await writeCodexConfig(api, mcpServerEdits(editing ?? name, original, draft));
       onDone(true);
+      return true;
     } catch (e) {
       setError(errorText(e));
       setBusy(false);
+      return false;
     }
   };
+  // The form once edited is a draft (lib/settingsDrafts): a window-bar entry that would close a covering Settings asks
+  // first. An invalid one is not saved from there (like its 保存, which is disabled then): it stays, showing its problems.
+  const [opened] = useState(() => JSON.stringify(draft));
+  useSettingsDraft({
+    dirty: name !== (editing ?? "") || JSON.stringify(draft) !== opened,
+    save: () => (busy || nameProblem || problems.length > 0 ? Promise.resolve(false) : save()),
+    discard: () => onDone(false),
+  });
   return (
-    <div className="-mx-4 border-b border-border bg-surface-2/50 px-4 pt-2 pb-3">
+    <div className="-mx-4 border-b border-border bg-surface-2/50 px-4 pt-2 pb-3" data-settings-draft="">
       <div className="flex h-7 items-center gap-2">
         <h4 className="min-w-0 truncate text-sm font-medium">{editing ? t("codex-config.mcp.editTitle", { name: editing }) : t("codex-config.mcp.add")}</h4>
         <span className="text-xs text-subtle">{t("codex-config.mcp.restartNote")}</span>
@@ -340,7 +351,7 @@ export function McpPage() {
         hint={t("codex-config.mcp.scopedHint")}
         actions={
           <>
-            <RefreshButton onClick={() => void api.codexRequest("config/mcpServer/reload").then(reloadAll, (e: unknown) => config.setError(errorText(e)))} />
+            <RefreshButton onClick={() => api.codexRequest("config/mcpServer/reload").then(reloadAll, (e: unknown) => config.setError(errorText(e)))} />
             <SettingsGroup agents="next" source="codex"><AddButton disabled={form !== null} onClick={() => setForm("")}>
               {t("codex-config.mcp.add")}
             </AddButton></SettingsGroup>

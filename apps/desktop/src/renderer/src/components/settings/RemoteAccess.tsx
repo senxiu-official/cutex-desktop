@@ -1,3 +1,4 @@
+import { useSettingsCard } from "../../lib/settingsDrafts";
 import { isImeComposing } from "../../lib/ime";
 // Settings → 接入: 监听地址 + 配对设备 + CORS (cutex `listen-settings` / `device-pairing`,
 // docs/research/cutex-mobile-api.md §1, §2): which addresses the connected cutex's Management API
@@ -191,7 +192,7 @@ export function RemoteAccessSection() {
       setConfirming(true);
       try {
         const result = await confirmSettingsRisk(target, () => promptDialog(riskText("settingsRisk.listen"), "", {
-          placeholder: target, hint: riskText("settingsRisk.listenHint", { host, target, targets: widened.join(" · ") }),
+          placeholder: target, expect: target, hint: riskText("settingsRisk.listenHint", { host, target, targets: widened.join(" · ") }),
         }), valid);
         if (result !== "confirmed") {
           if (result !== "cancelled") setProblem(riskText(result === "changed" ? "settingsRisk.changed" : "settingsRisk.typeMismatch"));
@@ -303,7 +304,7 @@ export function CorsSection() {
     setConfirming(true);
     try {
       const result = await confirmSettingsRisk(target, () => promptDialog(riskText("settingsRisk.cors"), "", {
-        placeholder: target, hint: riskText("settingsRisk.corsHint", { host, target, targets: widened.join(" · ") }),
+        placeholder: target, expect: target, hint: riskText("settingsRisk.corsHint", { host, target, targets: widened.join(" · ") }),
       }), valid);
       if (result !== "confirmed") {
         if (result !== "cancelled") setProblem(riskText(result === "changed" ? "settingsRisk.changed" : "settingsRisk.typeMismatch"));
@@ -422,6 +423,7 @@ export function PairingSection() {
   // device-scope: what the paired device may do.
   const withScope = features.has(DEVICE_SCOPE_FEATURE);
   const [scope, setScope] = useState<DeviceScope>("full");
+  const scopeCard = useSettingsCard();
   const lock = useOwnerLocalLock(targetHost);
   const hostLabel = useHostScope().host(targetHost)?.view.label ?? targetHost;
 
@@ -503,7 +505,7 @@ export function PairingSection() {
   };
   const sorted = tokens ? sortTokens(tokens) : null;
   return (
-    <Section title={t("remote.pair.title")} hint={t("remote.pair.hint")} actions={<RefreshButton disabled={busy} onClick={() => void load()} />}>
+    <Section title={t("remote.pair.title")} hint={t("remote.pair.hint")} actions={<RefreshButton disabled={busy} onClick={() => load()} />}>
       {code ? (
         <PairingCard code={code} busy={busy} onRenew={() => void generate()} onClose={() => setCode(null)} />
       ) : (
@@ -512,7 +514,7 @@ export function PairingSection() {
           {paired && <span className="text-xs text-ok-text">{t("remote.pair.paired", { name: tokenName(paired, t) })}</span>}
         </div>
       )}
-      {!code && withScope && !lock.locked && <PairScope value={scope} ownerDevice onChange={setScope} />}
+      {!code && withScope && !lock.locked && <PairScope value={scope} ownerDevice onChange={setScope} card={scopeCard.ref} />}
       {!code && !lock.locked && (!withScope || scope === "full") && features.has(OWNER_DEVICE_NOTICE_FEATURE) && <OwnerCodeWarning host={hostLabel} />}
       {!code && (
         <div className="-mx-4 flex flex-wrap items-center justify-end gap-2 border-b border-border px-4 py-2.5">

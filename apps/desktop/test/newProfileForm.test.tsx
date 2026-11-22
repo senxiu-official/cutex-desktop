@@ -4,11 +4,11 @@
 // the payloads that reach cutex, 「用这个服务商新建」 preselection and the legacy DSH host variable.
 import { act, createElement as h } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const fx = vi.hoisted(() => ({ features: new Set<string>(), createProfile: vi.fn(), createClaudeAccount: vi.fn(), patchProfile: vi.fn(), presets: [] as unknown[] }));
 vi.mock("../src/renderer/src/bridge", () => ({ bridge: { on: () => () => {} }, api: {} }));
-vi.mock("../src/renderer/src/i18n", () => ({ useI18n: () => ({ t: (key: string, vars?: Record<string, unknown>) => key + (vars ? JSON.stringify(vars) : ""), locale: "zh-CN" }) }));
+vi.mock("../src/renderer/src/i18n", () => ({ translate: (key: string) => key, useI18n: () => ({ t: (key: string, vars?: Record<string, unknown>) => key + (vars ? JSON.stringify(vars) : ""), locale: "zh-CN" }) }));
 vi.mock("../src/renderer/src/lib/targetHost", async (original) => ({ ...(await original<object>()), useTargetApi: () => ({ createProfile: fx.createProfile, createClaudeAccount: fx.createClaudeAccount, patchProfile: fx.patchProfile }), useTargetHostId: () => "host-a", useTargetFeatures: () => fx.features }));
 vi.mock("../src/renderer/src/lib/useProfilePresets", () => ({ useProfilePresets: () => fx.presets }));
 vi.mock("../src/renderer/src/components/ComponentCard", () => ({ ComponentNotice: ({ name }: { name: string }) => h("div", { "data-component": name }) }));
@@ -210,4 +210,104 @@ it("legacy DSH auth and runtime choices are labelled experimental", () => {
   expect(option.querySelector('[data-experimental-runtime="dsh"]')).toBeTruthy();
   act(() => option.querySelector<HTMLInputElement>("input")!.click());
   expect(q('[data-runtime-step="dsh"] [data-experimental-runtime="dsh"]')).toBeTruthy();
+});
+
+// Review 2026-11-18 (night-review): a form that does not report its own draft lost it too — the real NewProfileForm: type
+// an API key, click a window-bar entry over maximised Settings, reopen: empty. The Settings Shelf watches its page for
+// typed edits (lib/settingsDrafts watchSettingsEdits): the entry now asks first; such an edit can only be dropped from there.
+describe("a window-bar entry over a new Profile being typed", async () => {
+  const { useSettingsShelf, openSettingsShelf, setSettingsShelfMaximized, resetSettingsShelfForTest } = await import("../src/renderer/src/lib/settingsShelf");
+  const { runBarEntry } = await import("../src/renderer/src/lib/navEntries");
+  const { resetSettingsDrafts, hasSettingsDrafts, useSettingsEditWatch } = await import("../src/renderer/src/lib/settingsDrafts");
+  const { useOverlayState, runAction, closeMenu } = await import("../src/renderer/src/lib/contextMenu");
+  const { translate } = await import("../src/renderer/src/i18n");
+  let menu: ReturnType<typeof useOverlayState>["menu"] = null;
+  /** The Shelf's page column (components/SettingsShelf): the same watch. */
+  function ShelfPage() {
+    const open = useSettingsShelf((s) => s.open);
+    const watch = useSettingsEditWatch();
+    menu = useOverlayState().menu;
+    return open ? h("div", { ref: watch }, h(NewProfileForm, { ...props, initialPreset: "deepseek" } as never)) : null;
+  }
+  const row = (key: string) => {
+    const r = menu!.items.find((i) => i !== "separator" && i.label === translate(key as never));
+    if (!r || r === "separator") throw new Error(key);
+    return r;
+  };
+  const setup = async () => {
+    resetSettingsShelfForTest();
+    resetSettingsDrafts();
+    openSettingsShelf({ tab: "profiles" });
+    setSettingsShelfMaximized(true);
+    await act(async () => root.render(h(ShelfPage)));
+    type(input("newProfile.key.label"), "review-new-profile-draft");
+  };
+  afterEach(() => act(() => { closeMenu(); resetSettingsShelfForTest(); resetSettingsDrafts(); }));
+
+  it("asks; 取消 keeps the typed key and Settings", async () => {
+    await setup();
+    expect(hasSettingsDrafts()).toBe(true);
+    const go = vi.fn();
+    await act(async () => runBarEntry({ id: "review", target: { run: go } } as never));
+    expect(go).not.toHaveBeenCalled();
+    expect(useSettingsShelf.getState().open).toBe(true);
+    // Only its own page can create it: 保存并前往 is not offered, and says why.
+    expect(row("settings.drafts.saveGo").disabled).toBe(true);
+    expect(row("settings.drafts.saveGo").title).toBe(translate("settings.drafts.saveOnPage" as never));
+    await act(async () => runAction(row("settings.drafts.cancel")));
+    expect(input("newProfile.key.label").value).toBe("review-new-profile-draft");
+  });
+
+  it("放弃并前往 goes, as chosen", async () => {
+    await setup();
+    const go = vi.fn();
+    await act(async () => runBarEntry({ id: "review", target: { run: go } } as never));
+    await act(async () => runAction(row("settings.drafts.discardGo")));
+    expect(go).toHaveBeenCalledTimes(1);
+    expect(useSettingsShelf.getState().open).toBe(false);
+  });
+
+  it("typed back to what it was, or cleared by the form itself: nothing unsaved", async () => {
+    await setup();
+    type(input("newProfile.key.label"), "");
+    expect(hasSettingsDrafts()).toBe(false);
+  });
+
+  // Final review 2026-11-18 (night-review): a button press or Enter in the card settled it, so the entry then left without
+  // asking. Only a successful create does (lib/settingsDrafts useSettingsCard); a colour pick is itself a change.
+  it.each(["colour", "Enter", "refused create"])("%s does not settle an unsaved new Profile", async (mode) => {
+    await setup();
+    type(input("newProfile.key.label"), "");
+    type(input("newProfile.name.label"), "review-draft-name");
+    expect(hasSettingsDrafts()).toBe(true);
+    if (mode === "colour") act(() => host.querySelector<HTMLButtonElement>("[data-new-profile-colors] button:nth-of-type(2)")!.click());
+    if (mode === "Enter") act(() => void input("newProfile.name.label").dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
+    if (mode === "refused create") {
+      fx.createProfile.mockRejectedValueOnce(new Error("review refused"));
+      await act(async () => button("newProfile.create").click());
+      expect(fx.createProfile).toHaveBeenCalledTimes(1);
+      expect(input("newProfile.name.label").value).toBe("review-draft-name");
+    }
+    expect(hasSettingsDrafts()).toBe(true);
+    const go = vi.fn();
+    await act(async () => runBarEntry({ id: "review", target: { run: go } } as never));
+    expect(go).not.toHaveBeenCalled();
+    expect(useSettingsShelf.getState().open).toBe(true);
+  });
+
+  it("a colour picked alone is a change; a create that succeeded leaves nothing unsaved", async () => {
+    await setup();
+    type(input("newProfile.key.label"), "");
+    expect(hasSettingsDrafts()).toBe(false);
+    act(() => host.querySelector<HTMLButtonElement>("[data-new-profile-colors] button:nth-of-type(2)")!.click());
+    expect(hasSettingsDrafts()).toBe(true);
+    type(input("newProfile.key.label"), "sk-review");
+    type(input("newProfile.name.label"), "review-created");
+    fx.createProfile.mockResolvedValueOnce({ name: "review-created" });
+    fx.patchProfile.mockResolvedValueOnce({ name: "review-created" });
+    await act(async () => button("newProfile.create").click());
+    expect(props.onCreated).toHaveBeenCalledWith({ name: "review-created" });
+    expect(input("newProfile.name.label").value).toBe("review-created");
+    expect(hasSettingsDrafts()).toBe(false);
+  });
 });

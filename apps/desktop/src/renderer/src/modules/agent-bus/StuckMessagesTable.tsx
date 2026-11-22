@@ -1,21 +1,22 @@
 // 待清理 → 卡住的消息 (cutex `agent-bus-stuck-messages`): undelivered bus messages as a compact table —
 // what, who → whom, how long it has waited, state, 丢弃 (click twice). A row opens the details: the
-// text, the last delivery error, cutex's reasons, warnings (丢弃前先确认对应的作业) and, where cutex
-// offers it, 关闭卡住消息. 全部丢弃 (click twice, says how many) leaves out job / control messages, which
-// are discarded on their own row. Discarding makes a message terminal in cutex and withdraws it from the
-// live queue; it is never redelivered.
+// text, the last delivery error, cutex's reasons, warnings (丢弃前先确认对应的作业) and the ways out
+// (MessageDetails: 确认已结束并关闭 where cutex has evidence, 结束跟进 always). 全部丢弃 (click twice, says how
+// many) leaves out job / control messages, which are discarded on their own row. Discarding makes a durable
+// message terminal in cutex and withdraws it from the live queue; it is never redelivered. A live-only message's
+// button says 从队列撤下, with （可能被再次排入） on a host that does not remember withdrawn ones (L2 / N9).
 import { X } from "lucide-react";
 import { ArmedButton } from "../../components/ArmedButton";
-import { MessageSettlementControl } from "../../components/MessageSettlementControl";
 import type { StuckBusMessage } from "../../../../shared/ipc";
 import { EmptyState, ErrorNote, IconButton, Loading, Notice } from "../../components/settings/Form";
 import { useI18n, type MessageKey } from "../../i18n";
-import { useAgentMessage } from "../../lib/agentMessageStore";
 import { useTargetHostId } from "../../lib/targetHost";
-import { useApp } from "../../store";
 import { CleanupTable } from "./CleanupTable";
 import { CLEANUP_ACTION, CLEANUP_ACTION_DANGER, cleanupAge, stuckFrom, stuckState } from "./cleanupText";
-import { bulkTargets, KNOWN_ERRORS, knownKind, minAgeKey, partyName, protectedCount, refusalText, stuckHints, type StuckHint } from "./stuck";
+import { endedOn, endFollowUpKey, useEndFollowUps } from "./endFollowUp";
+import { MessageDetails } from "./MessageDetails";
+import { bulkTargets, discardWords, KNOWN_ERRORS, minAgeKey, partyName, protectedCount, refusalText } from "./stuck";
+import { useMessageEndFollowUp } from "./useEndFollowUp";
 import type { StuckMessagesState } from "./useStuckMessages";
 
 type T = ReturnType<typeof useI18n>["t"];
@@ -50,6 +51,8 @@ export function DiscardAllButton({ state }: { state: StuckMessagesState }) {
 export function StuckMessagesTable({ state, minAge }: { state: StuckMessagesState; minAge: number }) {
   const { t } = useI18n();
   const hostId = useTargetHostId();
+  const tombstone = useMessageEndFollowUp(hostId);
+  const endEntries = useEndFollowUps((s) => s.entries);
   const { view } = state;
   if (state.error && !view) return <ErrorNote>{state.error}</ErrorNote>;
   if (!view) return <Loading rows={2} />;
@@ -76,23 +79,20 @@ export function StuckMessagesTable({ state, minAge }: { state: StuckMessagesStat
               who: `${stuckFrom(m, t)} → ${partyName(m.to) ?? t("agent-bus.stuck.unknownParty")}`,
               whoTitle: [m.from?.id, m.to?.id].filter(Boolean).join(" → ") || undefined,
               age: cleanupAge(m.ageSecs, t),
-              state: m.protectedControl ? <span className="text-warn-text">{t("agent-bus.stuck.protected")}</span> : stuckState(m, t),
-              // A message with a settlement is closed in its details (关闭卡住消息), never discarded.
-              action: m.settlement ? undefined : (
-                <ArmedButton
-                  shape={`${CLEANUP_ACTION} whitespace-nowrap`}
-                  idle={CLEANUP_ACTION_DANGER}
-                  hint={t(m.protectedControl ? "agent-bus.cleanup.discardProtectedArmed" : "agent-bus.stuck.discardArmed")}
-                  disabled={working}
-                  testId="stuck-discard"
-                  onConfirm={() => void state.discardOne(m)}
-                >
-                  {state.busy.has(m.messageId) ? t("agent-bus.cleanup.working") : t("agent-bus.stuck.discard")}
-                </ArmedButton>
-              ),
+              state:
+                endEntries[endFollowUpKey(hostId, m.messageId)]?.phase === "ended" ? (
+                  <span className="text-muted" data-tip={t("followUp.confirm")}>{t("followUp.endedMessage")}</span>
+                ) : m.protectedControl ? (
+                  <span className="text-warn-text">{t("agent-bus.stuck.protected")}</span>
+                ) : (
+                  stuckState(m, t)
+                ),
+              // A message with a settlement is closed in its details (确认已结束并关闭 / 结束跟进), never discarded.
+              action: m.settlement ? undefined : <DiscardButton m={m} tombstone={tombstone} working={working} state={state} />,
             })}
             details={(m) => <MessageDetails message={m} hostId={hostId} onRefresh={state.refresh} />}
           />
+          <EndedNotes hostId={hostId} listed={new Set(messages.map((m) => m.messageId))} />
           {(view.total > messages.length || protectedRows > 0) && (
             <div className="py-2">
               {view.total > messages.length && <p className="text-xs text-subtle">{t("agent-bus.stuck.truncated", { shown: messages.length, total: view.total })}</p>}
@@ -105,50 +105,37 @@ export function StuckMessagesTable({ state, minAge }: { state: StuckMessagesStat
   );
 }
 
-function MessageDetails({ message: m, hostId, onRefresh }: { message: StuckBusMessage; hostId: string; onRefresh(): Promise<void> }) {
+function DiscardButton({ m, tombstone, working, state }: { m: StuckBusMessage; tombstone: boolean; working: boolean; state: StuckMessagesState }) {
   const { t } = useI18n();
-  // The whole text when this window holds the message (the focus host's bus records); else cutex's first 200 characters.
-  const record = useAgentMessage(m.messageId);
-  const activeHost = useApp((s) => s.hosts?.active);
-  const full = (!activeHost || activeHost === hostId) && record?.body ? record.body : null;
-  const text = full ?? m.contentPreview;
-  const created = m.createdAtEpochSecs ? new Date(m.createdAtEpochSecs * 1000).toLocaleString() : null;
-  const kind = knownKind(m.senderKind);
+  const words = discardWords(m, tombstone);
   return (
-    <div className="flex min-w-0 flex-col gap-1.5">
-      <p className="whitespace-pre-wrap text-foreground [overflow-wrap:anywhere]">{text.trim() || t("agent-bus.stuck.noContent")}</p>
-      {!full && m.contentPreview.length >= 200 && <p className="text-subtle">{t("agent-bus.cleanup.previewOnly")}</p>}
-      {(m.errorCode || m.errorMessage) && (
-        <p className="text-danger [overflow-wrap:anywhere]">{t("agent-bus.cleanup.lastError", { error: [m.errorCode, m.errorMessage].filter(Boolean).join(" · ") })}</p>
-      )}
-      {stuckHints(m).length > 0 && (
-        <ul>
-          {stuckHints(m).map((hint) => (
-            <li key={hint.key} className={hint.key === "protected" ? "text-warn-text" : "text-subtle"}>
-              {hintText(hint, t)}
-            </li>
-          ))}
-        </ul>
-      )}
-      {m.reasons.length > 0 && (
-        <ul className="text-subtle" lang="en">
-          {m.reasons.map((reason) => (
-            <li key={reason}>{reason}</li>
-          ))}
-        </ul>
-      )}
-      <p className="text-subtle [overflow-wrap:anywhere]">
-        {[stuckFrom(m, t), m.from?.id].filter(Boolean).join(" · ")} → {[partyName(m.to), m.to?.id].filter(Boolean).join(" · ")}
-        {kind ? ` · ${t(`agent-bus.stuck.kind.${kind}` as MessageKey)}` : m.senderKind ? ` · ${m.senderKind}` : ""}
-        {created ? ` · ${created}` : ""} · {m.messageId}
-      </p>
-      <MessageSettlementControl hostId={hostId} messageId={m.messageId} settlement={m.settlement} sessionId={m.to?.id} onRefresh={onRefresh} />
-    </div>
+    <span data-tip={words.tip ? t(words.tip) : undefined}>
+      <ArmedButton shape={`${CLEANUP_ACTION} whitespace-nowrap`} idle={CLEANUP_ACTION_DANGER} hint={t(words.armed)} disabled={working} testId="stuck-discard" onConfirm={() => void state.discardOne(m)}>
+        {state.busy.has(m.messageId) ? t("agent-bus.cleanup.working") : t(words.label)}
+      </ArmedButton>
+    </span>
   );
 }
 
-function hintText(hint: StuckHint, t: T): string {
-  return t(`agent-bus.stuck.hint.${hint.key}` as MessageKey, hint.params);
+/** Messages whose follow-up ended here this session: they leave the stuck list, this says what became of them. */
+function EndedNotes({ hostId, listed }: { hostId: string; listed: ReadonlySet<string> }) {
+  const { t } = useI18n();
+  const entries = useEndFollowUps((s) => s.entries);
+  const ended = endedOn(entries, hostId).filter((e) => !listed.has(e.messageId));
+  if (ended.length === 0) return null;
+  return (
+    <div className="py-2 text-xs" data-testid="stuck-ended">
+      <p className="text-subtle">{t("agent-bus.stuck.ended")}</p>
+      <ul>
+        {ended.map((e) => (
+          <li key={e.messageId} className="flex min-w-0 gap-2" data-tip={t("followUp.confirm")}>
+            <span className="min-w-0 truncate text-muted">{e.preview.trim() || e.messageId}</span>
+            <span className="shrink-0 text-subtle">{t("followUp.endedMessage")}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
 }
 
 /** What the last discard / 全部丢弃 did: refusals and oddities always, the count after 全部丢弃. */

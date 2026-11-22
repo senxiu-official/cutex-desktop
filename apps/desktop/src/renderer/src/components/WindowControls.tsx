@@ -11,13 +11,13 @@ export function LinuxControls({ deskId }: { deskId?: string } = {}) {
   if (!win || win.nativeControls !== null) return null;
   return (
     <div className="ml-1 flex items-center [app-region:no-drag]">
-      <button onClick={() => void win.control("minimize", deskId)} className="px-3 py-2.5 text-muted hover:bg-surface-2">
+      <button onClick={() => void win.control("minimize", deskId)} className="press px-3 py-2.5 text-muted hover:bg-surface-2 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
         <Minus size={14} />
       </button>
-      <button onClick={() => void win.control("toggleMaximize", deskId)} className="px-3 py-2.5 text-muted hover:bg-surface-2">
+      <button onClick={() => void win.control("toggleMaximize", deskId)} className="press px-3 py-2.5 text-muted hover:bg-surface-2 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
         <Square size={12} />
       </button>
-      <button onClick={() => void win.control("close", deskId)} className="px-3 py-2.5 text-muted hover:bg-danger-solid hover:text-white">
+      <button onClick={() => void win.control("close", deskId)} className="press-solid px-3 py-2.5 text-muted hover:bg-danger-solid hover:text-white active:bg-danger-solid active:text-white focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
         <X size={14} />
       </button>
     </div>

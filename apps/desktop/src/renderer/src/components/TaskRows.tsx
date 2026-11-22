@@ -16,6 +16,7 @@ import { approvalSubject, liveOutcome, useLiveApproval, type ShownOutcome, type 
 import { sessionProfileName } from "../lib/agentLook";
 import type { AgentHint } from "../lib/agentHint";
 import { ToolErrorText } from "./ToolErrorText";
+import { DelegationRowRef } from "./DelegationRowRef";
 import { useUserLayoutToggle } from "../lib/userLayoutToggle";
 
 /**
@@ -93,17 +94,38 @@ export function TaskToolRow({ item, task }: { item: RawItem; task: TaskRowModel 
   const full = [body, reason, raw].filter(Boolean).join("\n\n") || null;
   const long = !!full && (full.length > 80 || (!!reason && !!task.text) || !!task.detail || !!raw);
   const took = !running && typeof item.durationMs === "number" ? formatSpan(item.durationMs / 1000) : null;
+  const toggle = () => long && userToggle(() => setOpen(!open));
+  const tooltip = [task.counterpartName, full].filter(Boolean).join("\n") || undefined;
+  const head = (
+    <>
+      <RowIcon running={running} outcome={outcome} />
+      <Sentence task={task} />
+      <Tag task={task} />
+    </>
+  );
+  const tail = (
+    <>
+      {outcome && <span className={`shrink-0 ${OUTCOME_TONE[outcome.kind]}`}>· {t(`taskrow.outcome.${outcome.kind}`)}</span>}
+      {took && !outcome && !task.text && <span className="shrink-0 text-subtle tabular-nums">· {took}</span>}
+      {!open && (reason ? <span className="min-w-0 truncate text-subtle">{reason.replace(/\s+/g, " ")}</span> : task.text && <span className="min-w-0 truncate text-subtle">{task.text.replace(/\s+/g, " ")}</span>)}
+      {long && (open ? <ChevronDown size={13} className="ml-auto shrink-0" /> : <ChevronRight size={13} className="ml-auto shrink-0" />)}
+    </>
+  );
+  const rowClass = "flex min-w-0 items-center gap-1.5 overflow-hidden text-left text-muted hover:text-foreground";
   return (
     <div className="my-0.5 min-w-0 max-w-full text-xs" data-task-tool-row="">
-      <button onClick={() => long && userToggle(() => setOpen(!open))} title={[task.counterpartName, full].filter(Boolean).join("\n") || undefined} className="flex w-full min-w-0 max-w-full items-center gap-1.5 overflow-hidden text-left text-muted hover:text-foreground">
-        <RowIcon running={running} outcome={outcome} />
-        <Sentence task={task} />
-        <Tag task={task} />
-        {outcome && <span className={`shrink-0 ${OUTCOME_TONE[outcome.kind]}`}>· {t(`taskrow.outcome.${outcome.kind}`)}</span>}
-        {took && !outcome && !task.text && <span className="shrink-0 text-subtle tabular-nums">· {took}</span>}
-        {!open && (reason ? <span className="min-w-0 truncate text-subtle">{reason.replace(/\s+/g, " ")}</span> : task.text && <span className="min-w-0 truncate text-subtle">{task.text.replace(/\s+/g, " ")}</span>)}
-        {long && (open ? <ChevronDown size={13} className="ml-auto shrink-0" /> : <ChevronRight size={13} className="ml-auto shrink-0" />)}
-      </button>
+      {task.delegation?.label ? (
+        // The delegation link sits BESIDE the expand control, never inside it (no interactive content in a <button>):
+        // Tab reaches the expand button, then the link; Enter on each does its own thing. The part after the link
+        // toggles too, by mouse only (one keyboard stop for expanding).
+        <div className="flex w-full min-w-0 max-w-full items-center gap-1.5 overflow-hidden">
+          <button type="button" onClick={toggle} title={tooltip} aria-expanded={long ? open : undefined} className={`${rowClass} shrink-0`}>{head}<span className="shrink-0 text-subtle">·</span></button>
+          <DelegationRowRef delegation={task.delegation} />
+          <button type="button" tabIndex={-1} onClick={toggle} title={tooltip} className={`${rowClass} flex-1`}>{tail}</button>
+        </div>
+      ) : (
+        <button type="button" onClick={toggle} title={tooltip} className={`${rowClass} w-full max-w-full`}>{head}{tail}</button>
+      )}
       {/* Design 028 (d): an unfinished agent_create (its own, or the one still holding the name). */}
       {outcome?.kind === "failed" && unfinishedCreateAction(item) && (
         <div className="mt-0.5 ml-5">

@@ -7,15 +7,23 @@
 //   control message needs allowProtected, a changed digest or a missing id is refused). `?stuck=empty`:
 //   nothing is stuck; `?stuck=down`: the live bus cannot be read; `?stuck=fail`: discarding the ordinary
 //   message "m-a1" is refused (message_digest_mismatch).
+// - r289 owner 结束跟进 (agent-bus-owner-end-followup-v1): an ended message leaves the list. `?stuckold`: a host
+//   without it (结束跟进 greyed, 从队列撤下（可能被再次排入）). `?stuck=gone`: the settlement row's recipient is
+//   retired (evidence read / close answer 409 runtime_gone). `?stuck=full`: withdrawing the live-only "m-d4" is
+//   refused with live_discard_capacity.
 import { asStuckDiscarded, asStuckView } from "../../../../shared/agentBusStuck";
 import type { MessageSettlement, MessageSettlementCloseRequest } from "@cutex-desktop/protocol";
 import { MESSAGE_SETTLEMENT_EVENT, MESSAGE_SETTLEMENT_FEATURE, STALE_ACK_SETTLEMENT_FEATURE } from "../../../../shared/messageSettlement";
 import type { ModuleMock } from "../../dev/mockTypes";
+import type { MessageEndFollowUpRequest, MessageEndFollowUpResult, OwnerMessageSettlement } from "../../../../shared/ownerDispositions";
 
 const DEFAULT_SECS = 120;
 const params = typeof location !== "undefined" ? new URLSearchParams(location.search) : new URLSearchParams();
 const startOff = params.has("wakeoff");
 const STUCK = params.get("stuck");
+const STUCK_OLD = params.has("stuckold");
+/** Messages whose follow-up the owner ended (they leave the stuck list). */
+const ended = new Set<string>();
 
 // Preview-only facts stay inside this module mock; production code never imports fixtures.
 function settlementFixture(): MessageSettlement {
@@ -91,6 +99,8 @@ const settlementRow: WireRow = {
 };
 if (params.has("settlement")) rows.push(settlementRow);
 const closeRequests = new Map<string, { request: MessageSettlementCloseRequest; settlement: MessageSettlement }>();
+/** r289 owner 结束跟进 receipts by actionId. */
+const endFollowUps = new Map<string, { request: MessageEndFollowUpRequest; result: { messageId: string; changed: boolean; settlement: OwnerMessageSettlement } }>();
 
 function wire(row: WireRow, nowSecs: number): Record<string, unknown> {
   return {
@@ -113,7 +123,7 @@ function wire(row: WireRow, nowSecs: number): Record<string, unknown> {
 }
 
 export const mock: ModuleMock = {
-  features: { new: ["wake-busy-wait", "agent-bus-stuck-messages", MESSAGE_SETTLEMENT_FEATURE, STALE_ACK_SETTLEMENT_FEATURE] },
+  features: { new: ["wake-busy-wait", "agent-bus-stuck-messages", MESSAGE_SETTLEMENT_FEATURE, STALE_ACK_SETTLEMENT_FEATURE, ...(STUCK_OLD ? [] : ["agent-bus-owner-end-followup-v1"])] },
   cutexState: (sessionId) => ({
     ...(params.has("settlement") && sessionId === "scratch" ? { agentBusMessages: rows.filter((r) => r.settlement).map((r) => ({ ...wire(r, Date.now() / 1000), fromCutexSessionId: "mika", toCutexSessionId: "scratch", body: r.contentPreview, deliveryKind: "wake" })) } : {}),
   }),
@@ -127,7 +137,7 @@ export const mock: ModuleMock = {
       if (core.legacy) return null;
       await new Promise((r) => setTimeout(r, 250));
       const now = Math.floor(Date.now() / 1000);
-      const listed = rows.filter((r) => r.settlement?.state !== "closed" && r.waitedSecs >= minAgeSecs).sort((a, b) => b.waitedSecs - a.waitedSecs);
+      const listed = rows.filter((r) => r.settlement?.state !== "closed" && !ended.has(r.messageId) && r.waitedSecs >= minAgeSecs).sort((a, b) => b.waitedSecs - a.waitedSecs);
       return asStuckView(
         {
           messages: listed.map((r) => wire(r, now)),
@@ -141,6 +151,7 @@ export const mock: ModuleMock = {
     },
     async busMessageEvidence({ messageId }) {
       const row = rows.find(r => r.messageId === messageId);
+      if (STUCK === "gone" && row?.settlement) return { ok: false, error: { status: 409, code: "runtime_gone", message: "the recipient session is retired", retryable: false } };
       return row ? { ok: true, result: { messageId, settlement: row.settlement ?? null } }
         : { ok: false, error: { status: 404, code: "message_not_found", message: "Unknown message" } };
     },
@@ -153,11 +164,31 @@ export const mock: ModuleMock = {
         : refuse(409, "request_key_conflict");
       const row = rows.find((r) => r.messageId === request.messageId);
       if (!row?.settlement) return refuse(404, "message_not_found");
+      if (STUCK === "gone") return refuse(409, "runtime_gone");
       if (row.settlement.evidenceToken !== request.expectedEvidenceToken || !row.settlement.canClose) return refuse(409, "evidence_changed");
       row.settlement = { ...row.settlement, state: "closed", canClose: false, closure: { actor: "owner", closedAt: new Date().toISOString(), reason: request.reason, requestId: request.requestId } };
       closeRequests.set(request.requestId, { request: { ...request }, settlement: row.settlement });
       core.emitCutex("scratch", MESSAGE_SETTLEMENT_EVENT, { messageId: row.messageId, requestId: request.requestId, settlement: row.settlement });
       return { ok: true, result: { messageId: row.messageId, changed: true, settlement: row.settlement } };
+    },
+    // r289 `POST /v2/agent-bus/stuck-messages/end-follow-up`: closes the follow-up as unconfirmed by the owner, no
+    // evidence, no collector; the same actionId replays (changed false), another body with it is action_id_conflict.
+    async messageEndFollowUp(request: MessageEndFollowUpRequest): Promise<MessageEndFollowUpResult> {
+      await new Promise((r) => setTimeout(r, 250));
+      const prior = endFollowUps.get(request.actionId);
+      const same = (a: MessageEndFollowUpRequest, b: MessageEndFollowUpRequest) => a.messageId === b.messageId && a.reason.trim() === b.reason.trim() && (a.expectedSemanticSha256 ?? null) === (b.expectedSemanticSha256 ?? null);
+      if (prior) return same(prior.request, request) ? { ok: true, result: { ...prior.result, changed: false } } : { ok: false, error: { code: "action_id_conflict", message: "this action id was used for another request" } };
+      if (STUCK_OLD) return { ok: false, error: { code: "owner_disposition_unsupported", message: "this host predates agent-bus-owner-end-followup-v1" } };
+      const row = rows.find((r) => r.messageId === request.messageId);
+      if (!row) return { ok: false, error: { code: "message_not_found", message: "no stuck message has this id" } };
+      const settlement: OwnerMessageSettlement = { state: "closed", outcome: "unconfirmed", by: "owner", canClose: false, evidence: null, evidenceToken: "", closure: { actor: "owner", closedAt: new Date().toISOString(), reason: request.reason, requestId: request.actionId } };
+      // The row's evidence-backed settlement stays as it was (shared/messageSettlement reads only those); the owner
+      // settlement is its own shape (shared/ownerDispositions OwnerMessageSettlement).
+      const result = { messageId: row.messageId, changed: true, settlement };
+      endFollowUps.set(request.actionId, { request: { ...request }, result });
+      ended.add(row.messageId);
+      core.emitCutex("scratch", MESSAGE_SETTLEMENT_EVENT, { messageId: row.messageId, requestId: request.actionId, settlement });
+      return { ok: true, result };
     },
     async discardStuckBusMessage(request) {
       await new Promise((r) => setTimeout(r, 350));
@@ -165,6 +196,7 @@ export const mock: ModuleMock = {
       const row = rows.find((r) => r.messageId === request.messageId);
       if (!row) return refuse("message_not_found", "no stuck message has this id");
       if (STUCK === "fail" && row.messageId === "m-a1") return refuse("message_digest_mismatch", "the message changed since it was listed");
+      if (STUCK === "full" && !row.durable) return refuse("live_discard_capacity", "the live discard tombstone store is full");
       if (row.durable && request.expectedSemanticSha256 && request.expectedSemanticSha256 !== sha(row.messageId.charCodeAt(2))) return refuse("message_digest_mismatch", "the message changed since it was listed");
       if (row.protectedControl && !request.allowProtected) return refuse("message_protected", "Task / Job / control messages need allowProtected");
       rows = rows.filter((r) => r !== row);

@@ -8,7 +8,7 @@ import { useI18n, type MessageKey } from "../../../i18n";
 import { migrateOlderProjectsAfter, OLDER_PROJECTS_AFTER } from "../../../lib/rosterTiers";
 import { PROJECT_SEPARATIONS } from "../../../lib/projectSeparation";
 import { STATUS_CHIPS } from "../../../lib/statusChips";
-import { SIDEBAR_LAYOUTS, setUiPref, uiPrefDefault, useUiPrefs, type ProjectIconStyle, type SystemRowStyle, type UiPrefs } from "../../../lib/prefs";
+import { SIDEBAR_LAYOUTS, SYSTEM_ROW_STYLES, setUiPref, uiPrefDefault, useUiPrefs, type ProjectIconStyle, type UiPrefs } from "../../../lib/prefs";
 import { RUNNING_AGENTS } from "../../../lib/runningAgentsPref";
 import { settingsAnchorId } from "../../../lib/settingsNav";
 import { AppearanceNumberRow } from "../AppearanceRows";
@@ -141,7 +141,7 @@ export function SidebarStyleCard() {
         <Segmented
           label={t("appearance.systemRows")}
           value={ui.systemRows}
-          options={(["line", "band"] as SystemRowStyle[]).map((v) => ({ value: v, label: t(`appearance.systemRows.${v}` as MessageKey) }))}
+          options={SYSTEM_ROW_STYLES.map((v) => ({ value: v, label: t(`appearance.systemRows.${v}` as MessageKey) }))}
           onChange={(v) => setUiPref("systemRows", v)}
         />
       </SettingRow>

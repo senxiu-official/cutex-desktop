@@ -30,5 +30,6 @@ it("rotates bounded audit files and records queue drops", async () => {
     const records = (await readFile(join(root, "drops.jsonl"), "utf8")).trim().split("\n").map(line => JSON.parse(line));
     expect(records).toHaveLength(256);
     expect(records[0].dropped).toBe(44);
-  } finally { await rm(root, { recursive: true, force: true }); }
-});
+  } finally { await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
+  // 600 real appends with rotation, ~2 s alone on Windows: the work, not a wait.
+}, 30_000);

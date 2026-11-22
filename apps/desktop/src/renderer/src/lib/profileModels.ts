@@ -2,6 +2,9 @@ import type { CatalogModel, CatalogModelPatch, ModelsSource, ProfileModelsView }
 import type { MessageKey } from "../i18n";
 import { localDateTime } from "./profileKind";
 
+/** The catalog shows this many rows on the profile page; the rest are on the 全部 N 个模型 sub-page (R6). */
+export const MODELS_ON_PAGE = 5;
+
 export const MODEL_VARIANTS_FEATURE = "profile-model-variants";
 export const MODEL_EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra", "persistent"];
 

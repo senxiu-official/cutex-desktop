@@ -4,6 +4,8 @@
 import { afterEach, beforeAll, expect, it, vi } from "vitest";
 import type { PreloadBridge } from "../src/shared/ipc";
 vi.mock("../src/renderer/src/i18n", () => ({ translate: (key: string) => key }));
+// This checks project data, not the delayed visual Operator preview.
+vi.mock("../src/renderer/src/dev/devOperator", () => ({ installDevOperator: vi.fn() }));
 
 function stubs(search: string) {
   const win: { cutex?: PreloadBridge } = {};
@@ -20,6 +22,9 @@ async function install(search: string) {
   const { installMockBridge } = await import("../src/renderer/src/dev/mockBridge");
   installMockBridge();
   await vi.dynamicImportSettled();
+  // Drain its optional lazy preview import before globals are removed.
+  await import("../src/renderer/src/dev/devOperator");
+  await Promise.resolve();
   const { changeProjectOperator } = await import("../src/renderer/src/lib/projectOperators");
   return { api: win.cutex!.api, changeProjectOperator };
 }

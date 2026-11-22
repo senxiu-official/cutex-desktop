@@ -44,6 +44,11 @@ vi.mock("../src/main/browser/desktopLoopback", async importOriginal => {
   const actual = await importOriginal<typeof import("../src/main/browser/desktopLoopback")>();
   return { ...actual, BrowserDesktopLoopbackStore: class extends actual.BrowserDesktopLoopbackStore { constructor() { super(null); } } };
 });
+vi.mock("../src/main/browser/certificateExceptions", async importOriginal => {
+  const actual = await importOriginal<typeof import("../src/main/browser/certificateExceptions")>();
+  // In-memory store: tests never write browser-certificate-exceptions.json under the cwd.
+  return { ...actual, BrowserCertificateExceptionStore: class extends actual.BrowserCertificateExceptionStore { constructor() { super(null); } } };
+});
 vi.mock("../src/main/browser/egressProxy", () => ({ startBrowserEgressProxy: electron.startProxy }));
 vi.mock("../src/main/browser/tabIdentity", async importOriginal => {
   const original = await importOriginal<typeof import("../src/main/browser/tabIdentity")>();
@@ -601,6 +606,13 @@ describe("installed browser owner IPC / Electron boundary", () => {
     expect(JSON.stringify(diagnostic)).not.toContain("secret");
     // The owner hears about a page's own popup once (Chromium-style popup blocking).
     expect(f.events.at(-1)).toMatchObject({ kind: "blocked", blocked: "popup" });
+    // B10: main keeps that popup for the owner's 「打开」 in the tab (display URL only, redeemed by id once).
+    const kept = f.events.at(-1)!.ownerNotices!.find(item => item.kind === "popup")!;
+    expect(kept.url).toBe("http://localhost:26180/no-input"); expect(JSON.stringify(f.events.at(-1))).not.toContain("secret");
+    await f.ipc({ op: "openOwnerNotice", tabKey: "side-one", id: kept.id });
+    expect(f.events.filter(event => event.kind === "new-tab")).toEqual([expect.objectContaining({ newTabUrl: "http://localhost:26180/no-input" })]);
+    await expect(f.ipc({ op: "openOwnerNotice", tabKey: "side-one", id: kept.id })).rejects.toThrow();
+    f.events.length = 0;
     guest.emit("before-mouse-event", {}, { type: "mouseDown" });
     expect(guest.popup("http://localhost:26180/owner-link")).toEqual({ action: "deny" });
     expect(guest.popup("http://localhost:26180/second-link")).toEqual({ action: "deny" });
@@ -1155,6 +1167,40 @@ describe("installed browser owner IPC / Electron boundary", () => {
     expect(guest.url).toBe(url); expect(f.events.at(-1)!.blockedNavigation).toBeNull();
     await expect(f.ipc({ op: "openBlockedNavigation", tabKey: "side-one", id: notice.id })).rejects.toThrow();
   });
+  it("B5: an untrusted LAN / loopback certificate offers 仍然打开 pinned to that fingerprint; public names stay strict", async () => {
+    const f = fixture(); await f.ipc({ op: "setEnabled", enabled: true }); const { guest } = await f.mount();
+    const verify = f.session.setCertificateVerifyProc.mock.calls.at(-1)![0] as (request: unknown, callback: (value: number) => void) => void;
+    const verdict = (hostname: string) => { let value: number | undefined; verify({ hostname, errorCode: -202, verificationResult: "net::ERR_CERT_AUTHORITY_INVALID" }, next => { value = next; }); return value; };
+    expect(verdict("localhost")).toBe(-3); expect(verdict("example.test")).toBe(-2);
+    const pinned = `sha256/${"Q".repeat(43)}=`, other = `sha256/${"R".repeat(43)}=`, url = "https://localhost:8443/admin?token=fixture-secret";
+    const certificateError = (target: string, fingerprint: string, mainFrame = true) => {
+      const event = { preventDefault: vi.fn() }, callback = vi.fn();
+      guest.emit("certificate-error", event, target, "net::ERR_CERT_AUTHORITY_INVALID", { fingerprint }, callback, mainFrame);
+      return { accepted: event.preventDefault.mock.calls.length > 0 && callback.mock.calls[0]?.[0] === true, callback };
+    };
+    expect(certificateError(url, pinned).accepted).toBe(false);
+    const notice = f.events.at(-1)!.ownerNotices!.find(item => item.kind === "certificate")!;
+    expect(notice).toMatchObject({ kind: "certificate", url: "https://localhost:8443/admin" });
+    expect(notice.detail).toMatch(/^(?:[0-9A-F]{2}:){31}[0-9A-F]{2}$/);
+    // A public name never reaches the tab (and never gets a notice); a subframe gets no notice.
+    const before = f.events.length;
+    expect(certificateError("https://example.test/", pinned).accepted).toBe(false);
+    expect(certificateError("https://127.0.0.1:9443/", pinned, false).accepted).toBe(false);
+    expect(f.events.length).toBe(before);
+    await expect(f.ipc({ op: "openOwnerNotice", tabKey: "side-one", id: "wrong" })).rejects.toThrow();
+    await expect(f.ipc({ op: "openOwnerNotice", tabKey: "side-one", id: notice.id, url: "https://localhost:9/" })).rejects.toThrow();
+    await f.ipc({ op: "openOwnerNotice", tabKey: "side-one", id: notice.id });
+    expect(guest.url).toBe(url); expect(f.events.at(-1)!.ownerNotices).toBeNull();
+    await expect(f.ipc({ op: "openOwnerNotice", tabKey: "side-one", id: notice.id })).rejects.toThrow();
+    // Remembered for exactly this origin + certificate: a changed certificate asks again.
+    expect(certificateError(url, pinned).accepted).toBe(true);
+    expect(certificateError("https://localhost:8443/other", pinned, false).accepted).toBe(true);
+    expect(certificateError("https://localhost:9443/", pinned).accepted).toBe(false);
+    expect(certificateError(url, other).accepted).toBe(false);
+    const again = f.events.at(-1)!.ownerNotices!;
+    expect(again).toHaveLength(1); expect(again[0]).toMatchObject({ kind: "certificate", url: "https://localhost:8443/admin" });
+    expect(again[0]!.detail).not.toBe(notice.detail); expect(again[0]!.id).not.toBe(notice.id);
+  });
   it("a refused cross-origin iframe does not replace the owner's current page with a tab error", async () => {
     const f = fixture(); await f.ipc({ op: "setEnabled", enabled: true }); const { guest } = await f.mount();
     const before = f.events.length;
@@ -1297,6 +1343,16 @@ describe("installed controlled tabs, downloads and site permissions (0.1.3)", ()
     const notices = f.events.filter(item => item.kind === "blocked").length;
     expect(download(guest).cancelled).toBe(true);
     expect(f.events.filter(item => item.kind === "blocked")).toHaveLength(notices); // one notice per 10 s
+    // B10: the cancelled download waits in the tab (display URL + suggested name); 「下载…」 re-requests it as the owner.
+    const kept = f.events.findLast(item => item.ownerNotices?.length)!.ownerNotices!;
+    expect(kept).toEqual([expect.objectContaining({ kind: "download", url: "http://localhost:26180/report.csv", detail: "report.csv" })]);
+    await f.ipc({ op: "openOwnerNotice", tabKey: "side-one", id: kept[0]!.id });
+    expect(guest.downloadURL).toHaveBeenCalledWith("http://localhost:26180/report.csv");
+    expect(f.events.at(-1)!.ownerNotices).toBeNull();
+    const redeemed = download(guest);
+    expect(redeemed.cancelled).toBe(false); expect(redeemed.options.defaultPath).toMatch(/report.csv$/);
+    await expect(f.ipc({ op: "openOwnerNotice", tabKey: "side-one", id: kept[0]!.id })).rejects.toThrow();
+    clock.mockReturnValue(Date.now() + 30_000);
     expect(download(new ContentsMock(nextContentsId++, f.session)).cancelled).toBe(true);
     guest.emit("before-mouse-event", {}, { type: "mouseDown" });
     const allowed = download(guest, "../..\\evil:name?.exe");
@@ -1435,11 +1491,22 @@ describe("installed controlled tabs, downloads and site permissions (0.1.3)", ()
     expect(await pending).toBe(false);
     expect(shown().at(-1)).toBeNull();
     expect(f.windowState.flashFrame.mock.calls).toEqual([[true], [false]]);
-    f.windowState.visible = false;
-    expect(await ask("notifications", { requestingUrl: "http://localhost:26180/" })).toBe(false);
+    // A7: the owner's request while the window is hidden waits for it (never an invisible dialog, never allowed by itself).
+    f.windowState.visible = false; f.windowState.focused = true;
+    let later!: (value: { response: number; checkboxChecked: boolean }) => void;
+    electron.messageBox.mockImplementationOnce(() => new Promise(resolve => { later = resolve; }));
+    const heldCallback = vi.fn(); request(guest, "notifications", heldCallback, { requestingUrl: "http://localhost:26180/" });
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(heldCallback).not.toHaveBeenCalled();
     expect(electron.messageBox).toHaveBeenCalledOnce();
-    expect(notices().at(-1)).toEqual(["permission-hidden", { state: "hidden", origin: "http://localhost:26180", permissions: ["notifications"] }]);
-    expect(shown().at(-1)).toBe("hidden");
+    expect(notices().at(-1)).toEqual(["permission-held", { state: "held", origin: "http://localhost:26180", permissions: ["notifications"] }]);
+    expect(shown().at(-1)).toBe("held");
+    f.windowState.visible = true;
+    for (let i = 0; i < 40 && !later; i++) await new Promise(resolve => setTimeout(resolve, 25));
+    expect(electron.messageBox).toHaveBeenCalledTimes(2); expect(shown().at(-1)).toBe("waiting");
+    later({ response: 1, checkboxChecked: false });
+    for (let i = 0; i < 50 && !heldCallback.mock.calls.length; i++) await Promise.resolve();
+    expect(heldCallback).toHaveBeenCalledWith(false); expect(shown().at(-1)).toBeNull();
     expect(await f.ipc({ op: "sitePermissions" })).toEqual([]);
   });
   it("media: Chromium's play / pause / audible events publish in the view; the owner mutes and pauses through main; a new document resets it", async () => {
@@ -1513,8 +1580,14 @@ describe("installed controlled tabs, downloads and site permissions (0.1.3)", ()
     expect(imageTab.guest.loads).toContain("http://localhost:26180/pic.png");
     (template[1] as { click: () => void }).click(); // 复制图片
     expect(guest.copyImageAt).toHaveBeenCalledWith(10, 20);
+    // Main's own menu is the owner's gesture even 10 s after the page loaded: its download gets the save dialog.
+    const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 60_000);
+    cleanup.push(() => clock.mockRestore());
     (template[2] as { click: () => void }).click(); // 另存为…
     expect(guest.downloadURL).toHaveBeenCalledWith("http://localhost:26180/pic.png");
+    const event = { preventDefault: vi.fn() }, item = { cancel: vi.fn(), getFilename: () => "pic.png", getMimeType: () => "image/png", getURL: () => "http://localhost:26180/pic.png", setSaveDialogOptions: vi.fn() };
+    f.session.emit("will-download", event, item, guest);
+    expect(item.cancel).not.toHaveBeenCalled(); expect(item.setSaveDialogOptions).toHaveBeenCalledOnce();
   });
 });
 

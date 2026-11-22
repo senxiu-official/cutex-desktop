@@ -52,12 +52,15 @@ export function senderLabel(m: Pick<StuckBusMessage, "from" | "senderKind">): Se
 }
 
 /** A hint line under a row, from the row's own fields (cutex's English `reasons` go to the tooltip). */
-export type StuckHint = { key: "held" | "frozen" | "memoryOnly" | "error" | "quarantine" | "protected"; params?: Record<string, string> };
+export type StuckHint = { key: "held" | "frozen" | "memoryOnly" | "memoryOnlyTombstone" | "error" | "quarantine" | "protected"; params?: Record<string, string> };
 
-/** At most three hints, most useful first. */
-export function stuckHints(m: StuckBusMessage): StuckHint[] {
+/**
+ * At most three hints, most useful first. `tombstone`: the host remembers withdrawn live-only messages
+ * (agent-bus-owner-end-followup-v1), so a withdrawn one is not queued again (L2).
+ */
+export function stuckHints(m: StuckBusMessage, tombstone = false): StuckHint[] {
   const hints: StuckHint[] = [];
-  if (!m.durable) hints.push({ key: "memoryOnly" });
+  if (!m.durable) hints.push({ key: tombstone ? "memoryOnlyTombstone" : "memoryOnly" });
   else if (m.state === "stale_held") hints.push({ key: "held" });
   else if (m.nativeSubmissionPresent) hints.push({ key: "frozen" });
   if (m.errorCode) hints.push({ key: "error", params: { code: m.errorCode } });
@@ -96,7 +99,23 @@ export type DiscardOutcome =
 /** Refusals that only mean "not stuck any more". */
 const GONE_CODES = ["message_not_found", "message_not_discardable"];
 /** Refusals the page words itself (agent-bus.stuck.error.<code>). */
-export const KNOWN_ERRORS = ["message_digest_mismatch", "message_protected", "invalid_request"] as const;
+export const KNOWN_ERRORS = ["message_digest_mismatch", "message_protected", "invalid_request", "live_discard_capacity"] as const;
+
+/**
+ * The words of a row's discard button (N9). A live-only (in-memory) message is withdrawn from the queue: on a host
+ * that remembers withdrawn messages (`tombstone`) it stays out; on an older host its sender may queue it again, and
+ * the button says so. A durable message keeps 丢弃.
+ */
+export function discardWords(m: Pick<StuckBusMessage, "durable" | "protectedControl">, tombstone: boolean): {
+  label: "agent-bus.stuck.discard" | "agent-bus.stuck.withdraw" | "agent-bus.stuck.withdrawMayRequeue";
+  armed: "agent-bus.stuck.discardArmed" | "agent-bus.cleanup.discardProtectedArmed" | "agent-bus.stuck.withdrawArmed";
+  tip?: "agent-bus.stuck.withdrawTip" | "agent-bus.stuck.withdrawMayRequeueTip";
+} {
+  if (m.durable) return { label: "agent-bus.stuck.discard", armed: m.protectedControl ? "agent-bus.cleanup.discardProtectedArmed" : "agent-bus.stuck.discardArmed" };
+  return tombstone
+    ? { label: "agent-bus.stuck.withdraw", armed: m.protectedControl ? "agent-bus.cleanup.discardProtectedArmed" : "agent-bus.stuck.withdrawArmed", tip: "agent-bus.stuck.withdrawTip" }
+    : { label: "agent-bus.stuck.withdrawMayRequeue", armed: m.protectedControl ? "agent-bus.cleanup.discardProtectedArmed" : "agent-bus.stuck.withdrawArmed", tip: "agent-bus.stuck.withdrawMayRequeueTip" };
+}
 
 export function discardOutcome(result: StuckBusDiscardResult): DiscardOutcome {
   if (result.ok) return { kind: "discarded", liveWithdrawError: result.discarded.liveWithdrawError };

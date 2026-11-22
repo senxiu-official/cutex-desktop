@@ -21,6 +21,7 @@ export const zhCN = {
   "modules.reloadWindow": "重新加载窗口",
   "modules.needsUpgrade": "这台主机的 cutex 不支持（需要 {feature}），请升级 cutex",
   "modules.needsCapability": "需要 cutex 能力：{list}",
+  "modules.waitingHost": "主机连上后可用",
   "modules.pageOff": "这一页所属的模块已关闭或在这台主机上不可用。",
   "modules.openModules": "打开 模块",
   "modules.section.sources": "安装与来源",

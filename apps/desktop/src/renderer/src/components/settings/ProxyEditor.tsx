@@ -9,6 +9,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { isProxyParseError, normalizeNoProxy, parseProxyUrl } from "../../../../shared/proxy";
 import { useI18n } from "../../i18n";
 import type { SettingsAgents, SettingsSource } from "../../lib/settingsNav";
+import { useSettingsCard } from "../../lib/settingsDrafts";
 import { Button, ErrorNote, Segmented, SettingRow, TextInput } from "./Form";
 
 /** Last manual address per setting (memoryKey), this renderer's lifetime only (never persisted). */
@@ -71,6 +72,14 @@ export function ProxyEditor<M extends string>({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  // The address fields are Settings cards of their own (lib/settingsDrafts): unsaved from the first change (手动 picked
+  // included) until 保存 succeeds; a mode that saves at once reports its own result.
+  const urlCard = useSettingsCard();
+  const bypassCard = useSettingsCard();
+  const pickedManual = shown === manual && mode !== manual;
+  useEffect(() => {
+    if (pickedManual) urlCard.changed();
+  }, [pickedManual, urlCard]);
   useEffect(() => {
     setShown(mode);
     // cutex (with the Q16 ② fix) and the update proxy return the remembered manual URL outside 手动;
@@ -84,8 +93,11 @@ export function ProxyEditor<M extends string>({
     setBusy(true);
     setError(null);
     setSaved(false);
+    const upTo = urlCard.revision();
     try {
       await onSave(value);
+      urlCard.saved(upTo);
+      bypassCard.saved(upTo);
       setSaved(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -144,11 +156,11 @@ export function ProxyEditor<M extends string>({
               </>
             }
           >
-            <TextInput value={draftUrl} onChange={setDraftUrl} placeholder={t("proxy.urlPlaceholder")} mono width="w-72" disabled={disabled || busy} label={t("proxy.url")} />
+            <TextInput inputRef={urlCard.ref} value={draftUrl} onChange={setDraftUrl} placeholder={t("proxy.urlPlaceholder")} mono width="w-72" disabled={disabled || busy} label={t("proxy.url")} />
           </SettingRow>
           {noProxy !== undefined && (
             <SettingRow agents={agents} source={source} label={t("proxy.noProxy")} hint={t("proxy.noProxyHint")}>
-              <TextInput value={draftBypass} onChange={setDraftBypass} placeholder={t("proxy.noProxyPlaceholder")} mono width="w-72" disabled={disabled || busy} label={t("proxy.noProxy")} />
+              <TextInput inputRef={bypassCard.ref} value={draftBypass} onChange={setDraftBypass} placeholder={t("proxy.noProxyPlaceholder")} mono width="w-72" disabled={disabled || busy} label={t("proxy.noProxy")} />
             </SettingRow>
           )}
           <SettingRow agents={agents} source={source} label="">

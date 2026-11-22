@@ -219,7 +219,7 @@ function AgentsSection({ peer }: { peer: PeerView }) {
   const fetched = r.value?.fetchedAt ?? null;
   const stale = peer.state !== "online" && !!r.value;
   return (
-    <Section title={t("peers.agents")} hint={t("peers.agentsHint")} actions={<RefreshButton onClick={() => void r.load()} disabled={r.loading} />}>
+    <Section title={t("peers.agents")} hint={t("peers.agentsHint")} actions={<RefreshButton onClick={() => r.load()} pending={r.loading} />}>
       {r.error && <ErrorNote>{r.error}</ErrorNote>}
       {!r.value && !r.error && <Loading rows={1} />}
       {r.value && (
@@ -261,7 +261,7 @@ function PeerAgentList({ peer, agents }: { peer: PeerView; agents: readonly Peer
     <>
       {many && (
         <div role="search" className="flex flex-wrap items-center gap-2 border-b border-border/60 py-2">
-          <TextInput width="w-56" value={query} placeholder={t("peers.agentsSearch")} onChange={setQuery} />
+          <TextInput search width="w-56" value={query} placeholder={t("peers.agentsSearch")} onChange={setQuery} />
           <Segmented
             value={filter}
             label={t("peers.agentsFilter")}
@@ -296,7 +296,7 @@ function AuditSection({ peer }: { peer: PeerView }) {
   const api = useTargetApi();
   const r = usePeerResource(peer.id, (id) => api.peerAudit(id, 100));
   return (
-    <Section title={t("peers.audit")} hint={t("peers.auditHint")} actions={<RefreshButton onClick={() => void r.load()} disabled={r.loading} />}>
+    <Section title={t("peers.audit")} hint={t("peers.auditHint")} actions={<RefreshButton onClick={() => r.load()} pending={r.loading} />}>
       {r.error && <ErrorNote>{r.error}</ErrorNote>}
       {!r.value && !r.error && <Loading rows={1} />}
       {r.value && r.value.length === 0 && <EmptyState>{t("peers.auditNone")}</EmptyState>}

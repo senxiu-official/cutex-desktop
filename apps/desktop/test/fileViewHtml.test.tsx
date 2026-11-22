@@ -115,10 +115,26 @@ describe("HTML in the file view", () => {
     }
   });
 
-  it("says when the page refers to files it cannot load (inline-only)", async () => {
+  it("says when the page refers to files it cannot load", async () => {
     prepareFilePage.mockImplementationOnce(async () => ({ ok: true, frame: { id: "f2", url: "about:blank" }, externalRefs: 3 }));
     await render({ path: "D:/p/with-assets.html" });
     await vi.waitFor(() => expect(host.querySelector("[data-page-refs]")?.textContent).toContain("3"));
+    expect(host.querySelector("[data-page-refs]")?.textContent).not.toMatch(/Loaded|已加载/);
+  });
+
+  // Owner 2026-11-20: main writes the page's own files in (main/filePageAssets); the line counts both, short.
+  it("its own files loaded: says how many, and how many still did not", async () => {
+    prepareFilePage.mockImplementationOnce(async () => ({ ok: true, frame: { id: "f2", url: "about:blank" }, externalRefs: 2, localFiles: 79 }));
+    await render({ path: "D:/p/with-assets.html" });
+    await vi.waitFor(() => expect(host.querySelector("[data-page-refs]")?.textContent).toContain("79"));
+    expect(host.querySelector("[data-page-refs]")?.textContent).toMatch(/(?:Loaded|已加载) 79 .*2 /);
+  });
+
+  it("every reference loaded: no line", async () => {
+    prepareFilePage.mockImplementationOnce(async () => ({ ok: true, frame: { id: "f2", url: "about:blank" }, externalRefs: 0, localFiles: 79 }));
+    await render({ path: "D:/p/all-local.html" });
+    await vi.waitFor(() => expect(host.querySelector("iframe")).not.toBeNull());
+    expect(host.querySelector("[data-page-refs]")).toBeNull();
   });
 
   it("remembers both gate choices across remounts; changed content and TTL expiry ask again", async () => {

@@ -39,7 +39,8 @@ export function operationToolRow(item: RawItem): StandardToolModel | null {
     if (!ref) return null;
     const offset = typeof a.cursor === "number" && Number.isSafeInteger(a.cursor) && a.cursor >= 0 ? ` · cursor=${a.cursor}` : "";
     const metadata = result?.ok === true ? Object.fromEntries(["name", "ref", "version", "media_type", "bytes", "cursor", "next_cursor", "detail"].filter(k => k in result).map(k => [k, result[k]])) : {};
-    return { ...base, kind: "artifactRead", summary: ref + offset, resultFields: fields(metadata), body: result?.ok === true && typeof result.text === "string" ? result.text : null };
+    // The artifact's name when the read returned it (the ref stays in the details).
+    return { ...base, kind: "artifactRead", summary: (result?.ok === true ? str(result.name) ?? ref : ref) + offset, resultFields: fields(metadata), body: result?.ok === true && typeof result.text === "string" ? result.text : null };
   }
   const action = str(a.action_id), operation = str(a.tool);
   if (!action || !operation) return null;

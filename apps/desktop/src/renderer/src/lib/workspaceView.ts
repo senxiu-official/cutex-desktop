@@ -6,7 +6,8 @@ import { LOCAL_HOST_ID } from "../../../shared/hosts";
 import type { DaemonApi, GitStatus, WorkspaceScope } from "../../../shared/ipc";
 import { api, bridge } from "../bridge";
 import { agentHost, hostApi, selectedSidebar, sidebarOf, useApp } from "../store";
-import { gitStatusFlight } from "./gitStatusFlight";
+import { gitStatusFlight, type GitStatusFlight } from "./gitStatusFlight";
+import { readIssue, type ReadIssue } from "./transientError";
 import { hostKey } from "./hostKeys";
 import { onHostSwitch } from "./hostSwitch";
 import { rootFor, scopeFor, scopeKey, workspaceErrorText } from "./workspace";
@@ -63,18 +64,22 @@ function sessionInScope(scope: WorkspaceScope, hostId: string, sessionId: string
  * open folders of the 文件 tree to reload (lib/workspaceRefresh.ts), git status reloads when files or
  * `.git` change (one read at a time per workspace, lib/gitStatusFlight.ts). Sources: cutex's watch (re-opened after the host reconnects, everything reloaded
  * then), and the agents of this workspace: a completed `fileChange` item reloads its folders, a turn's
- * end everything open (shell commands; hosts whose watcher misses changes). Errors (e.g. old cutex
- * without workspace routes) surface as `error`.
+ * end everything open (shell commands; hosts whose watcher misses changes). A failed git status read is
+ * `gitIssue` (`git` keeps the last good one): transient ones retry by themselves (lib/gitStatusFlight.ts),
+ * `reloadGit` reads now. It is only about git: the 文件 tree reads its folders itself and still shows them
+ * (owner 2026-11-16: a busy git status replaced the whole tree with red text).
  */
 export function useWorkspace(scope: WorkspaceScope | null, hostId: string) {
   const [revision, setRevision] = useState(0);
   const [git, setGit] = useState<GitStatus | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [gitIssue, setGitIssue] = useState<ReadIssue | null>(null);
   const [dirs, setDirs] = useState<DirVersions>(NO_DIR_VERSIONS);
+  const [flight, setFlight] = useState<GitStatusFlight | null>(null);
 
   useEffect(() => {
     setGit(null);
-    setError(null);
+    setGitIssue(null);
+    setFlight(null);
     if (!scope) {
       setDirs(NO_DIR_VERSIONS);
       return;
@@ -89,9 +94,15 @@ export function useWorkspace(scope: WorkspaceScope | null, hostId: string) {
       if (cancelled) return;
       // The same status again (each reload after a turn) keeps the object: App and every consumer of the
       // workspace context would re-render for nothing (perf §9).
-      if (result.ok) setGit((prev) => (prev && JSON.stringify(prev) === JSON.stringify(result.status) ? prev : result.status));
-      else setError(workspaceError(result.error));
+      if (result.ok) {
+        setGit((prev) => (prev && JSON.stringify(prev) === JSON.stringify(result.status) ? prev : result.status));
+        setGitIssue(null);
+      } else {
+        const issue = readIssue(result.error);
+        setGitIssue((prev) => (prev && prev.code === issue.code && prev.detail === issue.detail && prev.retrying === issue.retrying ? prev : issue));
+      }
     });
+    setFlight(gitFlight);
     gitFlight.ensure();
     const reloadGitSoon = () => gitFlight.request();
     const batcher = new ChangeBatcher((change) => {
@@ -164,7 +175,7 @@ export function useWorkspace(scope: WorkspaceScope | null, hostId: string) {
     };
   }, [scope, hostId]);
 
-  return { revision, git, error, dirs };
+  return { revision, git, gitIssue, reloadGit: () => flight?.reload(), dirs };
 }
 
 /** The 文件 tree's reload version of the open folder `path` (changes when it or everything changed). */
@@ -182,12 +193,15 @@ export interface SelectedWorkspace {
   scope: WorkspaceScope | null;
   revision: number;
   git: GitStatus | null;
-  error: string | null;
+  /** The last git status read failed (`git` is then the last good one, or null). */
+  gitIssue: ReadIssue | null;
+  /** 重新加载 for git status: read now. */
+  reloadGit: () => void;
   /** Which open folders of the 文件 tree to reload (`useDirVersion`). */
   dirs: DirVersions;
 }
 
-export const WorkspaceContext = createContext<SelectedWorkspace>({ hostId: LOCAL_HOST_ID, api, scope: null, revision: 0, git: null, error: null, dirs: NO_DIR_VERSIONS });
+export const WorkspaceContext = createContext<SelectedWorkspace>({ hostId: LOCAL_HOST_ID, api, scope: null, revision: 0, git: null, gitIssue: null, reloadGit: () => {}, dirs: NO_DIR_VERSIONS });
 export function useSelectedWorkspace(): SelectedWorkspace {
   return useContext(WorkspaceContext);
 }

@@ -15,7 +15,8 @@ beforeEach(() => { fx.platform = "win32"; fx.state.hosts.hosts[0]!.kind = "local
 
 it("offers local reveal/open, sends exact paths to main, and keeps copy separate", async () => {
   const rows = entries("local");
-  expect(rows.map((row) => row.label)).toEqual(["menu.copyPath", "menu.revealExplorer", "menu.openFile"]);
+  // A name without a type: main decides (打开, or 打开 off + 运行… for a program); each row waits for its check.
+  expect(rows.map((row) => row.label)).toEqual(["menu.copyPath", "menu.revealExplorer", "menu.openFile", "menu.openFile", "menu.runFile"]);
   await rows[1]!.onSelect(); await rows[2]!.onSelect(); await rows[0]!.onSelect();
   expect(fx.file.mock.calls).toEqual([["local", "/tmp/file", "reveal"], ["local", "/tmp/file", "open"]]);
   expect(fx.copy).toHaveBeenCalledWith("/tmp/file");

@@ -31,7 +31,7 @@ import { rootFor } from "../lib/workspace";
 import { AttentionContext, useAttentionSource } from "../lib/attentionView";
 import { activityTimesFor, activityTimesOf } from "../lib/sessionsMeta";
 import { useNameOrderKey } from "../lib/rosterOrder";
-import { foldRows, layoutSidebar, nextRosterChange, type GroupLayout, type LayoutContext } from "../lib/sidebarLayout";
+import { foldRows, layoutSidebar, nextRosterChange, pinnedRows, type GroupLayout, type LayoutContext } from "../lib/sidebarLayout";
 import { holdLayout, placementOf, useRosterPresence } from "../lib/rosterFreeze";
 import { useRovingList } from "../lib/rovingList";
 import { openProjectViewPane, useProjectViewAvailable } from "../lib/sidebarProjectView";
@@ -49,7 +49,9 @@ import { RestoreBanner } from "./RestoreBanner";
 import { AgentRowButton, OfflineRow, PinnedRows } from "./AgentRows";
 import { toggleOpenedProject, useOpenedProject } from "../lib/openedProjects";
 import { relativeTime } from "../lib/sidebarView";
-import { folderLook, folderStyle, OLDER_FOLDER_LOOK, type FolderLook } from "../lib/folderLook";
+import { folderLook, folderStyle, OLDER_FOLDER_LOOK, UNGROUPED_FOLDER_LOOK, type FolderLook } from "../lib/folderLook";
+import { RosterStick } from "./RosterStick";
+import { rosterHostRows } from "../lib/hostReach";
 import { UpdateButton } from "./UpdateButton";
 import { IdentityButton } from "./IdentityMenu";
 import { middleOpen } from "./SidebarNav";
@@ -113,7 +115,7 @@ export function OfflineSection({ rows, searching, onAll }: { rows: AgentRow[]; s
         <span className="shrink-0">{t("sidebar.offlineCount", { count: rows.length })}</span>
         <span className="h-px min-w-2 flex-1 bg-border" />
         {onAll && (
-          <button onClick={onAll} className="shrink-0 rounded px-0.5 hover:text-foreground">
+          <button onClick={onAll} className="press shrink-0 rounded px-0.5 hover:text-foreground">
             {t("sidebar.allAgents")} ›
           </button>
         )}
@@ -123,7 +125,7 @@ export function OfflineSection({ rows, searching, onAll }: { rows: AgentRow[]; s
       ))}
       {hidden > 0 && onAll && (
         // The same 「+N」 fold as 「最近 +N」 / 「其余 +N」 (owner 2026-11-05); it opens the full list.
-        <button onClick={onAll} data-offline-fold="" className="flex w-full min-w-0 items-center gap-1 rounded-md px-1.5 py-[3px] text-left text-meta/[inherit] text-subtle hover:bg-surface-2/60 hover:text-foreground">
+        <button onClick={onAll} data-offline-fold="" className="press flex w-full min-w-0 items-center gap-1 rounded-md px-1.5 py-[3px] text-left text-meta/[inherit] text-subtle hover:bg-surface-2/60 hover:text-foreground">
           <ChevronRight size={11} className="shrink-0" />
           <span className="shrink-0">{t("sidebar.moreOffline", { count: hidden })}</span>
         </button>
@@ -157,7 +159,7 @@ function RunningAgents({ rows, mode }: { rows: AgentRow[]; mode: RunningAgentsMo
             onClick={() => void select(row.id, row.hostId)}
             onContextMenu={contextMenu(() => agentMenu(row.session, t, row.hostId))}
             // The open agent stays here (opening never moves a row): ringed.
-            className={`rounded-full ${row.id === selectedId ? "ring-2 ring-accent ring-offset-1 ring-offset-surface" : ""}`}
+            className={`press-avatar rounded-full ${row.id === selectedId ? "ring-2 ring-accent ring-offset-1 ring-offset-surface" : ""}`}
             aria-current={row.id === selectedId ? "true" : undefined}
           >
             <StatusAvatar name={row.name} initial={row.initial} color={row.color} avatar={row.session.avatar} seed={row.session.cutexSessionId} size={20} signal="running" />
@@ -219,7 +221,7 @@ function AgentFold({ kind, groupId, hostId, rows }: { kind: "idle" | "offline"; 
           (kind === "idle" ? toggleRestOpen : toggleOfflineFoldOpen)(groupId, hostId);
         }}
         aria-expanded={open}
-        className="flex w-full min-w-0 items-center gap-1 rounded-md px-1.5 py-[3px] text-left text-meta/[inherit] text-subtle hover:bg-surface-2/60 hover:text-foreground"
+        className="press flex w-full min-w-0 items-center gap-1 rounded-md px-1.5 py-[3px] text-left text-meta/[inherit] text-subtle hover:bg-surface-2/60 hover:text-foreground"
       >
         <ChevronRight size={11} className={`shrink-0 transition-transform ${open ? "rotate-90" : ""}`} />
         <span className="shrink-0">{t(kind === "idle" ? "sidebar.idleFold" : "sidebar.offlineFold", { count: rows.length })}</span>
@@ -316,6 +318,13 @@ function useGroupOpen(groupId: string, hostId?: string): [boolean, () => void] {
  * `dragKey`: null = not draggable; `dragging`: this group is the one being dragged. `collapse`: a one-row
  * project opened in place (OneRowProject): its header click goes back to one row instead of folding.
  */
+/**
+ * A roster block that shows nothing under its title (folded, no pinned or attention rows under it): the next block's
+ * title touches it (styles.css roster spacing; owner 2026-11-19 zero gap between titles). A block with rows under its
+ * title keeps the gap after them, folded or not (cross-review: a folded 文件夹 still lists its attention projects).
+ */
+const endsTitle = (only: boolean) => (only ? "" : undefined);
+
 const Group = memo(function Group({ layout, dragKey, dragging: dragged, searching, collapse }: { layout: GroupLayout; dragKey: string | null; dragging: boolean; searching: boolean; collapse?: () => void }) {
   const { t } = useI18n();
   const { group } = layout;
@@ -341,12 +350,13 @@ const Group = memo(function Group({ layout, dragKey, dragging: dragged, searchin
   const projectView = useProjectViewAvailable();
   const standalone = group.kind === "independent";
   return (
-    <section data-roster-kind={standalone ? "system" : "project"} className={`relative ${block.className} ${dragged ? "opacity-40" : ""} ${state === "offline" ? "opacity-50 grayscale" : ""}`} style={block.style} data-project-block={block.style ? prefs.projectSeparation : undefined} data-folded={open ? undefined : ""} data-group-key={groupKey(group)}>
+    <section {...(standalone ? { "data-stick-group": `independent:${groupKey(group)}`, "data-stick-system": "", "data-stick-label": look ? `${title} · ${look.label}` : title } : {})} data-roster-kind={standalone ? "system" : "project"} className={`relative ${block.className} ${dragged ? "opacity-40" : ""} ${state === "offline" ? "opacity-50 grayscale" : ""}`} style={block.style} data-project-block={block.style ? prefs.projectSeparation : undefined} data-folded={open ? undefined : ""} data-ends-title={endsTitle(!open && pinnedRows(layout.big).length === 0)} data-group-key={groupKey(group)}>
       {dropAt && <div className={`pointer-events-none absolute right-1 left-1 h-0.5 rounded bg-accent ${dropAt === "before" ? "-top-1" : "-bottom-1"}`} />}
       <div
         // Folded with the open agent inside: highlighted like a collapsed row.
         className={`group/header flex items-center rounded-md ${!open && layout.hasSelected ? "bg-surface-2" : ""} ${block.headerClassName}`}
         data-highlight={!open && layout.hasSelected ? "" : undefined}
+        data-stick={standalone ? "edge" : "project"}
         draggable={!!dragKey}
         onDragStart={(e) => {
           if (!drag || !dragKey) return;
@@ -373,7 +383,7 @@ const Group = memo(function Group({ layout, dragKey, dragging: dragged, searchin
           data-standalone-header={standalone ? "" : undefined}
           data-system-row={standalone ? "" : undefined}
           data-highlight={standalone && !open && layout.hasSelected ? "" : undefined}
-          className={standalone ? STANDALONE_HEADER : "group/fold flex h-7 min-w-0 flex-1 items-center gap-1.5 px-1.5 text-left"}
+          className={standalone ? STANDALONE_HEADER : "press group/fold flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded-md px-1.5 text-left"}
         >
           {/* The group icon is its fold toggle (chevron on hover / focus). */}
           {standalone ? (
@@ -402,13 +412,13 @@ const Group = memo(function Group({ layout, dragKey, dragging: dragged, searchin
             data-tip={t("sidebar.openProjectView")}
             aria-label={t("sidebar.openProjectView")}
             data-open-project-view=""
-            className="hidden rounded p-0.5 text-subtle group-focus-within/header:block group-hover/header:block hover:bg-surface-2 hover:text-foreground"
+            className="press-icon hidden rounded p-0.5 text-subtle group-focus-within/header:block group-hover/header:block hover:bg-surface-2 hover:text-foreground"
           >
             <LayoutDashboard size={13} />
           </button>
         )}
         {group.kind === "project" && (
-          <button onClick={() => services.ui.openPage("projects.page", { project: group.id, tab: "settings", ...(own ? {} : { host: group.hostId! }) })} data-tip={t("nav.projectSettings")} aria-label={t("nav.projectSettings")} className="mr-1 hidden rounded p-0.5 text-subtle group-hover/header:block hover:bg-surface-2 hover:text-foreground">
+          <button onClick={() => services.ui.openPage("projects.page", { project: group.id, tab: "settings", ...(own ? {} : { host: group.hostId! }) })} data-tip={t("nav.projectSettings")} aria-label={t("nav.projectSettings")} className="press-icon mr-1 hidden rounded p-0.5 text-subtle group-focus-within/header:block group-hover/header:block hover:bg-surface-2 hover:text-foreground">
             <Settings2 size={13} />
           </button>
         )}
@@ -447,8 +457,8 @@ function OtherProjects({ layouts }: { layouts: GroupLayout[] }) {
   const running = layouts.reduce((n, l) => n + l.runningCount, 0);
   const needs = layouts.reduce((n, l) => n + l.needsYouCount, 0);
   return (
-    <section data-roster-kind="system">
-      <button onClick={toggleOpen} className="flex w-full min-w-0 items-center gap-1.5 px-1.5 py-1 text-left">
+    <section data-roster-kind="system" data-ends-title={endsTitle(!open)}>
+      <button onClick={toggleOpen} className="press flex w-full min-w-0 items-center gap-1.5 rounded-md px-1.5 py-1 text-left">
         <span className="inline-block w-2.5 text-caption/[inherit] text-subtle">{open ? "▾" : "▸"}</span>
         <span className="truncate text-xs font-semibold text-muted">{t("sidebar.otherProjects")}</span>
         <span className="ml-auto flex shrink-0 items-center gap-1.5 text-caption/[inherit]">
@@ -527,8 +537,9 @@ function FolderTotals({ needsYou, updates = 0, running }: { needsYou: number; up
  * A folder's header row, the parent level of the projects under it (owner 2026-11-05): it starts a little
  * left of a project's icon (outdented, never clipped: the roster keeps its padding), the folder's icon
  * (lib/folderLook; the chevron while pointing at it), the name in the folder's colour as strong as a project
- * name, the project count, then a thick line in the same colour; folded, the totals after it. Owner folders
- * and the automatic 「更早的项目」 share it.
+ * name, then — right-aligned — the totals (needs-you, updates, running) and the project count. No thick line (owner
+ * 2026-11-18: in place it looks exactly as when stuck at an edge; it is the same element). A 系统行 has a gap there
+ * that 系统行样式 can draw as a dashed line. Owner folders, 未分组 and the automatic 「更早的项目」 share it.
  */
 function FolderHeader({ look, name, count, open, onToggle, title, totals, system = false }: { look: FolderLook; name: string; count: number; open: boolean; onToggle(): void; title: string; totals?: ReactNode; system?: boolean }) {
   return (
@@ -538,7 +549,7 @@ function FolderHeader({ look, name, count, open, onToggle, title, totals, system
       data-tip={title}
       data-folder-header=""
       data-system-row={system ? "" : undefined}
-      className="group/fold -ml-1 flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden rounded-md py-1 pr-1.5 pl-0.5 text-left text-caption/[inherit] whitespace-nowrap text-subtle hover:bg-surface-2/60"
+      className="press group/fold -ml-1 flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden rounded-md py-1 pr-1.5 pl-0.5 text-left text-caption/[inherit] whitespace-nowrap text-subtle hover:bg-surface-2/60"
     >
       <span className="folder-ink relative flex h-5 w-[18px] shrink-0 items-center justify-center">
         <look.icon size={14} strokeWidth={2.2} aria-hidden className="group-hover/fold:invisible group-focus-visible/fold:invisible" />
@@ -549,11 +560,9 @@ function FolderHeader({ look, name, count, open, onToggle, title, totals, system
       <span className="folder-ink min-w-[2.5em] truncate text-ui/[inherit] font-semibold" data-folder-name="">
         <ScriptText text={name} />
       </span>
-      {/* Only a folder's count sits beside its name; a system row's is right-aligned like the other rows' meta. */}
-      {!system && <span className="shrink-0 tabular-nums">{count}</span>}
-      {system ? <SystemLine /> : <span className="folder-line h-[3px] min-w-2 flex-1 rounded-full" />}
-      {system && <span className="shrink-0 tabular-nums">{count}</span>}
-      {!open && totals}
+      {system ? <SystemLine /> : <span className="min-w-2 flex-1" aria-hidden />}
+      {totals}
+      <span className="shrink-0 tabular-nums" data-folder-count="">{count}</span>
     </button>
   );
 }
@@ -564,7 +573,7 @@ function FolderHeader({ look, name, count, open, onToggle, title, totals, system
  * reads as the child of the folder above it; what only a folder has is left out: its colour, the count beside
  * the name and the thick line. Neutral colours; the meta (host chip, counts, time) stays right-aligned.
  */
-const STANDALONE_HEADER = "group/fold -ml-1 flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden rounded-md py-1 pr-1.5 pl-0.5 text-left text-caption/[inherit] whitespace-nowrap text-subtle hover:bg-surface-2/60";
+const STANDALONE_HEADER = "press group/fold -ml-1 flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden rounded-md py-1 pr-1.5 pl-0.5 text-left text-caption/[inherit] whitespace-nowrap text-subtle hover:bg-surface-2/60";
 /**
  * A system row's trailing line (styles.css `.system-line`): 虚线 draws it thin, grey and dashed where a folder has its thick
  * coloured one; 灰底条 hides it (the row sits on a grey band instead). Either way it keeps the meta right-aligned.
@@ -607,8 +616,8 @@ function OlderProjects({ layouts, foldId, nested = false }: { layouts: GroupLayo
   const days = prefs.olderProjectsAfter === "off" ? 0 : prefs.olderProjectsAfter;
   const look = OLDER_FOLDER_LOOK;
   return (
-    <section data-roster-kind={nested ? "project" : "system"} data-folded={open ? undefined : ""} data-older-projects="" style={folderStyle(look)}>
-      <div className="flex items-center rounded-md">
+    <section {...(nested ? {} : { "data-stick-group": "older", "data-stick-system": "", "data-stick-label": t("sidebar.olderProjects") })} data-roster-kind={nested ? "project" : "system"} data-folded={open ? undefined : ""} data-ends-title={endsTitle(!open)} data-older-projects="" style={folderStyle(look)}>
+      <div className="flex items-center rounded-md" data-stick={nested ? "project" : "edge"}>
         <FolderHeader system={!nested} look={look} name={t("sidebar.olderProjects")} count={layouts.length} open={open} onToggle={() => toggleRestOpen(foldId)} title={t("sidebar.olderProjectsHint", { days })} totals={<FolderTotals needsYou={needs} running={running} />} />
       </div>
       {open && (
@@ -650,7 +659,7 @@ function OneRowProject({ layout, dragKey = null, dragging = false }: { layout: G
   if (opened) return <Group layout={{ ...layout, mode: "full" }} dragKey={dragKey} dragging={dragging} searching={false} collapse={() => toggleOpenedProject(key)} />;
   const standalone = group.kind === "independent";
   return (
-    <div data-roster-kind={standalone ? "system" : "project"} data-folded="">
+    <div data-roster-kind={standalone ? "system" : "project"} data-folded="" data-ends-title={endsTitle(pinnedRows(layout.big).length === 0)}>
       <div className={block.rowClassName || undefined} style={block.style} data-group-key={key} data-one-row="" onContextMenu={contextMenu(() => projectMenu(group, root, true, null, t))}>
         <button
           onClick={() => toggleOpenedProject(key)}
@@ -659,7 +668,7 @@ function OneRowProject({ layout, dragKey = null, dragging = false }: { layout: G
           data-highlight={layout.hasSelected ? "" : undefined}
           data-standalone-header={standalone ? "" : undefined}
           data-system-row={standalone ? "" : undefined}
-          className={standalone ? `${STANDALONE_HEADER} w-full ${layout.hasSelected ? "bg-surface-2" : ""}` : `group/fold flex h-7 w-full min-w-0 items-center gap-1.5 rounded-md px-1.5 text-left ${layout.hasSelected ? "bg-surface-2" : "hover:bg-surface-2/60"}`}
+          className={standalone ? `${STANDALONE_HEADER} w-full ${layout.hasSelected ? "bg-surface-2" : ""}` : `press group/fold flex h-7 w-full min-w-0 items-center gap-1.5 rounded-md px-1.5 text-left ${layout.hasSelected ? "bg-surface-2" : "hover:bg-surface-2/60"}`}
         >
           {/* The icon stands where the chevron was (chevron while pointing at it), as in an expanded header. */}
           {standalone ? (
@@ -713,8 +722,9 @@ function ProjectSection({ section, layouts, older, visible, searching, dragged, 
   const updates = sum.attention - sum.needsYou;
   const look = folderLook(section.id, section.look);
   return (
-    <section data-roster-kind="folder" data-sidebar-section={section.id} style={folderStyle(look)}>
+    <section data-stick-group={`folder:${section.id}`} data-stick-label={section.name} data-folded={folded ? "" : undefined} data-ends-title={endsTitle(!(shown.length > 0 || (!folded && older.length > 0)))} data-roster-kind="folder" data-sidebar-section={section.id} style={folderStyle(look)}>
       <div
+        data-stick="edge"
         data-section-drop-over={drop.over || undefined}
         className={`flex items-center rounded-md ${drop.over ? `ring-1 ring-accent/50 ${DROP_TINT}` : ""}`}
         style={drop.over ? dropTint("var(--accent)", 10) : undefined}
@@ -753,6 +763,54 @@ function ProjectSection({ section, layouts, older, visible, searching, dragged, 
   );
 }
 
+/** The 「未分组」 fold key (foldedProjects, like the other automatic groups). */
+const UNGROUPED_FOLD = "__ungrouped__";
+
+/**
+ * 「未分组」 (owner 2026-11-18): the projects in no 文件夹, while there are folders, under a 系统行 (the look of 更早的
+ * 项目 / 独立智能体) directly above 独立智能体 — so it sticks at the top while you are in it and waits in the bottom
+ * stack otherwise, one click away, instead of the projects scrolling away with nothing to bring them back. Folds like a folder (kept, foldedProjects); dropping a project
+ * from a folder on it takes the project out of that folder. Not renameable or deletable; not in 现在·全部.
+ */
+function UngroupedProjects({ layouts, extra, searching, drop, children }: { layouts: GroupLayout[]; extra: GroupLayout[]; searching: boolean; drop: SectionDrop; children(shown: GroupLayout[]): ReactNode }) {
+  const { t } = useI18n();
+  const { sectionCollapsedShows } = useUiPrefs();
+  const [open, toggleOpen] = useGroupOpen(UNGROUPED_FOLD);
+  const folded = !open && !searching;
+  const sum = summarizeSection([...layouts, ...extra]);
+  const shown = visibleInSection(layouts, folded, searching, sectionCollapsedShows);
+  const look = UNGROUPED_FOLDER_LOOK;
+  const name = t("sidebar.ungrouped");
+  return (
+    <section data-stick-group="ungrouped" data-stick-system="" data-stick-label={name} data-folded={folded ? "" : undefined} data-ends-title={endsTitle(!(shown.length > 0 || (!folded && extra.length > 0)))} data-roster-kind="system" data-ungrouped="" style={folderStyle(look)}>
+      <div
+        data-stick="edge"
+        data-section-drop-over={drop.over || undefined}
+        className={`flex items-center rounded-md ${drop.over ? `ring-1 ring-accent/50 ${DROP_TINT}` : ""}`}
+        style={drop.over ? dropTint("var(--accent)", 10) : undefined}
+        onDragOver={(e) => {
+          if (!drop.active) return;
+          e.preventDefault();
+          drop.onDragOver();
+        }}
+        onDragLeave={() => drop.onDragLeave()}
+        onDrop={(e) => {
+          e.preventDefault();
+          drop.onDrop();
+        }}
+      >
+        <FolderHeader system look={look} name={name} count={sum.projects} open={!folded} onToggle={toggleOpen} title={t("sidebar.ungroupedHint", { count: sum.projects })} totals={<FolderTotals needsYou={sum.needsYou} updates={sum.attention - sum.needsYou} running={sum.running} />} />
+      </div>
+      {(shown.length > 0 || (!folded && extra.length > 0)) && (
+        <div className={folded ? "" : "pl-2"} data-roster-body="">
+          {children(shown)}
+          {!folded && <OtherProjects layouts={extra} />}
+        </div>
+      )}
+    </section>
+  );
+}
+
 /** Quick chats (human-create-session): one flat, foldable list, newest first. */
 function ChatsGroup({ rows }: { rows: AgentRow[] }) {
   const { t } = useI18n();
@@ -761,8 +819,8 @@ function ChatsGroup({ rows }: { rows: AgentRow[] }) {
   // A section header like 独立智能体: the project header treatment in the neutral colour.
   const block = projectBlockLook(prefs.projectSeparation, NEUTRAL_GROUP);
   return (
-    <section data-roster-kind="system" className={`relative ${block.className}`} style={block.style} data-project-block={block.style ? prefs.projectSeparation : undefined} data-folded={open ? undefined : ""} data-group-key="__chats__">
-      <div className={`flex items-center rounded-md ${block.headerClassName}`}>
+    <section data-stick-group="chats" data-stick-system="" data-stick-label={t("sidebar.chats")} data-roster-kind="system" className={`relative ${block.className}`} style={block.style} data-project-block={block.style ? prefs.projectSeparation : undefined} data-folded={open ? undefined : ""} data-ends-title={endsTitle(!open && pinnedRows(rows).length === 0)} data-group-key="__chats__">
+      <div className={`flex items-center rounded-md ${block.headerClassName}`} data-stick="edge">
         <button
           onClick={toggleOpen}
           aria-expanded={open}
@@ -800,7 +858,7 @@ function HostStatusAction({ look, state }: { look: HostLook; state: HostSidebarS
       {t(disconnected ? "sidebar.hostDisconnected" : "sidebar.hostOffline")} ·
       <button
         onClick={() => void (disconnected ? setHostConnected(look.id, true) : api.reconnectHost(look.id).catch(() => {}))}
-        className="rounded px-0.5 text-accent hover:underline"
+        className="press rounded px-0.5 text-accent hover:underline"
       >
         {t(disconnected ? "sidebar.hostConnect" : "sidebar.hostReconnect")}
       </button>
@@ -841,7 +899,7 @@ function FooterEntry({ entry }: { entry: AppSlotEntry<"nav.primary"> }) {
       {...middleOpen(() => runNav(item, openModifiers({ ctrlKey: false, metaKey: false, shiftKey: false, button: 1 })))}
       data-tip={[label, badge?.title].filter(Boolean).join("\n")}
       aria-label={label}
-      className={`relative flex shrink-0 items-center rounded p-1.5 hover:bg-surface-2 hover:text-foreground disabled:opacity-50 ${active ? "bg-surface-2 text-foreground" : ""}`}
+      className={`press-icon relative flex shrink-0 items-center rounded p-1.5 hover:bg-surface-2 hover:text-foreground disabled:opacity-50 ${active ? "bg-surface-2 text-foreground" : ""}`}
     >
       <Icon size={14} />
       <LocalBadge moduleId={entry.moduleId} />
@@ -871,13 +929,15 @@ export function Sidebar() {
   const { t } = useI18n();
   // Every host of the view scope, merged (multi-host RFC §8; one host = today's sidebar). Rows and
   // groups carry their host and are matched by host keys (prefs, selection, attention).
-  const scoped = useScopedSidebar();
+  const prefs = useUiPrefs();
+  // The 花名册 lists only hosts it can reach (owner 2026-11-17; the others are in the footer switcher); 现在·全部
+  // keeps an unreachable host's last rows, greyed.
+  const scoped = useScopedSidebar({ reachableOnly: prefs.sidebarLayout !== "now-all" });
   const { model, scope } = scoped;
   const attention = useScopedAttention(model, scope);
   const attentionSource = useAttentionSource(attention);
   const selectedKey = useApp((s) => (s.view.kind === "conversation" && s.selectedId ? hostKey(s.selectedHost ?? s.hosts?.active ?? "local", s.selectedId) : null));
   const [query, setQuery] = useState("");
-  const prefs = useUiPrefs();
   const hostIds = scope.ids;
   // Re-read on every prefs change (useUiPrefs re-renders): host-keyed lists over the scope's hosts.
   const projectOrder = useMemo(() => hostListKeys("projectOrder", hostIds), [prefs, hostIds]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -891,7 +951,11 @@ export function Sidebar() {
   const activity = useApp((s) => (searching ? s.activity : null));
   const hostsCtx = useMemo<SidebarHosts>(() => ({ marks: scope.showHostMarks, localMarks: prefs.hostMarkLocal, focus: scope.focus, look: (id) => scope.host(id ?? scope.focus), stateOf: scoped.stateOf }), [scope, scoped.stateOf, prefs.hostMarkLocal]);
   // Hosts of the scope with nothing to list (not reached yet this run): a header with their status.
-  const hostOnly = scoped.hosts.filter((h) => !h.hasRows && (scope.multi || h.state !== "live"));
+  // A host of the scope without rows: loading, or live with nothing to list. One that cannot be reached is not in the
+  // 花名册 (owner 2026-11-17): its 连不上 · 重连 is in the footer switcher (IdentityMenu).
+  const hostOnly = rosterHostRows(scoped.hosts, scope.multi);
+  // Every host of the scope unreachable: the empty 花名册 says where they are.
+  const unreachableOnly = scoped.hosts.length > 0 && scoped.hosts.every((x) => x.state === "offline");
   // Activity previews are the focus host's (other hosts' rows search by name).
   const own = (r: AgentRow) => !r.hostId || r.hostId === scope.focus;
   const previewOf = (r: AgentRow) => (own(r) ? activity?.[r.id] : undefined);
@@ -1002,6 +1066,10 @@ export function Sidebar() {
   );
   const visibleSections = useMemo(() => sectionLayouts.map((x) => x.section.id), [sectionLayouts]);
   const trailing = (l: GroupLayout) => l.group.kind === "independent" && !l.starred;
+  // 「未分组」: the 花名册's projects in no folder, while there are folders (owner 2026-11-18). null = no such header.
+  const ungroupedProjects = layout.main.filter((l) => !trailing(l) && l.group.kind === "project");
+  const ungrouped = prefs.sidebarLayout !== "now-all" && sectionLayouts.length > 0 && (ungroupedProjects.length > 0 || layout.others.length > 0) ? ungroupedProjects : null;
+  const laidOut = (l: GroupLayout) => <LaidOutProject key={groupKey(l.group)} layout={l} dragKey={dragKeyOf(l.group, searching)} dragging={dragged === groupKey(l.group)} searching={searching} />;
   const [sectionOver, setSectionOver] = useState<string | null>(null);
   /** A shown project's section member key, from its group key (drag state). */
   const memberOf = (key: string): string | null => {
@@ -1105,16 +1173,26 @@ export function Sidebar() {
         <ProjectDragContext.Provider value={projectDrag}>
         {/* The list's empty area: a menu with only 调整左侧栏… (rows and headers have their own menus). */}
         {/* IM-style rows (消息预览 on): a wider avatar column, shared by every row variant so names line up. */}
-        <nav ref={roving} data-sidebar-roster={nowAll ? "all" : "roster"} data-system-rows={prefs.systemRows} data-separation={prefs.projectSeparation} data-roster-held={hold ? "" : undefined} {...presence.bind} className="flex-1 overflow-y-auto px-1.5 pt-1 pb-2" style={prefs.rowPreview === "off" && !nowAll ? undefined : ({ "--avatar-col": nowAll ? "20px" : "32px" } as CSSProperties)} onContextMenu={contextMenu(() => [...hostStopIdleEntries(t, <Power size={14} />), ...sidebarMenuTail(t)])}>
+        {/* The list and its sticky headers' bottom edge (components/RosterStick; the top edge is CSS sticky).
+            The space above and below the list is the box's, not the scroller's (owner 2026-11-19, titles jumped at the
+            very top): a title stacked at the edge sits exactly where it rests at scroll 0, so reaching either end moves
+            nothing. Padding inside the scroller put the resting titles 4 px (8 px at the end) off their stuck place. */}
+        <div className="relative flex min-h-0 flex-1 flex-col pt-1 pb-2" data-roster-box="">
+        <nav ref={roving} data-sidebar-roster={nowAll ? "all" : "roster"} data-stick-off={searching ? "" : undefined} data-system-rows={prefs.systemRows} data-separation={prefs.projectSeparation} data-roster-held={hold ? "" : undefined} {...presence.bind} className="flex-1 overflow-y-auto px-1.5" style={prefs.rowPreview === "off" && !nowAll ? undefined : ({ "--avatar-col": nowAll ? "20px" : "32px" } as CSSProperties)} onContextMenu={contextMenu(() => [...hostStopIdleEntries(t, <Power size={14} />), ...sidebarMenuTail(t)])}>
           <SidebarLoadProgress />
           {groups.length === 0 && chats.length === 0 && hostOnly.length === 0 ? (
-            <p className="px-2 py-6 text-center text-sm text-subtle">{focusAccess.pending ? t("users.access.pendingEmpty") : t("sidebar.empty")}</p>
+            <p className="px-2 py-6 text-center text-sm text-subtle" data-roster-empty={unreachableOnly ? "unreachable" : ""}>{focusAccess.pending ? t("users.access.pendingEmpty") : unreachableOnly ? t("sidebar.unreachableOnly") : t("sidebar.empty")}</p>
           ) : (
             <>
-              {layout.main.filter((l) => !trailing(l)).map((l) => (
-                <LaidOutProject key={groupKey(l.group)} layout={l} dragKey={dragKeyOf(l.group, searching)} dragging={dragged === groupKey(l.group)} searching={searching} />
-              ))}
-              <OtherProjects layouts={layout.others} />
+              {ungrouped ? (
+                // The projects go under 未分组 (below the folders); a starred 独立智能体 stays at the top as before.
+                layout.main.filter((l) => !trailing(l) && l.group.kind !== "project").map(laidOut)
+              ) : (
+                <>
+                  {layout.main.filter((l) => !trailing(l)).map(laidOut)}
+                  <OtherProjects layouts={layout.others} />
+                </>
+              )}
               {sectionLayouts.map(({ section, layouts, older }) => (
                 <ProjectSection
                   key={section.id}
@@ -1138,6 +1216,28 @@ export function Sidebar() {
                   }}
                 />
               ))}
+              {/* 未分组: a system row directly above 独立智能体 (owner 2026-11-18), so it is in the bottom stack. */}
+              {ungrouped && (
+                <UngroupedProjects
+                  layouts={ungrouped}
+                  extra={layout.others}
+                  searching={searching}
+                  drop={{
+                    active: dragged !== null && !!sectionOf(sections, memberOf(dragged) ?? ""),
+                    over: sectionOver === UNGROUPED_FOLD,
+                    onDragOver: () => setSectionOver(UNGROUPED_FOLD),
+                    onDragLeave: () => setSectionOver((o) => (o === UNGROUPED_FOLD ? null : o)),
+                    onDrop: () => {
+                      const from = dragged ? memberOf(dragged) : null;
+                      if (from) updateSections((list) => assignSection(list, from, null));
+                      setSectionOver(null);
+                      projectDrag.end();
+                    },
+                  }}
+                >
+                  {(shown) => shown.map(laidOut)}
+                </UngroupedProjects>
+              )}
               {/* 独立智能体 (unless starred) stays below the projects, sections included. */}
               {layout.main.filter(trailing).map((l) => (
                 <LaidOutProject key={groupKey(l.group)} layout={l} dragKey={null} dragging={false} searching={searching} />
@@ -1149,6 +1249,8 @@ export function Sidebar() {
             </>
           )}
         </nav>
+        {!nowAll && !searching && <RosterStick />}
+        </div>
         </ProjectDragContext.Provider>
         </AllRowsCompact.Provider>
         <UserLayoutOfflineItems />

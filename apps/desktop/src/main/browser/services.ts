@@ -23,6 +23,19 @@ export function parseBrowserServiceUrl(raw: string, connectionPort?: number): Br
     return { slug, path: url.pathname + url.search };
   } catch { return null; }
 }
+/**
+ * The service's own raw loopback address (127.0.0.1 / localhost / [::1] on its registered port, as a page or its redirect
+ * may name it) as that service's target: it goes back through the service, never to the desktop's own loopback.
+ */
+export function serviceTargetForRawPort(raw: string, slug: string, port: number | undefined | "any"): BrowserServiceTarget | null {
+  if (!port) return null;
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== "http:" || url.username || url.password || !["127.0.0.1", "localhost", "[::1]"].includes(url.hostname) || (port !== "any" && Number(url.port || 80) !== port)) return null;
+    const path = url.pathname + url.search;
+    return safeServicePath(path) ? { slug, path } : null;
+  } catch { return null; }
+}
 export function safeServicePath(path: string): boolean {
   return path.startsWith("/") && !path.startsWith("//") && !/[\\\x00-\x20\x7f#]/.test(path)
     && !/^\/__cutex(?:[/?]|$)/i.test(path) && path.length <= 2000;
@@ -119,15 +132,28 @@ export class BrowserServiceSession {
     if (this.options.isAvailable?.() === false) throw new ServiceTemporarilyUnavailable();
   }
   private route(suffix = ""): string { return `/v2/services/${this.options.target.slug}${suffix}`; }
-  async start(start = true): Promise<string> {
+  /** ticketPath: where the ticket's auth hop lands (default the target; "/" when main then submits a popup's form body
+   * to the target itself, so the target never sees a GET first). */
+  async start(start = true, ticketPath?: string): Promise<string> {
     this.check();
     if (this.options.lifetime) await this.acquire();
-    return this.ticket(start);
+    return this.ticket(start, ticketPath);
   }
-  async ticket(start = false): Promise<string> {
+  private port: Promise<number | undefined> | undefined;
+  /** The service's own port on its host (its raw loopback address), from its record; asked once per session, only when
+   * the page heads for a raw loopback address. undefined: unknown (the navigation is refused as before). */
+  upstreamPort(): Promise<number | undefined> {
+    this.port ??= this.options.client.request<unknown>("GET", this.route()).then(answer => {
+      const view = answer as { service?: { port?: unknown }; port?: unknown } | null;
+      const port = view?.service?.port ?? view?.port;
+      return typeof port === "number" && Number.isInteger(port) && port > 0 && port < 65536 ? port : undefined;
+    }, () => { this.port = undefined; return undefined; });
+    return this.port;
+  }
+  async ticket(start = false, path = this.options.target.path): Promise<string> {
     this.check();
     const ticket = await this.options.client.request<{ hostLabel: string; authPath: string }>("POST", this.route("/view-ticket"),
-      { body: { path: this.options.target.path, start, routing: "host" } });
+      { body: { path, start, routing: "host" } });
     this.check();
     const port = this.options.connectionPort();
     if (!Number.isInteger(port) || port < 1 || port > 65535 || ticket.hostLabel !== `${this.options.target.slug}.svc.localhost`

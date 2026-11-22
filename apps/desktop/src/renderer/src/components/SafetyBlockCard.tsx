@@ -36,6 +36,9 @@ export function SafetyBlockCard({ record: r, block, hostId }: { record: OwnerNot
   const notify = (text: string, tone?: "info" | "error") => convNotify(conv, text, tone);
   const agentName = useApp((s) => rowsOf(s.sidebar, convSidebarOf(conv, s)).find((x) => x.cutexSessionId === r.agentId)?.displayName ?? r.agentName ?? r.agentId);
   const [busy, setBusy] = useState<null | "grant" | "dismiss">(null);
+  // Granted, but the agent was not told it may retry (noticeError): the grant stands and nothing is retried, so the
+  // warning stays on the decided row rather than in a passing toast.
+  const [noticeWarning, setNoticeWarning] = useState<string | null>(null);
   // The grant notice's ledger record (read = in context with evidence), when cutex names one.
   const ledgerNotice = useApp((s) => (block.noticeInputId ? agentState(s.inputs, hostId, r.agentId)?.records.get(block.noticeInputId) ?? null : null));
   const state = safetyBlockState(block, now);
@@ -49,7 +52,7 @@ export function SafetyBlockCard({ record: r, block, hostId }: { record: OwnerNot
     try {
       const result = await safetyCheckAct(r, decision, hostId);
       if (!result.ok) notify(REFUSALS[result.error.code] ? t(REFUSALS[result.error.code]!) : result.error.message || result.error.code, "error");
-      else if (result.submitError) notify(t("safetyBlock.error.message", { error: result.submitError.message || result.submitError.code }), "error");
+      else setNoticeWarning(result.noticeError ? t("safetyBlock.error.message", { error: result.noticeError.message || result.noticeError.code }) : null);
     } catch (e) {
       notify(e instanceof Error ? e.message : String(e), "error");
     } finally {
@@ -100,6 +103,11 @@ export function SafetyBlockCard({ record: r, block, hostId }: { record: OwnerNot
           {stateLine}
         </span>
       </div>
+      {noticeWarning && (
+        <div role="alert" data-safety-warning="" className="mt-0.5 text-meta/[inherit] text-warn">
+          {noticeWarning}
+        </div>
+      )}
       {open && <div className="mt-1.5 text-ui/[inherit]">{t("safetyBlock.lead", { tool: block.toolName })}</div>}
       <ClampBox lines={open ? 10 : 3} resetKey={block.blockId} className={open ? "mt-1.5" : "mt-0.5"}>
         <pre data-safety-command="" className={`font-mono whitespace-pre-wrap break-all rounded-lg bg-surface-2/70 px-2.5 py-1.5 ${open ? "text-ui/[inherit] text-foreground" : "text-meta/[inherit] text-muted"}`}>

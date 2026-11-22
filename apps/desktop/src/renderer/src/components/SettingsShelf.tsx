@@ -16,6 +16,7 @@ import { isImeComposing } from "../lib/ime";
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { observeSync } from "../lib/syncResize";
+import { useSettingsEditWatch } from "../lib/settingsDrafts";
 import { ArrowLeftRight, ChevronRight, Maximize2, Minimize2, PanelLeftClose, PanelLeftOpen, Search, X } from "lucide-react";
 import { useI18n, type MessageKey } from "../i18n";
 import { resetDragonSize } from "../lib/aboutDragon";
@@ -57,8 +58,9 @@ import { bindingLabel, keyVar, matchesCommand } from "../lib/keybindings";
 import { withKey } from "../lib/useKeybindings";
 import { ownerWindowOf } from "../lib/ownerWindow";
 
-const RAIL_BTN = "relative flex size-[30px] shrink-0 items-center justify-center rounded-ctl text-muted transition-[background,color] duration-(--motion-short) ease-(--ease-standard) hover:bg-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent/60 focus-visible:outline-none";
-const HEAD_BTN = "flex size-7 shrink-0 items-center justify-center rounded-md text-muted outline-none hover:bg-surface-2 hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent/60";
+// press: the shared pressed fill (styles.css; these keep their own focus ring).
+const RAIL_BTN = "press relative flex size-[30px] shrink-0 items-center justify-center rounded-ctl text-muted transition-[background,color] duration-(--motion-short) ease-(--ease-standard) hover:bg-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent/60 focus-visible:outline-none";
+const HEAD_BTN = "press flex size-7 shrink-0 items-center justify-center rounded-md text-muted outline-none hover:bg-surface-2 hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent/60";
 
 /** One category of the nav: its icon (folded) or icon + name (named, maximised), the badge, the page in view marked. */
 function Category({ entry, current, wide }: { entry: AppSlotEntry<"settings.page">; current: boolean; wide: boolean }) {
@@ -83,7 +85,7 @@ function Category({ entry, current, wide }: { entry: AppSlotEntry<"settings.page
         disabled={disabled}
         title={why ?? undefined}
         onClick={go}
-        className={`${SUBNAV_ITEM} ${current ? SUBNAV_ON : SUBNAV_OFF} ${disabled && !current ? "opacity-60" : ""} focus-visible:ring-2 focus-visible:ring-accent/60 focus-visible:outline-none`}
+        className={`${SUBNAV_ITEM} ${current ? SUBNAV_ON : SUBNAV_OFF} press ${disabled && !current ? "opacity-60" : ""} focus-visible:ring-2 focus-visible:ring-accent/60 focus-visible:outline-none`}
       >
         <Icon size={15} strokeWidth={1.75} className="shrink-0" />
         <span className="truncate">{name}</span>
@@ -123,7 +125,7 @@ function NamesToggle({ named, labels }: { named: boolean; labels: boolean }) {
       title={label}
       aria-label={label}
       onClick={() => setSettingsRailLabels(!named)}
-      className={named ? `${SUBNAV_ITEM} ${SUBNAV_OFF} disabled:opacity-50` : `${RAIL_BTN} disabled:opacity-50`}
+      className={named ? `${SUBNAV_ITEM} ${SUBNAV_OFF} press disabled:opacity-50` : `${RAIL_BTN} disabled:opacity-50`}
     >
       <Icon size={15} strokeWidth={1.75} className="shrink-0" />
       {named && <span className="truncate">{t("settingsShelf.railIcons")}</span>}
@@ -171,7 +173,7 @@ function CategoryNav({ tab: shown, named, labels, width, onSearch }: { tab: stri
     <nav data-settings-rail={named ? "named" : ""} aria-label={t("settingsShelf.rail")} className="flex shrink-0 flex-col border-r border-border/60 select-none" style={{ width }}>
       {/* The categories scroll; the names toggle stays at the bottom. */}
       <div className={`flex min-h-0 flex-1 flex-col gap-[2px] overflow-y-auto py-1.5 [scrollbar-width:none] ${named ? "px-2" : "items-center"}`}>
-        <button data-settings-search-button="" title={withKey(search, bindingLabel("settingsSearch", " · "))} aria-label={search} onClick={onSearch} className={named ? `${SUBNAV_ITEM} ${SUBNAV_OFF}` : RAIL_BTN}>
+        <button data-settings-search-button="" title={withKey(search, bindingLabel("settingsSearch", " · "))} aria-label={search} onClick={onSearch} className={named ? `${SUBNAV_ITEM} ${SUBNAV_OFF} press` : RAIL_BTN}>
           <Search size={named ? 15 : 16} strokeWidth={named ? 1.75 : 2} className="shrink-0" />
           {named && <span className="truncate">{search}</span>}
         </button>
@@ -207,7 +209,7 @@ function Crumbs({ entry, params }: { entry: AppSlotEntry<"main.page">; params: P
           <Fragment key={i}>
             {i > 0 && <ChevronRight size={13} className="shrink-0 text-subtle" />}
             {to && !last ? (
-              <button onClick={() => useApp.getState().openSettings((to.params?.tab ?? "general") as never)} className="min-w-0 truncate rounded px-1 text-sm text-muted hover:bg-surface-2 hover:text-foreground">
+              <button onClick={() => useApp.getState().openSettings((to.params?.tab ?? "general") as never)} className="press min-w-0 truncate rounded px-1 text-sm text-muted hover:bg-surface-2 hover:text-foreground">
                 {c.text}
               </button>
             ) : (
@@ -251,7 +253,7 @@ function SearchField({ query, setQuery, input }: { query: string; setQuery(q: st
         className="h-7 w-full rounded-md border border-border bg-background pr-6 pl-7 text-ui/[inherit] outline-none select-text placeholder:text-subtle focus:border-accent focus-visible:ring-2 focus-visible:ring-accent/30 [&::-webkit-search-cancel-button]:hidden"
       />
       {query && (
-        <button aria-label={t("shell.settingsSearch.clear")} title={t("shell.settingsSearch.clear")} onClick={() => (setQuery(""), input.current?.focus())} className="absolute top-1/2 right-1.5 -translate-y-1/2 rounded p-0.5 text-subtle hover:text-foreground">
+        <button aria-label={t("shell.settingsSearch.clear")} title={t("shell.settingsSearch.clear")} onClick={() => (setQuery(""), input.current?.focus())} className="press absolute top-1/2 right-1.5 -translate-y-1/2 rounded p-0.5 text-subtle hover:text-foreground">
           <X size={12} />
         </button>
       )}
@@ -332,6 +334,8 @@ function OpenShelf({ row, inSlot }: { row: HTMLElement; inSlot: boolean }) {
   const affects = useSettingsAffectsHover(tab, maximized);
   const title = useSlot("main.page").find((e) => e.item.id === SETTINGS_PAGE && e.mode === "show");
   const box = useRef<HTMLElement>(null);
+  // Typing in its forms is an unsaved edit until saved (lib/settingsDrafts): a window-bar entry asks before closing.
+  const watchEdits = useSettingsEditWatch();
   const input = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
   const [rowWidth, setRowWidth] = useState(0);
@@ -438,7 +442,7 @@ function OpenShelf({ row, inSlot }: { row: HTMLElement; inSlot: boolean }) {
         {!maximized && <CategoryNav tab={tab} named={named} labels={labels} width={nav} onSearch={focusSearch} />}
         {/* The page column (components/Settings: header with the source tags, host picker, cards). */}
         {/* Design 006 v1 Q9: a card hovered outlines the panel(s) it affects in the real UI beside it. */}
-        <div className="flex min-h-0 min-w-0 flex-1" data-settings-page-column="" {...affects}>
+        <div ref={watchEdits} className="flex min-h-0 min-w-0 flex-1" data-settings-page-column="" {...affects}>
           {page}
         </div>
       </div>

@@ -162,13 +162,27 @@ function decodedPath(url: URL): string {
 export const BROWSER_LOCAL_PROXY = Object.freeze({ mode: "fixed_servers" as const,
   proxyRules: "socks5://127.0.0.1:9",
   proxyBypassRules: "<-loopback>;localhost;127.0.0.1;[::1];*.svc.localhost" });
-/** Certificate verify proc verdict: -3 = keep Chromium's own (successful) result, -2 = reject.
- * Only Chromium's default verification may pass; no override can admit a certificate it refused.
+/** Certificate verify proc verdict: -3 = keep Chromium's own result, -2 = reject (net::ERR_FAILED).
+ * Chromium's verification passes as is. A certificate it refused is rejected outright (-2), except for a
+ * LAN / loopback-class host in the OWNER partition (`overridable`): there Chromium's own certificate error
+ * stands (-3), so the guest's 'certificate-error' asks main, which admits only an owner exception pinned to
+ * that origin + fingerprint (hardenBrowserGuest) and otherwise lets Electron deny it. Electron caches this
+ * proc's answer per certificate and host, which is why the per-origin decision cannot live here.
  * Electron documents verificationResult as "OK", but Electron 44 reports net::ErrorToString(),
  * i.e. "net::OK" (and "net::ERR_CERT_…" on failure). Matching only "OK" refused every HTTPS page. */
-export function browserCertificateVerdict(request: { errorCode?: unknown; verificationResult?: unknown }): -3 | -2 {
+export function browserCertificateVerdict(request: { hostname?: unknown; errorCode?: unknown; verificationResult?: unknown }, overridable?: (hostname: string) => boolean): -3 | -2 {
   const result = typeof request.verificationResult === "string" ? request.verificationResult.replace(/^net::/, "") : undefined;
-  return request.errorCode === 0 && result === "OK" ? -3 : -2;
+  if (request.errorCode === 0 && result === "OK") return -3;
+  try { return typeof request.hostname === "string" && overridable?.(request.hostname) === true ? -3 : -2; } catch { return -2; }
+}
+/** A host whose refused certificate the owner may accept: loopback, a LAN-class literal or a LAN-only name
+ * (single label, .local, .lan, .home.arpa …). Never a public-looking name (those stay strict). */
+export function isBrowserPrivateCertificateHost(hostname: string): boolean {
+  if (typeof hostname !== "string" || !hostname || hostname.length > 255) return false;
+  const bare = hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  if (bare === "localhost" || bare === "127.0.0.1" || bare === "::1") return true;
+  if (isIP(bare)) return isLanEgressAddress(bare);
+  return !!parseLanBrowserUrl(`https://${bare}/`) && !parsePublicBrowserUrl(`https://${bare}/`);
 }
 export interface BrowserSessionOptions {
   partition: string;
@@ -196,6 +210,9 @@ export interface BrowserSessionOptions {
   download?: (webContentsId: number | undefined, item: DownloadItem) => boolean;
   /** Per-origin site permissions the owner granted. Omitted = deny every request and check. */
   permissions?: BrowserSessionPermissions;
+  /** Owner partition only: hosts whose refused certificate goes to the guest's certificate-error (see
+   * browserCertificateVerdict). Omitted (agent partition) = every refused certificate is rejected outright. */
+  certificateOverridable?: (hostname: string) => boolean;
 }
 export interface BrowserPermissionDetails { requestingUrl?: string; isMainFrame?: boolean; mediaTypes?: string[]; mediaType?: string; embeddingOrigin?: string }
 export interface BrowserSessionPermissions {
@@ -216,7 +233,10 @@ export function revokeBrowserSessionPolicy(session: Session): void { installed.g
 
 /** Call only on session.fromPartition(main-derived partition), before permitting attach. */
 export function installBrowserSessionPolicy(session: Session, options: BrowserSessionOptions): Promise<BrowserSessionPolicy> {
-  if (!matchBrowserPartition(options.partition, options.registeredHostIds)) return Promise.reject(new Error("Unregistered browser partition"));
+  const partition = matchBrowserPartition(options.partition, options.registeredHostIds);
+  if (!partition) return Promise.reject(new Error("Unregistered browser partition"));
+  // Only the owner partition may hand a refused certificate to its guest; the agent partition rejects outright.
+  const certificateOverridable = partition.pool === "owner" ? options.certificateOverridable : undefined;
   const old = installed.get(session);
   if (old) return old.partition === options.partition ? old.ready : Promise.reject(new Error("Session partition changed"));
   let active = false;
@@ -240,7 +260,7 @@ export function installBrowserSessionPolicy(session: Session, options: BrowserSe
     } catch { return false; }
   });
   session.setDevicePermissionHandler(() => false);
-  session.setCertificateVerifyProc((request, callback) => callback(browserCertificateVerdict(request)));
+  session.setCertificateVerifyProc((request, callback) => callback(browserCertificateVerdict(request, active ? certificateOverridable : undefined)));
   if (options.download) downloadDeciders.set(session, options.download); else downloadDeciders.delete(session);
   if (!downloadGuarded.has(session)) {
     // One listener per session for its lifetime; the current registration decides. Anything
@@ -345,6 +365,16 @@ export interface BrowserGuestPolicyOptions {
   policy: BrowserUrlPolicy;
   onBlocked?: (kind: "navigation" | "redirect", url: string, mainFrame: boolean, reason: BrowserRefusal) => void;
   ownerNavigation?: (url: string, kind: "navigation" | "redirect") => boolean;
+  /** A redirect of a navigation the browser itself started (main's loadURL: no initiator frame) that stays on the service this
+   * tab holds: main's own ticket exchange (/__cutex/auth → the page). A fresh popup tab's guest is still about:blank, so the
+   * initiator fallback below is opaque and this same-service redirect was refused (window.open from a service page). */
+  ownServiceRedirect?: (url: string) => boolean;
+  /** A main-frame navigation main answers itself, before the policy (a service tab's raw loopback address: back through
+   * the service, or refused): true = the guest's own navigation is cancelled and main navigates or reports. */
+  takeOver?: (url: string, kind: "navigation" | "redirect") => boolean;
+  /** A certificate Chromium refused (only LAN / loopback hosts of the owner partition reach this, see
+   * browserCertificateVerdict). True = main holds the owner's exception for exactly this origin + fingerprint. */
+  certificateError?: (url: string, fingerprint: string, isMainFrame: boolean) => boolean;
 }
 export interface BrowserPopupPolicyOptions {
   hostId: string;
@@ -369,6 +399,9 @@ export interface BrowserPopupPolicyOptions {
    * page flag). Its popup becomes an app tab too, rate limited by consumeAgentPopup. */
   agentActing?: () => boolean;
   consumeAgentPopup?: () => boolean;
+  /** An allowed popup dropped only for want of a fresh owner click (no_owner_gesture): main may keep it for the owner's
+   * explicit 「打开」. Never called for an agent's popup or a policy refusal. */
+  onOwnerGestureMissing?: (request: { url: string; post?: BrowserPopupPost }) => void;
 }
 export interface BrowserPopupPost { data: Buffer; contentType: string }
 export interface BrowserPopupRequest { hostId: string; url: string; post?: BrowserPopupPost; agent?: true; ownerNavigation?: true }
@@ -435,7 +468,10 @@ export function createBrowserWindowOpenHandler(getOptions: () => BrowserPopupPol
             else if (agent) {
               if (options.consumeAgentPopup?.() !== true) drop("agent_rate_limited");
               else options.onNewTab({ hostId: options.hostId, url: url.href, ...(post ? { post } : {}), agent: true });
-            } else if (!ownerGesture && options.consumeOwnerGesture?.() !== true) drop("no_owner_gesture");
+            } else if (!ownerGesture && options.consumeOwnerGesture?.() !== true) {
+              try { options.onOwnerGestureMissing?.({ url: url.href, ...(post ? { post } : {}) }); } catch { /* Keeping it is optional. */ }
+              drop("no_owner_gesture");
+            }
             else options.onNewTab({ hostId: options.hostId, url: url.href, ...(post ? { post } : {}), ...(ownerIntent ? { ownerNavigation: true as const } : {}) });
           }
         }
@@ -469,10 +505,14 @@ export function hardenBrowserGuest(guest: WebContents, options: BrowserGuestPoli
   let active = true;
   const denyNavigation = (kind: "navigation" | "redirect") => (event: { url: string; isMainFrame?: boolean; initiator?: { url: string } | null; preventDefault(): void }) => {
     let reason: BrowserRefusal | null = "invalid_url";
+    try {
+      if (active && event.isMainFrame !== false && options.takeOver?.(event.url, kind) === true) { event.preventDefault(); return; }
+    } catch { /* Not taken over: the checks below decide. */ }
     // Page-initiated (or redirected) navigation of this guest. Private-class targets pass here only
     // for an origin admitted in this tab; onBeforeRequest then checks the real initiator.
     try {
-      const intended = active && event.isMainFrame !== false && options.ownerNavigation?.(event.url, kind) === true;
+      const ownRedirect = () => kind === "redirect" && event.initiator == null && options.ownServiceRedirect?.(event.url) === true;
+      const intended = active && event.isMainFrame !== false && (options.ownerNavigation?.(event.url, kind) === true || ownRedirect());
       const origin = browserTargetOrigin(event.initiator?.url ?? guest.getURL?.() ?? "") ?? "null";
       const context: BrowserRequestContext = { actor: "page", webContentsId: guest.id,
         initiatorOrigin: origin, ...(intended ? { ownerNavigation: true as const } : { resourceType: event.isMainFrame === false ? "subFrame" : "mainFrame" }) };
@@ -484,6 +524,13 @@ export function hardenBrowserGuest(guest: WebContents, options: BrowserGuestPoli
     }
   };
   const navigate = denyNavigation("navigation"), redirect = denyNavigation("redirect");
+  // Electron denies a certificate error unless a listener prevents the default; only main's pinned owner
+  // exception does, and only while this hardening is active.
+  guest.on("certificate-error", (event, url, _error, certificate, callback, isMainFrame) => {
+    let accept = false;
+    try { accept = active && options.certificateError?.(url, certificate?.fingerprint, isMainFrame !== false) === true; } catch { accept = false; }
+    if (accept) { event.preventDefault(); callback(true); }
+  });
   guest.on("will-frame-navigate", navigate);
   guest.on("will-navigate", navigate);
   guest.on("will-redirect", redirect);

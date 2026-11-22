@@ -3,12 +3,12 @@ import { act, createContext, createElement as h } from "react";
 import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vitest";
 import type { AgentRow } from "../src/renderer/src/lib/sidebar";
-const fx = vi.hoisted(() => ({ host: "original", archived: false, rows: [] as AgentRow[], action: vi.fn() }));
+const fx = vi.hoisted(() => ({ host: "original", archived: false, online: false, rows: [] as AgentRow[], action: vi.fn(), confirm: vi.fn(async () => true) }));
 vi.mock("../src/renderer/src/i18n", () => ({ useI18n: () => ({ t: (key: string) => key }), translate: (key: string) => key }));
 vi.mock("../src/renderer/src/store", () => ({ useApp: Object.assign((select: (s: unknown) => unknown) => select({ activity: {} }), { getState: () => ({ sessionAction: fx.action }) }), sidebarOf: () => ({ retired: [] }) }));
 vi.mock("../src/renderer/src/lib/targetHost", () => ({ useTargetHostId: () => fx.host, useTargetIsFocus: () => false, useTargetSelect: () => vi.fn() }));
-vi.mock("../src/renderer/src/lib/sidebarView", () => ({ useSidebarModel: () => ({ groups: [{ id: "group", online: [], offline: fx.archived ? [] : fx.rows }], archived: fx.archived ? fx.rows : [], chats: [] }), relativeTime: () => "" }));
-vi.mock("../src/renderer/src/lib/contextMenu", () => ({ confirmDialog: async () => true, contextMenu: () => () => {}, openMenuFrom: () => {} }));
+vi.mock("../src/renderer/src/lib/sidebarView", () => ({ useSidebarModel: () => ({ groups: [{ id: "group", online: fx.online ? fx.rows : [], offline: fx.archived || fx.online ? [] : fx.rows }], archived: fx.archived ? fx.rows : [], chats: [] }), relativeTime: () => "" }));
+vi.mock("../src/renderer/src/lib/contextMenu", () => ({ confirmDialog: fx.confirm, contextMenu: () => () => {}, openMenuFrom: () => {} }));
 vi.mock("../src/renderer/src/lib/menus", () => ({ agentMenu: () => [], ownedServicesNote: () => null, restoreArchived: vi.fn() }));
 vi.mock("../src/renderer/src/lib/profileSnapshot", () => ({ cachedProfileList: () => null, loadProfileList: async () => null }));
 vi.mock("../src/renderer/src/lib/attentionView", () => ({ AttentionContext: createContext(null), useAttention: () => null, useAttentionSource: () => null, useRowSignal: () => ({ signal: null, needs: null }) }));
@@ -70,4 +70,31 @@ it("a click next to a row's checkbox selects the row instead of opening the agen
     await act(async () => row.querySelector<HTMLInputElement>('input[type="checkbox"]')!.click());
     expect(row.querySelector<HTMLInputElement>('input[type="checkbox"]')!.checked).toBe(true);
   } finally { act(() => root.unmount()); div.remove(); }
+});
+
+it.each([false, true])("bulk stop of idle agents arms in place; a working one gets the dialog (busy=%s)", async (busy) => {
+  fx.host = "original";
+  fx.archived = false;
+  fx.online = true;
+  fx.action.mockReset().mockResolvedValue(undefined);
+  fx.confirm.mockClear();
+  fx.rows = ["a", "b"].map(id => ({ id, hostId: "original", name: id, status: "online", session: { cutexSessionId: id, displayName: id, runtime: { status: "online", runtimeGeneration: 1, activeTurnId: busy && id === "a" ? "turn" : null } } }) as unknown as AgentRow);
+  const div = document.createElement("div"); document.body.append(div);
+  const root = createRoot(div);
+  try {
+    await act(async () => root.render(h(AgentList, { groupId: "group", variant: "dialog", initialTab: "online" })));
+    await act(async () => div.querySelector<HTMLInputElement>('input[title="agents.selectAll"]')!.click());
+    const stop = () => [...div.querySelectorAll("button")].find(b => b.textContent === "agents.stop")!;
+    await act(async () => stop().click());
+    if (busy) {
+      expect(fx.confirm).toHaveBeenCalledTimes(1);
+    } else {
+      expect(fx.confirm).not.toHaveBeenCalled();
+      expect(fx.action).not.toHaveBeenCalled();
+      expect(stop().dataset.armed).toBe("true");
+      await act(async () => stop().click());
+      expect(fx.confirm).not.toHaveBeenCalled();
+    }
+    expect(fx.action.mock.calls.filter(call => call[1] === "cutex/runtime/offline").map(call => call[0]).sort()).toEqual(["a", "b"]);
+  } finally { act(() => root.unmount()); div.remove(); fx.online = false; }
 });

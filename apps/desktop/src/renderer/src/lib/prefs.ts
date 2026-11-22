@@ -33,8 +33,23 @@ import { migrateImageHistoryHintDone } from "./imageHistoryHint";
 import { migrateMultiWindow, takeLegacyDesksFlag } from "./multiWindowPref";
 
 export type ProjectIconStyle = "tint" | "line";
-/** 系统行样式: a grey dashed line or a grey band (UiPrefs.systemRows). */
-export type SystemRowStyle = "line" | "band";
+/**
+ * 系统行样式 (UiPrefs.systemRows): plain (无线, the default since 2026-11-18: the same layout as a folder header, no line),
+ * a grey dashed line, or a grey band.
+ */
+export type SystemRowStyle = "plain" | "line" | "band";
+export const SYSTEM_ROW_STYLES: readonly SystemRowStyle[] = ["plain", "line", "band"];
+/**
+ * 1: the old default 虚线 became 无线 (owner 2026-11-18: no long line on any header). A stored "line" from before is
+ * that old default (the pref was saved whole), so it moves once; choosing 虚线 again later sticks.
+ */
+export const SYSTEM_ROWS_REV = 1;
+
+export function migrateSystemRows(stored: unknown, rev: unknown): SystemRowStyle {
+  if (stored === "band") return "band";
+  if (stored === "line" && typeof rev === "number" && rev >= SYSTEM_ROWS_REV) return "line";
+  return "plain";
+}
 export type { AgentAvatarDefault };
 
 /** 头像底色 (UiPrefs.avatarTint). */
@@ -53,6 +68,9 @@ export interface UiPrefs {
   /** One Profile's window gauges whose resets are < 10 min apart share one composer ring (the
    *  popover's bottom switch turns merging off). */
   quotaMerge: boolean;
+  /** A desktop notification when a 5h-style window with an agent working on it is forecast to run out within
+   *  30 minutes (design 052 §5 item 4; once per window). Off by default until the owner decides (052 §8 Q2). */
+  quotaRunOutAlert: boolean;
   /** The profile chip in the composer starts with the profile picture (lib/profileAvatar). */
   composerProfileAvatar: boolean;
   /** Quota gauges in the composer chip + popover show what is left (default) or what is used.
@@ -132,6 +150,10 @@ export interface UiPrefs {
   foldLines: FoldLines;
   /** Older agent replies fold the same way (the latest reply never does). */
   foldOlderReplies: boolean;
+  /** 教学模式 (owner 2026-11-17, docs/design/teaching-mode.md P1; default off): `> [!EXPLAIN]` / `[!NOTE]`-style
+   *  quotes render as cards and a text selection in Markdown gets the modules' `selection` actions (解释这段).
+   *  Off = plain quotes and the native selection menu. */
+  teachingMode: boolean;
   /** Sidebar v2 (lib/sidebarLayout): 全部分组 (projects without online agents fold to one row) or
    *  星标展开 (starred projects in full, every other one row under 其他项目). */
   projectGrouping: ProjectGrouping;
@@ -172,6 +194,7 @@ export interface UiPrefs {
    * grey band (band). Folders and 「更早的项目」 inside a folder are not affected.
    */
   systemRows: SystemRowStyle;
+  systemRowsRev: number;
   /** 状态标签: agent rows' status chips as text, icon only, or automatic by row width (lib/statusChips). */
   statusChips: StatusChips;
   /** 「需要你」 chips above the composer (done / needs-you / error agents of every project). */
@@ -278,7 +301,7 @@ export type { RunningAgents };
 
 const KEY = "cutex-desktop.ui";
 const ROW_PREVIEW_REV = 1;
-const BASE_DEFAULTS: Omit<UiPrefs, "imageHistoryHintDone"> = { deskPerformanceHintDone: false, viewerAutoRefresh: true, quotaGauges: {}, quotaResetDefault: true, quotaMerge: true, composerProfileAvatar: true, quotaView: DEFAULT_QUOTA_VIEW, sidebarOpen: true, sidebarRail: false, agentMessages: "compact", foldedGroups: [], modelPins: {}, lastAgentCwd: "", remoteAgentCwd: {}, sendKeys: "queueFirst", delegationSteerKeys: false, capsuleCorner: DEFAULT_CAPSULE_CORNER, capsuleEdge: DEFAULT_CAPSULE_EDGE, reasoningView: DEFAULT_REASONING_VIEW, reasoningViewRev: REASONING_VIEW_REV, capsuleOpen: false, capsuleFoldedItems: [], timelineTurns: 30, timelineInteractions: true, timelineIntro: true, capsuleAlways: false, projectOrder: [], profileOrder: [], restOpen: [], olderProjectsAfter: DEFAULT_OLDER_PROJECTS_AFTER, nameGrouping: null, nameReading: null,runtimeButton: "all", foldLong: true, foldLines: DEFAULT_FOLD_LINES, foldOlderReplies: false, projectGrouping: "all", noOnlineProjects: "collapse", runningAgents: DEFAULT_RUNNING_AGENTS, runningAgentsRev: RUNNING_AGENTS_REV, offlineFoldOpen: [], foldedProjects: [], starredProjects: [], sidebarSections: [], projectRemarks: {}, projectDirectors: {}, projectIcons: {}, sectionCollapsedShows: "summary", projectSeparation: DEFAULT_PROJECT_SEPARATION, projectSeparationRev: PROJECT_SEPARATION_REV, projectIconStyle: "tint", systemRows: "line", statusChips: DEFAULT_STATUS_CHIPS, needsYouStrip: true, titleTwoLines: true, rowPreview: "all", rowPreviewRev: ROW_PREVIEW_REV, agentAvatarDefault: "important", agentAvatarDefaultRev: AGENT_AVATAR_DEFAULT_REV, avatarTint: "none", directorHeadwear: DEFAULT_DIRECTOR_HEADWEAR, operatorHeadwear: true, seasonalHeadwear: true, portraitPacks: [...DEFAULT_PORTRAIT_THEMES], avatarThemes: {}, messageImages: "thumbnail", turnSummary: "collapsed", sideMode: "push", sideNarrow: "overlay", sidePreview: DEFAULT_SIDE_PREVIEW, sidePreviewRev: SIDE_PREVIEW_REV, sideRestore: true, sideKeepHidden: 4, sideKeepMounted: 4, sideLauncherPins: {}, sidebarLayout: "roster", sidebarNowHeight: NOW_HEIGHT.def, navPins: null, peekTarget: "auto", gutterDocked: [], sideHomes: {}, gutterDockWidth: DOCK_WIDTH_DEFAULT, hostMarksSingle: false, hostMarkLocal: false, queueSectionStrip: true, queuePanelFold: DEFAULT_QUEUE_PANEL_FOLD, lastCreateHost: "", createHostDefault: "local", perfMode: "save" };
+const BASE_DEFAULTS: Omit<UiPrefs, "imageHistoryHintDone"> = { deskPerformanceHintDone: false, viewerAutoRefresh: true, quotaGauges: {}, quotaResetDefault: true, quotaMerge: true, quotaRunOutAlert: true, composerProfileAvatar: true, quotaView: DEFAULT_QUOTA_VIEW, sidebarOpen: true, sidebarRail: false, agentMessages: "compact", foldedGroups: [], modelPins: {}, lastAgentCwd: "", remoteAgentCwd: {}, sendKeys: "queueFirst", delegationSteerKeys: false, capsuleCorner: DEFAULT_CAPSULE_CORNER, capsuleEdge: DEFAULT_CAPSULE_EDGE, reasoningView: DEFAULT_REASONING_VIEW, reasoningViewRev: REASONING_VIEW_REV, capsuleOpen: false, capsuleFoldedItems: [], timelineTurns: 30, timelineInteractions: true, timelineIntro: true, capsuleAlways: false, projectOrder: [], profileOrder: [], restOpen: [], olderProjectsAfter: DEFAULT_OLDER_PROJECTS_AFTER, nameGrouping: null, nameReading: null,runtimeButton: "all", foldLong: true, foldLines: DEFAULT_FOLD_LINES, foldOlderReplies: false, teachingMode: false, projectGrouping: "all", noOnlineProjects: "collapse", runningAgents: DEFAULT_RUNNING_AGENTS, runningAgentsRev: RUNNING_AGENTS_REV, offlineFoldOpen: [], foldedProjects: [], starredProjects: [], sidebarSections: [], projectRemarks: {}, projectDirectors: {}, projectIcons: {}, sectionCollapsedShows: "summary", projectSeparation: DEFAULT_PROJECT_SEPARATION, projectSeparationRev: PROJECT_SEPARATION_REV, projectIconStyle: "tint", systemRows: "plain", systemRowsRev: SYSTEM_ROWS_REV, statusChips: DEFAULT_STATUS_CHIPS, needsYouStrip: true, titleTwoLines: true, rowPreview: "all", rowPreviewRev: ROW_PREVIEW_REV, agentAvatarDefault: "important", agentAvatarDefaultRev: AGENT_AVATAR_DEFAULT_REV, avatarTint: "none", directorHeadwear: DEFAULT_DIRECTOR_HEADWEAR, operatorHeadwear: true, seasonalHeadwear: true, portraitPacks: [...DEFAULT_PORTRAIT_THEMES], avatarThemes: {}, messageImages: "thumbnail", turnSummary: "collapsed", sideMode: "push", sideNarrow: "overlay", sidePreview: DEFAULT_SIDE_PREVIEW, sidePreviewRev: SIDE_PREVIEW_REV, sideRestore: true, sideKeepHidden: 4, sideKeepMounted: 4, sideLauncherPins: {}, sidebarLayout: "roster", sidebarNowHeight: NOW_HEIGHT.def, navPins: null, peekTarget: "auto", gutterDocked: [], sideHomes: {}, gutterDockWidth: DOCK_WIDTH_DEFAULT, hostMarksSingle: false, hostMarkLocal: false, queueSectionStrip: true, queuePanelFold: DEFAULT_QUEUE_PANEL_FOLD, lastCreateHost: "", createHostDefault: "local", perfMode: "save" };
 const DEFAULTS: UiPrefs = { ...BASE_DEFAULTS, imageHistoryHintDone: [] };
 const listeners = new Set<() => void>();
 /**
@@ -443,6 +466,7 @@ function load(): UiPrefs {
       olderProjectsAfter: migrateOlderProjectsAfter(stored.olderProjectsAfter),
       nameGrouping: (NAME_GROUPINGS as readonly unknown[]).includes(stored.nameGrouping) ? (stored.nameGrouping as NameGrouping) : null,
       nameReading: (NAME_READINGS as readonly unknown[]).includes(stored.nameReading) ? (stored.nameReading as NameReading) : null,
+      quotaRunOutAlert: stored.quotaRunOutAlert !== false,
       foldLines: migrateFoldLines(stored.foldLines),
       reasoningView: migrateReasoningView(stored.reasoningView, stored.reasoningViewRev),
       reasoningViewRev: REASONING_VIEW_REV,
@@ -453,12 +477,14 @@ function load(): UiPrefs {
       sectionCollapsedShows: stored.sectionCollapsedShows === "attention" ? "attention" : "summary",
       viewerAutoRefresh: stored.viewerAutoRefresh !== false,
       timelineIntro: stored.timelineIntro !== false,
+      teachingMode: stored.teachingMode === true,
       timelineInteractions: stored.timelineInteractions !== false,
       gutterDockWidth: clampDockPref(stored.gutterDockWidth),
       projectSeparation: migrateProjectSeparation(stored.projectSeparation, stored.projectSeparationRev, projectHeaderTint),
       projectSeparationRev: PROJECT_SEPARATION_REV,
       projectIconStyle: stored.projectIconStyle === "line" ? "line" : "tint",
-      systemRows: stored.systemRows === "band" ? "band" : "line",
+      systemRows: migrateSystemRows(stored.systemRows, stored.systemRowsRev),
+      systemRowsRev: SYSTEM_ROWS_REV,
       statusChips: migrateStatusChips(stored.statusChips),
       sideLauncherPins: migrateLauncherPins(stored.sideLauncherPins),
       sideHomes: migrateSideHomes(stored.sideHomes),

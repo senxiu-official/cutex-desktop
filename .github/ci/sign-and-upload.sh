@@ -375,6 +375,10 @@ for c in json.load(open(sys.argv[1])).get("components", {}).values():
           gh release download "$ctag" -R "$repo" -p "$cname.minisig" -D "$dir/published/$ctag" --clobber
           minisign -V -q -P "$(sed -n 2p "$pubkey_file")" -m "$dir/published/$ctag/$cname" \
             || { echo "the published $ctag/$cname.minisig does not verify with $pubkey_file" >&2; exit 1; }
+          # Preserve the published detached signature after both its payload hash and signature verify.
+          # A fresh randomized signature would fail immutable release-asset verification on upload.
+          mkdir -p "$dir/signatures"
+          cp "$dir/published/$ctag/$cname.minisig" "$dir/signatures/$csha-$cname.minisig"
         else
           echo "$ctag $cname.minisig" >> "$dir/component-uploads"
         fi

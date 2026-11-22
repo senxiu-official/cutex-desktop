@@ -2,7 +2,7 @@ import { requestFork } from "./requestFork";
 import { isHostBusyActionPending } from "./hostBusyActions";
 import { mentionPlainText } from "./mentionWire";
 import { agentToolGateNow, agentPauseNow, agentPauseSupported, pauseAgent, resumeAgent } from "./agentPause";
-import { canRevealLocal, downloadFileAction, fileActions, performFilePathAction, revealFileLabel } from "./fileActions";
+import { canRevealLocal, downloadFileAction, fileActions, localOpenEntries, performFilePathAction, revealFileLabel } from "./fileActions";
 // Menu item builders (DESIGN §4.12). Each surface — sidebar row, project header, message, tool
 // row, file link / tree / changes entry, side-pane tab — gets one builder shared by its
 // right-click menu and its hover "⋯" button.
@@ -72,6 +72,7 @@ import { canRenameFormal, restoreError, RestoreNameError, sessionOf } from "./ag
 import { writeMetadataRetrying } from "./metadataRetry";
 import { holdMetadata, releaseMetadata, serverView } from "./pendingMetadata";
 import { refusalText } from "./profileCreate";
+import { isBusyRefusal, stopUntilIdle } from "./stopAndDelete";
 import { agentFeaturesOf, canRewindFiles, lacks } from "./agentFeatures";
 import { agentFeaturesFor } from "./agentFeaturesView";
 import { revertTexts } from "./runtimeWording";
@@ -84,7 +85,7 @@ import { captureHostAction } from "./hostSwitch";
 import { archivedProjectOf } from "./archivedAgent";
 // Cycle by design (projectArchive reuses retireAgent / restoreArchived); both only call each other at run time.
 import { restoreWithDirector } from "./projectArchive";
-import { openGitDiff, openPath, openSide, revealInTree } from "./sideOpen";
+import { openGitDiff, openPath, openSide, otherSource, revealInTree, type OpenSource } from "./sideOpen";
 import { FILES_COMPONENT } from "./sideKinds";
 import { OWNER_ROTATION_FEATURE } from "../../../shared/directorRotation";
 import { FORK_PROFILE_FEATURE } from "../../../shared/sessionFork";
@@ -93,7 +94,9 @@ import { asksPauseKind } from "./stopHold";
 import { operatorMenuItem } from "./operatorMenu";
 import { loadQuotaContinue, quotaContinueNow, setQuotaContinue } from "./quotaContinue";
 import { isOwnerFeatures } from "../../../shared/users";
-import { runtimeStartSince } from "./runtimeStart";
+import { abandonRuntimeStart, runtimeStartView, START_DEADLINE_MS } from "./runtimeStart";
+import { formatAbsolute } from "./time";
+import { archiveWord } from "./archiveWords";
 import { repinApplies, repinMenuOffer, runRepinFlow } from "./claudeRepin";
 import { avatarSwitchOf, hiddenAvatar, shownAvatar } from "./avatarDefault";
 import { themedEmoji } from "./avatarThemes";
@@ -159,13 +162,51 @@ export async function deleteAgent(session: SessionResource, t: T, host = hostOfS
   const busy = !!session.runtime.activeTurnId;
   if (!(await confirmDialog(t(busy ? "menu.deleteConfirmBusy" : "menu.deleteConfirm", { name: session.displayName }), true))) return false;
   if (!current()) return false;
+  // The owner confirmed deleting a working agent (r290 P11 / B7): stop the turn, then delete.
+  if (busy) return stopThenDelete(session, t, host);
   return deleteAgentNow(session, t, expectedRevision, host);
 }
 
 /** Permanent delete without asking (the caller confirmed, e.g. a click-twice button). */
 export async function deleteAgentNow(session: SessionResource, t: T, expectedRevision = session.revision, host = hostOfSession(session)): Promise<boolean> {
   if (lacks(agentFeaturesOf(session), "threadDelete")) return false;
+  const current = fenceOf(host);
   const result = await deleteAgentResult(session, t, expectedRevision, host);
+  if (!result) return false;
+  if (!result.ok) {
+    // A turn started meanwhile: offer 停止并删除 in place instead of a dead end.
+    if (isBusyRefusal(result.error)) {
+      const labels = { ok: t("menu.stopAndDelete"), cancel: t("dialog.cancel") };
+      if (!(await confirmDialog(t("refusal.session_busyStop", { name: session.displayName }), true, labels))) return false;
+      if (!current()) return false;
+      return stopThenDelete(session, t, host);
+    }
+    await noticeDialog(refusalText(result.error, t));
+    return false;
+  }
+  return true;
+}
+
+/** Stop the running turn, wait (bounded) until cutex reports it idle, then delete its current revision. */
+async function stopThenDelete(session: SessionResource, t: T, host: string): Promise<boolean> {
+  const current = fenceOf(host);
+  const id = session.cutexSessionId;
+  const app = useApp.getState();
+  app.notify(t("menu.stoppingForDelete", { name: session.displayName }), "info");
+  const idle = await stopUntilIdle({
+    session: () => sessionOf(host, id),
+    // queue-pause hosts stop by session (no open view needed); older hosts interrupt the shown turn.
+    stop: async () => { if (featuresOf(useApp.getState(), host).has("queue-pause")) await hostApi(host).stopTurn(id); else await useApp.getState().interrupt(id, host); },
+    refresh: () => useApp.getState().refreshHostSidebar(host),
+    sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+    now: () => Date.now(),
+  });
+  if (!current()) return false;
+  if (!idle) {
+    useApp.getState().notify(t("menu.stopForDeleteTimeout", { name: session.displayName }), "error");
+    return false;
+  }
+  const result = await deleteAgentResult(idle, t, idle.revision, host);
   if (!result) return false;
   if (!result.ok) {
     await noticeDialog(refusalText(result.error, t));
@@ -227,11 +268,15 @@ export async function offerRenameAfterRestore(error: unknown, t: T): Promise<voi
   if (await confirmDialog(error.message, false, { ok: t("rename.restoreRename"), cancel: t("dialog.cancel") })) await editAgentInfo(fresh, error.host);
 }
 
-/** Archiving an agent that owns services: name them so the owner can reassign later. */
-export function ownedServicesNote(id: string, t: T, host: string): string {
+function ownedServices(id: string, host: string) {
   const app = useApp.getState();
   const services = host === focusHost() ? app.services : app.byHost[host]?.services;
-  const owned = (services ?? []).filter((s) => s.ownerCutexSessionId === id);
+  return (services ?? []).filter((s) => s.ownerCutexSessionId === id);
+}
+
+/** Archiving an agent that owns services: name them so the owner can reassign later. */
+export function ownedServicesNote(id: string, t: T, host: string): string {
+  const owned = ownedServices(id, host);
   if (owned.length === 0) return "";
   return t("menu.archiveOwnsServices", { n: owned.length, names: owned.map((s) => s.displayName || s.slug).join("、") });
 }
@@ -401,15 +446,31 @@ export async function setAgentNote(session: SessionResource, host: string, note:
   await updateMetadataNow(session, host, { note: next });
 }
 
-/** Archive with the same confirmation as the menu item (`/archive`); false when cancelled. */
+/**
+ * 归档 by risk (owner rule: confirm by risk): archive is restorable (设置 → 归档), so an idle agent that owns no
+ * services confirms in place (the armed menu row; `/archive` is picked, then sent); a running turn (interrupted) or
+ * owned services (they lose their owner) keep the dialog that names them.
+ */
+export function archiveNeedsDialog(session: SessionResource, host: string): boolean {
+  return !!session.runtime.activeTurnId || ownedServices(session.cutexSessionId, host).length > 0;
+}
+
+function archiveDialogText(session: SessionResource, t: T, host: string): string {
+  const busy = !!session.runtime.activeTurnId;
+  return [t(busy ? "menu.archiveConfirmBusy" : "menu.archiveConfirm", { name: session.displayName }), ownedServicesNote(session.cutexSessionId, t, host)].filter(Boolean).join("\n\n");
+}
+
+/**
+ * Archive after the confirmation its state needs now (`/archive`, and the armed menu row's second click). The agent is
+ * read again first, so one that started a turn or took a service since the menu opened still gets the dialog.
+ * False when cancelled.
+ */
 export async function archiveAgent(session: SessionResource, t: T, host = hostOfSession(session)): Promise<boolean> {
   const current = fenceOf(host);
-  const id = session.cutexSessionId;
-  const busy = !!session.runtime.activeTurnId;
-  const message = [t(busy ? "menu.archiveConfirmBusy" : "menu.archiveConfirm", { name: session.displayName }), ownedServicesNote(id, t, host)].filter(Boolean).join("\n\n");
-  if (!(await confirmDialog(message, true))) return false;
+  const now = sessionOf(host, session.cutexSessionId) ?? session;
+  if (archiveNeedsDialog(now, host) && !(await confirmDialog(archiveDialogText(now, t, host), true))) return false;
   if (!current()) return false;
-  await retireAgent(session, t, host);
+  await retireAgent(now, t, host);
   return current();
 }
 
@@ -495,9 +556,60 @@ function quotaContinueItem(session: SessionResource, t: T, host: string): MenuEn
   };
 }
 
+/** The archive state row of an archived agent (W13): 已归档（可恢复） or 已永久退休 (+ the greyed 恢复); none on older hosts. */
+function archiveRows(session: SessionResource, t: T): MenuEntry[] {
+  const word = archiveWord(session);
+  if (word === "restorable") return [{ label: t("agentLifecycle.archivedRestorable"), icon: <Archive size={ICON} />, disabled: true, info: t("agentLifecycle.archivedRestorableHint"), onSelect: () => {} }];
+  if (word !== "permanent") return [];
+  return [
+    { label: t("agentLifecycle.permanentlyRetired"), icon: <Archive size={ICON} />, disabled: true, info: t("agentLifecycle.permanentlyRetiredHint"), onSelect: () => {} },
+    { label: t("menu.restore"), icon: <ArchiveRestore size={ICON} />, disabled: true, title: t("agentLifecycle.permanentlyRetiredHint"), onSelect: () => {} },
+  ];
+}
+
 /**
- * 启动运行时 / 停止运行时 for an active agent (null while starting or archived). Shared by the
- * agent menu and the title bar's runtime button; run it with runAction so the confirmation applies.
+ * 停止 for a start past its deadline (启动未确认, lib/runtimeStart S11): an offline request fenced by the runtime
+ * generation the agent shows now; the start in flight is given up locally so a late answer changes nothing here.
+ */
+function stopUnconfirmedStart(session: SessionResource, t: T, host: string, since: number): MenuAction {
+  const id = session.cutexSessionId;
+  return {
+    label: t("menu.stop"),
+    icon: <Power size={ICON} />,
+    info: t("runtime.stopUnconfirmedHint", { time: formatAbsolute(Math.floor(since / 1000)) }),
+    armed: t("menu.stopArmed"),
+    onSelect: guarded(async () => {
+      abandonRuntimeStart(host, id);
+      await useApp.getState().sessionAction(id, "cutex/runtime/offline", { expectedRuntimeGeneration: session.runtime.runtimeGeneration }, host);
+    }),
+  };
+}
+
+/**
+ * The runtime rows of the agent menu: 启动未确认 (a note with why), 重新读取 and 停止 once a start is past its
+ * deadline (lib/runtimeStart START_DEADLINE_MS); otherwise runtimeItem.
+ */
+function runtimeEntries(session: SessionResource, t: T, host: string): MenuEntry[] {
+  const start = ownerRuntimeView(session, host);
+  if (start?.phase !== "unconfirmed") return [runtimeItem(session, t, host)];
+  const time = formatAbsolute(Math.floor(start.since / 1000));
+  return [
+    { label: t("runtime.startUnconfirmed"), icon: <Power size={ICON} />, disabled: true, info: t("runtime.startUnconfirmedHint", { time }), onSelect: () => {} },
+    { label: t("runtime.reread"), icon: <RotateCw size={ICON} />, info: t("runtime.rereadHint"), onSelect: guarded(() => useApp.getState().refreshHostSidebar(host)) },
+    stopUnconfirmedStart(session, t, host, start.since),
+  ];
+}
+
+/** The start view of an active agent whose runtime the owner may start / stop here (null otherwise). */
+function ownerRuntimeView(session: SessionResource, host: string) {
+  if (session.lifecycle === "retired" || !isOwnerFeatures(featuresOf(useApp.getState(), host))) return null;
+  return runtimeStartView(host, session.cutexSessionId, session.runtime);
+}
+
+/**
+ * 启动运行时 / 停止运行时 for an active agent (null while cutex reports it starting, within the start deadline, or
+ * archived). Shared by the agent menu and the title bar's runtime button; run it with runAction so the confirmation
+ * applies. Past the deadline (启动未确认) it is the fenced 停止.
  */
 export function runtimeItem(session: SessionResource, t: T, host = hostOfSession(session)): MenuAction | null {
   const app = useApp.getState();
@@ -505,10 +617,13 @@ export function runtimeItem(session: SessionResource, t: T, host = hostOfSession
   if (!isOwnerFeatures(featuresOf(app, host))) return null;
   const id = session.cutexSessionId;
   const status = session.runtime.status;
-  if (session.lifecycle === "retired" || status === "starting") return null;
+  if (session.lifecycle === "retired") return null;
+  const start = runtimeStartView(host, id, session.runtime);
+  if (start?.phase === "unconfirmed") return stopUnconfirmedStart(session, t, host, start.since);
+  if (status === "starting") return null;
   if (status !== "online") {
     // A start of ours still waiting for cutex's answer (lib/runtimeStart): shown, not offered again.
-    if (runtimeStartSince(host, id) !== null) return { label: t("menu.starting"), icon: <Power size={ICON} />, disabled: true, onSelect: () => {} };
+    if (start) return { label: t("menu.starting"), icon: <Power size={ICON} />, disabled: true, info: t("runtime.startingHint", { time: formatAbsolute(Math.floor((start.since + START_DEADLINE_MS) / 1000)) }), onSelect: () => {} };
     // The desktop is the front end: no "attach from a terminal" step.
     return { label: t("menu.start"), icon: <Power size={ICON} />, onSelect: guarded(() => app.sessionAction(id, "cutex/runtime/online", { openVisibleTerminal: false }, host)) };
   }
@@ -642,12 +757,13 @@ export function agentMenu(session: SessionResource, t: T, hostId?: string): Menu
     icon: <ArrowRightLeft size={ICON} />,
     onSelect: () => app.openPage("projects.page", { project: directs.project_id, tab: "agents", rotate: "1" }),
   };
+  // Idle and owning no services: armed in place; otherwise the dialog. archiveAgent asks again at the click.
   const archiveItem: MenuAction = {
     label: t("menu.archive"),
     icon: <Archive size={ICON} />,
     danger: true,
-    confirm: [t(busy ? "menu.archiveConfirmBusy" : "menu.archiveConfirm", { name: session.displayName }), ownedServicesNote(id, t, host)].filter(Boolean).join("\n\n"),
-    onSelect: guarded(() => retireAgent(session, t, host)),
+    ...(archiveNeedsDialog(session, host) ? {} : { armed: t("menu.archiveArmed", { name: session.displayName }) }),
+    onSelect: guarded(() => archiveAgent(session, t, host)),
   };
   // Confirms itself (deleteAgent), so the refusal can follow in the same flow.
   const deleteItem: MenuAction = { label: t("menu.delete"), icon: <Trash2 size={ICON} />, danger: true, onSelect: guarded(() => deleteAgent(session, t, host)) };
@@ -741,12 +857,14 @@ export function agentMenu(session: SessionResource, t: T, hostId?: string): Menu
     asksPauseItem,
     "separator",
     // ── runtime ──
-    runtimeItem(session, t, host),
+    ...runtimeEntries(session, t, host),
     restartItem(session, t, host),
     repinItem(session, t, host),
     "separator",
     // ── archive / delete ──
-    retired && { label: t("menu.restore"), icon: <ArchiveRestore size={ICON} />, onSelect: guarded(() => restoreWithDirector(session, t, host).catch((e: unknown) => offerRenameAfterRestore(e, t))) },
+    // 已归档（可恢复） / 已永久退休 (lib/archiveWords, W13): a permanently retired agent can't be restored (greyed, with why).
+    ...archiveRows(session, t),
+    retired && archiveWord(session) !== "permanent" && { label: t("menu.restore"), icon: <ArchiveRestore size={ICON} />, onSelect: guarded(() => restoreWithDirector(session, t, host).catch((e: unknown) => offerRenameAfterRestore(e, t))) },
     retired && canDelete && deleteItem,
     // 归档 stays a plain, clickable row; 删除… sits one level down under 更多 › (a row with "›" reads
     // as a pure submenu, so it never doubles as an action).
@@ -803,7 +921,9 @@ export function messageMenu(m: MessageMenuInput, t: T, canRevert: boolean): Menu
       icon: <Undo2 size={ICON} />,
       hint: canRevert ? undefined : "·",
       disabled: !canRevert || !m.turnId,
-      confirm: t(texts.editResendConfirm),
+      // Armed in place like the hover bar's 编辑并重发 (MessageActions): what it drops is in the ⓘ.
+      info: t(texts.editResendHint),
+      armed: t("menu.editResendArmed"),
       onSelect: guarded(() => app.editAndResend(m.sessionId, m.turnId!, m.text, host, m.extra)),
       ...(canRevert ? blocked : {}),
     },
@@ -823,7 +943,8 @@ export function messageMenu(m: MessageMenuInput, t: T, canRevert: boolean): Menu
         label: t("reply.revert"),
         icon: <History size={ICON} />,
         danger: true,
-        confirm: t(texts.revertConfirm, { n: m.laterTurns ?? 0 }),
+        info: t(texts.revertHint, { n: m.laterTurns ?? 0 }),
+        armed: t("reply.revertArmed", { n: m.laterTurns ?? 0 }),
         onSelect: guarded(() => app.revertTo(m.sessionId, m.nextTurnId!, { hostId: host })),
         ...blocked,
       },
@@ -835,7 +956,8 @@ export function messageMenu(m: MessageMenuInput, t: T, canRevert: boolean): Menu
         label: t("reply.revertWithFiles"),
         icon: <FileClock size={ICON} />,
         danger: true,
-        confirm: t("menu.revertFilesConfirm", { n: m.laterTurns ?? 0 }),
+        info: t("reply.revertFilesHint", { n: m.laterTurns ?? 0 }),
+        armed: t("reply.revertFilesArmed", { n: m.laterTurns ?? 0 }),
         onSelect: guarded(() => app.revertTo(m.sessionId, m.nextTurnId!, { rewindFiles: true, hostId: host })),
         ...blocked,
       },
@@ -853,24 +975,28 @@ export function toolMenu(item: { type: string; command?: unknown; aggregatedOutp
 }
 
 /** Workspace file (relative path) — file links, tool rows, file tree, changes list. */
-export function fileMenu(path: string, root: string | null, t: T, opts: { changed?: boolean; isDir?: boolean; inTree?: boolean; hostId?: string } = {}): MenuEntry[] {
+export function fileMenu(path: string, root: string | null, t: T, opts: { changed?: boolean; isDir?: boolean; inTree?: boolean; hostId?: string; /** Markdown outside a conversation pane: preview / reveal / diff target this agent (lib/markdownOpenSource). */ source?: OpenSource } = {}): MenuEntry[] {
   const app = useApp.getState();
   const hostId = opts.hostId ?? agentHost(app);
   const sourceHost = app.hosts?.hosts.find((host) => host.id === hostId);
   const hostHint = sourceHost?.kind === "local" ? "" : ` · ${sourceHost?.label ?? hostId}`;
   const abs = root ? `${root.replace(/[\\/]+$/, "")}${root.includes("\\") ? "\\" : "/"}${root.includes("\\") ? path.replace(/\//g, "\\") : path}` : null;
   const sessionId = app.selectedId;
+  // Another agent's file (a side chat, a note): the 文件 tree and the diff view show the selected workspace only.
+  const other = !!otherSource(opts.source);
   return [
-    !opts.isDir && { label: t("menu.preview"), icon: <FileText size={ICON} />, onSelect: () => void openPath(path) },
+    !opts.isDir && { label: t("menu.preview"), icon: <FileText size={ICON} />, onSelect: () => void openPath(path, null, "link", undefined, opts.source) },
     // 在文件树中显示 (docs/design/019 §3); the 文件 explorer's own rows leave it out (`inTree`).
-    !opts.inTree && { label: t("workspace.revealInTree"), icon: <LocateFixed size={ICON} />, hint: "Ctrl+Alt+R", onSelect: () => void revealInTree(path) },
-    opts.changed && { label: t("menu.showDiff"), icon: <FileDiff size={ICON} />, onSelect: () => void openGitDiff(path) },
+    !opts.inTree && !other && { label: t("workspace.revealInTree"), icon: <LocateFixed size={ICON} />, hint: "Ctrl+Alt+R", onSelect: () => void revealInTree(path, opts.source) },
+    opts.changed && !other && { label: t("menu.showDiff"), icon: <FileDiff size={ICON} />, onSelect: () => void openGitDiff(path) },
     "separator",
     { label: `${t("menu.copyRelPath")}${hostHint}`, icon: <Copy size={ICON} />, onSelect: () => copyText(path) },
     abs && { label: `${t("menu.copyAbsPath")}${hostHint}`, icon: <ClipboardCopy size={ICON} />, onSelect: () => copyText(abs) },
     sessionId && { label: t("menu.mention"), icon: <MessageSquareQuote size={ICON} />, onSelect: () => app.insertIntoComposer(sessionId, `\`${path}\` `, "append") },
-    // Local host only: a remote host's files are not on this machine. Reveal, never open (it could run it).
+    // Local host only: a remote host's files are not on this machine. 打开 with the system app by the file's type; a
+    // script or program is never opened from here (以文本打开 = the preview above; 运行… asks in main first).
     abs && canRevealLocal({ hostId, path: abs }) && { label: revealFileLabel(t), icon: <FolderOpen size={ICON} />, onSelect: guarded(() => performFilePathAction(hostId, abs, "reveal")) },
+    ...(abs ? localOpenEntries({ hostId, path: abs, isDir: opts.isDir, viewText: () => void openPath(path, null, "link", undefined, opts.source) }, t) : []),
     abs && downloadFileAction({ hostId, path: abs, isDir: opts.isDir }, t),
   ];
 }
@@ -893,7 +1019,7 @@ export function outsideFileMenu(ref: FileRef, full: string, remote: boolean, t: 
     { label: full, hint: t(preview ? "menu.fileOutsideWorkspaceHost" : "menu.fileOutsideWorkspace"), note: true, disabled: true, onSelect: () => {} },
     "separator",
     preview && { label: t("menu.preview"), icon: <FileText size={ICON} />, onSelect: preview },
-    ...fileActions({ hostId: sourceHostId, path }, t),
+    ...fileActions({ hostId: sourceHostId, path, viewText: preview ?? undefined }, t),
     ref.line != null && { label: `${t("menu.copyPathLine")}${hostHint}`, icon: <ClipboardCopy size={ICON} />, onSelect: () => copyText(full) },
     sessionId && { label: t("menu.mention"), icon: <MessageSquareQuote size={ICON} />, onSelect: () => app.insertIntoComposer(sessionId, `\`${path}\` `, "append") },
   ];

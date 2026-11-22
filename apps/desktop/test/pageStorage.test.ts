@@ -1,15 +1,18 @@
 // Channel A of agent pages (main/pageStorage.ts, docs/design/004-artifact-page-bridge.md): each artifact's
 // own storage, shared by its versions; 5 MiB per page, 200 MB soft total; a full store refuses, never evicts.
-import { mkdtempSync, readdirSync } from "node:fs";
+import { mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import { createPageStorage, PAGE_STORAGE_PAGE_LIMIT, PAGE_STORAGE_TOTAL_LIMIT } from "../src/main/pageStorage";
 
 const A = { hostId: "local", artifactId: "af-0123456789abcdef0123456789abcdef" };
 const B = { hostId: "local", artifactId: "af-fedcba9876543210fedcba9876543210" };
 const A_OTHER_HOST = { hostId: "host02", artifactId: A.artifactId };
-const root = () => mkdtempSync(join(tmpdir(), "page-storage-"));
+const roots: string[] = [];
+const root = () => { const dir = mkdtempSync(join(tmpdir(), "page-storage-")); roots.push(dir); return dir; };
+// Windows: rm retries EBUSY / EPERM / ENOTEMPTY (a just-renamed file can still be open).
+afterAll(() => { for (const dir of roots.splice(0)) rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
 
 describe("page storage", () => {
   it("keeps the limits as main constants: 5 MiB per page, 200 MB total", () => {
@@ -87,8 +90,8 @@ describe("page storage", () => {
     await s.set(A, "k", "v");
     await s.set(B, "k", "v");
     await s.clear(B);
-    await new Promise((r) => setTimeout(r, 80));
-    expect(s.pending()).toBe(false);
+    // The flush timer fires on its own; under full-suite load it can run well after 20 ms, so wait for it (no flush call).
+    await vi.waitFor(() => expect(s.pending()).toBe(false), { timeout: 4_000, interval: 10 });
     expect(readdirSync(dir)).toHaveLength(1);
     expect(await createPageStorage({ root: dir }).get(B, "k")).toBeNull();
   });

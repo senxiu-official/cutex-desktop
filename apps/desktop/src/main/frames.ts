@@ -16,7 +16,8 @@ import { buildOfflinePageChunks, buildOfflinePageDocument, OFFLINE_PAGE_MAX_BYTE
 import type { FrameDocument, FrameDocumentStore } from "@cutex-desktop/opaque-frame/documents";
 import { ARTIFACT_ID, type ArtifactContent, type ArtifactDetail } from "../shared/artifactStore";
 import { ARTIFACT_PAGE_MAX_BYTES, FILE_PAGE_MAX_BYTES, FILE_PAGE_PROMPT_BYTES, FILE_PAGE_WINDOW_BYTES, type ArtifactPageInput, type ArtifactPageResult, type FilePageInput, type FilePageResult } from "../shared/frames";
-import type { FsFile, WorkspaceScope } from "../shared/ipc";
+import type { FsDir, FsFile, WorkspaceScope } from "../shared/ipc";
+import { dirOf, inlineLocalAssets, insideDir, joinPath } from "./filePageAssets";
 
 /** The scheme of every opaque frame document (main/index.ts registers it; the parent CSP allows only it in frame-src). */
 export const FRAME_SCHEME = "cutex-plugin";
@@ -73,7 +74,25 @@ export interface ArtifactPageDeps {
 /** One window of a file: the workspace route (`scope`) or fs-file-read (none = an absolute host path). */
 export interface FileWindowReader {
   fileWindow(scope: WorkspaceScope | undefined, path: string, offset: number, maxBytes: number): Promise<FileWindow>;
+  /** The workspace route's listing: its `root` is the workspace folder as the host resolved it. */
+  fsDir?(scope: WorkspaceScope, path: string): Promise<FsDir>;
 }
+
+/**
+ * The folder a file page's own files may come from, as the host resolved it (links / junctions followed), or null
+ * (then nothing is inlined). fs-file-read answers with the resolved path; the workspace route answers with the path
+ * as asked (a label), so a workspace page is found again under its root (the listing's, resolved) through
+ * fs-file-read, and must still be inside that root. Older hosts without either: null.
+ */
+async function resolvedPageDir(reader: FileWindowReader, input: FilePageInput, first: FileWindow): Promise<string | null> {
+  if (!input.scope) return isAbsolutePath(first.path) ? dirOf(first.path) : null;
+  if (!reader.fsDir) return null;
+  const root = (await reader.fsDir(input.scope, "")).root;
+  if (!isAbsolutePath(root)) return null;
+  const real = (await reader.fileWindow(undefined, joinPath(root, input.path), 0, 1)).path;
+  return isAbsolutePath(real) && insideDir(root, real) ? dirOf(real) : null;
+}
+const isAbsolutePath = (p: string) => typeof p === "string" && /^(?:[a-z]:)?[\\/]/i.test(p) && !p.startsWith("\\\\") && !p.startsWith("//");
 /**
  * cutex's fs/file body; `offset` and `revision` (size + full-precision mtime of the opened file) come only from a
  * cutex with windowed reads (fs-file-window).
@@ -255,7 +274,7 @@ export function createArtifactPageService(deps: ArtifactPageDeps) {
       const input = parseFilePageInput(raw);
       const reader = deps.fileReader?.(input.hostId);
       if (!reader) return { ok: false, reason: "host-offline" };
-      const read = (offset: number, maxBytes: number) => reader.fileWindow(input.scope, input.path, offset, maxBytes);
+      const read = (offset: number, maxBytes: number, path = input.path) => reader.fileWindow(input.scope, path, offset, maxBytes);
       let file: FileWindow;
       try {
         // offset=0 is asked for explicitly: a cutex with windowed reads echoes it, an older one ignores it.
@@ -309,16 +328,29 @@ export function createArtifactPageService(deps: ArtifactPageDeps) {
         page = await run;
       } else page = await assemble();
       if ("ok" in page) return page;
+      // Its own files (images, style sheets, scripts, fonts next to it) written in: a page read in one window only
+      // (a page of several windows is kept as raw chunks, never joined into one string).
+      let localFiles = 0;
+      const pageDir = !first.truncated && page.refs > 0 ? await resolvedPageDir(reader, input, first).catch(() => null) : null;
+      if (pageDir) {
+        const inlined = await inlineLocalAssets(first.content, pageDir, (path, max) => reader.fileWindow(undefined, path, 0, max)).catch(() => null);
+        if (inlined && inlined.loaded > 0) {
+          localFiles = inlined.loaded;
+          page.chunks = [Buffer.from(inlined.html, "utf8")];
+          page.refs = countExternalRefs(inlined.html);
+        }
+      }
       let document: FrameDocument;
       try {
-        document = buildOfflinePageChunks(page.chunks, maxBytes, { pageApi: false });
+        // Its files in: bounded by FILE_PAGE_MAX_BYTES (what is written in is bounded on its own: FILE_PAGE_INLINE_MAX_BYTES).
+        document = buildOfflinePageChunks(page.chunks, localFiles ? Math.max(maxBytes, FILE_PAGE_MAX_BYTES) : maxBytes, { pageApi: false });
       } catch {
         return tooLarge;
       }
       // No file page exists before Chromium networking is contained.
       await deps.ensureContained();
       placeStillOpen(owner, place);
-      return { ok: true, frame: lease(owner, place, document), externalRefs: page.refs };
+      return { ok: true, frame: lease(owner, place, document), externalRefs: page.refs, localFiles };
     },
     /** `place`: the webContents the frame will be drawn in (the owner's own, or a desk it opened; main resolved it). */
     async prepare(owner: number, raw: unknown, place: number = owner): Promise<ArtifactPageResult> {

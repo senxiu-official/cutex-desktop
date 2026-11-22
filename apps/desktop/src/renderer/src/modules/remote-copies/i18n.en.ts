@@ -14,6 +14,7 @@ export const en: Record<keyof typeof zhCN, string> = {
   "remote-copies.start": "Start download",
   "remote-copies.cancel": "Cancel",
   "remote-copies.open": "Open copy",
+  "remote-copies.openRefused": "Scripts and programs are not opened from here (opening could run them); show it in its folder instead.",
   "remote-copies.reveal": "Show in folder",
   "remote-copies.original": "Open remote original",
   "remote-copies.refresh": "Download again",

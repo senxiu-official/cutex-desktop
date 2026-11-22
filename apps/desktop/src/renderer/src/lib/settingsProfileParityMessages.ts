@@ -1,15 +1,10 @@
 // Profile parity copy; integrated into the shared catalogs by the lead.
 export const zhCN = {
-  "settings.profileParity.modelDefaultHint": "新建{{agent}}使用这里的默认模型；运行中的{{agent}}保留自己的选择。模型目录的编辑在下方单独保存。",
   "settings.profileParity.runtimeModelDefault": "不指定 · 使用运行时默认模型",
   "settings.profileParity.effortInheritance": "不指定时使用所选模型的默认推理强度。这里的显式值优先于模型目录中的默认值；修改随底部保存按钮保存。",
-  "settings.profileParity.effortUnknown": "目录未提供这个模型的推理等级。保留已存值，也可清空以使用模型默认；不会据此假定模型支持其他等级。",
-  "settings.profileParity.savedEffective": "主机返回的已保存生效值",
-  "settings.profileParity.limitsInheritance": "上下文和压缩阈值留空时跟随模型目录。Profile 的显式值会覆盖目录值，但仍受模型上限约束；下方生效值尚不包含未保存的草稿。",
   "settings.profileParity.catalogLimitsHint": "每行显示主机返回的已保存生效值及来源。上下文受模型上限约束；压缩阈值依次取 Profile、模型目录、上下文的 90%，且不超过上下文的 90%。",
   "settings.profileParity.modelEfforts": "推理：{levels}",
   "settings.profileParity.modelEffortsUnknown": "推理等级：目录未提供",
-  "settings.profileParity.modelEffortDefault": "模型默认：{effort}",
   "settings.profileParity.runtimeEffortDefault": "不指定 · 由运行时决定",
   "settings.profileParity.modelEntryHint": "这里只编辑这个 Profile 的模型目录。窗口、图片输入和推理等级是给运行时的配置说明，不会改变服务商实际支持的能力；此弹窗的保存独立于详情页底部的保存。",
   "settings.profileParity.capabilityDeclaration": "只勾选服务商实际支持的等级；中文是显示名称，保存时仍使用原有等级标识。",
@@ -23,16 +18,11 @@ export const zhCN = {
 } as const;
 
 export const en: Record<keyof typeof zhCN, string> = {
-  "settings.profileParity.modelDefaultHint": "A new {{agent}} uses this default model; a running {{agent}} keeps its selection. Model catalog edits save separately below.",
   "settings.profileParity.runtimeModelDefault": "Unset · use runtime default model",
   "settings.profileParity.effortInheritance": "Unset follows the selected model’s default effort. An explicit Profile value takes precedence over the catalog default; use Save below to apply.",
-  "settings.profileParity.effortUnknown": "The catalog provides no reasoning levels for this model. Keep the stored value or clear it to use the model default; no other levels are assumed to be supported.",
-  "settings.profileParity.savedEffective": "Saved effective value returned by host",
-  "settings.profileParity.limitsInheritance": "Unset context and compaction follow the model catalog. Explicit Profile values override catalog values within model limits. Effective values below exclude unsaved drafts.",
   "settings.profileParity.catalogLimitsHint": "Rows show saved effective values and sources returned by the host. Context is capped by the model maximum. Compaction uses the Profile value, then catalog value, then 90% of context, capped at 90% of context.",
   "settings.profileParity.modelEfforts": "Reasoning: {levels}",
   "settings.profileParity.modelEffortsUnknown": "Reasoning levels: not provided",
-  "settings.profileParity.modelEffortDefault": "Model default: {effort}",
   "settings.profileParity.runtimeEffortDefault": "Unset · runtime decides",
   "settings.profileParity.modelEntryHint": "Edits only this Profile’s model catalog. Window, image input and reasoning levels describe configuration for the runtime; they do not change provider capabilities. This dialog saves separately from the detail page.",
   "settings.profileParity.capabilityDeclaration": "Select only levels supported by the provider. Translated labels keep their original stored identifiers.",

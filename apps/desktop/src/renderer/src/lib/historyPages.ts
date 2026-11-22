@@ -72,3 +72,28 @@ export function prependHistory(state: TimelineState, result: unknown): number {
 export function cloneTimeline(state: TimelineState): TimelineState {
   return { ...state, ...(state.liveDeltas ? { liveDeltas: cloneLiveDeltas(state.liveDeltas) } : {}), turns: state.turns.map((t) => ({ ...t, entryIds: [...t.entryIds] })), entries: state.entries instanceof TimelineEntries ? new TimelineEntries(state.entries) : new Map(state.entries), pending: new Map(state.pending), answering: new Set(state.answering) };
 }
+
+/**
+ * A re-read of an open (or cached) agent returns only the newest turns: the older turns it showed —
+ * paged in earlier, or simply more than the fresh window — would vanish from the screen once the fresh
+ * timeline replaced the cached one (the owner saw them, then they were gone). They are finished
+ * history, so they are kept in front of the fresh window, in place, when the fresh window's first turn
+ * is one of them (same thread, contiguous). Returns the paging state to keep (the cached one), or null
+ * when nothing was kept (another thread, no overlap, a reverted range or a turn still running).
+ */
+export function keepPagedTurns(fresh: TimelineState, previous: TimelineState | null | undefined, previousOlder: OlderHistory | null | undefined): OlderHistory | null {
+  if (!previous || !fresh.threadId || previous.threadId !== fresh.threadId) return null;
+  const anchor = fresh.turns[0]?.id;
+  const at = anchor ? previous.turns.findIndex((t) => t.id === anchor) : -1;
+  if (at <= 0) return null;
+  const kept = previous.turns.slice(0, at);
+  if (kept.some((t) => t.status === "inProgress")) return null;
+  // Turns the fresh window adds after the cached ones: the render window grows by them too, so every turn
+  // shown before stays shown (Timeline renders the newest `limit + added`).
+  const newAtEnd = Math.max(0, fresh.turns.length - (previous.turns.length - at));
+  const known = new Set(fresh.turns.map((t) => t.id));
+  const turns = kept.filter((t) => !known.has(t.id)).map((t) => ({ ...t, entryIds: t.entryIds.filter((id) => !fresh.entries.has(id) && previous.entries.has(id)) }));
+  for (const turn of turns) for (const id of turn.entryIds) fresh.entries.set(id, previous.entries.get(id)!);
+  fresh.turns = [...turns, ...fresh.turns];
+  return { cursor: previousOlder?.cursor ?? null, loading: false, error: null, added: (previousOlder?.added ?? 0) + newAtEnd };
+}

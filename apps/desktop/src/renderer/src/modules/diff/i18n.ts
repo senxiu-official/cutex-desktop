@@ -6,6 +6,8 @@ export const zhCN = {
   "diff.turnBadge": "本轮变更",
   "diff.staged": "已暂存",
   "diff.noDiff": "没有差异",
+  "diff.retrying": "差异暂时读不出，正在重试…",
+  "diff.failed": "差异读不出",
   "diff.noScope": "这个{{agent}}没有工作目录，看不了 git 差异。",
   "diff.noWorkspaceFs": "这台主机的 cutex 不提供工作区接口（需要 workspace-fs），请升级 cutex",
   "diff.turnGone": "这一轮的变更文本只在打开它的那次运行里保留。回到那一轮，左键点击「查看变更」再打开。",

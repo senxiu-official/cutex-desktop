@@ -52,7 +52,7 @@ const WREN = "wren-session";
 const RELEASE = "release-021-session";
 const NOW = "2026-10-30T09:35:00.000Z";
 const reference = { kind: "routing", approvalId: "routing-26", projectId: PROJECT } as const;
-let scope = routingActionScope(HOST, PROJECT);
+let scope = routingActionScope(HOST, PROJECT, "routing");
 const ref = (id: string) => ({ hostId: HOST, id });
 const owner = { kind: "owner", hostId: null, sessionId: null, name: null, redacted: false } as const;
 let record: UpgradeApprovalRead;
@@ -129,7 +129,7 @@ const grantWrites = () => fx.write.mock.calls.filter(([, action]) => action.kind
 beforeEach(() => {
   // Production deliberately keeps committed-grant fences across host reconnects.
   // Give each case its own host rather than resetting or weakening that state.
-  HOST = `review-grant-fixture-${++hostSequence}`; scope = routingActionScope(HOST, PROJECT);
+  HOST = `review-grant-fixture-${++hostSequence}`; scope = routingActionScope(HOST, PROJECT, "routing");
   vi.clearAllMocks(); localStorage.clear(); unresolved.clear(); fireHostReset(HOST);
   fx.features = new Set(["owner-approvals", "delegation-review-refs", "delegation-routing-v1", "delegation-tree-stop-v1"]);
   access(); record = approval();

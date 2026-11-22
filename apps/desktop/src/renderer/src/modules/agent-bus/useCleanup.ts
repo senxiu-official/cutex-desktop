@@ -2,8 +2,9 @@
 // `GET /v2/asks?state=open`, owner commands cutex/ask/stop | close through lib/delegationStore). Read
 // when the section opens, on 刷新 and after each command; mounted only while the page is open.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { AskCommandMethod, AskSummary } from "../../../../shared/ipc";
-import { delegationCommand } from "../../lib/delegationStore";
+import type { AskCommandMethod, AskSummary, MutationResult } from "../../../../shared/ipc";
+import { OWNER_DISPOSITION_UNSUPPORTED } from "../../../../shared/ownerDispositions";
+import { delegationCommand, endDelegationFollowUp } from "../../lib/delegationStore";
 import type { ContextOf } from "../../lib/delegations";
 import { useTargetApi, useTargetHostId } from "../../lib/targetHost";
 import { useHostData } from "../../lib/useHostScope";
@@ -41,6 +42,8 @@ export interface StaleDelegationsState {
   ctxOf: ContextOf;
   refresh(): Promise<void>;
   command(d: AskSummary, method: AskCommandMethod, outcome?: "abandoned"): Promise<void>;
+  /** 结束跟进 (r289 followUpEnded). A refusal keeps its code for owner_disposition_unsupported / *_conflict (worded by the table). */
+  endFollowUp(d: AskSummary): Promise<void>;
 }
 
 export function useStaleDelegations(minAge: number, enabled: boolean): StaleDelegationsState {
@@ -87,14 +90,14 @@ export function useStaleDelegations(minAge: number, enabled: boolean): StaleDele
     };
   }, [hostId, connected, enabled, refresh]);
 
-  const command = useCallback(
-    async (d: AskSummary, method: AskCommandMethod, outcome?: "abandoned") => {
+  const run = useCallback(
+    async (d: AskSummary, send: (hostId: string) => Promise<MutationResult>) => {
       const startedOn = scope.current.hostId;
       setBusy((b) => new Set(b).add(d.askId));
       let refusal: string | null = null;
       try {
-        const r = await delegationCommand(startedOn, d, method, outcome);
-        if (!r.ok) refusal = r.error.message || r.error.code;
+        const r = await send(startedOn);
+        if (!r.ok) refusal = r.error.code === OWNER_DISPOSITION_UNSUPPORTED || r.error.code === "idempotency_conflict" || r.error.code === "action_id_conflict" ? r.error.code : r.error.message || r.error.code;
       } catch (e) {
         refusal = e instanceof Error ? e.message : String(e);
       }
@@ -114,6 +117,8 @@ export function useStaleDelegations(minAge: number, enabled: boolean): StaleDele
     },
     [refresh],
   );
+  const command = useCallback((d: AskSummary, method: AskCommandMethod, outcome?: "abandoned") => run(d, (hostId) => delegationCommand(hostId, d, method, outcome)), [run]);
+  const endFollowUp = useCallback((d: AskSummary) => run(d, (hostId) => endDelegationFollowUp(hostId, d)), [run]);
 
   const ctxOf = useMemo<ContextOf>(() => {
     const status = new Map(rowsOf(sidebar).map((s) => [s.cutexSessionId, s.runtime?.status ?? "offline"]));
@@ -124,5 +129,5 @@ export function useStaleDelegations(minAge: number, enabled: boolean): StaleDele
   }, [sidebar]);
   // eslint-disable-next-line react-hooks/exhaustive-deps -- recomputed with each read, not every tick
   const rows = useMemo(() => (open ? staleDelegations(open, minAge, Date.now(), ctxOf) : null), [open, minAge, ctxOf]);
-  return { rows, error, loading, busy, refusals, ctxOf, refresh, command };
+  return { rows, error, loading, busy, refusals, ctxOf, refresh, command, endFollowUp };
 }

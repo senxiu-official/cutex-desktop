@@ -180,7 +180,7 @@ function RowView(props: RowHandlers & { row: EntryRow; index: number; sel: strin
       onContextMenu={(e) => props.onMenu(e, row)}
       title={outside ? t("workspace.fx.symlinkOutside") : row.path}
       className={`${top === null ? "relative" : "absolute inset-x-0"} flex cursor-default select-none items-center gap-1.5 pr-2 text-ui/[inherit] ${
-        selected ? "bg-accent/20 group-focus/list:inset-ring group-focus/list:inset-ring-accent" : multi.has(row.path) ? "bg-accent/10" : "hover:bg-surface-2"
+        selected ? "bg-accent/20 group-focus/list:inset-ring group-focus/list:inset-ring-accent" : multi.has(row.path) ? "bg-accent/10" : "press hover:bg-surface-2"
       } ${row.entry.ignored ? "text-muted" : ""} ${flash === row.path ? "fx-flash" : ""}`}
       style={{ top: top ?? undefined, height: ROW_H, paddingLeft: 4 + row.depth * 12 }}
     >
@@ -300,7 +300,7 @@ export function Gallery(props: GalleryProps) {
               onDoubleClick={() => props.onDoubleClick(entry)}
               onContextMenu={(e) => props.onMenu(e, entry)}
               title={entry.name}
-              className={`flex cursor-default select-none flex-col gap-1 rounded-lg p-1 ${selected ? "bg-accent/20 group-focus/list:ring-1 group-focus/list:ring-accent" : multi.has(entry.path) ? "bg-accent/10" : "hover:bg-surface-2"}`}
+              className={`flex cursor-default select-none flex-col gap-1 rounded-lg p-1 ${selected ? "bg-accent/20 group-focus/list:ring-1 group-focus/list:ring-accent" : multi.has(entry.path) ? "bg-accent/10" : "press hover:bg-surface-2"}`}
             >
               <div className="grid aspect-square place-items-center overflow-hidden rounded-md bg-surface-2">
                 {dir ? <EntryIcon path={entry.path} isDir size={36} /> : <Thumb api={props.api} scope={props.scope} entry={entry} cacheKey={`${props.thumbKey}|${entry.path}|${entry.modifiedAt}`} />}
@@ -396,7 +396,7 @@ export function InlinePreview({ api, hostId, scope, thumbKey, target, multi, chi
   }, [target?.path, target?.dir, target?.git]);
   if (multi > 1) return <p className="p-3 text-xs text-subtle">{t("workspace.fx.multi", { n: multi })}</p>;
   if (!shown) return <p className="p-3 text-xs text-subtle">{t("workspace.fx.pick")}</p>;
-  const button = "grid size-6 shrink-0 place-items-center rounded text-subtle hover:bg-hover hover:text-foreground";
+  const button = "press-icon grid size-6 shrink-0 place-items-center rounded text-subtle hover:bg-hover hover:text-foreground";
   const entry = shown.entry;
   const kind = shown.dir ? null : viewKindOf(shown.path);
   return (
@@ -413,7 +413,7 @@ export function InlinePreview({ api, hostId, scope, thumbKey, target, multi, chi
         ) : (
           <>
             {kind && (
-              <button className="shrink-0 rounded px-1.5 py-0.5 text-subtle hover:bg-hover hover:text-foreground" onClick={() => { if (source) reconsiderFileRender(hostId, scope, shown.path); rememberSourceChoice(kind, !source); }} data-source-toggle="" aria-pressed={source}>
+              <button className="press shrink-0 rounded px-1.5 py-0.5 text-subtle hover:bg-hover hover:text-foreground" onClick={() => { if (source) reconsiderFileRender(hostId, scope, shown.path); rememberSourceChoice(kind, !source); }} data-source-toggle="" aria-pressed={source}>
                 {source ? t("workspace.showRendered") : t("workspace.showSource")}
               </button>
             )}
@@ -477,6 +477,8 @@ export function formatSize(n: number): string {
 
 interface SearchListProps {
   results: readonly string[] | null;
+  /** The search did not run (shown instead of the hint / count). */
+  issue?: ReactNode;
   sel: number;
   marks: ReadonlyMap<string, GitMark>;
   onSelect(index: number): void;
@@ -486,7 +488,7 @@ interface SearchListProps {
   onDragStart(e: DragEvent, path: string): void;
 }
 
-export function SearchList({ results, sel, marks, onSelect, onOpen, onMenu, onEnterDir, onDragStart }: SearchListProps) {
+export function SearchList({ results, issue, sel, marks, onSelect, onOpen, onMenu, onEnterDir, onDragStart }: SearchListProps) {
   const win = useOwnerWindow();
   const { t } = useI18n();
   useEffect(() => {
@@ -494,7 +496,7 @@ export function SearchList({ results, sel, marks, onSelect, onOpen, onMenu, onEn
   }, [sel]);
   return (
     <div className="min-h-0 flex-1 overflow-y-auto" role="listbox" aria-label={t("workspace.fx.searchAll")}>
-      <div className="flex items-center border-b border-border/60 px-2.5 py-1 text-meta/[inherit] text-subtle">{results === null ? t("workspace.fx.searchHint") : t("workspace.fx.searchCount", { n: results.length })}</div>
+      <div className="flex items-center border-b border-border/60 px-2.5 py-1 text-meta/[inherit] text-subtle">{issue ?? (results === null ? t("workspace.fx.searchHint") : t("workspace.fx.searchCount", { n: results.length }))}</div>
       {results?.map((path, i) => {
         const dir = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
         const mark = marks.get(path) ?? null;
@@ -511,7 +513,7 @@ export function SearchList({ results, sel, marks, onSelect, onOpen, onMenu, onEn
             onDoubleClick={() => onOpen(path)}
             onContextMenu={(e) => onMenu(e, path)}
             title={t("workspace.fx.searchRowHint")}
-            className={`flex h-6 cursor-default items-center gap-1.5 px-2.5 text-ui/[inherit] ${i === sel ? "bg-accent/20" : "hover:bg-surface-2"}`}
+            className={`flex h-6 cursor-default items-center gap-1.5 px-2.5 text-ui/[inherit] ${i === sel ? "bg-accent/20" : "press hover:bg-surface-2"}`}
           >
             <EntryIcon path={path} isDir={false} />
             <span className={`shrink-0 ${gitClass(mark)}`}>{path.split("/").pop()}</span>

@@ -5,6 +5,7 @@ import { guardStdio } from "./stdioGuard";
 import { devRendererUrl } from "./devRenderer";
 import { appWindows, markOwnerWindow, ownerWindow } from "./appWindows";
 import { localFileAction, localFileOpenInfo } from "./localFiles";
+import { runFileConfirm } from "./localFileRunPrompt";
 import { createRemoteCopies } from "./remoteCopiesIpc";
 import { initialCaption, isOverlayColor, isSymbolColor } from "../shared/windowChrome";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
@@ -44,6 +45,7 @@ import { setWindowAppDetails, setWindowsAppId, syncWindowsShortcuts } from "./wi
 import { DeskPetService } from "./deskPet";
 import { packArtOf } from "./deskPetPackArt";
 import { demoOwnerAlertRequested, OwnerAlerts } from "./ownerAlert";
+import { BoardWindow, demoBoardRequested } from "./board";
 import { DesktopNotifications } from "./notifications";
 import { sanitizeEventAlert, sanitizeRetract, sanitizeShellNotification } from "../shared/notificationLevels";
 import { createPluginNetworkLockdown, PLUGIN_WEBRTC_POLICY } from "./pluginNetwork";
@@ -181,6 +183,7 @@ function createDaemon(hostId: string, epoch: string): DaemonService {
       manager.onDaemonState(hostId, epoch, state);
       ownerAlerts.onDaemonState(hostId, state);
       clientPresence?.onDaemonState(hostId, state);
+      board.onHostChanged(hostId);
       return sendEvent("daemonState", { ...tag, state });
     }
     if (event === "hostEvent") {
@@ -191,8 +194,11 @@ function createDaemon(hostId: string, epoch: string): DaemonService {
       browserHostEvent(hostId, envelope);
       // client-remote-close: a close request for this desktop instance starts the countdown (main-owned).
       clientPresence?.onHostEvent(hostId, envelope);
+      // 项目看板: a relevant event re-reads this host's summary (only while the board is shown).
+      board.onHostEvent(hostId, envelope.cutex?.method);
       return sendEvent("hostEvent", { ...tag, envelope });
     }
+    if (event === "sidebarChanged") board.onHostChanged(hostId);
     sendEvent(event, { ...tag, ...(payload as object) } as DesktopEvents[typeof event]);
   });
   // Pairing v2: allowing a full-control device asks here, in a native dialog that shows its code (main/pairingInvites.ts).
@@ -213,6 +219,15 @@ const ownerAlerts = new OwnerAlerts({
   openInApp: (hostId, agentId, notificationId) => sendEvent("ownerNotifyOpen", { hostId, agentId, notificationId }),
   openEvent: (key) => sendEvent("notifyClick", { key }),
 });
+
+/** 项目看板 (main/board.ts): its own window and reads; a click shows the main window at the target. */
+const board = new BoardWindow({
+  hosts: () => hosts?.state().hosts ?? [],
+  daemonFor: (hostId) => hosts?.connection(hostId)?.daemon ?? null,
+  shell: desktopShell,
+  openInApp: (target) => sendEvent("boardOpen", { target }),
+});
+desktopShell.onOpenBoard = () => board.open();
 
 /**
  * Remote close (cutex `client-remote-close`, main/clientPresence.ts): the countdown is main's, so it
@@ -320,6 +335,7 @@ const ALLOWED: ReadonlySet<InvokeMethod> = new Set<InvokeMethod>([
   "continueDirectorRotation",
   "stuckBusMessages",
   "discardStuckBusMessage",
+  "messageEndFollowUp",
   "delegationUpgradeSnapshot",
   "delegationUpgradeAction",
   "delegationUpgradeApproval",
@@ -328,8 +344,10 @@ const ALLOWED: ReadonlySet<InvokeMethod> = new Set<InvokeMethod>([
   "delegationRetirementReview",
   "closeBusMessage",
   "busMessageEvidence",
+  "busMessages",
   "runtimes",
   "runtimePrunePlan",
+  "cancelRuntimePrunePlan",
   "pruneRuntimes",
   "claudeAccounts",
   "addProfileVariant",
@@ -408,6 +426,8 @@ const ALLOWED: ReadonlySet<InvokeMethod> = new Set<InvokeMethod>([
   "capabilities",
   "usage",
   "usagePrices",
+  "quotaHistory",
+  "quotaAttribution",
   "putUsagePrices",
   "guidesPreferences",
   "putGuidesPreferences",
@@ -537,6 +557,9 @@ const ALLOWED: ReadonlySet<InvokeMethod> = new Set<InvokeMethod>([
   "componentConfigure",
   "componentIndexCheck",
   "askCommand",
+  "askDispose",
+  "ownerDispositionSupport",
+  "jobCloseFollowUp",
   "jobs",
   "jobServiceCapabilities",
   "cancelJob",
@@ -742,7 +765,8 @@ ipcMain.handle(SHELL_CHANNEL, (event, request: ShellRequest) => {
       return localFileOpenInfo(request.hostId, request.path);
     case "filePath":
       if (Object.keys(request).some((key) => !["op", "hostId", "path", "action"].includes(key))) throw new Error("unknown local file request field");
-      return localFileAction(request.hostId, request.path, request.action, shell);
+      // 运行… asks in main's own dialog over the asking window (main/localFileRunPrompt.ts); the renderer cannot skip it.
+      return localFileAction(request.hostId, request.path, request.action, shell, runFileConfirm(() => BrowserWindow.fromWebContents(event.sender), () => desktopShell.locale));
     case "setZoom":
       if (typeof request.factor !== "number" || !(request.factor >= 0.5 && request.factor <= 2.5)) throw new Error("bad zoom");
       event.sender.setZoomFactor(request.factor);
@@ -756,9 +780,11 @@ ipcMain.handle(SHELL_CHANNEL, (event, request: ShellRequest) => {
       return desktopShell.setCloseBehavior(request.value);
     case "setLocale":
       if (isShellLocale(request.value)) desktopShell.setLocale(request.value);
+      board.onLocaleChanged();
       return;
     case "setTerms":
       desktopShell.setTerms(request.value);
+      board.onLocaleChanged();
       return;
     case "setAttention":
       desktopShell.setAttention(request.count);
@@ -811,6 +837,14 @@ ipcMain.handle(SHELL_CHANNEL, (event, request: ShellRequest) => {
     case "eventAlert":
       if (!desktopShell.notifyOff.bigAlert) ownerAlerts.showEvent(sanitizeEventAlert(request.alert));
       return;
+    case "openBoard":
+      board.open();
+      return;
+    case "boardOpenOnLaunch":
+      return board.openOnLaunch;
+    case "setBoardOpenOnLaunch":
+      if (typeof request.value !== "boolean") throw new Error("bad value");
+      return board.setOpenOnLaunch(request.value);
     case "retractAlerts": {
       const retract = sanitizeRetract(request.retract);
       ownerAlerts.retract(retract);
@@ -1060,9 +1094,9 @@ function deskRequest(senderId: number, arg: unknown): unknown {
   }
 }
 
-/** The app window only: the big alert window has its own channel (main/ownerAlert.ts). */
+/** The app window only: the big alert window and the 项目看板 have their own channels (main/ownerAlert.ts, main/board.ts). */
 function isAppSender(event: IpcMainInvokeEvent): boolean {
-  if (ownerAlerts.isAlertSender(event.sender)) return false;
+  if (ownerAlerts.isAlertSender(event.sender) || board.isBoardSender(event.sender)) return false;
   return !!mainWindow && event.sender === mainWindow.webContents
     && !!event.senderFrame && event.senderFrame === mainWindow.webContents.mainFrame
     && isAppUrl(event.senderFrame.url);
@@ -1342,6 +1376,7 @@ app.whenReady().then(async () => {
   desktopShell.start();
   desks.watchDisplays();
   ownerAlerts.start();
+  board.start();
   deskPet = new DeskPetService({
     dir: join(app.getPath("userData"), "desk-pet"),
     isAppSender,
@@ -1379,6 +1414,7 @@ app.whenReady().then(async () => {
     localHost: hasImplicitLocalHost(process.platform, localCutexConfigured(localProbe)),
     onDisconnect: (hostId) => {
       ownerAlerts.forgetHost(hostId);
+      board.forgetHost(hostId);
       clientPresence?.forgetHost(hostId);
       remoteClose.forgetHost(hostId);
     },
@@ -1386,6 +1422,9 @@ app.whenReady().then(async () => {
   });
   // Dev only: sample big alerts without a daemon (screenshots).
   if (demoOwnerAlertRequested()) setTimeout(() => ownerAlerts.showDemo(), 1500);
+  // 项目看板: Settings → 启动时打开 (on its remembered display); dev only: sample projects without a daemon.
+  if (demoBoardRequested()) void import("./boardDemo").then((m) => board.showDemo(m.demoBoardProjects()));
+  else if (board.openOnLaunch) board.open();
   await hosts.start();
   remoteCopies = createRemoteCopies(app.getPath("userData"), () => hosts, shell, async () => {
     // Downloads page → 更改文件夹: main's own dialog, on the window the owner is using.
@@ -1431,6 +1470,7 @@ app.on("will-quit", (event) => {
     return;
   }
   ownerAlerts.dispose();
+  board.dispose();
   deskPet?.dispose();
   remoteClose.dispose();
   desktopShell.dispose();

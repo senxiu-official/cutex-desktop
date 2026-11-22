@@ -12,6 +12,7 @@ import { applyGroupEdit, checkGroupDrafts, freeGroupName, type GroupEdit } from 
 import type { HostLook } from "../../lib/hostScope";
 import { settingsAnchorId } from "../../lib/settingsNav";
 import { saveHostGroups, setViewScope, useHostScope } from "../../lib/useHostScope";
+import { settingsControlChanged, useSettingsCard } from "../../lib/settingsDrafts";
 import { useApp } from "../../store";
 import { HostDot } from "../HostMark";
 import { Button, Section, TextInput, SettingsGroup } from "./Form";
@@ -28,12 +29,12 @@ export function SwatchPicker({ value, onChange, onNone, label, customLabel, none
   const custom = current !== null && !(HOST_PALETTE as readonly string[]).includes(current);
   return (
     <span className="flex items-center gap-1.5">
-      {onNone && <button type="button" onClick={onNone} title={noneLabel} aria-label={noneLabel} aria-pressed={current === null} className={`h-4 w-4 rounded-full border border-subtle bg-[linear-gradient(135deg,transparent_45%,var(--color-subtle)_45%,var(--color-subtle)_55%,transparent_55%)] ${current === null ? RING : ""}`} />}
+      {onNone && <button type="button" onClick={(e) => settingsControlChanged(e.currentTarget, onNone())} title={noneLabel} aria-label={noneLabel} aria-pressed={current === null} className={`h-4 w-4 rounded-full border border-subtle bg-[linear-gradient(135deg,transparent_45%,var(--color-subtle)_45%,var(--color-subtle)_55%,transparent_55%)] ${current === null ? RING : ""}`} />}
       {HOST_PALETTE.map((c) => (
-        <button key={c} type="button" onClick={() => onChange(c)} title={c} aria-label={`${label} ${c}`} aria-pressed={current === c} className={`h-4 w-4 rounded-full ${current === c ? RING : ""}`} style={{ background: c }} />
+        <button key={c} type="button" onClick={(e) => settingsControlChanged(e.currentTarget, onChange(c))} title={c} aria-label={`${label} ${c}`} aria-pressed={current === c} className={`h-4 w-4 rounded-full ${current === c ? RING : ""}`} style={{ background: c }} />
       ))}
       <label title={customLabel} className={`relative h-4 w-4 cursor-pointer overflow-hidden rounded-full border border-dashed border-subtle ${custom ? RING : ""}`} style={custom ? { background: current! } : undefined}>
-        <input type="color" aria-label={customLabel} value={current ?? "#888888"} onChange={(e) => onChange(e.target.value)} className="absolute inset-0 h-full w-full cursor-pointer opacity-0" />
+        <input type="color" aria-label={customLabel} value={current ?? "#888888"} data-settings-control="" onChange={(e) => settingsControlChanged(e.currentTarget, onChange(e.target.value))} className="absolute inset-0 h-full w-full cursor-pointer opacity-0" />
       </label>
     </span>
   );
@@ -84,6 +85,8 @@ function GroupRow({ group, index, count, apply }: { group: HostGroup; index: num
   const [name, setName] = useState(group.name);
   const [error, setError] = useState<HostGroupError | null>(null);
   const [armed, setArmed] = useArmed(group.id);
+  // The name saves on Enter / blur: unsaved until that rename succeeded (lib/settingsDrafts).
+  const nameCard = useSettingsCard();
   const shown = sameScope(scope.scope, { kind: "group", id: group.id });
   const known = group.hosts.filter((id) => scope.host(id));
   const run = async (edit: GroupEdit) => {
@@ -93,13 +96,15 @@ function GroupRow({ group, index, count, apply }: { group: HostGroup; index: num
   };
   const commitName = async () => {
     if (name.trim() === group.name) return setName(group.name);
-    await run({ kind: "rename", id: group.id, name });
+    const upTo = nameCard.revision();
+    if (!(await run({ kind: "rename", id: group.id, name }))) nameCard.saved(upTo);
   };
   return (
     <SettingsGroup agents="none" source="local"><div id={hostGroupRowId(group.id)} className={`-mx-4 scroll-mt-4 border-b border-border px-4 py-3 last:border-b-0 ${armed ? ARMED_FRAME : ""}`}>
       <div className="flex items-center gap-2">
         <Layers size={14} className="shrink-0 text-muted" style={group.color ? { color: group.color } : undefined} />
         <TextInput
+          inputRef={nameCard.ref}
           width="w-48"
           value={name}
           label={t("hostGroups.name")}
@@ -158,8 +163,8 @@ function GroupRow({ group, index, count, apply }: { group: HostGroup; index: num
             label={t("hostGroups.color")}
             customLabel={t("host.colorCustom")}
             noneLabel={t("hostGroups.colorNone")}
-            onNone={() => void run({ kind: "recolor", id: group.id, color: null })}
-            onChange={(color) => void run({ kind: "recolor", id: group.id, color })}
+            onNone={() => run({ kind: "recolor", id: group.id, color: null }).then((refused) => !refused)}
+            onChange={(color) => run({ kind: "recolor", id: group.id, color }).then((refused) => !refused)}
           />
         </span>
       </div>
@@ -174,13 +179,15 @@ function NewGroupForm({ groups, apply, onDone }: { groups: readonly HostGroup[];
   const [members, setMembers] = useState<string[]>([]);
   const [color, setColor] = useState<string | null>(null);
   const [error, setError] = useState<HostGroupError | null>(null);
+  // Unsaved from the first change until the group is created, which closes it (lib/settingsDrafts).
+  const card = useSettingsCard();
   const create = async () => {
     const r = await apply({ kind: "create", name, hosts: members, color });
     if (r) setError(r.error);
     else onDone();
   };
   return (
-    <SettingsGroup agents="none" source="local"><div className="-mx-4 border-b border-border bg-surface-2/40 px-4 py-3">
+    <SettingsGroup agents="none" source="local"><div ref={card.ref} className="-mx-4 border-b border-border bg-surface-2/40 px-4 py-3">
       <div className="flex items-center gap-2">
         <Layers size={14} className="shrink-0 text-muted" style={color ? { color } : undefined} />
         <TextInput
@@ -209,7 +216,7 @@ function NewGroupForm({ groups, apply, onDone }: { groups: readonly HostGroup[];
       <div className="mt-2 flex flex-col gap-2 pl-6 text-xs text-muted">
         <span className="flex items-start gap-2">
           <span className="shrink-0 pt-0.5">{t("hostGroups.members")}</span>
-          <MemberChips hosts={scope.hosts} members={members} onToggle={(id) => setMembers((m) => (m.includes(id) ? m.filter((x) => x !== id) : [...m, id]))} />
+          <MemberChips hosts={scope.hosts} members={members} onToggle={(id) => (card.changed(), setMembers((m) => (m.includes(id) ? m.filter((x) => x !== id) : [...m, id])))} />
         </span>
         <span className="flex items-center gap-2">
           {t("hostGroups.color")}

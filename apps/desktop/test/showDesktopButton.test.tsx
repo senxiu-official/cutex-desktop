@@ -7,11 +7,20 @@ import { act, createElement as h } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const fx = vi.hoisted(() => ({ shown: false, snapshot: null as unknown, toggles: 0 }));
+const fx = vi.hoisted(() => ({ shown: false, snapshot: null as unknown, toggles: 0, calls: [] as string[] }));
+// Settings in front leaves first (owner 2026-11-18; the real one: test/pagesOwnPane.test.tsx).
+// It runs the action once Settings is out of the way; the button hands itself over as where an unsaved-Settings confirm shows.
+vi.mock("../src/renderer/src/lib/openSettings", () => ({
+  leaveCoveringSettings: (go: () => void, anchor?: HTMLElement | null) => {
+    fx.calls.push(anchor ? `leave@${anchor.dataset.titlebarEntry}` : "leave");
+    go();
+  },
+}));
 vi.mock("../src/renderer/src/i18n", () => ({ useI18n: () => ({ t: (key: string, v?: Record<string, unknown>) => (v ? `${key}:${JSON.stringify(v)}` : key) }) }));
 vi.mock("../src/renderer/src/lib/paneActions", () => ({
   showDesktop: () => {
     fx.toggles++;
+    fx.calls.push("show");
     // What the real one does: show (remembering the layout), or put it back.
     fx.snapshot = fx.shown ? null : {};
     fx.shown = !fx.shown;
@@ -29,7 +38,7 @@ const btn = () => host.querySelector<HTMLButtonElement>("[data-show-desktop]")!;
 const render = () => act(() => root!.render(h(ShowDesktopButton, { className: "ICON" })));
 
 beforeEach(() => {
-  Object.assign(fx, { shown: false, snapshot: null, toggles: 0 });
+  Object.assign(fx, { shown: false, snapshot: null, toggles: 0, calls: [] });
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
@@ -54,6 +63,8 @@ describe("显示桌面", () => {
     render();
     expect(fx.toggles).toBe(2);
     expect(btn().getAttribute("aria-pressed")).toBe("false");
+    // Each press leaves Settings in front first, so the desktop is seen.
+    expect(fx.calls).toEqual(["leave@show-desktop", "show", "leave@show-desktop", "show"]);
   });
 
   it("a real button: in the Tab order, with its name for a screen reader", () => {
@@ -74,6 +85,7 @@ describe("显示桌面", () => {
     expect(row!.label).toBe("titlebar.showDesktop");
     act(() => row!.onSelect());
     expect(fx.toggles).toBe(1);
+    expect(fx.calls).toEqual(["leave", "show"]);
   });
 });
 

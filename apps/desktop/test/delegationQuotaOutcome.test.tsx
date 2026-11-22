@@ -32,7 +32,7 @@ vi.mock("../src/renderer/src/lib/delegationStore", () => ({
   loadCardDelegation: (...args: unknown[]) => mock.loadCard(...args),
 }));
 vi.mock("../src/renderer/src/lib/p2Access", () => ({ useP2Access: () => ({ delegations: false }) }));
-vi.mock("../src/renderer/src/lib/delegationMenu", () => ({ delegationMenu: () => [], runDelegationCommand: vi.fn() }));
+vi.mock("../src/renderer/src/lib/delegationMenu", () => ({ delegationMenu: () => [], runDelegationCommand: vi.fn(), runEndFollowUp: vi.fn(), canEndDelegationFollowUp: () => true, endFollowUpShown: () => true }));
 vi.mock("../src/renderer/src/lib/modelDisplay", () => ({ useModelName: () => (id: string) => id }));
 vi.mock("../src/renderer/src/lib/time", () => ({ useNow: () => Date.parse("2026-10-30T00:00:00Z") }));
 vi.mock("../src/renderer/src/lib/userLayoutToggle", () => ({ useUserLayoutToggle: () => (run: () => void) => run() }));
@@ -162,7 +162,8 @@ describe("runtime gate cause evidence", () => {
   it.each(["quota", "server_error"] as const)("uses an attached %s diagnostic", (lastError) => {
     expect(gateClosedCause(ask({ attempt: { n: 1, lastError: `Error: ${lastError}` } }))).toBe(lastError);
     expect(gateClosedCause(ask({ closed: "completed", attempt: { n: 1, lastError } }))).toBeNull();
-    expect(gateClosedCause(ask({ execution: "running", attempt: { n: 1, lastError } }))).toBeNull();
+    expect(gateClosedCause(ask({ execution: "running", attempt: { n: 1, lastError } }))).toBe(lastError);
+    expect(gateClosedCause(ask({ execution: "running", hold: null, attempt: { n: 1, lastError } }))).toBeNull();
   });
 });
 

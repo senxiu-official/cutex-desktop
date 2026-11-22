@@ -28,7 +28,7 @@ export default defineModule({
       { id: "bookmarks.gutter", side: "left", anchor: "top", order: 100, dockMinWidth: 240, titleKey: "bookmarks.title", icon: Bookmark, Trigger: BookmarksTrigger, Body: BookmarksGutter },
     ],
     "side.component": [{ id: BOOKMARKS, titleKey: "bookmarks.memo.title", icon: Bookmark, instances: "singleton", defaultBinding: "host", placement: { home: "reference" }, parseParams: parseList,
-      init: (params: ListState, previous: ListState | null) => ({ ...previous, ...params }), restore: (raw) => parseList(raw), useTab: useBookmarksTab, Body: MemoCard, launcher: { category: "content", order: 400, params: () => ({}) } }],
+      init: (params: ListState, previous: ListState | null) => ({ ...previous, ...params }), restore: (raw) => parseList(raw), useTab: useBookmarksTab, Body: MemoCard, launcher: { category: "content", order: 400, params: () => ({ pin: null }) } }],
     // Not on agents (the sidebar agent menu): 置顶 keeps an agent at hand (owner 2026-10-16).
     // `inline`: 书签 is always on a message's hover bar (owner 2026-10-23); everything else is in its 「⋯」.
     "ref.action": [{ id: "bookmarks.toggle", icon: Bookmark, titleKey: "bookmarks.add", excludeKinds: UNBOOKMARKED_KINDS, inline: true, useState: useBookmarkAction, run: ref => toggleBookmark(ref, bookmarkContext(ref)) }],

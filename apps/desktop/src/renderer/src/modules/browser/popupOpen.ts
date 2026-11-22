@@ -65,13 +65,15 @@ export function revealBrowserTab(event: Pick<BrowserEvent, "hostId" | "tabKey">,
 }
 
 /**
- * Opens a popup's new tab (null: not an http(s) URL / an agent-pool or owner-minted tab without its minted key). `open`: the
+ * Opens a popup's new tab (null: not an http(s) / cutex:service URL / a service page, an agent-pool or owner-minted tab without its minted key). `open`: the
  * module's services.side.open, used when the opener is in the focused Shelf (or gone).
  */
 export function openPopupTab(event: PopupEvent, open: SideOpen): SideOpenResult | null {
   const url = browserNavigationUrl(event.newTabUrl);
   const owner = event.newTabOwner === true;
-  if (!url || !/^https?:/.test(url) || ((owner || event.pool === "agent") && !isBrowserTabKey(event.newTabKey))) return null;
+  // A page of a service on this host: main names it by its cutex:service/ address (and always mints its key).
+  const service = !!url && url.startsWith("cutex:service/");
+  if (!url || !(service || /^https?:/.test(url)) || ((owner || service || event.pool === "agent") && !isBrowserTabKey(event.newTabKey))) return null;
   // Main minted the new tab's key in the opener's pool — or, with newTabOwner, in the owner's pool whatever the
   // opener's — and holds the exact URL / form body for it.
   const params: Record<string, string | boolean> = owner ? { url, tabKey: event.newTabKey!, ownerTab: true } : event.pool === "agent" ? { url, tabKey: event.newTabKey!, agentOpened: true }
@@ -79,5 +81,7 @@ export function openPopupTab(event: PopupEvent, open: SideOpen): SideOpenResult 
   const opener = event.tabKey ? browserTabInstance(event.hostId, event.tabKey) : null;
   const source = opener ? { instanceId: opener } : null;
   const opts = { binding: { kind: "host" as const, hostId: event.hostId }, focus: false };
+  // That service's tab on its opener's page, never a web tab on the 浏览器 page (owner report 2026-11-18).
+  if (service) return source ? sideOpenFrom(source, SERVICE_TAB, params, opts) : open(SERVICE_TAB, params, opts);
   return opensElsewhere(source) ? sideOpenFrom(source, BROWSER_TAB, params, opts) : open(BROWSER_TAB, params, opts);
 }

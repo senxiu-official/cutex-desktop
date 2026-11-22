@@ -48,6 +48,7 @@ vi.mock("../src/renderer/src/store", async (importOriginal) => ({
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const { FilesBody } = await import("../src/renderer/src/modules/workspace/Files");
+const { ChangesBody } = await import("../src/renderer/src/modules/workspace/Changes");
 const { WorkspaceContext, NO_DIR_VERSIONS } = await import("../src/renderer/src/lib/workspaceView");
 const { useExplorerStore, setExplorerOptions } = await import("../src/renderer/src/modules/workspace/explorer/store");
 const { DEFAULT_OPTIONS } = await import("../src/renderer/src/modules/workspace/explorer/model");
@@ -60,10 +61,10 @@ const settle = async (n = 6) => {
 describe("文件 explorer", { timeout: 20_000 }, () => {
   let root: Root;
   let host: HTMLDivElement;
-  const ctx = { hostId: "local", api: fx.api as never, scope: { kind: "session" as const, id: "eva" }, revision: 0, git: null, error: null, dirs: NO_DIR_VERSIONS };
-  const render = async (state: Record<string, unknown> = { q: "" }) => {
+  const ctx = { hostId: "local", api: fx.api as never, scope: { kind: "session" as const, id: "eva" }, revision: 0, git: null, gitIssue: null as import("../src/renderer/src/lib/transientError").ReadIssue | null, reloadGit: () => {}, dirs: NO_DIR_VERSIONS };
+  const render = async (state: Record<string, unknown> = { q: "" }, value: typeof ctx = ctx) => {
     const props = { instance: { id: "f1", state }, setState: () => {}, sessionId: "eva", hostId: "local", close: () => {} } as never;
-    await act(async () => root.render(h(WorkspaceContext.Provider, { value: ctx }, h(FilesBody, props))));
+    await act(async () => root.render(h(WorkspaceContext.Provider, { value }, h(FilesBody, props))));
     await settle();
   };
   const list = () => host.querySelector<HTMLElement>("[data-explorer-list]")!;
@@ -87,6 +88,112 @@ describe("文件 explorer", { timeout: 20_000 }, () => {
   afterEach(() => {
     act(() => root.unmount());
     host.remove();
+  });
+
+  // Owner 2026-11-16: the panel showed only red `git_status_busy: git status is busy; retry shortly`, with no
+  // reload and no retry. Git status only decorates the tree; failed reads say so plainly and offer 重新加载.
+  describe("failed host reads", () => {
+    const busy = (what = "git status is busy; retry shortly") => new Error(`git_status_busy: ${what}`);
+    const issueLine = () => host.querySelector<HTMLElement>("[data-read-issue]");
+    const reloadButton = () => [...(issueLine()?.querySelectorAll("button") ?? [])].find((b) => b.textContent?.includes("readIssue.reload"))!;
+    const fsDir = fx.api.fsDir;
+    const fsSearch = fx.api.fsSearch;
+    afterEach(() => {
+      fx.api.fsDir = fsDir;
+      fx.api.fsSearch = fsSearch;
+    });
+
+    it("a busy git status leaves the tree on screen with a quiet retry line and 重新加载", async () => {
+      const reloadGit = vi.fn();
+      await render({ q: "" }, { ...ctx, gitIssue: { code: "git_status_busy", detail: "git_status_busy: git status is busy; retry shortly", retrying: true }, reloadGit });
+      expect(rows()).toEqual(["docs", "src", "README.md"]);
+      expect(host.textContent).not.toContain("git status is busy");
+      expect(issueLine()!.getAttribute("data-read-issue")).toBe("retrying");
+      expect(issueLine()!.textContent).toContain("workspace.git.retrying");
+      expect(issueLine()!.title).toContain("git_status_busy");
+      await act(async () => reloadButton().click());
+      expect(reloadGit).toHaveBeenCalledTimes(1);
+      // Not retrying (e.g. git missing): still the tree, the line says it could not be read.
+      await render({ q: "" }, { ...ctx, gitIssue: { code: "git_unavailable", detail: "git_unavailable: no git", retrying: false }, reloadGit });
+      expect(rows()).toEqual(["docs", "src", "README.md"]);
+      expect(issueLine()!.textContent).toContain("workspace.git.failed");
+    });
+
+    it("a busy folder read retries by itself and then shows the folder", async () => {
+      let calls = 0;
+      fx.api.fsDir = (scope: unknown, path: string) => (path === "" && calls++ === 0 ? Promise.reject(new Error("heavy_read_capacity_exceeded: heavy-read wait queue is full; retry shortly")) : fsDir(scope, path));
+      await render();
+      expect(rows()).toEqual([]);
+      expect(issueLine()!.textContent).toContain("workspace.fx.dirRetrying");
+      await act(async () => new Promise((r) => setTimeout(r, 1_100)));
+      await settle();
+      expect(rows()).toEqual(["docs", "src", "README.md"]);
+      expect(issueLine()).toBeNull();
+    });
+
+    it("a folder read that will not recover by itself waits for 重新加载", async () => {
+      let broken = true;
+      fx.api.fsDir = (scope: unknown, path: string) => (broken ? Promise.reject(new Error("permission_denied: access is denied")) : fsDir(scope, path));
+      await render();
+      expect(issueLine()!.getAttribute("data-read-issue")).toBe("failed");
+      expect(issueLine()!.textContent).toContain("workspace.fx.dirFailed");
+      expect(issueLine()!.title).toContain("permission_denied");
+      await act(async () => new Promise((r) => setTimeout(r, 1_100)));
+      await settle();
+      expect(rows()).toEqual([]);
+      broken = false;
+      await act(async () => reloadButton().click());
+      await settle();
+      expect(rows()).toEqual(["docs", "src", "README.md"]);
+    });
+
+    it("a failed search says so instead of 0 results, and retries", async () => {
+      let calls = 0;
+      fx.api.fsSearch = () => (calls++ === 0 ? Promise.reject(busy("file search is busy")) : Promise.resolve({ query: "main", results: [{ path: "src/main.ts" }] })) as never;
+      await render({ q: "main" });
+      await act(async () => new Promise((r) => setTimeout(r, 200)));
+      await settle();
+      expect(issueLine()!.textContent).toContain("workspace.fx.searchRetrying");
+      expect(host.textContent).not.toContain("workspace.fx.searchCount");
+      await act(async () => new Promise((r) => setTimeout(r, 1_300)));
+      // The retry's state update lands when that act ends; the search then runs after its 150 ms pause.
+      await act(async () => new Promise((r) => setTimeout(r, 300)));
+      await settle();
+      expect(calls).toBe(2);
+      expect(issueLine()).toBeNull();
+      expect(host.textContent).toContain("main.ts");
+    });
+
+    // Cross-review 2026-11-16 (gate-notice-review repro): a transient failure re-reading the same search kept nothing.
+    it("a failed refresh of the same search keeps the last good results under the retry line", async () => {
+      let calls = 0;
+      fx.api.fsSearch = (() => ++calls === 1
+        ? Promise.resolve({ query: "main", results: [{ path: "src/main.ts" }] })
+        : Promise.reject(new Error("heavy_read_capacity_exceeded: busy"))) as never;
+      await render({ q: "main" });
+      await act(async () => new Promise((resolve) => setTimeout(resolve, 200)));
+      expect(host.querySelector('[role="listbox"] [data-path="src/main.ts"]')).not.toBeNull();
+      await render({ q: "main" }, { ...ctx, revision: 1 });
+      await act(async () => new Promise((resolve) => setTimeout(resolve, 200)));
+      expect(calls).toBe(2);
+      expect(host.querySelector('[data-read-issue="retrying"]')).not.toBeNull();
+      expect(host.querySelector('[role="listbox"] [data-path="src/main.ts"]')).not.toBeNull();
+    });
+
+    it("the 改动 card shows a plain line with 重新加载, and keeps the last list under it", async () => {
+      const reloadGit = vi.fn();
+      const props = { instance: { id: "c1", state: null }, setState: () => {}, sessionId: "eva", hostId: "local", close: () => {} } as never;
+      const issue = { code: "git_status_busy", detail: "git_status_busy: git status is busy; retry shortly", retrying: true };
+      await act(async () => root.render(h(WorkspaceContext.Provider, { value: { ...ctx, gitIssue: issue, reloadGit } }, h(ChangesBody, props))));
+      expect(issueLine()!.textContent).toContain("workspace.changes.retrying");
+      expect(host.textContent).not.toContain("git status is busy");
+      await act(async () => reloadButton().click());
+      expect(reloadGit).toHaveBeenCalledTimes(1);
+      const git = { isRepo: true, branch: "main", upstream: null, ahead: 0, behind: 0, head: null, files: [{ path: "src/main.ts", status: "modified", staged: false, added: 1, deleted: 0 }] };
+      await act(async () => root.render(h(WorkspaceContext.Provider, { value: { ...ctx, git: git as never, gitIssue: issue, reloadGit } }, h(ChangesBody, props))));
+      expect(issueLine()).not.toBeNull();
+      expect(host.textContent).toContain("main.ts");
+    });
   });
 
   it("hidden files are off; arrows move and the preview follows; → / ← open and close", async () => {

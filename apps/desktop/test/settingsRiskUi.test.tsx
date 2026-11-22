@@ -10,7 +10,8 @@ const fixture = vi.hoisted(() => ({ target: "A", menus: [] as any[], answer: nul
 }));
 vi.mock("../src/renderer/src/i18n", async () => {
   const { en } = await import("../src/renderer/src/lib/settingsRiskMessages");
-  const t = (key: string, vars: Record<string, unknown> = {}) => ((en as Record<string, string>)[key] ?? key)
+  // Artifact keys (no English here) show their values, so the armed page-clear text can be checked.
+  const t = (key: string, vars: Record<string, unknown> = {}) => ((en as Record<string, string>)[key] ?? (key.startsWith("artifacts.") ? `${key} ${Object.values(vars).join(" | ")}` : key))
     .replace(/\{(\w+)\}/g, (match, name: string) => String(vars[name] ?? match));
   return { useI18n: () => ({ t, locale: "en" }), translate: t };
 });
@@ -75,7 +76,7 @@ vi.mock("../src/renderer/src/components/settings/Form", async () => {
 import { CollabExternalSubPage, CollabLinksSubPage, CollabPage } from "../src/renderer/src/components/settings/SecuritySettings";
 import { CorsSection, RemoteAccessSection } from "../src/renderer/src/components/settings/RemoteAccess";
 import { BrowserSettings } from "../src/renderer/src/modules/browser/BrowserSettings";
-import { clearPageData } from "../src/renderer/src/modules/artifacts/pageData";
+import { pageDataClearEntry } from "../src/renderer/src/modules/artifacts/pageDataClear";
 import { useApp } from "../src/renderer/src/store";
 
 let element: HTMLDivElement, root: Root;
@@ -124,17 +125,22 @@ beforeEach(() => {
 afterEach(() => { act(() => root.unmount()); element.remove(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe("settings risk interactions", () => {
-  it("does not widen visibility on first click or cancel; requires exact typing", async () => {
+  it("widening visibility confirms inline in place (no typing): the first click and cancel write nothing", async () => {
     await render(CollabPage); await click("security.crossProject.host");
     expect(fixture.apis.A.patchAgentSecurity).not.toHaveBeenCalled();
-    expect(fixture.prompt.mock.calls[0]![2].hint).toContain("Host A");
-    await answer(null); expect(fixture.apis.A.patchAgentSecurity).not.toHaveBeenCalled();
-    await click("security.crossProject.host"); await answer("Host A "); expect(fixture.apis.A.patchAgentSecurity).not.toHaveBeenCalled();
-    await click("security.crossProject.host"); await answer("Host A");
+    expect(fixture.prompt).not.toHaveBeenCalled();
+    const confirm = element.querySelector("[data-settings-risk-confirm]");
+    expect(confirm?.textContent).toContain("Host A");
+    expect(confirm?.textContent).toContain("Isolated");
+    await click("Cancel"); expect(fixture.apis.A.patchAgentSecurity).not.toHaveBeenCalled();
+    expect(element.querySelector("[data-settings-risk-confirm]")).toBeNull();
+    await click("security.crossProject.host"); await click("Confirm and save");
     expect(fixture.apis.A.patchAgentSecurity).toHaveBeenCalledWith({ crossProjectAccess: "host" });
+    expect(fixture.prompt).not.toHaveBeenCalled();
   });
-  it("invalidates a typed approval on host switch and never writes the new host", async () => {
-    await render(CollabPage); await click("security.crossProject.host"); fixture.target = "B"; await render(CollabPage); await answer("Host A");
+  it("invalidates an armed widening on host switch and never writes the new host", async () => {
+    await render(CollabPage); await click("security.crossProject.host"); fixture.target = "B"; await render(CollabPage);
+    expect(element.querySelector("[data-settings-risk-confirm]")).toBeNull();
     expect(fixture.apis.A.patchAgentSecurity).not.toHaveBeenCalled(); expect(fixture.apis.B.patchAgentSecurity).not.toHaveBeenCalled();
   });
   it("narrows visibility directly and refuses a stale backend value after confirmation", async () => {
@@ -235,10 +241,10 @@ describe("settings risk interactions", () => {
     let complete!: (value: unknown) => void;
     const current = await fixture.apis.A.getSettings();
     fixture.apis.A.getSettings.mockImplementationOnce(() => new Promise(resolve => { complete = resolve; }));
-    await click("security.crossProject.host"); await answer("Host A");
+    await click("security.crossProject.host"); await click("Confirm and save");
     roundTripEpoch(); await act(async () => { complete(current); });
     expect(fixture.apis.A.patchAgentSecurity).not.toHaveBeenCalled();
-    await click("security.crossProject.host"); await answer("Host A");
+    await click("security.crossProject.host"); await click("Confirm and save");
     expect(fixture.apis.A.patchAgentSecurity).toHaveBeenCalledWith({ crossProjectAccess: "host" });
   });
   it("releases the CORS save lock after a pending preflight's batched epoch round trip", async () => {
@@ -268,7 +274,7 @@ describe("settings risk interactions", () => {
     let completeOld!: (value: unknown) => void, completeNew!: (value: unknown) => void;
     const oldState = await fixture.apis.A.getSettings();
     fixture.apis.A.getSettings.mockImplementationOnce(() => new Promise(resolve => { completeOld = resolve; }));
-    await click("security.crossProject.host"); await answer("Host A");
+    await click("security.crossProject.host"); await click("Confirm and save");
     fixture.target = "B"; await render(CollabLinksSubPage);
     const selects = element.querySelectorAll("select");
     await choose(selects[0]!, "project:one"); await choose(selects[1]!, "project:two"); await click("security.links.add");
@@ -320,24 +326,32 @@ describe("settings risk interactions", () => {
     expect(fixture.apis.A.patchSettings).not.toHaveBeenCalled(); expect(element.querySelector<HTMLInputElement>("input")?.value).toBe("https://new.example");
     await click("remote.cors.add"); await answer("Host A"); expect(fixture.apis.A.patchSettings).toHaveBeenCalledWith({ managementCorsOrigins: ["https://new.example"] });
   });
-  it("page clear names this desktop, page, host and size, and requires exact typing", async () => {
-    const operation = clearPageData("A", { artifactId: "page-1", name: "Budget" }); await Promise.resolve();
+  it("page clear arms in place naming page, host and size (no typing); the second click clears", async () => {
+    const row = pageDataClearEntry("A", { artifactId: "page-1", name: "Budget" });
+    expect(row.armed).toBeUndefined();
+    const step = await row.prepare!();
     expect(fixture.frames.pageDataClear).not.toHaveBeenCalled();
-    const hint = fixture.prompt.mock.calls[0]![2].hint;
-    expect(hint).toContain("this desktop application"); expect(hint).toContain("Budget"); expect(hint).toContain("Host A"); expect(hint).toContain("2");
-    fixture.answer?.("Budget"); await operation; expect(fixture.frames.pageDataClear).toHaveBeenCalledWith("A", "page-1");
+    expect(fixture.prompt).not.toHaveBeenCalled();
+    const text = "armed" in step ? step.armed : "";
+    expect(text).toContain("artifacts.pageData.clearArmed"); expect(text).toContain("Budget"); expect(text).toContain("Host A"); expect(text).toContain("2");
+    await row.onSelect(); expect(fixture.frames.pageDataClear).toHaveBeenCalledWith("A", "page-1");
   });
-  it("page clear refuses cancellation and data changed while its dialog was open", async () => {
-    let operation = clearPageData("A", { artifactId: "page-1", name: "Budget" }); await Promise.resolve(); fixture.answer?.(null); await operation;
-    expect(fixture.frames.pageDataClear).not.toHaveBeenCalled();
-    operation = clearPageData("A", { artifactId: "page-1", name: "Budget" }); await Promise.resolve();
+  it("page clear with nothing saved says so instead of arming", async () => {
+    fixture.frames.pageDataUsage.mockResolvedValue({ items: [] });
+    const row = pageDataClearEntry("A", { artifactId: "page-1", name: "Budget" });
+    expect(await row.prepare!()).toEqual({ empty: expect.stringContaining("artifacts.pageData.none") });
+    await row.onSelect(); expect(fixture.frames.pageDataClear).not.toHaveBeenCalled();
+  });
+  it("page clear refuses data changed between the two clicks", async () => {
+    const row = pageDataClearEntry("A", { artifactId: "page-1", name: "Budget" }); await row.prepare!();
     fixture.frames.pageDataUsage.mockResolvedValue({ items: [{ hostId: "A", artifactId: "page-1", name: "Budget", bytes: 4096, updatedAt: "two" }] });
-    fixture.answer?.("Budget"); await operation; expect(fixture.frames.pageDataClear).not.toHaveBeenCalled();
+    await row.onSelect(); expect(fixture.frames.pageDataClear).not.toHaveBeenCalled();
+    expect(fixture.notice).toHaveBeenCalledWith("The target or current settings changed. Start again.");
   });
-  it("page clear rejects a host selection round trip during the dialog", async () => {
-    const operation = clearPageData("A", { artifactId: "page-1", name: "Budget" }); await Promise.resolve();
+  it("page clear rejects a host selection round trip between the two clicks", async () => {
+    const row = pageDataClearEntry("A", { artifactId: "page-1", name: "Budget" }); await row.prepare!();
     const original = useApp.getState().hosts;
     useApp.setState({ hosts: { ...original, active: "B" } } as never); useApp.setState({ hosts: original });
-    fixture.answer?.("Budget"); await operation; expect(fixture.frames.pageDataClear).not.toHaveBeenCalled();
+    await row.onSelect(); expect(fixture.frames.pageDataClear).not.toHaveBeenCalled();
   });
 });

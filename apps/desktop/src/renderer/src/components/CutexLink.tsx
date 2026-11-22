@@ -4,13 +4,14 @@
 // (thumbnail). Anything else renders as plain text with the raw link as its tooltip.
 // Shell file: no feature names.
 import { Link2, type LucideIcon } from "lucide-react";
-import { Children, isValidElement, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
+import { Children, isValidElement, useContext, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { useI18n, type MessageKey } from "../i18n";
 import { contextMenu, type MenuEntry } from "../lib/contextMenu";
 import { cutexLinkRef, linkableKind, type CutexLinkTarget } from "../lib/cutexLinks";
 import { THUMBNAIL_MAX_BYTES } from "../lib/fileKinds";
 import { useThumbnail, type ThumbnailBytes } from "../lib/fileThumbnails";
 import { useUiPrefs } from "../lib/prefs";
+import { RefOpenVia } from "../lib/refOpenVia";
 import { refActionEntries } from "../lib/refActions";
 import { services } from "../modules/app";
 import { useSlot } from "../modules/react";
@@ -51,7 +52,8 @@ function explain(t: (key: MessageKey, vars?: Record<string, string | number>) =>
 function useOpen() {
   const { t } = useI18n();
   const conv = useConvScope();
-  return (ref: CutexRef, how?: "auto" | "peek" | "page") => void services.refs.open(ref, how ? { how } : {}).then((r) => explain(t, r, conv));
+  const via = useContext(RefOpenVia);
+  return (ref: CutexRef, how?: "auto" | "peek" | "page") => void (via ?? services.refs.open)(ref, how ? { how } : {}).then((r) => explain(t, r, conv));
 }
 
 function menuFor(ref: CutexRef, open: (ref: CutexRef, how?: "auto" | "peek" | "page") => void, t: (key: MessageKey) => string): () => MenuEntry[] {
@@ -128,11 +130,12 @@ function LinkChip({ entry, cref, children }: { entry: TargetEntry; cref: CutexRe
   );
 }
 
-/** `[text](cutex:kind/key)`. */
-export function CutexLink({ href, target, children }: { href: string; target: CutexLinkTarget; children: ReactNode }) {
+/** `[text](cutex:kind/key)`. `plain`: the chip without the provider's look (useLink may look the target up). */
+export function CutexLink({ href, target, children, plain = false }: { href: string; target: CutexLinkTarget; children: ReactNode; plain?: boolean }) {
   const entry = useTarget(target.kind);
   const cref = useLinkRef(target, textOf(children));
   if (!entry) return <span title={href}>{children}</span>;
+  if (plain) return <Chip cref={cref} view={null}>{children}</Chip>;
   return (
     <LinkChip entry={entry} cref={cref}>
       {children}

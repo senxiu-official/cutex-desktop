@@ -5,10 +5,10 @@
 import { ArrowDownLeft, ChevronUp, Hourglass } from "lucide-react";
 import type { AskSummary } from "../../../shared/ipc";
 import { useI18n, type MessageKey } from "../i18n";
-import { delegationWait, formatSpan } from "../lib/delegations";
+import { delegationWait, formatSpan, openContinuationWait } from "../lib/delegations";
 import { delegationTurnSeconds, type DelegationSendChoice, type DelegationTurn } from "../lib/delegationTurn";
 import { formatAbsolute, useNow } from "../lib/time";
-import { DelegationTag, useWaitText } from "./DelegationParts";
+import { DelegationTag, useContinuationText, useWaitText } from "./DelegationParts";
 import { Popover } from "./Menu";
 import { Who } from "./Parties";
 import { Tag } from "./Tag";
@@ -118,14 +118,19 @@ export function DelegationSendMenu({ choices, disabled, onPick }: { choices: Del
 export function DelegationAwaitLine({ d, draft }: { d: AskSummary; draft: boolean }) {
   const { t } = useI18n();
   const wait = delegationWait(d);
-  const what = useWaitText()(wait);
+  const waitWhat = useWaitText()(wait);
   const deadline = wait.timeoutAt ? Date.parse(wait.timeoutAt) : NaN;
-  const hint = [t("delegation.wait.hint"), wait.note, Number.isFinite(deadline) ? formatAbsolute(deadline / 1000) : null].filter(Boolean).join("\n");
+  // A yielded wait (r290 P14): 等待中 #3 title · 约 14:15 继续 (the status word, not 在等委托事件).
+  const contWait = openContinuationWait(d);
+  const cont = useContinuationText(contWait ?? undefined, d.hold?.reason === "waitingForEvent" ? wait : undefined);
+  const label = contWait ? t(contWait.state === "limited" ? "delegation.status.continuationLimited" : contWait.state === "ready" ? "delegation.status.continuationReady" : "delegation.status.continuationWait") : t("delegationAwait.waiting");
+  const what = contWait ? cont.trailing : waitWhat;
+  const hint = contWait ? cont.hint : [t("delegation.wait.hint"), wait.note, Number.isFinite(deadline) ? formatAbsolute(deadline / 1000) : null].filter(Boolean).join("\n");
   if (draft)
     return (
       <div className="pointer-events-none absolute -top-2 left-2.5 z-10 flex max-w-[calc(100%-1.25rem)] min-w-0 items-center gap-1 rounded-full bg-surface px-1.5 text-caption/[inherit] text-subtle" data-delegation-await="" title={hint}>
         <Hourglass size={11} className="shrink-0 text-muted" />
-        <span className="shrink-0">{t("delegationAwait.waiting")}</span>
+        <span className="shrink-0">{label}</span>
         <DelegationTag askId={d.askId} />
       </div>
     );
@@ -134,7 +139,7 @@ export function DelegationAwaitLine({ d, draft }: { d: AskSummary; draft: boolea
       <span className="-mr-0.5 flex w-[22px] shrink-0 justify-center">
         <Hourglass size={13} className="text-muted" />
       </span>
-      <span className="shrink-0">{t("delegationAwait.waiting")}</span>
+      <span className="shrink-0">{label}</span>
       <DelegationTag askId={d.askId} />
       {d.title && <span className="min-w-0 truncate">{d.title}</span>}
       {what && <span className="shrink-0 tabular-nums">· {what}</span>}

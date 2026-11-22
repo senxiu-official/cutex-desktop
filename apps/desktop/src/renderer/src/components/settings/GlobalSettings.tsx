@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import type { AgentHarnessPreview, AgentHarnessSectionId, GlobalSettings, ProfileItem, UserInstructions } from "../../../../shared/ipc";
 import { useI18n, type MessageKey } from "../../i18n";
 import { AGENT_HARNESS_FEATURE, PROMPT_CACHE_KEY_FEATURE, useGlobalSettings } from "../../lib/globalSettings";
+import { useSettingsDraft } from "../../lib/settingsDrafts";
 import { pickHarnessAgent } from "../../lib/harnessPreview";
 import { settingsAnchorId } from "../../lib/settingsNav";
 import { AUTO_TITLES_FEATURE, QUICK_CHAT_PROFILE_FEATURE } from "../../lib/profileCreate";
@@ -175,20 +176,24 @@ export function InstructionsPage() {
       (e: unknown) => setError(errorText(e)),
     );
   }, []);
-  const save = async () => {
-    if (!doc) return;
+  const save = async (): Promise<boolean> => {
+    if (!doc) return false;
     setError(null);
     try {
       const next = await api.putUserInstructions(text, doc.revision);
       setDoc(next);
       setSaved(true);
       setTimeout(() => setSaved(false), 1500);
+      return true;
     } catch (e) {
       setError(errorText(e));
+      return false;
     }
   };
+  // Unsaved text, for a window-bar entry that would close a covering Settings (lib/settingsDrafts).
+  useSettingsDraft({ dirty: !!doc && text !== doc.content, save, discard: () => doc && setText(doc.content) });
   return (
-    <>
+    <div className="contents" data-settings-draft="">
       <Section
         id={settingsAnchorId("user")}
         title={t("agent-config.instructions.user")}
@@ -213,7 +218,7 @@ export function InstructionsPage() {
         /></SettingsGroup>
       </Section>
       {harness && <HarnessSection />}
-    </>
+    </div>
   );
 }
 
