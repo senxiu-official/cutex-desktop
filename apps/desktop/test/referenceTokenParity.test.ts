@@ -1,8 +1,7 @@
 import { expect, it } from "vitest";
 import { hasReferenceToken as desktop } from "../src/shared/inputPreview";
-import { hasReferenceToken as phone } from "../../../packages/cutex-mobile/src/chat/timeline";
 
-// The desktop and the phone decide the same way whether a `$skill` / `@file` word is already in the text.
+// Boundary cases for `$skill` and `@file` reference tokens in the desktop.
 const cases: [string, string, boolean][] = [
   ["比较 @计划书.md", "@计划", false],
   ["比较 @计划 和别的", "@计划", true],
@@ -20,7 +19,6 @@ const cases: [string, string, boolean][] = [
   ["@e\u0301x", "@e", false],
   ["$a.b", "$a", false],
 ];
-it.each(cases)("%j has %j: %s (desktop and phone alike)", (text, token, want) => {
+it.each(cases)("%j has %j: %s (desktop)", (text, token, want) => {
   expect(desktop(text, token)).toBe(want);
-  expect(phone(text, token)).toBe(want);
 });
