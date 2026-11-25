@@ -151,6 +151,17 @@ function initialRuns(): MockRun[] {
     [step(stoppedId, 0, "Run", "codex-1", "done"), step(stoppedId, 1, "Run", "claude-1", "failed", { profile: "Iota", error: { code: "provider_blocked", message: "Claude subscription quota reached" } })],
     [[89890, "Run: 10 steps"], [88010, "stopped: provider blocked", "warn"]],
   );
+  // r295 Z3: a run stopped because a step's outcome is unconfirmed (its receipt was lost); its retry needs the owner.
+  const unknownId = "wr-c3e8a611-ff06";
+  const unknown = view(
+    {
+      runId: unknownId, seq: 6, name: "migrate-home-layout", description: "Move every agent home to the v3 layout, one host at a time", phases: [{ title: "Migrate" }],
+      author: LEAD, projectId: "desktop", cwd: "/home/sam/Projects/cutex", limits: LIMITS, state: "stopped", stopReason: "interrupted",
+      error: { code: "step_outcome_unknown", message: "A step may have made changes before its result was recorded. Review it before retrying." }, createdAt: iso(5400), startedAt: iso(5300), endedAt: iso(4200),
+    },
+    [step(unknownId, 0, "Migrate", "host-a", "done"), step(unknownId, 1, "Migrate", "host-b", "failed", { error: { code: "ask_missing", message: "the step's delegation record is gone" } }), step(unknownId, 2, "Migrate", "host-c", "running", { activity: null })],
+    [[5290, "Migrate: 3 hosts"], [4210, "stopped: step outcome unknown", "warn"]],
+  );
   const rejectedId = "wr-91c4aa50-ee05";
   const rejected = view(
     {
@@ -160,7 +171,7 @@ function initialRuns(): MockRun[] {
     [],
     [],
   );
-  return [running, pending, completed, stopped, rejected].map((v) => ({ view: v, script: REVIEW_SCRIPT, result: v.hasResult ? "The agent bus has three layers: transport (mcp.rs), policy (tool_policy.rs) and delivery (asks). Messages enter through …" : undefined }));
+  return [running, pending, completed, stopped, unknown, rejected].map((v) => ({ view: v, script: REVIEW_SCRIPT, result: v.hasResult ? "The agent bus has three layers: transport (mcp.rs), policy (tool_policy.rs) and delivery (asks). Messages enter through …" : undefined }));
 }
 
 const runs: MockRun[] = initialRuns();

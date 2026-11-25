@@ -87,7 +87,7 @@ making a new module — e.g. a widget for delegations goes into `modules/delegat
   (from the repo root). It converts your `zhCN` block (one entry per line) and writes the `zhHantCN` block into the file:
   the first time with the `ModuleZhHantMessages` declaration and `export const locales`, later by replacing the block.
   Without `--write` it only prints it. It needs the OpenCC Python package and gets it itself through `uvx --with opencc`
-  when it is not installed; `uvx` is found on `PATH` or at `~/.local/bin/uvx` (on hachimi it is there, often not on an
+  when it is not installed; `uvx` is found on `PATH` or at `~/.local/bin/uvx` (on hostc it is there, often not on an
   agent's `PATH`, which is fine). Without uv it says so and how to install it. Run it again after changing a Chinese
   string, and read the diff. It is character-level s2t: mainland words stay (软件 → 軟件, not 軟體), which is what
   zh-Hant-CN means. Other locales fall back to English.
@@ -377,9 +377,9 @@ throw-away profile, sets theme, language and viewport, waits, runs optional step
 
 ```
 node scripts/shot.mjs --url 'http://127.0.0.1:5241/?desktop' --wait-for '[data-desk-widget]' \
-  --out /home/ema/cutex-dev/shots/0.2-<name>/01-light.jpg
+  --out /home/user/cutex-dev/shots/0.2-<name>/01-light.jpg
 node scripts/shot.mjs --url 'http://127.0.0.1:5241/?desktop' --theme dark --size 900x800 --wait-for '[data-desk-widget]' \
-  --out /home/ema/cutex-dev/shots/0.2-<name>/02-dark-narrow.jpg
+  --out /home/user/cutex-dev/shots/0.2-<name>/02-dark-narrow.jpg
 ```
 
 Flags: `--theme light|dark`, `--locale zh-CN|en|zh-Hant-CN`, `--size WxH` (default 1600x940), `--wait-for <css>` (then

@@ -13,6 +13,8 @@ import { NotesUnsupported } from "./NotesUnsupported";
 import { NoteEditor } from "./NoteEditor";
 import { newDraft, notesCache, setNoteDraft, useHostSidebar, useNoteDrafts, useNotesQuery } from "./store";
 import { SearchableSelect } from "../../components/SearchablePicker";
+import { EntitySelect } from "../../components/EntitySelect";
+import { projectEntity } from "../../lib/entityIcon";
 import { useAgentPicker } from "../../lib/useAgentPicker";
 
 const SELECT = "max-w-full rounded-md border border-border bg-background px-2 py-1 text-xs outline-none focus:border-accent";
@@ -44,9 +46,8 @@ export function NotesListBody({ hostId, state, setState, visible = true }: { hos
         {scope.kind === "session" && <SearchableSelect label={t("notes.chooseSession")} value={scope.id} options={picker.options} triggerText={scope.id}
           placeholder={picker.labels.search} emptyLabel={picker.labels.empty} hiddenNote={picker.labels.hiddenNote} width="w-64" triggerClassName={`flex w-44 items-center justify-between gap-1 ${SELECT}`}
           onChange={(v) => { picker.remember(v); setState({ ...state, sessionId: v }); }} />}
-        {scope.kind === "project" && <select aria-label={t("notes.chooseProject")} className={SELECT} value={scope.id} onChange={(e) => setState({ ...state, projectId: e.target.value })}>
-          {!projects.some((p) => p.project_id === scope.id) && <option value={scope.id}>{scope.id}</option>}{projects.map((p) => <option key={p.project_id} value={p.project_id}>{p.presentation.display_name || p.project_id}</option>)}
-        </select>}
+        {scope.kind === "project" && <EntitySelect label={t("notes.chooseProject")} className={`flex w-44 items-center justify-between gap-1 ${SELECT}`} value={scope.id} onChange={(v) => setState({ ...state, projectId: v })}
+          options={[...(!projects.some((p) => p.project_id === scope.id) ? [{ value: scope.id, label: scope.id }] : []), ...projects.map((p) => ({ value: p.project_id, label: p.presentation.display_name || p.project_id, entity: projectEntity(hostId, p) }))]} />}
         <select aria-label={t("notes.pinnedOnly")} className={SELECT} value={state.pinnedOnly ? "pinned" : "all"} onChange={(e) => setState({ ...state, pinnedOnly: e.target.value === "pinned" })}><option value="all">{t("notes.all")}</option><option value="pinned">{t("notes.pinnedOnly")}</option></select>
       </div>
       <div className="flex min-w-0 items-center gap-2"><Search size={13} className="shrink-0 text-subtle" /><input aria-label={t("notes.search")} placeholder={t("notes.search")} value={search} maxLength={500} onChange={(e) => setSearch(e.target.value)} className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1 text-xs outline-none focus:border-accent" onKeyDown={(e) => { if (e.key === "Escape" && search && !e.repeat && !isImeComposing(e) && !e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey) { e.preventDefault(); setSearch(""); setState({ ...state, query: "" }); } }} />

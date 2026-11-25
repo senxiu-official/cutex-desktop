@@ -1,4 +1,5 @@
 import { browserClaimZhCN } from "./claimMessages";
+import { browserIdentityZhCN } from "./identityMessages";
 import { browserTimelineZhCN } from "./browserTimeline";
 import { browserOwnerUiZhCN } from "./ownerUiMessages";
 import { browserHostSettingsZhCN } from "./hostSettingsMessages";
@@ -36,6 +37,7 @@ export const zhCN = {
   ...browserErrorMessagesZhCN,
   ...browserTimelineZhCN,
   ...browserOwnerUiZhCN,
+  ...browserIdentityZhCN,
   ...browserHostSettingsZhCN,
   "browser.title": "浏览器",
 "browser.media.tray": "正在播放",
@@ -163,7 +165,7 @@ export const zhCN = {
   "browser.carrierFrameRate30": "后台网页更流畅",
   "browser.seconds": "秒",
   "browser.ownerCapture": "你可以照常左键点击、滚动和输入：你打字时{{agent}}会稍等，你动过页面后它会先重新读取。要它停手请左键点击「暂停」。",
-  "browser.ownerCaptureFailed": "协同控制没能就绪，{{agent}}暂时不能操作这个标签（你仍可正常使用）。请重新打开标签，或左键点击「收回」。",
+  "browser.ownerCaptureFailed": "协同控制未能就绪，{{agent}}暂时不能操作这个标签（你仍可正常使用）。请重新打开标签，或左键点击「收回」。",
   "browser.idempotency.clear": "清除浏览器未决记录",
   "browser.idempotency.clearHint": "按一个{{agent}}或全部清除浏览器幂等记录，用于解除已卡满的未决上限",
   "browser.idempotency.target": "清理范围",
@@ -173,8 +175,8 @@ export const zhCN = {
   "browser.idempotency.confirmAction": "确认清除",
   "browser.idempotency.done": "已清除 {outcomeUnknown} 条结果未知记录和 {abandonedForwarded} 条已中断的在途记录。",
   // 两部分（UI-02）：本设备 / 主机
-  "browser.part.device": "本设备",
-  "browser.part.deviceHint": "仅在本设备的内置浏览器中生效",
+  "browser.part.device": "桌面应用",
+  "browser.part.deviceHint": "仅在桌面应用的内置浏览器中生效",
   "browser.part.host": "主机",
   "browser.part.hostHint": "作用于所选主机上的{{agent}}",
 } as const;

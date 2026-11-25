@@ -9,6 +9,9 @@ import { createRoot } from "react-dom/client";
 import { beforeEach, expect, it, vi } from "vitest";
 import type { IdleAgent, IdleRuntimes, StopIdleRequest } from "../src/shared/stopIdle";
 
+// The store double is too thin for the avatar stack (agent looks, Profile pictures): icons are stubbed.
+vi.mock("../src/renderer/src/components/EntityIcon", () => import("./helpers/entityIconStub"));
+
 const fx = vi.hoisted(() => ({
   features: new Set<string>(["stop-idle-agents"]),
   pinned: new Set<string>(),
@@ -177,16 +180,19 @@ it("one dialog for any scope: the dropdown lists 所有项目 / each project / �
   fx.listing = { now: "", minIdleSecs: 0, projectId: null, agents: [agent("a", "stoppable", 7200), agent("b", "stoppable", 60), agent("i", "stoppable", 7200, [], null)] };
   const d = mount();
   await act(async () => lib.openStopIdle({ hostId: "local", projectId: "p1", label: "Waveline" }));
-  const select = () => d.host.querySelector<HTMLSelectElement>("[data-testid=stop-idle-scope]")!;
-  expect([...select().options].map((o) => [o.value, o.textContent])).toEqual([["all", "stopIdle.scope.all"], ["p:p1", "Waveline"], ["independent", "stopIdle.scope.independent"]]);
-  expect(select().value).toBe("p:p1");
+  // The scope is a searchable picker (EntitySelect: the project's icon): the trigger carries the value.
+  const select = () => d.host.querySelector<HTMLButtonElement>("[data-testid=stop-idle-scope]")!;
+  const rows = () => [...document.querySelectorAll<HTMLButtonElement>("[role=option][data-value]")];
+  act(() => select().click());
+  expect(rows().map((o) => [o.dataset.value, o.textContent])).toEqual([["all", "stopIdle.scope.all"], ["p:p1", "Waveline"], ["independent", "stopIdle.scope.independent"]]);
+  expect(rows().filter((o) => o.getAttribute("aria-selected") === "true").map((o) => o.dataset.value)).toEqual(["p:p1"]);
+  act(() => select().click());
+  expect(select().dataset.value).toBe("p:p1");
   act(() => lib.toggleIdleRow("b"));
-  await act(async () => {
-    select().value = "all";
-    select().dispatchEvent(new Event("change", { bubbles: true }));
-  });
+  // Closed trigger: ↑ steps to the previous scope, like a native select.
+  await act(async () => { select().dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true })); });
   expect(fx.idleCalls).toEqual([{ minIdleSecs: 0, projectId: "p1" }, { minIdleSecs: 0 }]);
-  expect(select().value).toBe("all");
+  expect(select().dataset.value).toBe("all");
   // All projects: a group per project (independent last) with a box ticking the whole group.
   const groups = () => [...d.host.querySelectorAll<HTMLElement>("[data-testid=stop-idle-group]")];
   expect(groups().map((g) => g.getAttribute("data-project"))).toEqual(["p1", ""]);
@@ -198,10 +204,8 @@ it("one dialog for any scope: the dropdown lists 所有项目 / each project / �
   act(() => d.rows()[0]!.querySelector<HTMLButtonElement>("[role=checkbox]")!.click());
   expect(groups()[0]!.querySelector("h3 [role=checkbox]")!.getAttribute("aria-checked")).toBe("mixed");
   // The independent scope: only agents without a project, no group headers.
-  await act(async () => {
-    select().value = "independent";
-    select().dispatchEvent(new Event("change", { bubbles: true }));
-  });
+  act(() => select().click());
+  await act(async () => rows().find((o) => o.dataset.value === "independent")!.click());
   expect(d.rows().map((r) => r.querySelector("[role=checkbox]")!.getAttribute("aria-label"))).toEqual(["i"]);
   expect(d.host.querySelector("h3")).toBeNull();
   d.done();

@@ -151,6 +151,24 @@
         "zh-Hant-CN": "直接啟動 stdio 時，為該程序設定 PYTHONIOENCODING=utf-8。",
         "en": "Set PYTHONIOENCODING=utf-8 when launching direct stdio."
       }
+    },
+    {
+      "id": "linuxNativeSandboxHost",
+      "title": {
+        "zh-CN": "Linux 原生沙盒需要系统 bubblewrap",
+        "zh-Hant-CN": "Linux 原生沙盒需要系統 bubblewrap",
+        "en": "Linux Native sandbox requires system bubblewrap"
+      },
+      "body": {
+        "zh-CN": "Native 0.172.0-r70 不内置 bubblewrap，需要系统已安装可用的 bwrap、Linux 5.3 或更新版本的 pidfd_open，以及主机策略允许相应沙盒调用。AppArmor 拒绝用户命名空间时，透明 TCP 代理模式不能启动。缺少所需能力时会拒绝启动，不会自动降低沙盒限制。",
+        "zh-Hant-CN": "Native 0.172.0-r70 不內置 bubblewrap，需要系統已安裝可用的 bwrap、Linux 5.3 或更新版本的 pidfd_open，以及主機策略允許相應沙盒調用。AppArmor 拒絕使用者命名空間時，透明 TCP 代理模式不能啟動。缺少所需能力時會拒絕啟動，不會自動降低沙盒限制。",
+        "en": "Native 0.172.0-r70 requires a capable system bwrap, pidfd_open (Linux 5.3 or newer), and a host policy that permits sandbox startup. It does not bundle bubblewrap. AppArmor restrictions on user namespaces can prevent transparent TCP proxy mode. Missing requirements refuse startup without silently weakening sandboxing."
+      },
+      "workaround": {
+        "zh-CN": "使用满足上述要求的 Linux 主机；显式代理模式的支持不代表透明 TCP 模式也兼容。",
+        "zh-Hant-CN": "使用滿足上述要求的 Linux 主機；顯式代理模式的支持不代表透明 TCP 模式也相容。",
+        "en": "Use a Linux host that meets these requirements. Explicit-proxy support does not establish transparent-TCP compatibility."
+      }
     }
   ]
 }

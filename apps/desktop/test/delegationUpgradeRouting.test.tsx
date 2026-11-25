@@ -14,6 +14,7 @@ vi.mock("../src/renderer/src/i18n", () => ({ useI18n: () => ({
   locale: language.locale === "en" ? "en" : "zh-CN",
   t: (key: keyof typeof en, params: Record<string, string | number> = {}) => {
     const catalog = language.locale === "en" ? en : zhCN;
+    if ((key as string).startsWith("entitySelect.")) return key; // the shared picker's search line
     if (!(key in catalog)) throw new Error(`Missing routing message: ${key}`);
     const locale = language.locale === "en" ? "en" : "zh-CN";
     const defaults = DEFAULT_TERMS[locale];
@@ -82,10 +83,26 @@ function card(title: string): HTMLElement {
   if (!found) throw new Error(`Missing card: ${title}`);
   return found;
 }
-function select(label: string): HTMLSelectElement {
+/** Requester / Target are searchable pickers (EntitySelect: the party's avatar); Root delegation is a native select. */
+function picker(label: string): HTMLButtonElement | null {
+  return [...host.querySelectorAll("label")].find(el => el.firstChild?.textContent === label)?.querySelector<HTMLButtonElement>("[data-entity-select]") ?? null;
+}
+/** The picker's rows while it is open (the trigger toggles it). */
+function pickerRows(trigger: HTMLButtonElement): HTMLButtonElement[] {
+  act(() => trigger.click());
+  return [...document.querySelectorAll<HTMLButtonElement>("[role=option][data-value]")];
+}
+type OptionLike = { value: string; disabled: boolean };
+function select(label: string): { options: OptionLike[] } {
+  const trigger = picker(label);
+  if (trigger) {
+    const options = pickerRows(trigger).map(row => ({ value: row.dataset.value ?? "", disabled: row.disabled }));
+    act(() => trigger.click());
+    return { options };
+  }
   const found = [...host.querySelectorAll("label")].find(el => el.firstChild?.textContent === label)?.querySelector("select");
   if (!found) throw new Error(`Missing select: ${label}`);
-  return found;
+  return { options: [...found.options] };
 }
 function radio(label: string): HTMLInputElement {
   const found = [...host.querySelectorAll("label")].find(el => el.textContent === label)?.querySelector("input");
@@ -94,7 +111,19 @@ function radio(label: string): HTMLInputElement {
 }
 const click = async (el: HTMLElement) => { await act(async () => el.click()); };
 function change(label: string, value: string) {
-  act(() => { const el = select(label); el.value = value; el.dispatchEvent(new Event("change", { bubbles: true })); });
+  const trigger = picker(label);
+  if (trigger) {
+    if (trigger.matches(":disabled")) return; // as for the owner: a disabled picker does not open
+    const row = pickerRows(trigger).find(el => el.dataset.value === value);
+    if (!row) throw new Error(`Missing option ${value} in ${label}`);
+    act(() => row.click());
+    return;
+  }
+  act(() => {
+    const el = [...host.querySelectorAll("label")].find(node => node.firstChild?.textContent === label)?.querySelector("select");
+    if (!el) throw new Error(`Missing select: ${label}`);
+    el.value = value; el.dispatchEvent(new Event("change", { bubbles: true }));
+  });
 }
 async function submitGrant() {
   await act(async () => button("Create one-use grant").closest("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
@@ -125,7 +154,7 @@ describe("routing approval controls", () => {
       expect(control.disabled).toBe(true);
       await click(control);
     }
-    expect(host.textContent).toContain("Approval is stale; refresh before reviewing");
+    expect(host.textContent).toContain("Approval is stale; refresh before deciding");
     expect(props.onAction).not.toHaveBeenCalled();
   });
   it("allows approval even when policy update and grant creation are forbidden", async () => {
@@ -252,7 +281,7 @@ describe("policy and scoped grants", () => {
     await click(radio(label));
     expect(props.onAction).toHaveBeenCalledWith({ kind: "policy", memberMode: label === "Allowlisted only" ? "allowlistedOnly" : "open", expectedRevision: 17 });
     expect(host.textContent).toContain("Changing the policy does not bypass other permission checks.");
-    expect(host.textContent).toContain("Open mode lets member routing skip individual approval");
+    expect(host.textContent).toContain("Open mode lets members delegate without per-request approval");
   });
   it("blocks policy without update permission while allowing independently authorized grants and revocation", async () => {
     props.snapshot.policy.allowedActions.update = false;
@@ -273,7 +302,7 @@ describe("policy and scoped grants", () => {
     props.snapshot.grants.items[0]!.allowedActions.revoke = false;
     render();
     expect(radio("Open (not recommended)").matches(":disabled")).toBe(false);
-    for (const control of [...host.querySelectorAll("select"), button("Create one-use grant"), button("Revoke")]) expect(control.matches(":disabled")).toBe(true);
+    for (const control of [...host.querySelectorAll("select, [data-entity-select]"), button("Create one-use grant"), button("Revoke")]) expect(control.matches(":disabled")).toBe(true);
     fillGrant();
     await submitGrant();
     await click(button("Revoke"));
@@ -389,7 +418,8 @@ describe("policy and scoped grants", () => {
     expect(host.textContent).toContain("0 / 1 uses remaining");
     expect(host.textContent).toContain("Revoked");
     expect([...host.querySelectorAll("button")].some(el => el.textContent === "Revoke")).toBe(false);
-    for (const control of host.querySelectorAll("button")) expect(control.disabled).toBe(true);
+    // :disabled — the party pickers are disabled through their fieldset, not their own attribute.
+    for (const control of host.querySelectorAll("button")) expect(control.matches(":disabled")).toBe(true);
   });
   it("reports a failed action without an automatic retry", async () => {
     props.onAction = vi.fn().mockRejectedValue(new Error("conflict"));

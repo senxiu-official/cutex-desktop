@@ -19,14 +19,21 @@ type T = (key: MessageKey, vars?: Record<string, string | number>) => string;
 const FRESH_MS = 60_000;
 
 const keyOf = (hostId: string, profile: string) => `${hostId}\u0000${profile}`;
+const without = <V,>(record: Record<string, V>, key: string): Record<string, V> => {
+  if (!(key in record)) return record;
+  const { [key]: _gone, ...rest } = record;
+  return rest;
+};
 
 interface ResetState {
   views: Record<string, ResetCreditsView | null>;
+  /** A read that failed before any view was known (with a view, the error is shown on it). */
+  errors: Record<string, string>;
   loading: Record<string, boolean>;
   using: Record<string, boolean>;
 }
 
-export const useResetCredits = create<ResetState>(() => ({ views: {}, loading: {}, using: {} }));
+export const useResetCredits = create<ResetState>(() => ({ views: {}, errors: {}, loading: {}, using: {} }));
 const loadedAt = new Map<string, number>();
 const inflight = new Map<string, Promise<void>>();
 
@@ -42,14 +49,15 @@ export function loadResetCredits(hostId: string, profile: string, refresh = fals
     .then(
       (view) => {
         loadedAt.set(key, Date.now());
-        useResetCredits.setState((s) => ({ views: { ...s.views, [key]: view } }));
+        useResetCredits.setState((s) => ({ views: { ...s.views, [key]: view }, errors: without(s.errors, key) }));
       },
       (e: unknown) => {
         loadedAt.set(key, Date.now());
         const prev = useResetCredits.getState().views[key];
         const error = e instanceof Error ? e.message : String(e);
-        // Keep what we knew; show the failure on it.
+        // Keep what we knew; show the failure on it. Nothing known yet: the row says it could not read them.
         if (prev) useResetCredits.setState((s) => ({ views: { ...s.views, [key]: { ...prev, error } } }));
+        else useResetCredits.setState((s) => ({ errors: { ...s.errors, [key]: error } }));
       },
     )
     .finally(() => {
@@ -60,16 +68,17 @@ export function loadResetCredits(hostId: string, profile: string, refresh = fals
   return p;
 }
 
-/** The view for `profile` on `hostId`, read when `enabled` and not fresh. undefined = not read yet. */
-export function useProfileResetCredits(hostId: string, profile: string | null, enabled: boolean): { view: ResetCreditsView | null | undefined; loading: boolean; using: boolean } {
+/** The view for `profile` on `hostId`, read when `enabled` and not fresh. undefined = not read yet (`error`: the read failed). */
+export function useProfileResetCredits(hostId: string, profile: string | null, enabled: boolean): { view: ResetCreditsView | null | undefined; error: string | null; loading: boolean; using: boolean } {
   const key = profile ? keyOf(hostId, profile) : "";
   const view = useResetCredits((s) => (key ? s.views[key] : undefined));
+  const error = useResetCredits((s) => (key ? s.errors[key] ?? null : null));
   const loading = useResetCredits((s) => !!(key && s.loading[key]));
   const using = useResetCredits((s) => !!(key && s.using[key]));
   useEffect(() => {
     if (enabled && profile) void loadResetCredits(hostId, profile);
   }, [enabled, hostId, profile]);
-  return { view: enabled ? view : undefined, loading, using };
+  return { view: enabled ? view : undefined, error: enabled && view === undefined ? error : null, loading, using };
 }
 
 /** "5月 3日" / "May 3" (+ time when within two days). */

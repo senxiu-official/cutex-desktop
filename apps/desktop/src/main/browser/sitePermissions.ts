@@ -4,7 +4,8 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import type { BrowserPermissionDetails, BrowserSessionPermissions } from "./network";
-import { BROWSER_SITE_PERMISSIONS, type BrowserSitePermission, type BrowserSitePermissionView } from "../../shared/browser";
+import { BROWSER_SITE_PERMISSIONS, type BrowserSitePermission, type BrowserSitePermissionForget, type BrowserSitePermissionView } from "../../shared/browser";
+import { DEFAULT_BROWSER_IDENTITY_ID as DEFAULT_ID, isBrowserIdentityId } from "../../shared/browserIdentity";
 
 export type BrowserPool = "owner" | "agent";
 /** Electron permission name → the owner-facing permission(s) it needs. Anything else is denied
@@ -44,7 +45,7 @@ const defaultIo: Io = {
   write: (path, text) => { mkdirSync(dirname(path), { recursive: true }); writeFileSync(`${path}.tmp`, text, { mode: 0o600 }); renameSync(`${path}.tmp`, path); },
 };
 const MAX_ENTRIES = 512;
-const key = (pool: BrowserPool, origin: string, permission: BrowserSitePermission) => `${pool}\n${origin}\n${permission}`;
+const key = (pool: BrowserPool, origin: string, permission: BrowserSitePermission, identityId = DEFAULT_ID) => `${pool}\n${identityId}\n${origin}\n${permission}`;
 
 /** Unreadable or malformed = nothing remembered (fail closed: every request asks again). */
 export class BrowserSitePermissionStore {
@@ -56,37 +57,54 @@ export class BrowserSitePermissionStore {
     if (!this.file) return this.entries;
     try {
       const parsed = JSON.parse(this.io.read(this.file)) as { version?: unknown; entries?: unknown };
-      if (parsed?.version !== 1 || !Array.isArray(parsed.entries)) return this.entries;
+      if ((parsed?.version !== 1 && parsed?.version !== 2) || !Array.isArray(parsed.entries)) return this.entries;
       for (const raw of parsed.entries.slice(-MAX_ENTRIES)) {
         const entry = raw as Partial<BrowserSitePermissionView>;
         if ((entry.pool !== "owner" && entry.pool !== "agent") || typeof entry.allow !== "boolean" || browserPermissionOrigin(entry.origin) !== entry.origin
           || !(BROWSER_SITE_PERMISSIONS as readonly string[]).includes(entry.permission as string)) continue;
-        this.entries.set(key(entry.pool, entry.origin!, entry.permission!), { pool: entry.pool, origin: entry.origin!, permission: entry.permission!, allow: entry.allow });
+        const identityId = entry.browserIdentityId;
+        if (identityId !== undefined && (parsed.version !== 2 || entry.pool !== "owner" || !isBrowserIdentityId(identityId))) continue;
+        this.entries.set(key(entry.pool, entry.origin!, entry.permission!, identityId), {
+          pool: entry.pool, origin: entry.origin!, permission: entry.permission!, allow: entry.allow,
+          ...(identityId !== undefined && identityId !== DEFAULT_ID ? { browserIdentityId: identityId } : {}),
+        });
       }
     } catch { /* missing / malformed: empty */ }
     return this.entries;
   }
   private save(): void {
-    if (this.file) this.io.write(this.file, `${JSON.stringify({ version: 1, entries: [...this.load().values()] }, null, 2)}\n`);
+    const entries = [...this.load().values()];
+    if (this.file) this.io.write(this.file, `${JSON.stringify({ version: entries.some(entry => entry.browserIdentityId) ? 2 : 1, entries }, null, 2)}\n`);
   }
-  get(pool: BrowserPool, origin: string, permission: BrowserSitePermission): boolean | undefined { return this.load().get(key(pool, origin, permission))?.allow; }
-  set(pool: BrowserPool, origin: string, permission: BrowserSitePermission, allow: boolean): void {
-    const entries = this.load(), id = key(pool, origin, permission);
-    entries.delete(id); entries.set(id, { pool, origin, permission, allow });
+  get(pool: BrowserPool, origin: string, permission: BrowserSitePermission, identityId = DEFAULT_ID): boolean | undefined {
+    return this.load().get(key(pool, origin, permission, identityId))?.allow;
+  }
+  set(pool: BrowserPool, origin: string, permission: BrowserSitePermission, allow: boolean, identityId = DEFAULT_ID): void {
+    if (!isBrowserIdentityId(identityId) || pool === "agent" && identityId !== DEFAULT_ID) throw Error("invalid_browser_identity");
+    const entries = this.load(), id = key(pool, origin, permission, identityId);
+    entries.delete(id); entries.set(id, { pool, origin, permission, allow, ...(identityId !== DEFAULT_ID ? { browserIdentityId: identityId } : {}) });
     while (entries.size > MAX_ENTRIES) entries.delete(entries.keys().next().value!);
     this.save();
   }
   list(): BrowserSitePermissionView[] { return [...this.load().values()].map(entry => ({ ...entry })); }
   /** Forget one origin (every permission) or everything. */
-  forget(target: "all" | { pool: BrowserPool; origin: string }): void {
+  forget(target: BrowserSitePermissionForget): void {
     const entries = this.load();
     if (target === "all") entries.clear();
-    else for (const [id, entry] of entries) if (entry.pool === target.pool && entry.origin === target.origin) entries.delete(id);
+    else for (const [id, entry] of entries)
+      if (entry.pool === target.pool && entry.origin === target.origin
+        && (entry.browserIdentityId ?? DEFAULT_ID) === (target.browserIdentityId ?? DEFAULT_ID)) entries.delete(id);
+    this.save();
+  }
+  forgetIdentity(identityId: string): void {
+    const entries = this.load();
+    for (const [id, entry] of entries)
+      if (entry.pool === "owner" && (entry.browserIdentityId ?? DEFAULT_ID) === identityId) entries.delete(id);
     this.save();
   }
 }
 
-export interface BrowserPermissionGuest { guestId: string; pool: BrowserPool; url: string; agentName?: string }
+export interface BrowserPermissionGuest { guestId: string; pool: BrowserPool; url: string; agentName?: string; identityId?: string }
 export interface BrowserPermissionPrompt { guestId: string; origin: string; permissions: BrowserSitePermission[]; pool: BrowserPool; agentName?: string; agentActing: boolean;
   /** Aborted when the asking page is gone (navigated to another origin, closed): the prompt closes as a deny. */
   signal?: AbortSignal;
@@ -133,14 +151,14 @@ export function createBrowserSitePermissions(deps: BrowserSitePermissionsDeps): 
       const found = resolve(webContentsId, permission, details, requestingOrigin);
       if (!found) return false;
       if (found.keys === "auto") return !deps.agentInput(found.guest.guestId);
-      return found.keys.every(permission => deps.store.get(found.guest.pool, found.origin, permission) === true);
+      return found.keys.every(permission => deps.store.get(found.guest.pool, found.origin, permission, found.guest.identityId) === true);
     },
     request(webContentsId, permission, details) {
       const found = resolve(webContentsId, permission, details);
       if (!found) return false;
       const { guest, keys, origin } = found;
       if (keys === "auto") return !deps.agentInput(guest.guestId);
-      const stored = keys.map(permission => deps.store.get(guest.pool, origin, permission));
+      const stored = keys.map(permission => deps.store.get(guest.pool, origin, permission, guest.identityId));
       if (stored.some(value => value === false)) return false;
       if (stored.every(value => value === true)) return true;
       const id = `${webContentsId}\n${origin}\n${keys.join(",")}`;
@@ -168,7 +186,7 @@ export function createBrowserSitePermissions(deps: BrowserSitePermissionsDeps): 
             ...(deps.watch ? { signal: abort.signal } : {}), queue });
           // The page may have navigated (or the tab closed) while the dialog was open.
           if (!answer || abort.signal.aborted || !same()) return false;
-          if (answer.remember) for (const permission of keys) deps.store.set(guest.pool, origin, permission, answer.allow);
+          if (answer.remember) for (const permission of keys) deps.store.set(guest.pool, origin, permission, answer.allow, guest.identityId);
           return answer.allow;
         } finally { finished = true; stop?.(); unlock(); }
       })().catch(() => false).finally(() => { waiting--; pending.delete(id); });

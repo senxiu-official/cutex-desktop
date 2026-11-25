@@ -2,7 +2,7 @@
 // capsule: the status mark (glyph + word — never colour alone) and the "#N" tag that jumps to a card.
 import type { ContinuationWait } from "../../../shared/ipc";
 import type { DelegationStatus, DelegationWait, StatusGlyph, StatusTone } from "../lib/delegations";
-import { continuationTrailing } from "../lib/continuationWait";
+import { blockedReasonKey, continuationOverdue, continuationTrailing } from "../lib/continuationWait";
 import { formatAbsolute, formatAt, useClock } from "../lib/time";
 import { useStatusWord } from "../lib/delegationsView";
 import { taskTag } from "../lib/tasks";
@@ -58,25 +58,29 @@ export function useWaitText(): (wait: DelegationWait | undefined) => string | nu
  * A yielded wait (r290 P14) as words: the text after the status word ("约 14:15 继续", "等子委托完成"; null when
  * there is nothing to add) and its hover hint. Re-renders on the shared 30 s clock while it shows a time.
  */
-export function useContinuationText(cont: ContinuationWait | undefined, legacy?: DelegationWait): { trailing: string | null; hint: string | undefined } {
+export function useContinuationText(cont: ContinuationWait | undefined, legacy?: DelegationWait): { trailing: string | null; hint: string | undefined; overdue: boolean } {
   const { t } = useI18n();
   const now = useClock(!!cont?.nextWakeAt);
-  if (!cont) return { trailing: null, hint: undefined };
+  if (!cont) return { trailing: null, hint: undefined, overdue: false };
   const p = continuationTrailing(cont, now);
-  const form = p === null ? null : p.key === "delegation.cont.inMinutes" ? t(p.key, { n: p.n }) : p.key === "delegation.cont.at" ? t(p.key, { time: p.time }) : t(p.key);
+  const overdue = continuationOverdue(cont, now);
+  const form = p === null ? null : p.key === "delegation.cont.inMinutes" || p.key === "delegation.cont.inHours" ? t(p.key, { n: p.n }) : p.key === "delegation.cont.at" ? t(p.key, { time: p.time }) : t(p.key);
+  // The host's reason a wait has not continued (continuationWait.blockedReason, newer hosts only).
+  const reasonKey = blockedReasonKey(cont.blockedReason);
   // A job await's own time limit stays beside the form (「等作业完成 · 最晚 06:11」), its note and exact time on hover.
   const limit = legacy?.timeoutAt ? Date.parse(legacy.timeoutAt) : NaN;
   const until = Number.isFinite(limit) ? t("delegation.wait.until", { time: formatAt(limit / 1000, now) }) : null;
   const trailing = [form, until].filter(Boolean).join(" · ") || null;
   const wake = cont.nextWakeAt ? Date.parse(cont.nextWakeAt) : NaN;
-  const lead = cont.state === "limited" ? "delegation.cont.hintLimited" : cont.state === "ready" ? "delegation.cont.hintReady" : cont.kind === "children" ? "delegation.cont.hintChildren" : cont.kind === "jobs" ? "delegation.cont.hintJobs" : "delegation.cont.hintAfter";
+  const lead = cont.state === "limited" ? "delegation.cont.hintLimited" : cont.state === "ready" ? "delegation.cont.hintReady" : overdue ? "delegation.cont.hintOverdue" : cont.kind === "children" ? "delegation.cont.hintChildren" : cont.kind === "jobs" ? "delegation.cont.hintJobs" : "delegation.cont.hintAfter";
   const hint = [
     t(lead),
+    reasonKey && cont.state !== "limited" ? t("delegation.cont.blockedBy", { reason: t(reasonKey) }) : null,
     cont.state === "waiting" && Number.isFinite(wake) ? t("delegation.cont.wakeAt", { time: formatAbsolute(wake / 1000) }) : null,
     legacy?.note ?? null,
     Number.isFinite(limit) ? t("delegation.wait.until", { time: formatAbsolute(limit / 1000) }) : null,
   ].filter(Boolean).join("\n");
-  return { trailing, hint };
+  return { trailing, hint, overdue };
 }
 
 export function DelegationStatusMark({ status, name, trailing, error, className = "" }: { status: DelegationStatus; name: string; trailing?: string | null; error?: string | null; className?: string }) {
@@ -94,7 +98,7 @@ export function DelegationStatusMark({ status, name, trailing, error, className 
     trailing = cont.trailing;
     hint = cont.hint;
   }
-  // The word stays whole only beside a wait text (a bare 续接已达上限 truncates like any word).
+  // The word stays whole only beside a wait text (a bare 自动继续已到期 truncates like any word).
   const long = (!!status.wait && !status.cont) || (!!status.cont && !!trailing);
   const wordTone = status.dangerText ? "text-danger" : status.tone === "danger" ? "text-danger" : status.tone === "warn" ? "text-warn" : "text-muted";
   return (
@@ -104,7 +108,8 @@ export function DelegationStatusMark({ status, name, trailing, error, className 
       <span className={`${long ? "shrink-0" : "truncate"} ${wordTone} ${error || hint ? "cursor-help underline decoration-dotted underline-offset-2" : ""}`} title={[hint, error].filter(Boolean).join("\n") || undefined}>
         {word}
       </span>
-      {trailing && <span className={`${long ? "min-w-0 truncate" : "shrink-0"} text-subtle tabular-nums`} title={long ? hint : undefined}>· {trailing}</span>}
+      {/* Past its time and still waiting: a muted warning (owner 2026-11-25), never 「即将」. */}
+      {trailing && <span className={`${long ? "min-w-0 truncate" : "shrink-0"} ${status.cont && cont.overdue ? "text-warn-text/80" : "text-subtle"} tabular-nums`} data-cont-overdue={status.cont && cont.overdue ? "" : undefined} title={long ? hint : undefined}>· {trailing}</span>}
     </span>
   );
 }

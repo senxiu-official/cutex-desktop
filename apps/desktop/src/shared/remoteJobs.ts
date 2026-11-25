@@ -91,6 +91,13 @@ export interface NciVerificationStatus {
   lastQueryAt?: number | null;
   lastSuccessAt?: number | null;
   nextQueryAllowedAt?: number | null;
+  /** r296: the host's last successful check (Unix s); a per-job time stays `lastSourceEventAt`. */
+  lastVerifiedAt?: number | null;
+  /** r296: the earliest estimate when a tracked job can be checked again (Unix s); null = not known / nothing to check. */
+  nextCheckAt?: number | null;
+  /** r296: completion notices waiting to be delivered, and the last delivery error code. */
+  pendingDeliveries?: number | null;
+  deliveryErrorCode?: string | null;
 }
 
 /**

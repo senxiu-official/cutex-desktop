@@ -10,7 +10,7 @@
 // `?noworkers` (or `?legacy`) = a cutex without the capability: no workers are listed.
 import { SERVICES_ELIGIBLE_OWNERS_FEATURE, type EligibleServiceOwner } from "../../../../shared/serviceOwners";
 import type { ModuleMock } from "../../dev/mockTypes";
-import { SERVICES_EPHEMERAL_TTL_FEATURE, SERVICES_ORGANIZE_FEATURE, SERVICES_PERSIST_APPROVAL_FEATURE, SERVICES_PROJECT_SCOPE_FEATURE, SERVICES_IDLE_PRESETS_FEATURE, SERVICES_WORKERS_FEATURE, servicesSettingsPatch } from "../../../../shared/servicesSettings";
+import { SERVICES_REMOTE_ACCESS_FEATURE, SERVICES_EPHEMERAL_TTL_FEATURE, SERVICES_ORGANIZE_FEATURE, SERVICES_PERSIST_APPROVAL_FEATURE, SERVICES_PROJECT_SCOPE_FEATURE, SERVICES_IDLE_PRESETS_FEATURE, SERVICES_WORKERS_FEATURE, servicesSettingsPatch } from "../../../../shared/servicesSettings";
 import type { ServicesSettings, ServicesSettingsPatch } from "../../../../shared/ipc";
 
 const params = typeof location !== "undefined" ? new URLSearchParams(location.search) : new URLSearchParams();
@@ -33,6 +33,11 @@ function settingsStore(initial: ServicesSettings, legacy: () => boolean) {
 }
 
 function patchedService(service: MockService, patch: Parameters<NonNullable<import("../../../../shared/ipc").DesktopApi["patchService"]>>[1], settings: ServicesSettings): MockService {
+  // cutex services-remote-access-v1: decided on a registration (`?raStale`: it changed since, as after a re-register).
+  const { ifRegistration, ...fields } = patch;
+  if (ifRegistration && (params.has("raStale") || ifRegistration.createdAt !== service.createdAt || ifRegistration.ownerCutexSessionId !== service.ownerCutexSessionId)) throw new Error("409 service_registration_changed: the service registration changed; refresh and decide again");
+  if (fields.remoteAccess !== undefined && params.has("noremoteaccess")) throw new Error("400 invalid_request: unknown field `remoteAccess`");
+  patch = fields;
   const next = { ...service, ...patch } as MockService;
   if (patch.idleStopPreset !== undefined && ((next.runtime !== "managed" && next.runtime !== "worker") || next.lifetime !== "persistent" || !["1h", "24h", "7d", "forever"].includes(patch.idleStopPreset))) throw new Error("invalid_request: idleStopPreset requires a persistent managed service");
   if (patch.lifetime === "persistent" && service.lifetime !== "persistent" && next.runtime === "managed" && patch.idleStopPreset === undefined) next.idleStopPreset = "24h";
@@ -53,7 +58,7 @@ function mockService(slug: string, displayName: string, port: number, runtime: M
   return { slug, displayName, host: "host-a", port, path: null, ownerCutexSessionId: owner, projectId, runtime, lifetime: "ephemeral", purpose: null, pinned: false, effectiveIdleTtlMinutes: 120, maxIdleTtlMinutes: 1440, groupName: null, starred: false, sortOrder: 0, note: null, hidden: false, archived: false, createdAt: iso(86400), lastSeenAt: health === "reachable" ? iso(10) : null, lastTrafficAt: health === "reachable" ? iso(30) : null, health, url: `http://host-a:${port}`, localUrl: `http://127.0.0.1:${port}`, process: runtime === "external" ? null : { pid: health === "reachable" ? 4100 + port % 100 : null, startedAt: null, restarts: 0, lastExitCode: null, lastExitAt: null, nextRestartAt: null }, ...extra };
 }
 let mockServices: MockService[] = [
-  mockService("host-a-experiment-console", "HOST-A Experiment Console", 24301, "managed", "reachable", "eva", "desktop", { ownerScope: "project", lifetime: "persistent", purpose: "foreground", groupName: "开发工具", starred: true, note: "实验控制台与实时结果" }),
+  mockService("host-a-experiment-console", "HOST-A Experiment Console", 24301, "managed", "reachable", "eva", "desktop", { ownerScope: "project", lifetime: "persistent", purpose: "foreground", groupName: "开发工具", starred: true, note: "实验控制台与实时结果", remoteAccess: true }),
   mockService("kks-voice-audition", "KKS Voice Audition", 24234, "managed", "reachable", "mika", "desktop", { ownerScope: "project", lifetime: "persistent", purpose: "background", groupName: "语音", note: "本地试听与转码服务", process: { pid: 4321, startedAt: null, restarts: 2, lastExitCode: 1, lastExitAt: null, nextRestartAt: null } }),
   mockService("host-a-image2-results", "HOST-A Image2 Results", 24308, "managed", "stopped", "alden", "desktop", { lifetime: "persistent", purpose: null, note: "等待主人分类的长期服务" }),
   mockService("alpha-hexmap-editor", "ALPHA Hex Map Editor", 24201, "external", "unreachable", null, null),
@@ -83,6 +88,8 @@ if (withWorkers) mockServices.push(
   mockWorker("backup-uploader", "备份上传", "crashLooped", "eva", null, { lifetime: "ephemeral", purpose: null, idleStopPreset: undefined, process: { pid: null, startedAt: null, restarts: 5, lastExitCode: 2, lastExitAt: iso(600), nextRestartAt: null } }),
   mockWorker("rss-fetcher", "RSS 抓取", "reachable", "old1", "desktop", { idleStopPreset: "24h", idleStopAt: iso(-20 * 3600) }),
 );
+// `?wa` / `?waState=…` (modules/whatsapp/mock.ts): the owner-only WhatsApp integration service desktop main registers on this host.
+if (params.has("wa") || params.has("waState")) mockServices.push(mockService("whatsapp", "WhatsApp", 0, "integration", "reachable", null, null, { port: null, url: null, localUrl: null, portAllocated: false, lifetime: "persistent", purpose: "background", process: null }));
 // Repeatable conversation-header review: the Director owns thirteen synthetic services.
 if (params.has("idle") && !params.has("legacy") && !params.has("oldidle")) {
   mockServices.push(mockService("idle-preview", "Sleeping preview", 24358, "managed", "stoppedIdle", "eva", "desktop", { lifetime: "persistent", purpose: "foreground", idleStopPreset: "1h", stoppedIdle: true, stoppedIdleAt: iso(3600), idleStopAt: null, lastTrafficAt: iso(7200), stopped: false }));
@@ -237,7 +244,7 @@ function remoteServiceApi(hostId: string, emitHost: (method: string, params: Rec
 }
 export const mock: ModuleMock = {
   remote: remoteServiceApi,
-  features: { new: [...(withWorkers ? [SERVICES_WORKERS_FEATURE] : []), SERVICES_PERSIST_APPROVAL_FEATURE, SERVICES_EPHEMERAL_TTL_FEATURE, SERVICES_ORGANIZE_FEATURE, "service-tiles", SERVICES_ELIGIBLE_OWNERS_FEATURE, SERVICES_PROJECT_SCOPE_FEATURE, ...(params.has("oldidle") ? [] : [SERVICES_IDLE_PRESETS_FEATURE])] },
+  features: { new: [...(withWorkers ? [SERVICES_WORKERS_FEATURE] : []), SERVICES_PERSIST_APPROVAL_FEATURE, SERVICES_EPHEMERAL_TTL_FEATURE, SERVICES_ORGANIZE_FEATURE, "service-tiles", SERVICES_ELIGIBLE_OWNERS_FEATURE, SERVICES_PROJECT_SCOPE_FEATURE, ...(params.has("oldidle") ? [] : [SERVICES_IDLE_PRESETS_FEATURE]), ...(params.has("noremoteaccess") ? [] : [SERVICES_REMOTE_ACCESS_FEATURE])] },
   api: (core) => serviceApi(core, settingsStore({ portRangeStart: 24400, portRangeEnd: 24999, agentPersistentApproval: params.has("persistoff") ? "off" : "ask", ephemeralIdleMinutes: 120, ephemeralTtlHours: 24 }, () => core.legacy)),
   // service_register with reveal: true by demo-writer (owner of demo-notebook) ~16 s after start
   // (?revealAt=<s>): a card 「demo-writer 想给你看：Demo Notebook · 打开」 in its conversation (live.ts).

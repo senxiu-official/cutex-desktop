@@ -1,6 +1,7 @@
 // English strings of ./i18n.ts, apart from the zh-CN source so they stay out of the entry chunk: they load with the
 // en catalog (i18n/index.tsx), only when the UI or a search needs English (0.2.0 beta perf audit, 2026-10-24).
 import { browserClaimEn } from "./claimMessages";
+import { browserIdentityEn } from "./identityMessages";
 import { browserTimelineEn } from "./browserTimeline";
 import { browserOwnerUiEn } from "./ownerUiMessages";
 import { browserHostSettingsEn } from "./hostSettingsMessages";
@@ -40,6 +41,7 @@ export const en: Record<keyof typeof zhCN, string> = {
   ...browserErrorMessagesEn,
   ...browserTimelineEn,
   ...browserOwnerUiEn,
+  ...browserIdentityEn,
   ...browserHostSettingsEn,
   "browser.title": "Browser",
 "browser.media.tray": "Playing",
@@ -176,8 +178,8 @@ export const en: Record<keyof typeof zhCN, string> = {
   "browser.idempotency.cancel": "Cancel",
   "browser.idempotency.confirmAction": "Confirm clear",
   "browser.idempotency.done": "Cleared {outcomeUnknown} outcome-unknown records and {abandonedForwarded} abandoned in-flight records.",
-  "browser.part.device": "This device",
-  "browser.part.deviceHint": "Applies only to the built-in browser on this device",
+  "browser.part.device": "Desktop app",
+  "browser.part.deviceHint": "Applies only to the desktop app’s built-in browser",
   "browser.part.host": "Host",
   "browser.part.hostHint": "Applies to {{agents}} on the selected host",
 };

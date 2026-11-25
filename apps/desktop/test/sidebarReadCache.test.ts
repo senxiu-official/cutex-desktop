@@ -150,8 +150,44 @@ it("hands out a read overtaken by an invalidation burst at once, then asks once 
   await pending; await vi.advanceTimersByTimeAsync(0);
   expect(f.projects).toHaveBeenCalledOnce(); expect(f.hostSessions).toHaveBeenCalledOnce();
   expect(emit.mock.calls.filter(([name]) => name === "sidebarChanged")).toHaveLength(1);
-  // The follow-up never repopulates the new roster from the old read.
+  // The follow-up never repopulates the new roster from the old read. Until a roster was read once, a sidebar
+  // does not wait for it (perf audit 2026-11-24 #5): it follows with the next read.
+  expect((await sidebar()).projectOperators).toEqual({});
+  await vi.advanceTimersByTimeAsync(0);
+  expect(emit.mock.calls.filter(([name, value]) => name === "sidebarChanged" && (value as { reason: string }).reason === "project_operators")).toHaveLength(1);
   expect((await sidebar()).projectOperators).toEqual({ p: ["new"] });
+});
+
+it("the first sidebar does not wait for Operator rosters; they follow at once, and later reads wait for them", async () => {
+  await open();
+  const roster = deferred(); f.project.mockReturnValueOnce(roster.promise);
+  f.projects.mockImplementation(async () => ({ projects: [project(), { ...project(), project_id: "none", operator_count: 0 }] }));
+  const first = await sidebar();
+  // Known: the project without Operators. Unknown (absent): the one whose roster is still being read.
+  expect(first.projectOperators).toEqual({ none: [] });
+  expect(emit.mock.calls.some(([name]) => name === "sidebarChanged")).toBe(false);
+  roster.resolve(workspace("deputy")); await settle();
+  expect(emit.mock.calls.filter(([name]) => name === "sidebarChanged").map(([, value]) => (value as { reason: string }).reason)).toEqual(["project_operators"]);
+  // The follow-up starts without the 2 s spacing of event-driven reads.
+  const follow = service.sidebar(); await vi.advanceTimersByTimeAsync(0);
+  expect((await follow).projectOperators).toEqual({ p: ["deputy"], none: [] });
+  // Later: an equal-count replacement is read before the sidebar shows (no stale Operator).
+  const replaced = deferred(); f.project.mockReturnValueOnce(replaced.promise);
+  event("cutex/project/operatorsChanged"); emit.mockClear();
+  const later = sidebar(); let done = false; void later.then(() => { done = true; });
+  await vi.advanceTimersByTimeAsync(2000); expect(done).toBe(false);
+  replaced.resolve(workspace("replacement"));
+  expect((await later).projectOperators).toEqual({ p: ["replacement"], none: [] });
+  expect(emit.mock.calls.some(([name, value]) => name === "sidebarChanged" && (value as { reason: string }).reason === "project_operators")).toBe(false);
+});
+
+it("a host whose projects have no Operators reads no rosters and sends no follow-up", async () => {
+  await open();
+  f.projects.mockImplementation(async () => ({ projects: [{ ...project(), operator_count: 0 }] }));
+  expect((await sidebar()).projectOperators).toEqual({ p: [] });
+  await settle();
+  expect(f.project).not.toHaveBeenCalled();
+  expect(emit.mock.calls.some(([name]) => name === "sidebarChanged")).toBe(false);
 });
 
 it("retries failed or stale-authority operator projections rather than caching absence", async () => {

@@ -126,7 +126,7 @@ export const en: Record<keyof typeof zhCN, string> = {
   "home.showWhenEmptyHint": "When off, the desktop shows only from “Show desktop” or the sidebar's “Desktop”",
   "home.homeHost": "Home settings are kept on",
   "home.savedOnHost": "Stored on {host}: every device of yours shows the same",
-  "home.savedLocal": "This host's cutex does not support home settings yet; they stay on this device",
+  "home.savedLocal": "This host's cutex does not support home settings yet; they stay in the desktop app",
   "home.saveFailed": "Home settings were not saved: {error}",
   "home.saving": "Saving…",
   "home.artCredit": "Launch art",

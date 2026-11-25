@@ -49,3 +49,10 @@ export function recentEntries(entries: TimelineEntry[], turns: TurnView[], limit
   if (start <= 0) return { entries, hiddenTurns: 0 };
   return { entries: entries.slice(start), hiddenTurns: turns.length - limit };
 }
+
+/** Each turn's first position in `turns` (a user row's 「之后 N 轮」 count: one lookup instead of a scan per row). */
+export function visibleTurnPositions(turns: readonly { id: string }[]): Map<string, number> {
+  const at = new Map<string, number>();
+  turns.forEach((turn, index) => { if (!at.has(turn.id)) at.set(turn.id, index); });
+  return at;
+}

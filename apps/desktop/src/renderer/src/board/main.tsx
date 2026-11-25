@@ -3,10 +3,13 @@ import { createRoot } from "react-dom/client";
 import type { BoardBridge } from "../../../shared/board";
 import { BoardApp, type BoardDocument } from "./BoardApp";
 import "../styles.css";
+import { followStoredAccent } from "../lib/accent";
 
 // This window's own document (not drawn by the app renderer): theme, root font size (大字), language, title.
 const root = document.documentElement;
 root.dataset.theme = "dark";
+// The owner's 强调色 (Settings → 外观), live when it changes there.
+followStoredAccent();
 const applyDocument = (d: BoardDocument) => {
   root.style.fontSize = d.bigText ? "19px" : "16px";
   root.lang = d.lang;

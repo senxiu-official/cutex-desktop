@@ -52,7 +52,7 @@ function session(id: string, name: string, over: Partial<SessionResource> = {}):
     formalAgentName: name,
     registrationClass: null,
     lifecycle: "active",
-    cwd: `/home/ema/${id}`,
+    cwd: `/home/user/${id}`,
     note: null,
     avatar: null,
     native: { threadId: `thread-${id}`, schema: null },
@@ -71,7 +71,7 @@ function sidebar(sessions: SessionResource[], rows: Record<string, { projectId?:
 }
 
 const LOCAL = sidebar(
-  [session("lead", "Hachimi"), session("quick", "Quick chat", { formalAgentName: null, registrationClass: "local_only" }), session("solo", "Solo")],
+  [session("lead", "Hostc"), session("quick", "Quick chat", { formalAgentName: null, registrationClass: "local_only" }), session("solo", "Solo")],
   { lead: { projectId: "p1" }, quick: {}, solo: {} },
   [{ id: "p1", name: "cutex-dev", director: "lead" }],
 );

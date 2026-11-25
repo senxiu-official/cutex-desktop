@@ -4,7 +4,7 @@ import type { zhCN } from "./i18n";
 
 const zhHantCN: Record<keyof typeof zhCN, string> = {
   "perf-log.moduleTitle": "效能記錄",
-  "perf-log.description": "介面卡住超過 100 毫秒時記一條：什麼時間、螢幕上開著什麼、你剛做了什麼、哪段程式碼最耗時。只存在這台電腦上，不會發出去",
+  "perf-log.description": "界面卡住超過 100 毫秒時記一條：什麼時間、屏幕上開着什麼、你剛做了什麼、哪段代碼最耗時。只存在這臺電腦上，不會發送出去",
   "perf-log.section": "效能記錄",
   "perf-log.enabled": "記錄卡頓",
   "perf-log.enabled.hint": "介面卡住超過 100 毫秒時記一條，最多保留最近 500 條（約 5 MB），只存在這台電腦上。不卡的時候幾乎不佔資源",
@@ -32,7 +32,7 @@ const zhHantCN: Record<keyof typeof zhCN, string> = {
   "perf-log.hiddenWindow": "視窗在背景",
   "perf-log.desktop": "桌面",
   "perf-log.workspaces": "{n} 個工作區",
-  "perf-log.rows": "時間線 {turns} 輪 / {rows} 項",
+  "perf-log.rows": "時間線 {turns} 個回合 / {rows} 項",
   "perf-log.dom": "{n} 個元素",
 };
 

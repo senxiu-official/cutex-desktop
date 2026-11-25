@@ -397,7 +397,7 @@ export function TurnQueue({
           <QueuedImages images={messageImages((p.extra ?? []) as { type: string }[])} total={p.imageCount} hostId={hostId} />
           {(p.state === "checking" ? null : insertStatus?.(p.id)) ?? <SteerDeliveryNote steer={p} runtime={runtime} imageSteering={imageSteering} className={META_YIELDS} onRecheck={onRecheckSteer && (() => onRecheckSteer(p.id))} />}
           {p.state !== "checking" && <span className={`${ROW_ACTIONS} h-5 max-h-5`}>
-            <button onClick={onInterruptSendSteers} title={NEXT_UP_EFFECTS.interruptSend.tip[langOf(locale)]} className={`${TINY} text-danger hover:bg-danger/10`} data-testid="boundary-interrupt-send">
+            <button onClick={onInterruptSendSteers} title={t("interruptSend.oneTip")} className={`${TINY} text-danger hover:bg-danger/10`} data-testid="boundary-interrupt-send">
               {NEXT_UP_EFFECTS.interruptSend.label[langOf(locale)]}
             </button>
           </span>}

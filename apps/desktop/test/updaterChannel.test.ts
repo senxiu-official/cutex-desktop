@@ -1,9 +1,10 @@
 // Updater against real git repositories: the channel branch decides what is offered, and an install
 // whose update source is missing stays quietly "unsupported" (main/updater.ts, shared/update.ts).
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { UpdateStatus } from "../src/shared/ipc";
 
@@ -34,17 +35,17 @@ function gitOnlyPath(): string {
 
 const git = (cwd: string, ...args: string[]) => execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false", ...args], { cwd, encoding: "utf8" }).trim();
 
-// Every test here runs real git (clone, checkout, fetch, rev-parse, …: 10–20 processes, 0.5–1.3 s alone on Windows).
-// Under the full suite's load process start-up slows several times over and crossed the default 5 s — the work, not
-// a wait or a race. This file's own time for that (hooks: the fixture repositories).
+// The updater runs real fetch and history queries. On a loaded Windows host,
+// Git process startup alone can take seconds.
 vi.setConfig({ testTimeout: 30_000, hookTimeout: 60_000 });
 
 let root: string;
 let upstream: string;
 /** main m1 → m2 only (no release branch yet). */
 let mainOnly: string;
-/** main o1 → o2, release at o1 (an older release head). */
+/** main m1 → m2, release at m1 (an older release head). */
 let olderRelease: string;
+const checkoutTemplates = new Map<string, Map<string, string>>();
 const commits: Record<string, string> = {};
 const realExecPath = process.execPath;
 
@@ -53,7 +54,7 @@ beforeAll(async () => {
   root = mkdtempSync(join(tmpdir(), "cutex-updater-"));
   upstream = join(root, "upstream");
   mkdirSync(upstream);
-  git(upstream, "init", "-q", "-b", "main");
+  git(upstream, "init", "-q", "--template=", "-b", "main");
   const commit = (name: string) => {
     writeFileSync(join(upstream, "f.txt"), name);
     git(upstream, "add", "f.txt");
@@ -61,25 +62,17 @@ beforeAll(async () => {
     commits[name] = git(upstream, "rev-parse", "HEAD");
   };
   commit("m1");
-  git(upstream, "branch", "release");
-  commit("m2"); // main moves on…
-  git(upstream, "checkout", "-q", "release");
-  commit("r2"); // …and release gets its own newer commit
-  git(upstream, "checkout", "-q", "main");
-
+  commit("m2");
   mainOnly = join(root, "main-only");
-  git(root, "clone", "-q", "--bare", "--single-branch", "--branch", "main", upstream, mainOnly);
+  cpSync(upstream, mainOnly, { recursive: true });
 
   olderRelease = join(root, "older-release");
-  mkdirSync(olderRelease);
-  git(olderRelease, "init", "-q", "-b", "main");
-  for (const name of ["o1", "o2"]) {
-    writeFileSync(join(olderRelease, "f.txt"), name);
-    git(olderRelease, "add", "f.txt");
-    git(olderRelease, "commit", "-q", "-m", name);
-    commits[name] = git(olderRelease, "rev-parse", "HEAD");
-    if (name === "o1") git(olderRelease, "branch", "release");
-  }
+  cpSync(mainOnly, olderRelease, { recursive: true });
+  git(olderRelease, "branch", "release", commits.m1!);
+
+  git(upstream, "checkout", "-q", "-b", "release", commits.m1!);
+  commit("r2");
+  git(upstream, "checkout", "-q", "main");
 });
 
 afterAll(() => {
@@ -92,8 +85,22 @@ afterEach(() => {
   Object.defineProperty(process, "execPath", { value: realExecPath, configurable: true });
 });
 
+/** Copy a clean checkout so fetch, config edits and branch switches stay local to each test. */
+function copyCheckout(destination: string, origin: string, start: string) {
+  let templates = checkoutTemplates.get(origin);
+  if (!templates) checkoutTemplates.set(origin, templates = new Map());
+  let template = templates.get(start);
+  if (!template) {
+    template = mkdtempSync(join(root, "checkout-"));
+    git(root, "clone", "-q", "--template=", "-c", "maintenance.auto=false", origin, template);
+    if (start !== "main") git(template, "checkout", "-q", "--detach", start);
+    templates.set(start, template);
+  }
+  cpSync(template, destination, { recursive: true });
+}
+
 /** A portable install at <base> running a build of `build`, with <base>/src cloned from `origin`. */
-function install(name: string, opts: { build: string; channelFile?: string; packagedChannel?: string; origin?: string | null; from?: string; mac?: boolean }) {
+function install(name: string, opts: { build: string; channelFile?: string; packagedChannel?: string; origin?: string | null; from?: string; mac?: boolean; onMain?: boolean }) {
   const base = join(root, name);
   const rel = join(base, "releases", "abc1234");
   const appDir = join(rel, "resources", "app");
@@ -102,9 +109,9 @@ function install(name: string, opts: { build: string; channelFile?: string; pack
   writeFileSync(join(appDir, "package.json"), JSON.stringify({ commit: opts.build, committedAt: null, sourceDir: null, nodeDir: null, ...(opts.packagedChannel ? { channel: opts.packagedChannel } : {}) }));
   if (opts.channelFile !== undefined) writeFileSync(join(base, "channel"), opts.channelFile);
   if (opts.origin !== null) {
-    git(root, "clone", "-q", opts.from ?? upstream, join(base, "src"));
-    git(join(base, "src"), "checkout", "-q", "--detach", opts.build);
-    if (opts.origin) git(join(base, "src"), "remote", "set-url", "origin", opts.origin);
+    const src = join(base, "src");
+    copyCheckout(src, opts.from ?? upstream, opts.onMain ? "main" : opts.build);
+    if (opts.origin) git(src, "remote", "set-url", "origin", opts.origin);
   }
   const userData = join(base, "userData");
   mkdirSync(userData, { recursive: true });
@@ -127,8 +134,8 @@ async function settle(updater: InstanceType<typeof Updater>): Promise<UpdateStat
 }
 
 describe("updater channels", () => {
-  function exportedInstall(name: string, source?: string, legacy = false) {
-    const base = install(name, { build: commits.m1!, channelFile: "main", packagedChannel: "release" });
+  function exportedInstall(name: string, source?: string, legacy = false, origin?: string) {
+    const base = install(name, { build: commits.m1!, channelFile: "main", packagedChannel: "release", origin });
     const info = { commit: "e".repeat(40), committedAt: null, sourceDir: null, nodeDir: null, version: "0.2.1", channel: "release", releasePage: "https://github.com/example-org/cutex-desktop/releases" };
     writeFileSync(join(env.appPath, "package.json"), JSON.stringify(info));
     if (source) writeFileSync(legacy ? join(base, "RELEASE-RECEIPT.json") : join(env.appPath, "..", "..", "source-provenance.json"), JSON.stringify(legacy
@@ -152,9 +159,12 @@ describe("updater channels", () => {
     expect(s.latest?.offMain).toBeUndefined();
   });
 
-  it("distinguishes a valid source fork from an unavailable source object", async () => {
+  it("recognizes a valid source fork", async () => {
     exportedInstall("export-divergent", commits.r2);
     expect((await settle(new Updater(() => {}))).latest).toMatchObject({ offMain: true, sourceComparison: "diverged" });
+  });
+
+  it("keeps the comparison unknown if the source object is unavailable", async () => {
     exportedInstall("export-source-unavailable", "d".repeat(40));
     const s = await settle(new Updater(() => {}));
     expect(s.latest?.sourceComparison).toBe("unknown");
@@ -168,19 +178,18 @@ describe("updater channels", () => {
 
   it("recognizes a release source merged into main through a merge commit", async () => {
     const merged = join(root, "merged-release-origin");
-    git(root, "clone", "-q", upstream, merged);
+    copyCheckout(merged, upstream, "main");
     git(merged, "merge", "--no-ff", "-s", "ours", "origin/release", "-m", "release merged");
     const head = git(merged, "rev-parse", "HEAD");
-    const expectedCount = Number(git(merged, "rev-list", "--count", `${commits.r2}..${head}`));
-    const base = exportedInstall("export-merged-release", commits.r2);
-    git(join(base, "src"), "remote", "set-url", "origin", merged);
+    exportedInstall("export-merged-release", commits.r2, false, merged);
     const s = await settle(new Updater(() => {}));
-    expect(s.latest).toMatchObject({ commit: head, count: expectedCount, sourceComparison: "ahead" });
+    // The merge commit and m2 are the two commits outside the release history.
+    expect(s.latest).toMatchObject({ commit: head, count: 2, sourceComparison: "ahead" });
     expect(s.latest?.offMain).toBeUndefined();
   });
 
   it.each(["source", "standalone"])("keeps the package version visible for a %s install", async (kind) => {
-    install(`version-${kind}`, { build: commits.m1! });
+    install(`version-${kind}`, { build: commits.m1!, origin: kind === "standalone" ? null : undefined });
     const packagePath = join(env.appPath, "package.json");
     const info = JSON.parse(readFileSync(packagePath, "utf8"));
     writeFileSync(packagePath, JSON.stringify({ ...info, version: "0.2.0", releasePage: "https://github.com/example-org/cutex-desktop/releases" }));
@@ -226,15 +235,15 @@ describe("updater channels", () => {
   });
 
   it("the <base>/channel file wins over the packaged channel; junk falls back", async () => {
-    install("file-wins", { build: commits.m1!, channelFile: "main", packagedChannel: "release" });
+    install("file-wins", { build: commits.m1!, channelFile: "main", packagedChannel: "release", origin: null });
     expect(new Updater(() => {}).state().channel).toBe("main");
-    install("junk-file", { build: commits.m1!, channelFile: "--upload-pack=x", packagedChannel: "release" });
+    install("junk-file", { build: commits.m1!, channelFile: "--upload-pack=x", packagedChannel: "release", origin: null });
     expect(new Updater(() => {}).state().channel).toBe("release");
   });
 
   it("the remote override fetches the channel branch from that remote", async () => {
-    install("override", { build: commits.m1!, channelFile: "release", origin: join(root, "nowhere") });
-    const s = await settle(new Updater(() => {}, upstream));
+    install("override", { build: commits.m1!, channelFile: "release", from: mainOnly, origin: join(root, "nowhere") });
+    const s = await settle(new Updater(() => {}, pathToFileURL(upstream).href));
     expect(s.latest).toMatchObject({ commit: commits.r2 });
   });
 });
@@ -274,13 +283,15 @@ describe("switching channels (Settings → 更新与诊断)", () => {
   });
 
   it("switching to an older channel offers its head behind the button, never by itself", async () => {
-    install("to-older", { build: commits.o2!, from: olderRelease });
+    install("to-older", { build: commits.m2!, from: olderRelease });
     const updater = new Updater(() => {});
     expect((await settle(updater)).state).toBe("idle");
     const s = await updater.setChannel("release");
-    expect(s).toMatchObject({ state: "available", channel: "release", latest: { commit: commits.o1, switchChannel: true, count: 0 } });
-    // A build made for release (packaged with --channel release) that is newer than release: no offer.
-    install("release-build-newer", { build: commits.o2!, from: olderRelease, packagedChannel: "release" });
+    expect(s).toMatchObject({ state: "available", channel: "release", latest: { commit: commits.m1, switchChannel: true, count: 0 } });
+  });
+
+  it("does not offer an older release to a build already on the release channel", async () => {
+    install("release-build-newer", { build: commits.m2!, from: olderRelease, packagedChannel: "release" });
     expect((await settle(new Updater(() => {}))).latest).toBeNull();
   });
 
@@ -299,9 +310,8 @@ describe("switching channels (Settings → 更新与诊断)", () => {
   });
 
   it("apply after a switch puts the source checkout on the channel branch (build then fails here: no corepack)", async () => {
-    const base = install("apply-switch", { build: commits.o2!, from: olderRelease });
+    const base = install("apply-switch", { build: commits.m2!, from: olderRelease, onMain: true });
     const src = join(base, "src");
-    git(src, "checkout", "-q", "main");
     const updater = new Updater(() => {});
     await updater.setChannel("release");
     const path = process.env.PATH;
@@ -313,7 +323,7 @@ describe("switching channels (Settings → 更新与诊断)", () => {
       process.env.PATH = path;
     }
     expect(git(src, "symbolic-ref", "--short", "HEAD")).toBe("release");
-    expect(git(src, "rev-parse", "HEAD")).toBe(commits.o1);
+    expect(git(src, "rev-parse", "HEAD")).toBe(commits.m1);
   });
 
   it("macOS layout: <base>/releases/<hash>/Cutex.app is a portable install", async () => {

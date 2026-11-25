@@ -44,10 +44,10 @@ describe("who asked for a runtime stop", () => {
     expect(stopOfTurn(undefined, { startedAt: SEC, completedAt: SEC })).toBeNull();
   });
   it("ships the labels in zh-CN and en", () => {
-    expect(zhCN["conversation.turnStoppedBy.agent"]).toBe("已中断 · 停止：由 {name} 的命令发起");
+    expect(zhCN["conversation.turnStoppedBy.agent"]).toBe("已中断 · 由 {name} 的命令发起");
     for (const kind of ["agent", "self", "owner", "cli"] as const) {
-      expect(zhCN[`conversation.turnStoppedBy.${kind}`]).toMatch(/^已中断 · 停止：/);
-      expect(en[`conversation.turnStoppedBy.${kind}`]).toMatch(/^Interrupted · /);
+      expect(zhCN[`conversation.turnStoppedBy.${kind}`]).toMatch(/^已中断 · 由/);
+      expect(en[`conversation.turnStoppedBy.${kind}`]).toMatch(/^Interrupted (by|from) /);
     }
   });
 });

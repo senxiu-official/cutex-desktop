@@ -120,16 +120,19 @@ describe("yielded wait: 等待中, never 运行中", () => {
 });
 
 describe("the words after 等待中", () => {
-  it("within the hour: 约 N 分钟后继续; later: the local clock; due: 即将继续", () => {
+  it("within the hour 约 N 分钟后继续, within 24 h 约 N 小时后继续, later 预计 {time} 继续; overdue: 已到时间，还未继续", () => {
     expect(continuationTrailing(wait(), NOW)).toEqual({ key: "delegation.cont.inMinutes", n: 25 });
     expect(continuationTrailing(wait({ nextWakeAt: new Date(NOW + 30_000).toISOString() }), NOW)).toEqual({ key: "delegation.cont.inMinutes", n: 1 });
-    const later = NOW + 3 * 3600_000;
+    expect(continuationTrailing(wait({ nextWakeAt: new Date(NOW + 2 * 3600_000).toISOString() }), NOW)).toEqual({ key: "delegation.cont.inHours", n: 2 });
+    expect(continuationTrailing(wait({ nextWakeAt: new Date(NOW + 23 * 3600_000).toISOString() }), NOW)).toEqual({ key: "delegation.cont.inHours", n: 23 });
+    const later = NOW + 30 * 3600_000;
     const d = new Date(later), pad = (n: number) => String(n).padStart(2, "0");
     const clock = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
     const r = continuationTrailing(wait({ nextWakeAt: new Date(later).toISOString() }), NOW);
     expect(r?.key).toBe("delegation.cont.at");
     expect((r as { time: string }).time.endsWith(clock)).toBe(true);
-    expect(continuationTrailing(wait({ nextWakeAt: new Date(NOW - 5000).toISOString() }), NOW)).toEqual({ key: "delegation.cont.soon" });
+    expect(continuationTrailing(wait({ nextWakeAt: new Date(NOW - 5000).toISOString() }), NOW)).toEqual({ key: "delegation.cont.overdue" });
+    expect(continuationTrailing(wait({ nextWakeAt: new Date(NOW).toISOString() }), NOW)).toEqual({ key: "delegation.cont.overdue" });
   });
 
   it("children / jobs say what it waits for; no time, ready and limited add nothing", () => {
@@ -140,10 +143,16 @@ describe("the words after 等待中", () => {
     expect(continuationTrailing(wait({ state: "limited" }), NOW)).toBeNull();
   });
 
-  it("the approved label reads 等待中 · 约{时间}继续", () => {
+  it("the words (owner 2026-11-25): 预计 {time} 继续, 约 N 分钟 / 小时后继续, 已到时间，还未继续, 等待 {condition}", () => {
     expect(zh["delegation.status.continuationWait"]).toBe("等待中");
-    expect(zh["delegation.cont.at"]).toBe("约 {time} 继续");
+    expect(zh["delegation.cont.at"]).toBe("预计 {time} 继续");
     expect(zh["delegation.cont.inMinutes"]).toBe("约 {n} 分钟后继续");
+    expect(zh["delegation.cont.inHours"]).toBe("约 {n} 小时后继续");
+    expect(zh["delegation.cont.overdue"]).toBe("已到时间，还未继续");
+    expect(zh["delegation.cont.children"]).toBe("等待子委托完成");
+    expect(zh["delegation.cont.jobs"]).toBe("等待作业完成");
+    expect(Object.values(zh).join()).not.toContain("即将继续 ");
+    expect("delegation.cont.soon" in zh).toBe(false);
     expect(Object.keys(en).sort()).toEqual(Object.keys(zh).sort());
   });
 
@@ -163,6 +172,38 @@ describe("the words after 等待中", () => {
     expect(limited).toContain("delegation.cont.hintLimited");
     expect(limited).not.toContain("5m");
   });
+
+  it("overdue (owner 2026-11-25): 已到时间，还未继续 in a muted warning, its own hover and exact time; never 即将", () => {
+    const past = new Date(Date.now() - 3 * 60_000).toISOString();
+    const html = renderToStaticMarkup(h(DelegationStatusMark, { status: delegationStatus(row({ continuationWait: wait({ nextWakeAt: past }) })), name: "Helper" }));
+    expect(html).toContain("delegation.cont.overdue");
+    expect(html).toContain("data-cont-overdue");
+    expect(html).toContain("text-warn-text/80");
+    expect(html).toContain("delegation.cont.hintOverdue");
+    expect(html).toMatch(/delegation\.cont\.wakeAt\(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\)/);
+    expect(html).not.toContain("delegation.cont.blockedBy");
+    expect(html).not.toMatch(/cont\.soon|即将/);
+    // Not overdue: no warning style.
+    const ahead = renderToStaticMarkup(h(DelegationStatusMark, { status: delegationStatus(row({ continuationWait: wait({ nextWakeAt: new Date(Date.now() + 2 * 3600_000).toISOString() }) })), name: "Helper" }));
+    expect(ahead).toContain("delegation.cont.inHours(2)");
+    expect(ahead).not.toContain("data-cont-overdue");
+  });
+
+  it("the host's blockedReason shows on hover only when it sends one; routing and admission share a label; unknown ones show none", () => {
+    const past = new Date(Date.now() - 60_000).toISOString();
+    const mark = (blockedReason?: string) => renderToStaticMarkup(h(DelegationStatusMark, { status: delegationStatus(row({ continuationWait: { ...wait({ nextWakeAt: past }), ...(blockedReason ? { blockedReason } : {}) } })), name: "Helper" }));
+    expect(mark("quota")).toContain("delegation.cont.blockedBy");
+    expect(mark("quota")).toContain("delegation.cont.blocked.quota");
+    expect(mark("routing")).toContain("delegation.cont.blocked.admission");
+    expect(mark("admission")).toContain("delegation.cont.blocked.admission");
+    expect(mark("somethingNew")).not.toContain("delegation.cont.blockedBy");
+    expect(mark()).not.toContain("delegation.cont.blockedBy");
+    // Every reason of the backend contract has words in each language.
+    for (const r of ["quota", "login", "runtimeDown", "budget", "runtimeOffline", "reconnecting", "paused", "planMode", "profileSwitchPending", "targetBusy", "admission", "runtimeUnsupported", "reconciling"]) {
+      expect(zh[`delegation.cont.blocked.${r}` as keyof typeof zh], r).toBeTruthy();
+      expect(en[`delegation.cont.blocked.${r}` as keyof typeof en], r).toBeTruthy();
+    }
+  });
 });
 
 describe("wire", () => {
@@ -175,6 +216,9 @@ describe("wire", () => {
     expect(continuationWaitOf({ kind: "after" })).toBeNull();
     expect(continuationWaitOf("waiting")).toBeNull();
     expect(continuationWaitOf({ state: "ready", kind: "jobs" })).toEqual({ state: "ready", kind: "jobs", since: null, nextWakeAt: null });
+    // continuation-audit's optional blockedReason: kept when present, absent otherwise.
+    expect(continuationWaitOf({ state: "waiting", kind: "after", nextWakeAt: "2026-11-18T05:25:00Z", blockedReason: "quota" })?.blockedReason).toBe("quota");
+    expect(continuationWaitOf({ state: "waiting", kind: "after", nextWakeAt: "2026-11-18T05:25:00Z" })).not.toHaveProperty("blockedReason");
   });
 
   it("stateChanged carries the wait; without the field the row keeps it", () => {

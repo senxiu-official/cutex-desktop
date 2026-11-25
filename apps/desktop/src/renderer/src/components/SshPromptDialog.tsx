@@ -55,7 +55,7 @@ function PromptBody({ prompt, more }: { prompt: SshPromptView; more: number }) {
         <div className="mt-4 flex justify-end gap-2">
           {footer}
           {prompt.kind === "notice" ? (
-            <button autoFocus onClick={() => done(null)} className={`${button} bg-accent text-white`}>
+            <button autoFocus onClick={() => done(null)} className={`${button} bg-accent text-on-accent`}>
               {t("sshPrompt.close")}
             </button>
           ) : (
@@ -63,7 +63,7 @@ function PromptBody({ prompt, more }: { prompt: SshPromptView; more: number }) {
               <button autoFocus onClick={() => done(hostKey ? "no" : null)} className={`${button} text-muted hover:bg-surface-2`}>
                 {hostKey ? t("sshPrompt.reject") : t("sshPrompt.deny")}
               </button>
-              <button onClick={() => done("yes")} className={`${button} bg-accent text-white`}>
+              <button onClick={() => done("yes")} className={`${button} bg-accent text-on-accent`}>
                 {hostKey ? t("sshPrompt.trust") : t("sshPrompt.allow")}
               </button>
             </>
@@ -103,7 +103,7 @@ function PromptBody({ prompt, more }: { prompt: SshPromptView; more: number }) {
         <button type="button" onClick={() => done(null)} className={`${button} text-muted hover:bg-surface-2`}>
           {t("dialog.cancel")}
         </button>
-        <button type="submit" className={`${button} bg-accent text-white`}>
+        <button type="submit" className={`${button} bg-accent text-on-accent`}>
           {t("sshPrompt.submit")}
         </button>
       </div>

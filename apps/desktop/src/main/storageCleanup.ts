@@ -1,8 +1,10 @@
 import type { CutexClient } from "@cutex-desktop/cutex-client";
-import type { StorageCleanupApi, StorageCleanupExecuteRequest, StorageCleanupHistory, StorageCleanupPreview, StorageCleanupPreviewRequest, StorageCleanupRun } from "../shared/storageCleanup";
+import type { StorageCleanupAction, StorageCleanupApi, StorageCleanupExecuteRequest, StorageCleanupHistory, StorageCleanupPreview, StorageCleanupPreviewRequest, StorageCleanupRun } from "../shared/storageCleanup";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const ACTIONS = new Set(["orphan-homes", "retired-homes", "old-backups", "old-logs", "vacuum"]);
+// Every shared action, checked by the compiler: an action added to StorageCleanupAction must be added here.
+const ACTION_SET: Record<StorageCleanupAction, true> = { "orphan-homes": true, "retired-homes": true, "old-backups": true, "old-logs": true, vacuum: true, "stock-tmp": true };
+const ACTIONS: ReadonlySet<string> = new Set(Object.keys(ACTION_SET));
 function object(input: unknown, fields: readonly string[]): Record<string, unknown> {
   if (!input || typeof input !== "object" || Array.isArray(input) || Object.keys(input).some((key) => !fields.includes(key))) throw new Error("invalid storage cleanup request");
   return input as Record<string, unknown>;

@@ -48,6 +48,14 @@ export function delegationControlRoute(request: DelegationControlRequest): { met
     }
     case "resume": return route(`${project()}/resume`, { pauseId: delegationId(request.body.pauseId), expectedEpoch: revision(request.body.expectedEpoch) }, DELEGATION_CAPABILITIES.runControl);
     case "resumeContinuation": return route(`${delegation()}/resume-continuation`, { expectedRevision: revision(request.body.expectedRevision) }, DELEGATION_CAPABILITIES.continuation);
+    case "continuationDecision": {
+      // r296: the approval revision / digest / authority epoch; only to a host advertising continuationApproval.
+      const b = request.body;
+      const note = b.decisionNote === null ? null : typeof b.decisionNote === "string" ? b.decisionNote.trim() : undefined;
+      if (!["approve", "deny"].includes(b.decision) || typeof b.expectedDigest !== "string" || !/^[0-9a-f]{64}$/.test(b.expectedDigest)
+        || note === undefined || (note !== null && note.length > 200) || (b.decision === "deny" && !note)) throw new Error("bad continuation decision");
+      return route(`${delegation()}/resume-continuation`, { expectedRevision: revision(b.expectedRevision), expectedDigest: b.expectedDigest, expectedEpoch: revision(b.expectedEpoch), decision: b.decision, decisionNote: note || null }, DELEGATION_CAPABILITIES.continuationApproval);
+    }
     default: throw new Error("unsupported delegation operation");
   }
 }

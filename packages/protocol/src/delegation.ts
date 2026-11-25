@@ -2,6 +2,8 @@
 export const DELEGATION_CAPABILITIES = {
   routing: "delegation-routing-v1", tree: "delegation-tree-stop-v1", runControl: "project-run-control-v1",
   continuation: "delegation-continuation-v1", activity: "agent-activity-v1", settlement: "agent-bus-message-settlement-v1",
+  /** r296 continuation approval (cutex docs/continuation-approval.md): new owner decision fields and the approval lists. */
+  continuationApproval: "delegation-continuation-approval-v1",
 } as const;
 export type DelegationCapability = typeof DELEGATION_CAPABILITIES[keyof typeof DELEGATION_CAPABILITIES];
 export interface DelegationRef { hostId: string; id: string }
@@ -28,7 +30,22 @@ export interface DelegationContinuation {
   cancelReason?: string | null; reconciling?: boolean; maxRounds: number; maxElapsedSeconds: number;
   waitingFor: { kind: "after"; delaySeconds: number } | { kind: "children"; children: { kind: "delegation" | "native"; id: string }[]; until: "all" | "any" } | null;
   sourceAttemptId: string | null;
+  /** r296: the pending approval, only to views allowed to decide (absent on older hosts). */
+  approval?: { id: string; revision: number; digest: string; authorityEpoch: number; allowedActions?: { approve: boolean; deny: boolean } } | null;
+  /** r296: the scheduler hold after an approval (quota, runtimeOffline, targetBusy, …); null when none. */
+  blockedReason?: string | null;
 }
+/** r296 `allowedActions.resumeContinuationBlockedReason` (closed enum; a newer host may add codes). */
+export type ResumeContinuationBlockedReason = "notPending" | "handlerUnavailable" | "generationMismatch" | "handlerOffline" | "handlerBusy" | "leaseHeld" | "projectPaused" | "admissionBlocked";
+/** r296 continuation approval: one per expired budget epoch, decided by the owner or the current Director. */
+export interface DelegationContinuationApproval {
+  id: string; delegationId: string; budgetEpoch: number; authorityEpoch: number; directorSessionId: string | null; revision: number; digest: string;
+  reason: "elapsed" | "rounds"; requestedAt: string; briefPreview: string; progressPreview: string | null;
+  decision: "approve" | "deny" | null; decisionNote: string | null; decidedBy: unknown; decidedAt: string | null;
+  allowedActions: { approve: boolean; deny: boolean };
+}
+/** r296 owner decision body (POST /v2/delegations/{id}/resume-continuation); the legacy pair stays for older hosts. */
+export interface ContinuationDecisionBody { actionId: string; expectedRevision: number; expectedDigest: string; expectedEpoch: number; decision: "approve" | "deny"; decisionNote: string | null }
 export interface DelegationTreeNode {
   kind: "delegation"; ref: DelegationRef; id: string; hostId: string; projectId: string | null; requester: DelegationParty; target: DelegationParty;
   title: string; execution: "pendingReview" | "queued" | "running" | "answered" | "interrupted"; hold: string | null; review: string | null;
@@ -36,7 +53,7 @@ export interface DelegationTreeNode {
   root: DelegationRef | null; rootState: "visible" | "redacted" | "unknown"; redactedRootRef: { placeholderId: string } | null;
   followUp: DelegationRef | null; followUpState: "none" | "visible" | "redacted" | "unknown"; redactedFollowUpRef: { placeholderId: string } | null;
   parentId: string | null; rootId: string | null; followUpOf: string | null; parentAttemptId: string | null; redactedParent: boolean;
-  lineageState: "verified" | "legacyUnknown"; allowedActions: { readAttempts: boolean; stop: boolean; stopSelf: boolean; stopJobs: boolean; declareContinuation: boolean; resumeContinuation: boolean };
+  lineageState: "verified" | "legacyUnknown"; allowedActions: { readAttempts: boolean; stop: boolean; stopSelf: boolean; stopJobs: boolean; declareContinuation: boolean; resumeContinuation: boolean; resumeContinuationBlockedReason?: string | null };
   closed: string | null; createdAt: string; updatedAt: string; revision: number; attemptId: string | null; attemptNumber: number | null;
   attemptStartedAt: string | null; lastActivityAt: string | null; activitySource: "attempt" | "unknown";
   continuation: DelegationContinuation | null; routingApproval: Pick<DelegationApproval, "id" | "state" | "revision"> | null;
@@ -71,7 +88,8 @@ export type DelegationControlRequest =
  | { kind: "stop"; delegationId: string; body: { actionId: string; cascade: "descendants" | "none"; stopJobs: boolean; expectedRevision: number } }
  | { kind: "pause"; projectId: string; body: { actionId: string; expectedEpoch: number; mode: "afterTurn" | "interrupt"; scope: "members" | "all" } }
  | { kind: "resume"; projectId: string; body: { actionId: string; pauseId: string; expectedEpoch: number } }
- | { kind: "resumeContinuation"; delegationId: string; body: { actionId: string; expectedRevision: number } };
+ | { kind: "resumeContinuation"; delegationId: string; body: { actionId: string; expectedRevision: number } }
+ | { kind: "continuationDecision"; delegationId: string; body: ContinuationDecisionBody };
 export interface PermanentRetirementReviewRequest { cutex_session_id: string }
 export interface PermanentRetirementReview { confirmation_token: string; cutex_session_id: string; formal_name: string; revision: number; runtime_generation: number; expires_at_unix: number }
 export interface PermanentRetirementRequest { action_id: string; cutex_session_id: string; confirmed_name: string; confirmation_token: string; expected_revision: number }

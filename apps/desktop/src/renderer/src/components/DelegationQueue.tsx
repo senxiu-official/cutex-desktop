@@ -12,6 +12,8 @@ import { rowTip, useRowTime } from "../lib/queueRowTime";
 import { RowAge } from "./RowFullText";
 import { contextMenu } from "../lib/contextMenu";
 import { delegationMenu } from "../lib/delegationMenu";
+import { ownStepOf } from "../lib/activityOpen";
+import { ActivityStepChip } from "./ActivityStepChip";
 import { delegationStatus, isOwnerRequest, peerSideOf, requesterName, requesterSession } from "../lib/delegations";
 import { hasDelegationViews } from "../lib/delegationStore";
 import { useAgentHost, useAgentNames } from "../lib/delegationsView";
@@ -38,10 +40,12 @@ export function DelegationRow({ d, sessionId, dense = false, children }: { d: As
   const show = () => openDelegationDetail(host, d.askId, { title: d.title });
   const peer = peerSideOf(d);
   const time = useRowTime(d.createdAt);
+  // Registry 2.10: the host's next step when it leads elsewhere (查看结果 / 查看审批 without review buttons here).
+  const step = ownStepOf(d);
   return (
     <div className={`flex ${dense ? "h-6 pr-1 pl-0.5" : "h-7 px-2"} min-w-0 flex-1 items-center gap-1.5 rounded-lg text-xs text-muted hover:bg-surface-2/60`} onContextMenu={contextMenu(() => delegationMenu(d, t, nameOf, { host, here: sessionId, views }))} data-testid="queue-delegation">
       <ArrowDownLeft size={13} className="shrink-0 text-accent" />
-      <span className="inline-flex min-w-0 max-w-[30%] shrink-0">{peer?.side === "requester" ? <PeerParty text={peer.name} label={peer.label} size={16} /> : isOwnerRequest(d.requester) ? <span className="font-medium text-foreground">{t("delegation.you")}</span> : <Who id={requester} name={requesterName(d.requester) ?? (requester ? nameOf(requester) : null)} size={16} />}</span>
+      <span className="inline-flex min-w-0 max-w-[30%] shrink-0">{peer?.side === "requester" ? <PeerParty text={peer.name} label={peer.label} size={16} instanceId={peer.instanceId} hostId={host} /> : isOwnerRequest(d.requester) ? <span className="font-medium text-foreground">{t("delegation.you")}</span> : <Who id={requester} name={requesterName(d.requester) ?? (requester ? nameOf(requester) : null)} size={16} />}</span>
       <span className="shrink-0 text-subtle">·</span>
       <DelegationTag askId={d.askId} onJump={show} />
       {/* The title opens the delegation's detail (its whole title and brief), like the #tag; the tip previews it. */}
@@ -52,7 +56,8 @@ export function DelegationRow({ d, sessionId, dense = false, children }: { d: As
       {children}
       {/* Waiting for this owner's review (local or an incoming cross-host one): 批准 / 拒绝 right here. */}
       <DelegationReviewActions d={d} host={host} variant="row" />
-      {/* Registry 1.10: only registered wait words here (续接已达上限 reads 等待中; lib/nextUpDelegation). */}
+      {step && <ActivityStepChip step={step} hostId={host} askId={d.askId} title={d.title} blocker={false} className="shrink-0" />}
+      {/* Registry 1.10: only registered wait words here (自动继续已到期 reads 等待中; lib/nextUpDelegation). */}
       <DelegationStatusMark status={nextUpDelegationStatus(delegationStatus(d))} name={d.targetName ?? nameOf(d.target)} className="shrink-0" />
     </div>
   );

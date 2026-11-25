@@ -226,7 +226,7 @@ export const en: Record<keyof typeof zhCN, string> = {
   "modules.pack.local.hint": "Installed from a file: not signed, author unverified",
   "modules.pack.local.tag": "Local v{version} · author unverified",
   "modules.data.title": "Module data",
-  "modules.data.detail": "Files modules keep on this device. Removing a module asks whether to keep or delete them; kept data is listed here.",
+  "modules.data.detail": "Files modules keep in the desktop app. Removing a module asks whether to keep or delete them; kept data is listed here.",
   "modules.data.orphan": "{size} · module no longer installed",
   "modules.data.delete": "Delete…",
   "modules.pack.local.safeCrashes": "The last few starts did not run properly, so local modules were not loaded this time. The next start tries again; if a module is the cause, remove it here first.",

@@ -11,6 +11,7 @@ import { closeDialog } from "../lib/contextMenu";
 import { captureHostAction, onHostReset } from "../lib/hostSwitch";
 import { forkErrorKey, forkHistorySize, forkQuota, forkTargets } from "../lib/forkProfile";
 import { Button } from "./Button";
+import { EntitySelect } from "./EntitySelect";
 
 /** One owner choice, then an inline second click for a different profile; never creates a preview fork. */
 export function ForkProfileDialog({ sessionId, hostId, afterTurnId, resolve }: { sessionId: string; hostId: string; afterTurnId: string | null; resolve(value: null): void }) {
@@ -70,11 +71,11 @@ export function ForkProfileDialog({ sessionId, hostId, afterTurnId, resolve }: {
   return <form aria-label={t("fork.profile.title")} className="space-y-3" onSubmit={(e) => { e.preventDefault(); void submit(); }} onKeyDown={(e) => { if (isImeComposing(e)) return; if (e.key === "Escape" && !busy) { e.preventDefault(); done(); } }}>
     <h2 className="text-sm font-medium">{t("fork.profile.title")}</h2>
     <label className="block text-xs text-muted">{t("fork.profile.profileLabel")}
-      <select autoFocus aria-label={t("fork.profile.profileLabel")} value={profile} disabled={busy} onChange={(e) => { setProfile(e.target.value); setArmed(false); setError(null); }} className="mt-1.5 w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm">
-        <option value="">{t("fork.profile.sameProfile")}{preview?.sourceProfile ? ` · ${preview.sourceProfile}` : ""}</option>
-        {choices.map((p) => <option key={p.id} value={p.name}>{p.name}</option>)}
-        {profile && !choices.some((p) => p.name === profile) && <option value={profile} disabled>{profile}</option>}
-      </select>
+      <span className="mt-1.5 block"><EntitySelect autoFocus label={t("fork.profile.profileLabel")} value={profile} disabled={busy} onChange={(v) => { setProfile(v); setArmed(false); setError(null); }}
+        className="flex w-full items-center justify-between gap-2 rounded-md border border-border bg-background px-2 py-1.5 text-sm outline-none focus:border-accent focus-visible:ring-2 focus-visible:ring-accent/30 disabled:opacity-50" popoverWidth="w-72"
+        options={[{ value: "", label: `${t("fork.profile.sameProfile")}${preview?.sourceProfile ? ` · ${preview.sourceProfile}` : ""}`, entity: preview?.sourceProfile ? { kind: "profile" as const, ref: preview.sourceProfile, hostId } : null },
+          ...choices.map((p) => ({ value: p.name, label: p.name, entity: { kind: "profile" as const, ref: p.id, hostId } })),
+          ...(profile && !choices.some((p) => p.name === profile) ? [{ value: profile, label: profile, disabled: true }] : [])]} /></span>
     </label>
     <div className="flex justify-end"><Button size="sm" disabled={busy || loading} onClick={() => setReload(v => v + 1)}>{t("fork.profile.refresh")}</Button></div>
     {loading && <p role="status" className="text-xs text-subtle">{t("fork.profile.profilesLoading")}</p>}

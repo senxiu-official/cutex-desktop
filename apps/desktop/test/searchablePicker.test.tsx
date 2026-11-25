@@ -25,7 +25,7 @@ function mount(items = options) {
   }))));
 }
 const input = () => document.querySelector<HTMLInputElement>("[data-menu-search]")!;
-const rows = () => [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')];
+const rows = () => [...document.querySelectorAll<HTMLButtonElement>('[role="option"]')];
 function type(value: string) {
   act(() => {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input(), value);

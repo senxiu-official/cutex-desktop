@@ -54,7 +54,7 @@ vi.mock("../src/renderer/src/i18n", async (importOriginal) => ({
   useI18n: () => ({ t: (key: string, vars?: Record<string, unknown>) => (vars ? `${key} ${JSON.stringify(vars)}` : key), locale: "en" }),
 }));
 vi.mock("../src/renderer/src/store", async (importOriginal) => {
-  const state = () => ({ notify: () => {}, hosts: { active: "local" }, daemon: { kind: "connected" }, features: fx.features, featuresKnown: true, sidebar: null, approvals: null, services: null, byHost: { hachimi: { daemon: { kind: "connected" }, features: fx.features, featuresKnown: true, sidebar: null, approvals: null, services: null } } });
+  const state = () => ({ notify: () => {}, hosts: { active: "local" }, daemon: { kind: "connected" }, features: fx.features, featuresKnown: true, sidebar: null, approvals: null, services: null, byHost: { hostc: { daemon: { kind: "connected" }, features: fx.features, featuresKnown: true, sidebar: null, approvals: null, services: null } } });
   return {
     ...(await importOriginal<object>()),
     useApp: Object.assign((select: (s: unknown) => unknown) => select(state()), { getState: state, setState: () => {}, subscribe: () => () => {} }),
@@ -120,7 +120,7 @@ describe("ProfileImport (CC Switch)", () => {
   });
 
   it("imports the picked providers on the given host and reports created / failed", async () => {
-    const { div, unmount } = await render(h(ProfileImport, { hostId: "hachimi", onDone: (n: number) => fx.done.push(n) }));
+    const { div, unmount } = await render(h(ProfileImport, { hostId: "hostc", onDone: (n: number) => fx.done.push(n) }));
     // Also pick the one imported before.
     await act(async () => box(div, "codex", "x-deepseek").click());
     const button = [...div.querySelectorAll("button")].find((b) => b.textContent?.startsWith("profile-import.import"))!;
@@ -129,7 +129,7 @@ describe("ProfileImport (CC Switch)", () => {
     await act(async () => {});
     expect(fx.calls).toEqual([
       {
-        host: "hachimi",
+        host: "hostc",
         items: [
           { id: "c-glm", app: "claude" },
           { id: "x-deepseek", app: "codex" },

@@ -107,17 +107,29 @@ describe("New agent: provider first, 「自动」 by default", () => {
   });
 });
 
+let installModern: typeof import("../src/renderer/src/dev/mockBridge")["installMockBridge"];
+
 async function install(search = ""): Promise<PreloadBridge> {
-  vi.resetModules();
-  vi.useFakeTimers({ shouldAdvanceTime: true });
+  vi.useFakeTimers();
   const win: { cutex?: PreloadBridge } = {};
   vi.stubGlobal("window", win);
   vi.stubGlobal("location", { search });
   vi.stubGlobal("document", { title: "" });
   vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => {} });
-  const { installMockBridge } = await import("../src/renderer/src/dev/mockBridge");
-  installMockBridge();
+  if (search) {
+    // The legacy scenario reads location.search at module evaluation.
+    vi.resetModules();
+    (await import("../src/renderer/src/dev/mockBridge")).installMockBridge();
+  } else {
+    installModern();
+  }
   return win.cutex!;
+}
+
+async function completePreviewCall<T>(call: Promise<T>): Promise<T> {
+  // The preview delays ranking by 250 ms and automatic creation by 400 ms.
+  const [result] = await Promise.all([call, vi.advanceTimersByTimeAsync(400)]);
+  return result;
 }
 
 afterEach(() => {
@@ -125,14 +137,12 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-// Each install() needs a fresh mock bridge (vi.resetModules()), so the import stays there; this warm-up loads it once
-// (with the same globals) first, so its first transform is not billed to the first test under the full suite's load.
 beforeAll(async () => {
   vi.stubGlobal("window", {});
   vi.stubGlobal("location", { search: "" });
   vi.stubGlobal("document", { title: "" });
   vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => {} });
-  await import("../src/renderer/src/dev/mockBridge");
+  ({ installMockBridge: installModern } = await import("../src/renderer/src/dev/mockBridge"));
   vi.unstubAllGlobals();
 }, 60_000);
 
@@ -143,14 +153,17 @@ describe("preview mock", () => {
     const list = await api.listProfiles();
     expect(list?.profiles.find((p) => p.id === "claude")?.autoPick).toBe(true);
     expect(list?.profiles.find((p) => p.id === "GLM")?.autoPick).toBe(false);
-    expect((await api.patchProfile("GLM", { autoPick: true })).autoPick).toBe(true);
-    expect((await api.patchProfile("GLM", { autoPick: false })).autoPick).toBe(false);
-    await expect(api.patchProfile("GLM", { autoPick: "yes" as unknown as boolean })).rejects.toThrow("autoPick: must be a boolean");
+    try {
+      expect((await api.patchProfile("GLM", { autoPick: true })).autoPick).toBe(true);
+      await expect(api.patchProfile("GLM", { autoPick: "yes" as unknown as boolean })).rejects.toThrow("autoPick: must be a boolean");
+    } finally {
+      expect((await api.patchProfile("GLM", { autoPick: false })).autoPick).toBe(false);
+    }
   });
 
   it("ranks per provider, refuses a provider without a fresh candidate, and creates with the pick", async () => {
     const api = (await install()).api;
-    const all = await api.profileAutoPick({});
+    const all = await completePreviewCall(api.profileAutoPick({}));
     const claude = all.providers.find((p) => p.provider === "anthropic")!;
     expect(claude.pick?.picked).toBe("claude-work");
     expect(claude.pick?.candidates.map((c) => c.profile)).toEqual(["claude-work", "claude"]);
@@ -158,11 +171,11 @@ describe("preview mock", () => {
     expect(responses.pick).toBeNull();
     expect(responses.refusal?.code).toBe("no_auto_pick_candidate");
     // cutex's family id is "anthropic"; "claude" is an alias of it.
-    expect((await api.profileAutoPick({ provider: "claude" })).providers.map((p) => p.provider)).toEqual(["anthropic"]);
-    const created = await api.createAgent({ name: "Numbat", profile: "auto:anthropic", start: false });
+    expect((await completePreviewCall(api.profileAutoPick({ provider: "claude" }))).providers.map((p) => p.provider)).toEqual(["anthropic"]);
+    const created = await completePreviewCall(api.createAgent({ name: "Numbat", profile: "auto:anthropic", start: false }));
     expect(created.profilePick?.picked).toBe("claude-work");
     await expect(api.createAgent({ name: "Wombat", profile: "auto", start: false })).rejects.toThrow("provider_required");
-    await expect(api.createAgent({ name: "Quokka", profile: "auto:responses-api", start: false })).rejects.toThrow("no_auto_pick_candidate");
+    await expect(completePreviewCall(api.createAgent({ name: "Quokka", profile: "auto:responses-api", start: false }))).rejects.toThrow("no_auto_pick_candidate");
     expect((await api.createAgent({ name: "Plain", profile: "claude", start: false })).profilePick).toBeNull();
   });
 

@@ -122,7 +122,7 @@ export function CopyProfileToHostDialog({ item, sourceHostId, onClose }: { item:
               <button autoFocus onClick={onClose} className={`${button} text-muted hover:bg-surface-2`}>
                 {t("agent-config.profile.transfer.close")}
               </button>
-              <button onClick={() => openCopy(result.profile.name)} className={`${button} bg-accent text-white`}>
+              <button onClick={() => openCopy(result.profile.name)} className={`${button} bg-accent text-on-accent`}>
                 {t("agent-config.profile.transfer.open", { host: label(target) })}
               </button>
             </div>
@@ -184,7 +184,7 @@ export function CopyProfileToHostDialog({ item, sourceHostId, onClose }: { item:
               <button type="button" disabled={busy} onClick={onClose} className={`${button} text-muted hover:bg-surface-2`}>
                 {t("agent-config.profile.transfer.cancel")}
               </button>
-              <button type="submit" disabled={!canCopy} className={`${button} bg-accent text-white`}>
+              <button type="submit" disabled={!canCopy} className={`${button} bg-accent text-on-accent`}>
                 {busy ? t("agent-config.profile.transfer.copying") : t("agent-config.profile.transfer.copy")}
               </button>
             </div>

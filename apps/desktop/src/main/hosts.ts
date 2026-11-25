@@ -9,6 +9,8 @@ import { daemonFetch } from "./daemonFetch";
 // `CUTEX_DESKTOP_DEV_HOSTS` adds direct loopback hosts (main/devHosts.ts; ignored when packaged).
 import { randomBytes } from "node:crypto";
 import { ProfileLinkService } from "./profileLink";
+import { projectBatchLease } from "./projectBatchLease";
+import type { ProjectBatchLeaseRequest, ProjectBatchLeaseResult } from "../shared/projectBatchOutcome";
 import { readFileSync } from "node:fs";
 import { readFile, rename, writeFile } from "node:fs/promises";
 import { homedir, hostname } from "node:os";
@@ -759,6 +761,11 @@ export class HostManager implements HostApi {
 
   async importIdentityKey(text: string, texts: IdentityImportTexts): Promise<IdentityFileResult> {
     return this.local.identity ? this.local.identity.importKeyString(text, texts) : { ok: false, error: "unavailable" };
+  }
+
+  /** 项目 table: one batch at a time across every window (not per host: a batch spans hosts). */
+  async projectBatchLease(request: ProjectBatchLeaseRequest): Promise<ProjectBatchLeaseResult> {
+    return projectBatchLease.handle(request);
   }
 
   /** 复制到其他主机: export on the source host's connection, import on the target's (main → main). */

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { DEFAULT_BROWSER_IDENTITY_ID as DEFAULT_ID, isBrowserIdentityId } from "../../shared/browserIdentity";
 import { BrowserRelayError } from "./relayTypes";
 export interface BrowserTabIdentityStorage { read(): string | undefined; write(content: string): void; reset?(content: string): void }
 /** Nonsecret provenance only. A restored agent tab can never silently enter the owner's partition. */
@@ -8,7 +9,7 @@ export interface BrowserTabIdentityStorage { read(): string | undefined; write(c
 const AGENT_EVICT_BATCH = 512;
 /** `open`: the tabs open now (main's registry); their rows are never dropped. */
 export function createBrowserTabIdentity(storage: BrowserTabIdentityStorage, options: { open?: () => readonly { hostId: string; tabKey: string }[] } = {}) {
-  const entries = new Set<string>(); let owners = new Set<string>(); let loaded = false, degraded = false, strict = false;
+  const entries = new Set<string>(); let owners = new Map<string, string>(); let loaded = false, degraded = false, strict = false;
   const key = (hostId: string, tabKey: string) => { if (!/^[A-Za-z0-9._:-]{1,128}$/.test(hostId) || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(tabKey)) throw Error("invalid_browser_identity"); return JSON.stringify([hostId, tabKey]); };
   function load(): void {
     if (loaded) return;
@@ -24,9 +25,17 @@ export function createBrowserTabIdentity(storage: BrowserTabIdentityStorage, opt
         if (Array.isArray(value)) readRows(value, entries); // Healthy legacy store: absent rows were owner tabs.
         else {
           const v = value as Record<string, unknown> | null;
-          if (!v || v.version !== 2 || v.strict !== true || Object.keys(v).some(k => !["version", "strict", "agent", "owner"].includes(k))) throw Error("invalid_browser_identity");
-          strict = true; readRows(v.agent, entries); readRows(v.owner, owners);
-          if ([...owners].some(id => entries.has(id))) throw Error("invalid_browser_identity");
+          if (!v || (v.version !== 2 && v.version !== 3) || typeof v.strict !== "boolean" || v.version === 2 && !v.strict
+            || Object.keys(v).some(k => !["version", "strict", "agent", "owner"].includes(k))) throw Error("invalid_browser_identity");
+          strict = v.strict; readRows(v.agent, entries);
+          if (!Array.isArray(v.owner) || v.owner.length > 4096) throw Error("invalid_browser_identity");
+          for (const item of v.owner) {
+            if (!Array.isArray(item) || item.length !== (v.version === 2 ? 2 : 3)
+              || typeof item[0] !== "string" || typeof item[1] !== "string") throw Error("invalid_browser_identity");
+            const identityId: unknown = v.version === 2 ? DEFAULT_ID : item[2], id = key(item[0], item[1]);
+            if (!isBrowserIdentityId(identityId) || entries.has(id) || owners.has(id)) throw Error("invalid_browser_identity");
+            owners.set(id, identityId);
+          }
         }
       }
     } catch { entries.clear(); owners.clear(); degraded = true; }
@@ -34,8 +43,14 @@ export function createBrowserTabIdentity(storage: BrowserTabIdentityStorage, opt
     // never be reclassified as owner-cookie tabs after a failed provenance read.
     loaded = true;
   }
-  const rows = (set: Set<string>) => [...set].map(value => JSON.parse(value) as unknown);
-  const encode = (agent: Set<string>, owner = owners) => JSON.stringify(strict ? { version: 2, strict: true, agent: rows(agent), owner: rows(owner) } : rows(agent));
+  const rows = (set: Iterable<string>) => [...set].map(value => JSON.parse(value) as [string, string]);
+  const encode = (agent: Set<string>, owner = owners) => {
+    if ([...owner.values()].some(identityId => identityId !== DEFAULT_ID)) {
+      return JSON.stringify({ version: 3, strict, agent: rows(agent),
+        owner: [...owner].map(([id, identityId]) => [...JSON.parse(id) as [string, string], identityId]) });
+    }
+    return JSON.stringify(strict ? { version: 2, strict: true, agent: rows(agent), owner: rows(owner.keys()) } : rows(agent));
+  };
   function write(next: Set<string>, owner = owners): void {
     if (degraded) return;
     try { const content = encode(next, owner); if (Buffer.byteLength(content) > 1024 * 1024) throw Error("size"); storage.write(content); }
@@ -46,34 +61,42 @@ export function createBrowserTabIdentity(storage: BrowserTabIdentityStorage, opt
     requiresProof(): boolean { load(); return degraded || strict; },
     unproven(hostId: string, tabKey: string): boolean { load(); const id = key(hostId, tabKey); return !owners.has(id) && !entries.has(id) && (degraded || strict); },
     owner(hostId: string, tabKey: string): boolean { load(); return owners.has(key(hostId, tabKey)); },
+    identity(hostId: string, tabKey: string): string | undefined { load(); return owners.get(key(hostId, tabKey)); },
     agent(hostId: string, tabKey: string): boolean { load(); const id = key(hostId, tabKey); return entries.has(id) || (!owners.has(id) && (degraded || strict)); },
-    registerOwner(hostId: string, tabKey: string): void {
+    registerOwner(hostId: string, tabKey: string, identityId = DEFAULT_ID): void {
       load(); const id = key(hostId, tabKey);
-      if (entries.has(id)) throw new BrowserRelayError("permission_denied");
-      if (owners.has(id) && [...owners].at(-1) === id) return;
-      const next = new Set(owners); next.delete(id); next.add(id);
-      // Owner rows are ordered least-recently-used first. Eviction only isolates a
-      // restored tab in strict mode; agent tombstones must never be evicted.
-      if (next.size > 4096) next.delete(next.values().next().value!);
-      if (strict) write(entries, next); // Legacy files contain only agent rows.
+      const previous = owners.get(id);
+      if (entries.has(id) || previous !== undefined && previous !== identityId || !isBrowserIdentityId(identityId)) throw new BrowserRelayError("permission_denied");
+      if (identityId !== DEFAULT_ID && degraded) throw new BrowserRelayError("browser_identity_unavailable");
+      if (previous !== undefined && [...owners.keys()].at(-1) === id) return;
+      const next = new Map(owners); next.delete(id); next.set(id, identityId);
+      if (next.size > 4096) {
+        // Lost default provenance can only restore in the same default pool or degrade to the
+        // agent pool. A named identity's provenance must never fall back to the default pool.
+        const oldestDefault = [...next].find(([key, value]) => key !== id && value === DEFAULT_ID);
+        if (!oldestDefault) throw new BrowserRelayError("browser_identity_unavailable");
+        next.delete(oldestDefault[0]);
+      }
+      if (strict || [...next.values()].some(value => value !== DEFAULT_ID)) write(entries, next);
       owners = next;
     },
-    reset(known: { hostId: string; tabKey: string; pool: "owner" | "agent" }[]): void {
+    reset(known: { hostId: string; tabKey: string; pool: "owner" | "agent"; identityId?: string }[]): void {
       load();
       if (!degraded) return; // No destructive rewrite of a healthy store.
-      const agent = new Set(entries), owner = new Set(owners);
+      const agent = new Set(entries), owner = new Map(owners);
       for (const record of known) {
         // Legacy non-UUID live tabs stay trusted in memory, never weaken the persisted key grammar.
         if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(record.tabKey)) continue;
         const id = key(record.hostId, record.tabKey);
-        if (record.pool === "agent") { agent.add(id); owner.delete(id); } else if (!agent.has(id)) owner.add(id);
+        if (record.pool === "agent") { agent.add(id); owner.delete(id); } else if (!agent.has(id)) owner.set(id, record.identityId ?? DEFAULT_ID);
       }
-      while (owner.size > 4096) owner.delete(owner.values().next().value!);
+      while (owner.size > 4096) owner.delete(owner.keys().next().value!);
       if (agent.size > 4096 || !storage.reset) throw new BrowserRelayError("browser_identity_unavailable");
-      try { const content = JSON.stringify({ version: 2, strict: true, agent: rows(agent), owner: rows(owner) });
+      strict = true;
+      try { const content = encode(agent, owner);
         if (Buffer.byteLength(content) > 1024 * 1024) throw Error("size"); storage.reset(content); }
       catch { throw new BrowserRelayError("browser_identity_unavailable"); }
-      entries.clear(); owners.clear(); for (const id of agent) entries.add(id); for (const id of owner) owners.add(id);
+      entries.clear(); owners = owner; for (const id of agent) entries.add(id);
       strict = true; degraded = false;
     },
     register(hostId: string, tabKey: string): boolean {

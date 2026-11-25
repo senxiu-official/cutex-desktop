@@ -161,7 +161,7 @@ export interface HostOwnership {
   /** The owner person is this desktop; null when unknown, unconfirmed or an older cutex. */
   mine: boolean | null;
   connection: HostConnectionKind;
-  /** SSH hosts: the configured target (`ema@hachimi`). */
+  /** SSH hosts: the configured target (`ema@hostc`). */
   sshTarget?: string;
   /** SSH hosts: the kind of token held (owner / member; `setSshConnectAs` switches). */
   connectAs?: SshConnectAs;

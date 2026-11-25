@@ -12,10 +12,10 @@ export const zhCN = {
   "settingsRisk.cancel": "取消",
   "settingsRisk.changed": "目标或当前设置已变化，请重新操作。",
   "settingsRisk.typeMismatch": "输入与目标名称不一致，未作更改。",
-  "settingsRisk.origins": "只重建这台桌面应用的浏览器来源记录，并归档损坏记录。不会清除网站登录信息。",
+  "settingsRisk.origins": "只重建桌面应用的浏览器来源记录，并归档损坏记录。不会清除网站登录信息。",
   "settingsRisk.originsConfirm": "确认重建记录",
-  "settingsRisk.pageClear": "清除这台桌面应用的页面数据",
-  "settingsRisk.pageClearHint": "只清除这台桌面应用中页面「{name}」的数据（{size}，所属主机 · {host}）。此页面所有版本共用这些数据，清除后无法恢复。输入页面名称「{target}」确认。",
+  "settingsRisk.pageClear": "清除桌面应用里的页面数据",
+  "settingsRisk.pageClearHint": "只清除桌面应用里页面「{name}」的数据（{size}，所属主机 · {host}）。此页面的所有版本共用这些数据，清除后无法恢复。输入页面名称「{target}」确认。",
 } as const;
 
 export const en: Record<keyof typeof zhCN, string> = {
@@ -32,8 +32,8 @@ export const en: Record<keyof typeof zhCN, string> = {
   "settingsRisk.cancel": "Cancel",
   "settingsRisk.changed": "The target or current settings changed. Start again.",
   "settingsRisk.typeMismatch": "The entered name does not match. Nothing changed.",
-  "settingsRisk.origins": "Rebuild browser origin records on this desktop application and archive damaged records. Website sign-ins will remain.",
+  "settingsRisk.origins": "Rebuild browser origin records in the desktop app and archive damaged records. Website sign-ins will remain.",
   "settingsRisk.originsConfirm": "Confirm rebuild",
-  "settingsRisk.pageClear": "Clear page data on this desktop application",
-  "settingsRisk.pageClearHint": "Clear only this desktop application’s data for page “{name}” ({size}, associated host · {host}). All versions of this page share these data. Clearing cannot be undone. Type the page name “{target}” to confirm.",
+  "settingsRisk.pageClear": "Clear page data in the desktop app",
+  "settingsRisk.pageClearHint": "Clear only the desktop app’s data for page “{name}” ({size}, associated host · {host}). All versions of this page share these data. Clearing cannot be undone. Type the page name “{target}” to confirm.",
 };

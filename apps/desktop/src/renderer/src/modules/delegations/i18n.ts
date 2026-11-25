@@ -12,7 +12,7 @@ export const zhCN = {
   "delegations.description": "{{agent}}之间的委托，显示在状态行和胶囊里",
   "delegations.statusTitle": "委托",
   "delegations.count": "委托 {n}",
-  "delegations.mine": "我发出的",
+  "delegations.mine": "我发起的",
   "delegations.toMe": "发给我的",
   "delegations.handling": "承接 · {name} 的委托",
   "delegations.oldest": "最久 {t}",
@@ -39,6 +39,10 @@ export const zhCN = {
   "delegations.detail.gone": "找不到这个委托（已清理，或此主机看不到它）",
   "delegations.detail.created": "创建于 {when}",
   "delegations.detail.attempts": "第 {n} 次尝试",
+  "delegations.detail.newerResult": "结果已有新版本，这里显示的是当前版本",
+  "delegations.detail.noResult": "这条委托还没有可查看的结果，或你无权查看",
+  "delegations.detail.reviewDone": "这项审批已经处理，或不在这里",
+  "delegations.detail.openApprovals": "打开「审批」页",
 } as const;
 
 // Adds these keys to MessageKey (modules/i18nCatalog.ts collects the dictionary itself).

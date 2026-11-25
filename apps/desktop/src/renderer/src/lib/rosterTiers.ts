@@ -2,7 +2,7 @@
 // (modules/project-view/model). Pure. A project lists, without segment labels, its Director, pins, agents
 // that want the owner, running ones, then at most RECENT_CAP recently worked ones (placeRoster); everyone
 // else goes into 「在线空闲 +N」 or 「离线 +N」 by whether its runtime is up (owner 2026-11-05).
-import type { AgentSignal } from "./agentAttention";
+import type { AgentSignal } from "./agentSignal";
 
 /** now: listed first (Director, pins, wants the owner, running). recent: worked lately, or something open (capped, placeRoster). rest: folded. */
 export type RosterTier = "now" | "recent" | "rest";

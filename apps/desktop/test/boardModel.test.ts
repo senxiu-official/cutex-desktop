@@ -353,7 +353,7 @@ describe("soft lastTurnFailed: member state and unlisted severity", () => {
 
 describe("order, health, prefs, targets", () => {
   const view = (key: string, name: string, last: number | null, over: Partial<BoardProjectView> = {}): BoardProjectView => ({
-    key, name, color: "blue", places: [], director: null, members: [], counts: { busy: 0, idle: 1, paused: 0, error: 0, offline: 0, openDelegations: 0 },
+    key, name, color: "blue", badge: name.slice(0, 1), icon: null, places: [], director: null, members: [], counts: { busy: 0, idle: 1, paused: 0, error: 0, offline: 0, openDelegations: 0 },
     today: null, needsYou: 0, problems: [], problemCount: 0, hardProblems: 0, unsizedProblems: 0, problemsUnknown: false, recent: [], lastActivityAt: last, plan: null, goal: null, goalUnknown: false, ...over,
   });
   it("pinned first, then the owner's order, then the most recently active; hidden left out", () => {
@@ -386,5 +386,62 @@ describe("dev demo", () => {
     expect(list.map((p) => p.name).sort()).toEqual(["cutex 后端", "cutex-desktop", "demo-study", "ifm-ema", "STORM II 美术", "Waveline"].sort());
     expect(list.find((p) => p.name === "Waveline")!.places.map((x) => x.hostId)).toEqual(["demo-eva", "demo-remote"]);
     expect(list.find((p) => p.name === "cutex 后端")!.problems.map((x) => x.kind).sort()).toEqual(["agentError", "quotaOut"]);
+  });
+});
+
+// Owner 2026-11-25 (项目看板: 「239 处出问题」「cutex.01a16474-… 读不到状态 · 还有 238 处」): one row per cause with
+// the agents' names, never raw ids; the count is the host's, every problem once.
+describe("problem rows: names and one row per agent cause", () => {
+  const g1 = new Set([BOARD_SUMMARY_FEATURE]);
+  const unreadable = (ids: string[]) => ids.map((id) => ({ code: "memberUnavailable", id, targetKind: "agent" }));
+  const withSummary = (problems: Record<string, unknown>, members: [SessionResource, string][], over: Partial<SidebarSnapshot> = {}) => {
+    const h = host("eva", [project("p", "P")], members, {
+      features: g1,
+      summary: parseBoardSummary({ projects: [{ projectId: "p", openDelegationsCount: 0, finishedToday: 0, needsYou: { count: 0, items: [] }, problems, delegations: [] }] })!,
+    });
+    return only(buildBoard([{ ...h, sidebar: { ...h.sidebar!, ...over } }], NOW));
+  };
+  const ids = Array.from({ length: 20 }, (_, i) => `cutex.0000000${i}-aaaa`);
+
+  it("239 unreadable members, 20 listed: one row for all 239, named (archived / retired agents too), nothing 「more」", () => {
+    const archivedOnes = ids.slice(0, 10).map((id, i) => session(id, { displayName: `old-${i}`, archiveKind: "soft", visible: false } as never));
+    const retiredOnes = ids.slice(10).map((id, i) => session(id, { displayName: `gone-${i}`, lifecycle: "retired" } as never));
+    const p = withSummary({ count: 239, items: unreadable(ids), byCode: { memberUnavailable: 239 } }, [[session("live"), "p"]], { active: [session("live"), ...archivedOnes], retired: retiredOnes });
+    expect(p.problems).toHaveLength(1);
+    expect(p.problems[0]).toMatchObject({ kind: "memberUnavailable", group: { count: 239 } });
+    expect(p.problems[0]!.group!.names).toEqual([...archivedOnes.map((s) => s.displayName), ...retiredOnes.map((s) => s.displayName)]);
+    expect(p).toMatchObject({ problemCount: 239, hardProblems: 239, unsizedProblems: 0 });
+    // The card: 「239 个智能体读不到状态：old-0、old-1、old-2 等」 and no 「还有 N 处」.
+    expect(p.problemCount - p.problems[0]!.group!.count).toBe(0);
+  });
+
+  it("an agent the host's catalog does not have: a short id, never the full cutex.<uuid>", () => {
+    const p = withSummary({ count: 1, items: unreadable(["cutex.01a16474-5b6c-4d7e-8f90-123456789abc"]), byCode: { memberUnavailable: 1 } }, [[session("live"), "p"]]);
+    expect(p.problems).toEqual([expect.objectContaining({ kind: "memberUnavailable", subject: "01a16474" })]);
+    expect(p.problems[0]!.group).toBeUndefined();
+  });
+
+  it("other problems keep their own rows (hard first); the grouped row counts its agents once each", () => {
+    const p = withSummary({
+      count: 26,
+      items: [{ code: "delegationStalled", id: "a1", targetKind: "delegation" }, ...unreadable(["m1", "m2", "m3"]), { code: "lastTurnFailed", id: "m4", targetKind: "agent" }],
+      byCode: { delegationStalled: 1, memberUnavailable: 24, lastTurnFailed: 1 },
+    }, [[session("m1"), "p"], [session("m2"), "p"], [session("m3"), "p"], [session("m4"), "p"]]);
+    expect(p.problems.map((x) => [x.kind, x.group?.count ?? 1])).toEqual([["stalled", 1], ["memberUnavailable", 24], ["lastTurnFailed", 1]]);
+    expect(p).toMatchObject({ problemCount: 26, hardProblems: 25, unsizedProblems: 0 });
+  });
+
+  it("without per-code counts: the listed ones are grouped, the rest stays 「还有 N 处」 of unknown severity", () => {
+    const p = withSummary({ count: 25, items: unreadable(ids) }, [[session("live"), "p"]]);
+    expect(p.problems).toHaveLength(1);
+    expect(p.problems[0]!.group!.count).toBe(20);
+    expect(p).toMatchObject({ problemCount: 25, hardProblems: 20, unsizedProblems: 5 });
+  });
+
+  it("hosts without the summary: two errored members are one 「2 个智能体出错」 row", () => {
+    const err = (id: string) => session(id, { runtime: { ...session("x").runtime, status: "error", lastError: { message: "crashed" } } } as never);
+    const p = only(buildBoard([host("eva", [project("p", "P")], [[err("e1"), "p"], [err("e2"), "p"]])], NOW));
+    expect(p.problems).toEqual([expect.objectContaining({ kind: "agentError", group: { count: 2, names: ["e1", "e2"] } })]);
+    expect(p).toMatchObject({ problemCount: 2, hardProblems: 2 });
   });
 });

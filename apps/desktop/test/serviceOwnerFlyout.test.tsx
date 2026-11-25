@@ -26,6 +26,9 @@ vi.mock("../src/renderer/src/i18n", () => ({ useI18n: () => ({ t: (k: string, v?
 import { ServiceOwnerFlyout } from "../src/renderer/src/components/ServiceOwnerFlyout";
 import { closeMenu } from "../src/renderer/src/lib/contextMenu";
 
+// The store double is too thin for the avatar stack (agent looks, Profile pictures): icons are stubbed.
+vi.mock("../src/renderer/src/components/EntityIcon", () => import("./helpers/entityIconStub"));
+
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const session = (id: string, over: Partial<SessionResource> = {}): SessionResource =>

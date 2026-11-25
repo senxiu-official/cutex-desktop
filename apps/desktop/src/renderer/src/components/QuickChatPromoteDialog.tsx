@@ -46,9 +46,10 @@ export function QuickChatPromoteDialog({ sessionId, hostId, resolve }: { session
     const byId = new Map(projects.filter((p) => p.lifecycle === "active").map((p) => [p.project_id, p]));
     return [
       { value: STANDALONE, label: t("promote.standalone"), group: "" },
-      ...securityProjectIds(sidebar, projectOrder ?? [], hostId).filter((id) => byId.has(id)).map((id) => ({
-        value: id, label: byId.get(id)!.presentation.display_name || id, group: t("promote.projects"), searchText: id,
-      })),
+      ...securityProjectIds(sidebar, projectOrder ?? [], hostId).filter((id) => byId.has(id)).map((id) => {
+        const p = byId.get(id)!.presentation;
+        return { value: id, label: p.display_name || id, group: t("promote.projects"), searchText: id, entity: { kind: "project" as const, id, hostId, badge: p.badge_label || (p.display_name || id).slice(0, 1), color: p.color } };
+      }),
     ];
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projects, sidebar, projectOrder, hostId, t]);

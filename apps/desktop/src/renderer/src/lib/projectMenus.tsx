@@ -46,6 +46,7 @@ import { rotationRunningOn } from "./rotationProbe";
 import { projectTabsNow } from "./projectTabsView";
 import { isOwnerFeatures } from "../../../shared/users";
 import { projectMenuExtras } from "./projectMenuExtras";
+import { EntityIcon } from "../components/EntityIcon";
 
 type T = (key: MessageKey, vars?: Record<string, string | number>) => string;
 const ICON = 14;
@@ -167,7 +168,7 @@ export function projectMenu(group: SidebarGroup, workspaceRoot: string | null, c
       onSelect: () => {},
       submenu: projectTabsNow(host).map(({ tab, titleKey }) => ({ label: t(titleKey), onSelect: () => openProjectPage(group.id, host, { tab }) })),
     },
-    director && { label: t("menu.openDirector", { name: director.displayName }), icon: <Crown size={ICON} />, onSelect: () => void app.select(director.cutexSessionId, host) },
+    director && { label: t("menu.openDirector", { name: director.displayName }), icon: <EntityIcon entity={{ kind: "agent", id: director.cutexSessionId, name: director.displayName }} />, onSelect: () => void app.select(director.cutexSessionId, host) },
     { label: t("menu.allAgents"), icon: <Users size={ICON} />, onSelect: () => openAgentList(group.id, "online", host) },
     owner && {
       label: t(project ? "menu.newAgentHere" : "menu.newIndependentAgent"),

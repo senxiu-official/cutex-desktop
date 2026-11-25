@@ -59,10 +59,10 @@ describe("打断并发送 with several 插话", () => {
     expect(button("interruptSend").getAttribute("data-tip")).toBe('interruptSend.manyTip{"n":3}');
     expect(button("interruptSend").textContent).toBe("Interrupt and send"); // the same button
     seed([rows[0]!], running); show(rows[0]!);
-    expect(button("interruptSend").getAttribute("data-tip")).toBe("Stop the current turn and send this now");
+    expect(button("interruptSend").getAttribute("data-tip")).toBe("interruptSend.oneTip");
     features.delete("interrupt-send-many-v1");
     seed(rows, running); show({ ...rows[1]!, rev: 9 });
-    expect(button("interruptSend").getAttribute("data-tip")).toBe("Stop the current turn and send this now");
+    expect(button("interruptSend").getAttribute("data-tip")).toBe("interruptSend.oneTip");
   });
   it("an older runtime pin refuses the batch: said, nothing retried one by one", async () => {
     const rows = [steer("a", 1), steer("b", 2)];

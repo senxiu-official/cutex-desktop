@@ -37,9 +37,10 @@ describe("openModifiers", () => {
     expect(newInstanceOpts(PLAIN_OPEN)).toEqual({});
     expect(newInstanceOpts({ newInstance: true, focus: false })).toEqual({ pin: true, background: true });
     expect(newInstanceOpts({ newInstance: true, focus: true })).toEqual({ pin: true, focus: true });
-    expect(newInstanceKey(false)).toBe("Ctrl+");
-    expect(newInstanceKey(true)).toBe("⌘+");
-    expect(newInstanceKey()).toBe("Ctrl+"); // bridge.platform = linux
+    // Without a separator: the hint text writes 「{key} + 左键点击」 (one plus, audit 2026-11-24 #2).
+    expect(newInstanceKey(false)).toBe("Ctrl");
+    expect(newInstanceKey(true)).toBe("⌘");
+    expect(newInstanceKey()).toBe("Ctrl"); // bridge.platform = linux
   });
 });
 

@@ -6,7 +6,7 @@
 // Drag handles (lib/sideDnd.ts): the header (its icon, its empty space) = the whole pane; a tab, or the
 // title of a single-instance pane = that one instance. Double-click on the header = maximise / restore (a folded pane:
 // open it, as its ▾).
-import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
 import { ChevronDown, Expand, Maximize2, Minimize2, Minus, MoreHorizontal, Plus, Shrink, Volume2, VolumeX, X } from "lucide-react";
 import { fitTabs, headerCompact, TAB_ACTIVE_MAX, TAB_ACTIVE_MIN, TAB_MAX, TAB_MIN } from "../../lib/tabFit";
 import { PaneHeaderCompact } from "../../lib/paneHeader";
@@ -54,7 +54,27 @@ function ActionsWith({ entry, id, inst, card, page }: { entry: SideComponentEntr
   );
 }
 
-type TabLook = { busy?: boolean; unread?: boolean; attention?: number; tooltip?: string; favicon?: string; audio?: { muted: boolean; toggleMute(): void } };
+/** A component's tab-row control (TabRowLead / NewTabMenu), with the shown tab's props. */
+function TabRowPart({ part, entry, id, card, page }: { part: "TabRowLead" | "NewTabMenu"; entry: SideComponentEntry; id: string; card: string; page: SidePage }) {
+  const inst = useShelfLayout().instances[id];
+  if (!inst) return null;
+  return <TabRowPartWith part={part} entry={entry} id={id} inst={inst} card={card} page={page} />;
+}
+
+function TabRowPartWith({ part, entry, id, inst, card, page }: { part: "TabRowLead" | "NewTabMenu"; entry: SideComponentEntry; id: string; inst: SideInstance; card: string; page: SidePage }) {
+  const props = useSideBodyProps(id, inst, { cardId: card, pageId: page.id });
+  const P = entry.item[part]!;
+  const fixedPage = !!page.fixedHome && page.fixedHome === entry.item.placement.home;
+  return (
+    <span data-side-nodrag data-side-tab-row-part={part} className="flex shrink-0 items-center">
+      <ItemBoundary moduleId={entry.moduleId} resetKey={id}>
+        <P {...props} cardId={card} fixedPage={fixedPage} newTab={(params) => newTabInCard(card, params)} />
+      </ItemBoundary>
+    </span>
+  );
+}
+
+type TabLook = { busy?: boolean; unread?: boolean; attention?: number; tooltip?: string; favicon?: string; audio?: { muted: boolean; toggleMute(): void }; tint?: string; trailing?: ReactNode };
 
 /** A tab's hover text: its whole title, and what it shows when that says more (a web page's address). */
 /** A tab's image: only an inline `data:image/` URL (the renderer never fetches one). */
@@ -92,8 +112,9 @@ function Tab({ id, active, title, transient, info }: { id: string; active: boole
       onAuxClick={(e) => e.button === 1 && pressClose()}
       // Full width when there is room; short of it, every tab gives way evenly down to TAB_MIN (equal bases shrink evenly),
       // the active one from a larger base and to a larger minimum (lib/tabFit).
-      style={{ flex: `0 1 ${active ? TAB_ACTIVE_MAX : TAB_MAX}px`, minWidth: active ? TAB_ACTIVE_MIN : TAB_MIN }}
-      className={`group/tab flex h-6 items-center gap-1 overflow-hidden rounded-md pr-0.5 pl-1.5 text-xs ${armed ? "bg-danger/15 text-danger ring-1 ring-danger/70" : active ? `bg-surface-2 text-foreground ${PRESS_ROW}` : `text-muted hover:bg-hover hover:text-foreground ${PRESS_ROW}`} ${dragged ? "opacity-45" : ""}`}
+      style={{ flex: `0 1 ${active ? TAB_ACTIVE_MAX : TAB_MAX}px`, minWidth: active ? TAB_ACTIVE_MIN : TAB_MIN, ...(info?.tint && !armed ? { "--tab-tint": info.tint } as CSSProperties : {}) }}
+      data-side-tab-tint={info?.tint && !armed ? "" : undefined}
+      className={`group/tab flex h-6 items-center gap-1 overflow-hidden rounded-md pr-0.5 pl-1.5 text-xs ${armed ? "bg-danger/15 text-danger ring-1 ring-danger/70" : active ? `bg-surface-2 text-foreground ${PRESS_ROW}` : `text-muted hover:bg-hover hover:text-foreground ${PRESS_ROW}`} ${info?.tint && !armed ? "identity-tab" : ""} ${dragged ? "opacity-45" : ""}`}
     >
       {tabFavicon(info) && <img src={tabFavicon(info)!} alt="" width={12} height={12} referrerPolicy="no-referrer" className="size-3 shrink-0 rounded-sm" />}
       {info?.audio && (
@@ -117,6 +138,7 @@ function Tab({ id, active, title, transient, info }: { id: string; active: boole
       >
         {title}
       </button>
+      {info?.trailing}
       {info?.attention ? <CountBadge tone="danger" count={info.attention} max={9} /> : null}
       {!info?.attention && info?.unread && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent" />}
       {info?.busy && <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-ok" />}
@@ -137,7 +159,7 @@ function Tab({ id, active, title, transient, info }: { id: string; active: boole
  * The tab row (lib/tabFit): the tabs that fit at their minimum width share it evenly, the rest go into 「⌄ N」 (a
  * list: icon + whole title, a click shows it), ＋ always shows. Never a tab cut off mid-title.
  */
-function TabRow({ tabs, shown, label, transient, tabInfo, newTab, cardId }: { tabs: readonly string[]; shown: string | null; label: (id: string) => string; transient: (id: string) => boolean; tabInfo: Record<string, TabLook | undefined>; newTab: boolean; cardId: string }) {
+function TabRow({ tabs, shown, label, transient, tabInfo, newTab, cardId, newTabExtra }: { tabs: readonly string[]; shown: string | null; label: (id: string) => string; transient: (id: string) => boolean; tabInfo: Record<string, TabLook | undefined>; newTab: boolean; cardId: string; newTabExtra?: ReactNode }) {
   const { t } = useI18n();
   const box = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
@@ -149,7 +171,10 @@ function TabRow({ tabs, shown, label, transient, tabInfo, newTab, cardId }: { ta
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
-  const fit = fitTabs({ count: tabs.length, active: shown ? tabs.indexOf(shown) : -1, width, plus: newTab });
+  // The control after the ＋ (＋▾) takes its own width out of the tabs' room.
+  const extra = useRef<HTMLSpanElement>(null);
+  const extraW = newTabExtra ? (extra.current?.offsetWidth ?? 16) : 0;
+  const fit = fitTabs({ count: tabs.length, active: shown ? tabs.indexOf(shown) : -1, width: Math.max(0, width - extraW), plus: newTab });
   const hidden = fit.hidden.map((k) => tabs[k]!);
   return (
     <div ref={box} data-side-tab-row="" className="flex min-w-0 flex-1 items-center gap-0.5">
@@ -189,6 +214,7 @@ function TabRow({ tabs, shown, label, transient, tabInfo, newTab, cardId }: { ta
           <Plus size={13} />
         </button>
       )}
+      {newTab && newTabExtra && <span ref={extra} data-side-nodrag className="flex shrink-0 items-center">{newTabExtra}</span>}
     </div>
   );
 }
@@ -352,7 +378,10 @@ export function SideCardView({
         </button>
         {/* Tab strip: no bar at all (not even an overlay thumb over the tabs); wheel / touchpad scroll it. */}
         {tabs.length > 1 || alwaysTabs ? (
-          <TabRow tabs={tabs} shown={shown} label={label} transient={transient} tabInfo={tabInfo} newTab={canNewTab} cardId={card.id} />
+          <>
+            {shown && entry.item.TabRowLead && <PaneHeaderCompact.Provider value={compact}><TabRowPart part="TabRowLead" entry={entry} id={shown} card={card.id} page={page} /></PaneHeaderCompact.Provider>}
+            <TabRow tabs={tabs} shown={shown} label={label} transient={transient} tabInfo={tabInfo} newTab={canNewTab} cardId={card.id} newTabExtra={shown && canNewTab && entry.item.NewTabMenu ? <TabRowPart part="NewTabMenu" entry={entry} id={shown} card={card.id} page={page} /> : undefined} />
+          </>
         ) : (
           <div
             className="flex min-w-0 flex-1 items-center gap-1.5 px-1.5 text-xs font-medium"

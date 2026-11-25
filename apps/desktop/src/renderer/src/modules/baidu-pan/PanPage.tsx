@@ -24,6 +24,8 @@ import { featuresOf, sidebarOf, useApp } from "../../store";
 import type { SideBodyProps } from "../slots";
 import { baseName, controlsOf, crumbs, errorText, etaSeconds, fmtBytes, fmtEta, fmtRate, progressOf, STATE_KEY, targetDirProblem, vipKey } from "./model";
 import { acquireFeed, cancelAuth, clearSearch, configure, control, disconnect, loadConnection, loadDownloads, loadMore, openDir, pollAuth, search, select, startAuth, startDownload, submitAuthCode, usePan, emptyHost, type HostPan } from "./store";
+import { EntityMention } from "../../components/EntityIcon";
+import { tNodes } from "../../lib/textNodes";
 
 /** Persisted per page (small JSON): the chosen host and the last folder per host. */
 export interface PanState {
@@ -440,7 +442,7 @@ function DownloadRow({ hostId, d }: { hostId: string; d: PanDownload }) {
         <span className="shrink-0 tabular-nums">{amounts}</span>
         <span className="flex min-w-0 items-center gap-1" title={d.targetPath}><HardDrive size={11} className="shrink-0" aria-hidden /><span className="min-w-0 truncate font-mono [direction:rtl] text-left"><bdi>{d.targetPath || d.targetDir}</bdi></span></span>
       </div>
-      {agent !== null || d.caller.kind === "agent" ? <span className="text-caption text-subtle">{t("baidu-pan.downloads.byAgent", { name: agent ?? d.caller.id ?? "—" })}</span> : null}
+      {agent !== null || d.caller.kind === "agent" ? <span className="text-caption text-subtle">{tNodes(t, "baidu-pan.downloads.byAgent", { name: d.caller.id ? <EntityMention entity={{ kind: "agent", id: d.caller.id, name: agent ?? d.caller.id }}>{agent ?? d.caller.id}</EntityMention> : "—" })}</span> : null}
       {d.error && <span className="text-caption text-danger">{errorText(t, d.error)}</span>}
     </li>
   );

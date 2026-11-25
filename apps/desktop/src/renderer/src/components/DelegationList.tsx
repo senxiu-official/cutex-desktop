@@ -23,6 +23,8 @@ import { Avatar } from "./Avatar";
 import { DataTable, type Column } from "./DataTable";
 import { DelegationHops, DelegationStatusMark, DelegationTag } from "./DelegationParts";
 import { PeerParty } from "./PeerParty";
+import { RowReceiptTag } from "./CrossHostReceipt";
+import { crossHostOf, receiptWords } from "../lib/crossHost";
 import { PageToolbar } from "./Page";
 import { SearchableSelect } from "./SearchablePicker";
 import { agentPickerOptions, listPickerRows, pickerProjectRank } from "../lib/agentPickerOptions";
@@ -65,7 +67,8 @@ function useColumns(compact: boolean): Column<AskSummary>[] {
   const { t } = useI18n();
   const select = useTargetSelect();
   const hostId = useTargetHostId();
-  const views = hasDelegationViews(useTargetFeatures());
+  const features = useTargetFeatures();
+  const views = hasDelegationViews(features);
   const party = useParties();
   const nameOf = (id: string) => party(id).name;
   const progress = useDelegations((s) => s.progress);
@@ -75,7 +78,13 @@ function useColumns(compact: boolean): Column<AskSummary>[] {
       key: "status",
       header: t("table.status"),
       width: compact ? "7rem" : "9rem",
-      cell: (d) => <DelegationStatusMark status={delegationStatus(d, ctxOf(d))} name={d.remote?.targetName ?? d.targetName ?? nameOf(d.target)} error={d.attempt?.lastError ?? d.remote?.lastError} className="max-w-full text-xs" />,
+      cell: (d) => {
+        // peer-delivery-receipts-v1: the receipt's words join the status hover (the status itself stays the delegation's).
+        const ch = crossHostOf(d, features);
+        const words = ch ? receiptWords((k, v) => t(k as MessageKey, v), ch) : null;
+        const receipt = words ? t("crossHost.receiptHover", { words: [words.state, words.reason].filter(Boolean).join(" · ") }) : null;
+        return <DelegationStatusMark status={delegationStatus(d, ctxOf(d))} name={d.remote?.targetName ?? d.targetName ?? nameOf(d.target)} error={[receipt, d.attempt?.lastError ?? d.remote?.lastError].filter(Boolean).join("\n") || null} className="max-w-full text-xs" />;
+      },
     },
     {
       key: "delegation",
@@ -95,6 +104,12 @@ function useColumns(compact: boolean): Column<AskSummary>[] {
             </button>
             {!compact && note && <span className="min-w-0 truncate text-xs text-subtle">{note}</span>}
             {!compact && <DelegationHops hops={d.hops} />}
+            {(() => {
+              // peer-delivery-receipts-v1: a receipt that needs noticing (waiting with a reason, failed, unconfirmed).
+              const ch = crossHostOf(d, features);
+              // The title keeps its room; the tag shows in what is left (its words are in the status hover too).
+              return ch ? <RowReceiptTag ch={ch} /> : null;
+            })()}
           </div>
         );
       },
@@ -112,7 +127,7 @@ function useColumns(compact: boolean): Column<AskSummary>[] {
           <div className="flex min-w-0 items-center gap-1 text-xs text-muted">
             {!compact &&
               (peer?.side === "requester" ? (
-                <PeerParty text={peer.name} label={peer.label} size={16} quiet />
+                <PeerParty text={peer.name} label={peer.label} size={16} quiet instanceId={peer.instanceId} hostId={hostId} />
               ) : isOwnerRequest(d.requester) ? (
                 <span className="shrink-0 font-medium text-foreground">{t("delegation.you")}</span>
               ) : (
@@ -122,7 +137,7 @@ function useColumns(compact: boolean): Column<AskSummary>[] {
               ))}
             {!compact && <ArrowRight size={11} className="shrink-0 text-subtle" />}
             {peer?.side === "target" ? (
-              <PeerParty text={peer.name} label={peer.label} size={16} quiet />
+              <PeerParty text={peer.name} label={peer.label} size={16} quiet instanceId={peer.instanceId} hostId={hostId} />
             ) : (
               <button onClick={() => void select(d.target)} className="flex min-w-0 items-center gap-1 hover:text-foreground">
                 <Avatar name={d.targetName ?? to.name} avatar={to.avatar} seed={d.target} size={16} />

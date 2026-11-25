@@ -19,6 +19,8 @@ export interface Shortcut {
   desc: MessageKey;
   /** Only under this send-key preset (default: both). */
   preset?: SendKeyPreset;
+  /** Only while 「多行时 Enter 换行」 is on. */
+  multiline?: true;
 }
 
 export interface ShortcutGroup {
@@ -34,6 +36,7 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
     items: [
       { keys: ["Enter"], desc: "shortcuts.enter.queueFirst", preset: "queueFirst" },
       { keys: ["Enter"], desc: "shortcuts.enter.cli", preset: "cli" },
+      { keys: ["Enter"], desc: "shortcuts.enter.multiline", multiline: true },
       { keys: ["Shift+Enter"], desc: "shortcuts.newline" },
       { keys: ["↵"], desc: "shortcuts.sendButton" },
     ],
@@ -113,8 +116,8 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
 ];
 
 /** Groups with only the entries that apply under `preset`. */
-export function shortcutsFor(preset: SendKeyPreset): ShortcutGroup[] {
-  return SHORTCUT_GROUPS.map((g) => ({ ...g, items: g.items.filter((s) => !s.preset || s.preset === preset) }));
+export function shortcutsFor(preset: SendKeyPreset, multiline = false): ShortcutGroup[] {
+  return SHORTCUT_GROUPS.map((g) => ({ ...g, items: g.items.filter((s) => (!s.preset || s.preset === preset) && (!s.multiline || multiline)) }));
 }
 
 /** "Ctrl" → "⌘" on macOS. */

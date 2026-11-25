@@ -39,7 +39,7 @@ import { DelegationTurnOverlay, DelegationTurnHint } from "../src/renderer/src/c
 import { TimelineViewContext } from "../src/renderer/src/modules/timelineItemsView";
 import { applyEvent, emptyTimeline, timelineFromThreadRead } from "../src/renderer/src/lib/timeline";
 import { delivery, T0, iso } from "../src/renderer/src/lib/inputLedger/testkit";
-import { showStandaloneDelivery } from "../src/renderer/src/lib/inputLedger/deliveryPresentation";
+import { ledgerTailTurn, quietDeliveryHold, showStandaloneDelivery } from "../src/renderer/src/lib/inputLedger/deliveryPresentation";
 import type { SessionDelivery } from "@cutex-desktop/protocol";
 const turn = { askId: "ask-private", attempt: 1, title: "Review parser", requesterId: null, requesterName: null, owner: true, startedAt: T0 };
 const askTurn = { kind: "ask" as const, askId: turn.askId, turnId: "t", inputIds: [], startedAt: iso(T0) };
@@ -76,10 +76,48 @@ describe("timeline working line and Composer delegation context", () => {
   });
   it("does not invent a running turn from a held lease or stale native tool", () => {
     const timeline = timelineFromThreadRead({ thread: { id: "th", turns: [{ id: "t", status: "inProgress", items: [{ id: "tool", type: "commandExecution", command: "test", status: "inProgress" }] }] } });
-    expect(renderToStaticMarkup(tail(delivery("held", 1, { reason: "delegationLease", lease }), "codex", timeline))).toBe("");
+    // The hold keeps the line's box, empty: no busy dots, no working text (it is not a running turn).
+    expect(renderToStaticMarkup(tail(delivery("held", 1, { reason: "delegationLease", lease }), "codex", timeline))).toBe('<div class="mt-1.5 flex h-4 items-center gap-2" data-testid="turn-working" data-turn-held="" aria-hidden="true"></div>');
     const html = renderToStaticMarkup(tail(delivery("held", 1, { reason: "eventLease", lease: { ...lease, holder: "event" } }), "claude", timeline));
     expect(html).not.toContain("turn.activity.working");
     expect(html).toContain('data-state="held"');
+  });
+  // Owner 2026-11-26: delivery flipping between a turn and a delegation-lease hold grew and shrank the timeline by
+  // 22 px (the line's 6 px margin + 16 px box). Every delivery state now keeps that same box.
+  it("keeps the same line box when delivery flips between the turn, the delegation-lease hold and back", () => {
+    const timeline = timelineFromThreadRead({ thread: { id: "th", turns: [{ id: "t", status: "inProgress", items: [] }] } });
+    const box = (html: string) => html.match(/^<div class="([^"]*)" data-testid="turn-working"/)?.[1];
+    const running = renderToStaticMarkup(tail(delivery("turn", 1, { turn: askTurn, lease }), "codex", timeline));
+    const held = renderToStaticMarkup(tail(delivery("held", 2, { reason: "delegationLease", lease }), "codex", timeline));
+    const again = renderToStaticMarkup(tail(delivery("turn", 3, { turn: askTurn, lease }), "codex", timeline));
+    expect(box(running)).toBe("mt-1.5 flex h-4 items-center gap-2");
+    expect(box(held)).toBe(box(running));
+    expect(box(again)).toBe(box(running));
+    expect(held).not.toContain("animate-bounce");
+    expect(held).not.toContain("turn.activity.working");
+    for (const state of ["idle", "finishing", "offline", "starting", "disconnected"] as const)
+      expect(box(renderToStaticMarkup(tail(delivery(state, 1), "codex", timeline)))).toBe(box(running));
+  });
+  it("keeps the empty box for the hold without a native turn too, and only for the delegation-lease hold", () => {
+    expect(renderToStaticMarkup(tail(delivery("held", 1, { reason: "delegationLease", lease })))).toContain('data-turn-held=""');
+    expect(renderToStaticMarkup(tail(delivery("held", 1, { reason: "eventLease", lease: { ...lease, holder: "event" } })))).not.toContain("data-turn-held");
+    expect(quietDeliveryHold(delivery("held", 1, { reason: "delegationLease", lease }))).toBe(true);
+    expect(quietDeliveryHold(delivery("held", 1, { reason: "eventLease", lease }))).toBe(false);
+    expect(quietDeliveryHold(delivery("turn", 1, { turn: askTurn }))).toBe(false);
+    expect(quietDeliveryHold(null)).toBe(false);
+  });
+  it("keeps the tail on the lease's own turn through a delegation-lease hold, and only while the thread runs it", () => {
+    expect(ledgerTailTurn(delivery("turn", 1, { turn: askTurn, lease }), "t")).toBe("t");
+    // The hold has no delivery turn: the lease's turn, still the thread's active turn, keeps its header and line.
+    expect(ledgerTailTurn(delivery("held", 2, { reason: "delegationLease", lease }), "t")).toBe("t");
+    // The turn ended (no active native turn), or the native turn is another one (stale): no tail.
+    expect(ledgerTailTurn(delivery("held", 2, { reason: "delegationLease", lease }), null)).toBeNull();
+    expect(ledgerTailTurn(delivery("held", 2, { reason: "delegationLease", lease }), "other")).toBeNull();
+    expect(ledgerTailTurn(delivery("held", 2, { reason: "delegationLease", lease: { ...lease, turnId: null } }), "t")).toBeNull();
+    // Other holds and idle states keep the existing rule: only a delivery turn makes a tail.
+    expect(ledgerTailTurn(delivery("held", 2, { reason: "eventLease", lease: { ...lease, holder: "event" } }), "t")).toBeNull();
+    expect(ledgerTailTurn(delivery("idle", 2), "t")).toBeNull();
+    expect(ledgerTailTurn(null, "t")).toBeNull();
   });
   it.each(["idle", "finishing", "offline", "starting", "disconnected"] as const)("does not show a busy line for %s even with stale native activity", state => {
     const timeline = timelineFromThreadRead({ thread: { id: "th", turns: [{ id: "t", status: "inProgress", items: [] }] } });

@@ -35,7 +35,7 @@ export function ProjectionActions({ instance }: SideBodyProps<ProjectionParams>)
       data-projection-promote=""
       title={t("conversation.projection.besideHint", { name })}
       onClick={() => promoteProjection(instance.id, hostId, sessionId)}
-      className="flex h-6 shrink-0 items-center gap-1.5 rounded-full bg-[color-mix(in_srgb,#3b82f6_12%,transparent)] pr-2 pl-1 text-meta/[inherit] font-medium text-[color-mix(in_srgb,#3b82f6_85%,var(--fg))] hover:bg-[color-mix(in_srgb,#3b82f6_20%,transparent)]"
+      className="flex h-6 shrink-0 items-center gap-1.5 rounded-full bg-[color-mix(in_srgb,var(--accent)_12%,transparent)] pr-2 pl-1 text-meta/[inherit] font-medium text-[color-mix(in_srgb,var(--accent)_85%,var(--fg))] hover:bg-[color-mix(in_srgb,var(--accent)_20%,transparent)]"
     >
       <Tag tone="accent">{t("conversation.projection.label")}</Tag>
       <ArrowRightToLine size={12} />

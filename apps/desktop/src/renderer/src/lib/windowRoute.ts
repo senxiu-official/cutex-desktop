@@ -4,7 +4,7 @@
 // window's tray goes from there (it opens here). The owner coming to a window (focus, a click, a key) makes it the
 // active one: the selection becomes that window's own (lib/paneStore enterWindow).
 import { bridge } from "../bridge";
-import { setOpenRouter, useApp } from "../store";
+import { setOpenRouter, useApp, type AutoOpen } from "../store";
 import { onEveryAppWindow } from "./appWindowSet";
 import { useDesks } from "./deskStore";
 import { chipShowing, closeChip, conversationPanes, paneBinding, type PaneLayout } from "./paneLayout";
@@ -130,10 +130,13 @@ export function jumpTo(place: AgentPlace): void {
 }
 
 /** store.ts openAgent's router: true = handled (jumped to another window). */
-export function routeOpen(hostId: string, sessionId: string): boolean {
+export function routeOpen(hostId: string, sessionId: string, opts?: AutoOpen): boolean {
   if (useDesks.getState().desks.length === 0) return false;
   const here = currentWindow();
   const { jump, dropChips } = routeFor(agentPlaces(hostId, sessionId), here);
+  // An open the app makes for the owner (lib/services openOnItsHost, keepUnread) does not jump: going to that window
+  // would show (and mark read) a conversation the owner did not ask for. Handled = not opened here either (one copy).
+  if (jump && opts?.keepUnread) return true;
   if (jump) {
     jumpTo(jump);
     return true;

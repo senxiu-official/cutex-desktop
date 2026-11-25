@@ -64,6 +64,14 @@ describe("open a service link", () => {
     expect(r).toEqual({ status: "opened", where: "page" });
     expect(openExternal).toHaveBeenCalledWith("http://127.0.0.1:26180/a/b");
   });
+  it("a remote host's link with the browser module off: module-off, never its host URL in the system browser (owner 2026-11-23)", async () => {
+    shownHost = "ssh-eva";
+    sideOpen.mockReturnValue({ status: "unavailable", reason: "module-off" });
+    openService.mockResolvedValue({ url: "http://hosta:26180", localUrl: "http://127.0.0.1:26180/" });
+    expect(await openServiceRef(refOf("cutex:service/web/a", "ssh-eva"), "page")).toEqual({ status: "unavailable", reason: "module-off" });
+    expect(openService).not.toHaveBeenCalled();
+    expect(openExternal).not.toHaveBeenCalled();
+  });
   it("a bad key is a bad ref; the chip is muted", async () => {
     expect(await openServiceRef({ hostId: "local", kind: "service", key: "BAD", title: "x", params: {} }, "auto")).toEqual({ status: "unavailable", reason: "bad-ref" });
     expect(useServiceLink({ hostId: "local", kind: "service", key: "BAD", title: "x", params: {} })?.tone).toBe("muted");

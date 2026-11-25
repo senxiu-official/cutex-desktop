@@ -70,6 +70,11 @@ vi.mock("../src/renderer/src/bridge", () => ({
   },
 }));
 
+// These store tests provide no contributed pages or Shelf components.
+vi.mock("../src/renderer/src/modules/app", () => ({
+  appModules: () => ({ modules: [], snapshot: () => [] }),
+}));
+
 // ---------- transport ----------
 const WORKSTATION = "ssh-t";
 const LABEL: Record<string, string> = { local: "HOST-A", [WORKSTATION]: "workstation" };
@@ -141,6 +146,7 @@ beforeAll(async () => {
   await import("../src/renderer/src/lib/notifyEvents");
   await import("../src/renderer/src/lib/paneStore");
   await import("../src/renderer/src/lib/paneLayout");
+  await import("../src/renderer/src/lib/workspaceEffects");
   vi.clearAllTimers();
   vi.useRealTimers();
   vi.unstubAllGlobals();

@@ -39,8 +39,8 @@ describe("W6a: no 受阻 — will it clear by itself?", () => {
     // 受阻 is retired for delegations (the goal feature keeps its own state word).
     expect(Object.entries(zhCN).filter(([k, v]) => k.startsWith("delegation.") && v.includes("受阻"))).toEqual([]);
   });
-  it("W6b/W6c: admitted reads 已接收，未开始; a yielded attempt waits, with its stage note as the condition", () => {
-    expect(zhCN["delegation.status.starting"]).toBe("已接收，未开始");
+  it("W6b/W6c: admitted reads 已接收 (owner 2026-11-25); a yielded attempt waits, with its stage note as the condition", () => {
+    expect(zhCN["delegation.status.starting"]).toBe("已接收");
     const yielded = delegationStatus(ask({ attempt: { n: 2, state: "yielded", stageNote: "等 CI 跑完" } as never }));
     expect(yielded).toMatchObject({ key: "waiting", hint: { key: "delegation.statusHint.yieldedNote", vars: { condition: "等 CI 跑完" } } });
     expect(delegationStatus(ask()).key).toBe("running");
@@ -73,7 +73,7 @@ describe("stop settlement (W8, N4, N5) and 结束跟进 (N1–N3)", () => {
     expect(delegationBucket(ended)).toBe("done");
     expect(zhCN["delegation.status.followUpEnded"]).toBe("已结束跟进 · 结果未确认");
     expect(zhCN["followUp.end"]).toBe("结束跟进");
-    expect(zhCN["followUp.confirm"]).toBe("不再等这件事的结果。不会停下或撤回已经发出的动作；结果记为「未确认」，以后迟到的结果也不会让它重新出现。");
+    expect(zhCN["followUp.confirm"]).toBe("不再等待这件事的结果。不会停止或撤回已经发送的操作；结果记为「未确认」，以后迟到的结果也不会让它重新出现。");
   });
   it("one action id per delegation attempt (a repeated click replays, never a second disposal)", () => {
     expect(followUpActionId({ askId: "ask-9", attempts: 4, attempt: { n: 3 } })).toBe("followup-ask-9-3");
@@ -105,7 +105,7 @@ describe("per-run words (4.2, W10)", () => {
     expect(attemptStateKey("answered", true)).toBe("answered");
     expect(zhCN["delegation.attempt.unconfirmed"]).toBe("结果未确认");
     expect(zhCN["delegation.attempt.answered"]).toBe("已有结果");
-    expect(zhCN["delegation.attempt.yielded"]).toBe("本轮已结束，等待继续");
+    expect(zhCN["delegation.attempt.yielded"]).toBe("本回合已结束，等待继续");
     expect(zhCN["delegation.status.answered"]).toBe("已完成");
   });
 });
@@ -131,7 +131,7 @@ describe("N10 (Next Up registry v2.0): a delegation result is not held by a stop
     expect(perItemAdmission([{}])).toBe(false);
     expect(heldKeys("ownerStop", true).hint).toBe("queue.turn.afterStopHint");
     expect(heldKeys("ownerStop").hint).toBe("queue.turn.heldStopHint");
-    expect(zhCN["queue.turn.afterStop"]).toBe("停止后结果自动开新一轮");
+    expect(zhCN["queue.turn.afterStop"]).toBe("中断后，收到委托结果会开始新回合");
     expect(zhCN["agentPause.resumeButton"]).toBe("继续这个{{agent}}");
     expect(zhCN["asksPause.resumeShort"]).toBe("放行新委托");
   });

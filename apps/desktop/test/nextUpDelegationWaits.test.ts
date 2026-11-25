@@ -65,10 +65,10 @@ describe("接下来 delegation rows: registered wait words only", () => {
       for (const key of def.trailing) {
         const tail = { zh: zhCN[key as keyof typeof zhCN], en: en[key as keyof typeof en] };
         if (id === "timed") {
-          // 约{时间}继续: 「约 N 分钟后继续」 within the hour, 「约 14:15 继续」 later.
+          // 2.9: 「约 N 分钟后继续」 / 「约 N 小时后继续」 within 24 h, 「预计 {time} 继续」 later.
           expect(word.zh).toBe("等待中");
-          expect(tail.zh).toMatch(/^约 .+继续$/);
-          expect(tail.en).toMatch(/^continues /);
+          expect(tail.zh).toMatch(/^(约|预计) .+继续$/);
+          expect(tail.en).toMatch(/^(continues|expected to continue) /);
         } else {
           expect(`${word.zh} · ${tail.zh}`, id).toBe(def.text.zh);
           expect(`${word.en} · ${tail.en}`, id).toBe(def.text.en);
@@ -78,6 +78,8 @@ describe("接下来 delegation rows: registered wait words only", () => {
   });
 
   it("carries its approval record", () => {
-    expect(NEXT_UP_DELEGATION_WAITS_APPROVAL).toEqual({ by: "Cutex maintainers", date: "2026-11-18", why: expect.stringContaining("运行中") });
+    expect(NEXT_UP_DELEGATION_WAITS_APPROVAL).toEqual({ by: "owner via Cutex maintainers", date: "2026-11-25", why: expect.stringContaining("已到时间，还未继续") });
+    // Never 「即将继续」 once it is overdue.
+    expect(JSON.stringify(NEXT_UP_DELEGATION_WAITS)).not.toContain("即将继续");
   });
 });

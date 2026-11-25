@@ -93,6 +93,8 @@ export interface SidePage {
    * conversation's Shelf (it moves with the focus; lib/convShelves). Absent = this conversation's own page.
    */
   shared?: boolean;
+  /** The fixed page of a placement group (SidePlacement.fixedPage, e.g. 「我的浏览器」): shared and kept. */
+  fixedHome?: string;
 }
 
 export type ShelfSide = "left" | "right";
@@ -189,6 +191,8 @@ export interface PlaceSpec {
   otherwise: "new-page" | "active-page";
   order: number;
   share: number | null;
+  /** SidePlacement.fixedPage: host-bound opens go to the one fixed page of `home`. */
+  fixedPage?: { icon: PageIcon };
 }
 
 export function placeSpec(p: SidePlacement): PlaceSpec {
@@ -199,6 +203,7 @@ export function placeSpec(p: SidePlacement): PlaceSpec {
     otherwise: p.otherwise ?? "new-page",
     order: p.order ?? DEFAULT_ORDER,
     share,
+    ...(p.fixedPage ? { fixedPage: { icon: p.fixedPage.icon } } : {}),
   };
 }
 
@@ -451,7 +456,7 @@ export type SidePlaceDecision =
   | {
       op: "insert";
       /** An existing page, or a new one: in Shelf `shelf` (absent: a new Shelf on the right). */
-      page: { id: string } | { new: { groups: string[]; index: number; shelf?: string } };
+      page: { id: string } | { new: { groups: string[]; index: number; shelf?: string; fixed?: { home: string; icon: PageIcon } } };
       card: { id: string } | { new: { index: number; share: number | null; collapsed?: boolean } };
       via: "explicit" | "override" | "rule" | "otherwise" | "limit";
     };
@@ -488,6 +493,19 @@ export function place(input: SideLayout, req: SidePlaceRequest, spec: PlaceSpec,
       if (inst.kind === req.kind && !inst.pinned && sameBinding(inst.binding, req.binding) && placed(id)) return { op: "replace", instance: id };
     }
   }
+  // D1: a host-bound open of a kind with a fixed page goes there (made on first use at the top of the default Shelf).
+  if (spec.fixedPage && req.binding.kind === "host" && !findPage(layout, req.page)) {
+    const fixed = layout.pages.find((p) => p.fixedHome === spec.home);
+    if (fixed) {
+      const same = freshestCard(layout, fixed.cards.filter((c) => cardHolds(layout, c, req.kind)));
+      if (same) return { op: "insert", page: { id: fixed.id }, card: { id: same.id }, via: "rule" };
+      return { op: "insert", page: { id: fixed.id }, card: { new: { index: newCardIndex(fixed.cards, spec.order, orderOf), share: spec.share } }, via: "rule" };
+    }
+    const shelf = defaultShelf(layout);
+    const first = shelf ? pagesOfShelf(layout, shelf.id)[0] : undefined;
+    const index = first ? layout.pages.indexOf(first) : 0;
+    return { op: "insert", page: { new: { groups: [spec.home], index, ...(shelf ? { shelf: shelf.id } : {}), fixed: { home: spec.home, icon: spec.fixedPage.icon } } }, card: { new: { index: 0, share: spec.share } }, via: "rule" };
+  }
   // Normal opens never split a populated page. Kind declarations and stored placement hints
   // still decide the fallback at the sanity limit; an explicit page remains an intentional target.
   if (!findPage(layout, req.page)) {
@@ -517,11 +535,9 @@ export function place(input: SideLayout, req: SidePlaceRequest, spec: PlaceSpec,
   if (explicit) {
     pick = { id: explicit.id };
     via = "explicit";
-  } else if (layout.overrides[req.kind]) {
-    const ov = layout.overrides[req.kind]!;
+  } else if (movedTo(layout, req.kind)) {
     via = "override";
-    const page = findPage(layout, ov.page) ?? layout.pages.find((p) => p.groups.some((g) => ov.groups.includes(g)));
-    pick = page ? { id: page.id } : { new: [...ov.groups] };
+    pick = { id: movedTo(layout, req.kind)!.id };
   } else {
     for (const candidate of spec.prefer) {
       let hit: SidePage | null = null;
@@ -835,6 +851,17 @@ function touch(d: SideLayout, id: string, now: number): void {
   if (inst) d.instances[id] = { ...inst, lastActiveAt: now };
 }
 
+/**
+ * The owner's move of a kind (§18.7) while its page is there. Once that page is closed the move is over (owner
+ * 2026-11-24: 「已移到「已关闭的页」」 named no place): a normal open never read it anyway (the page holding the kind,
+ * else a page of its default group), the sanity-limit fallback follows the default rules too, the settings show no
+ * move, and the record is dropped on save.
+ */
+export function movedTo(layout: SideLayout, kind: string): SidePage | null {
+  const override = layout.overrides[kind];
+  return override ? findPage(layout, override.page) : null;
+}
+
 function setOverride(d: SideLayout, kind: ItemId, page: SidePage, now: number): void {
   d.overrides[kind] = { page: page.id, groups: [...page.groups], at: now };
   const keys = Object.keys(d.overrides);
@@ -912,6 +939,7 @@ export function applyOpen(layout: SideLayout, decision: SidePlaceDecision, input
       const free: ShelfSide | null = !room ? null : !d.shelves!.some((x) => x.side === "right") ? "right" : !d.shelves!.some((x) => x.side === "left") ? "left" : null;
       const shelf = findShelfRaw(d, n.shelf) ?? (free ? makeShelf(d, free) : (d.shelves!.find((x) => x.side === "right") ?? d.shelves![0]!));
       page = newPage(d, n.groups, findShelfRaw(d, n.shelf) ? n.index : shelfEnd(d, shelf.id), shelf.id);
+      if (n.fixed) Object.assign(page, { shared: true, kept: true, fixedHome: n.fixed.home, icon: n.fixed.icon });
     }
     // A launcher page takes the first component's group so later rules can find it.
     if (!page.groups.length) page.groups = [opts.home ?? `${USER_GROUP}${page.id}`];
@@ -2641,6 +2669,7 @@ export function sanitizeLayout(raw: unknown, hostId = "local", opts: { legacy?: 
       if (p.kept === true) page.kept = true;
       if (typeof p.emptyKind === "string" && ITEM_ID.test(p.emptyKind)) page.emptyKind = p.emptyKind as ItemId;
       if (p.shared === true) page.shared = true;
+      if (p.shared === true && typeof p.fixedHome === "string" && /^[a-z][a-z0-9-]{0,39}$/.test(p.fixedHome) && !out.pages.some((o) => o.fixedHome === p.fixedHome)) page.fixedHome = p.fixedHome;
       if (Array.isArray(p.cards)) {
         for (const c of p.cards) {
           if (!isRecord(c) || typeof c.id !== "string" || !/^c\d+$/.test(c.id) || seen.has(c.id) || typeof c.kind !== "string" || !Array.isArray(c.tabs)) continue;
@@ -2747,6 +2776,11 @@ export interface SaveOptions {
   persist(kind: ItemId): boolean;
   /** Visible now (the LRU cut drops invisible ones first). */
   visible?(instanceId: string): boolean;
+  /**
+   * Pages that exist outside this layout: a conversation's own Shelf saved without the shared pages (§24.13). A move
+   * onto one of them is still live and is kept (review of the stale-move prune: savePeerNow).
+   */
+  otherPages?: ReadonlySet<string>;
 }
 
 /** Serialized size of a state, in UTF-16 code units (close enough to bytes for the 4 KiB limit). */
@@ -2804,6 +2838,7 @@ export function prepareForSave(layout: SideLayout, opts: SaveOptions): SideLayou
   fixShelves(d, rails);
   if (!findPage(d, d.activePage)) d.activePage = d.shelves?.[0]?.active ?? d.pages[0]?.id ?? null;
   if (!d.pages.length) d.open = false;
+  for (const [kind, ov] of Object.entries(d.overrides)) if (!movedTo(d, kind) && !opts.otherPages?.has(ov.page)) delete d.overrides[kind];
   const keys = Object.keys(d.overrides);
   if (keys.length > MAX_OVERRIDES) {
     for (const k of keys.sort((a, b) => d.overrides[a]!.at - d.overrides[b]!.at).slice(0, keys.length - MAX_OVERRIDES)) delete d.overrides[k];

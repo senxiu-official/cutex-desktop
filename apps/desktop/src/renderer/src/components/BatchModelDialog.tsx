@@ -7,11 +7,15 @@ import { useI18n, type MessageKey } from "../i18n";
 import { isImeComposing } from "../lib/ime";
 import { useOwnerWindow } from "../lib/ownerContext";
 import {
-  applyBatch, batchRows, batchSources, chooseEffort, chooseSource, chooseTarget, closeBatchModel, scopeAgents, setBatchScope, tickedRows, toggleBatchRow, useBatchModel,
+  applyBatch, batchRows, batchSources, chooseEffort, chooseSource, chooseTarget, closeBatchModel, runningOn, scopeAgents, setBatchScope, tickedRows, toggleBatchRow, useBatchModel,
   type BatchModelScope, type BatchRow,
 } from "../lib/batchModel";
+import { EntitySelect } from "./EntitySelect";
+import { EntityMention } from "./EntityIcon";
+import { tNodes } from "../lib/textNodes";
 import { sidebarOf, useApp } from "../store";
 import { claudeAliasLabels, claudeCatalogChoices, looksClaude } from "../lib/claudeModels";
+import { effortAppliesNextTurn } from "../lib/effortNextTurn";
 import { Checkbox } from "./settings/Form";
 import { ArmedButton } from "./ArmedButton";
 import { btn } from "./Button";
@@ -55,11 +59,17 @@ function OpenBatchModelDialog() {
   const scope = s.scope!;
   const sidebar = useApp((app) => sidebarOf(app, scope.hostId));
   const projects = sidebar?.projects?.projects ?? [];
-  const agents = useMemo(() => scopeAgents(scope), [scope, sidebar]);
+  // Which agents run a turn now (lib/batchModel runningOn): rows and the effort line follow the ledger delivery too.
+  const running = useApp((app) => { const side = sidebarOf(app, scope.hostId); return side ? side.active.filter((x) => runningOn(app, scope.hostId, x)).map((x) => x.cutexSessionId).join("\n") : ""; });
+  const agents = useMemo(() => scopeAgents(scope), [scope, sidebar, running]);
   const sources = useMemo(() => batchSources(agents), [agents]);
   const source = sources.find((x) => x.key === s.sourceKey) ?? null;
   const rows = useMemo(() => (source && s.target ? batchRows(agents, source, s.target, s.runtimeModels, { choice: s.effort, catalogTarget: s.catalog?.find((m) => m.id === s.target) }) : []), [agents, source, s.target, s.runtimeModels, s.effort, s.catalog]);
   const ticked = tickedRows(rows, s.unticked);
+  // The listed online agents' deliveries (an unopened session has no ledger cache): read and kept live while listed.
+  const watched = rows.filter((r) => r.online).map((r) => r.id).join("\n");
+  const watchInputs = useApp((app) => app.watchInputs);
+  useEffect(() => (watched && watchInputs ? watchInputs(watched.split("\n"), scope.hostId) : undefined), [watched, scope.hostId, watchInputs]);
   const target = s.catalog?.find((m) => m.id === s.target);
   const busy = s.phase === "applying";
   const done = s.phase === "done";
@@ -91,6 +101,9 @@ function OpenBatchModelDialog() {
     }
   }
   const targetName = (m: (typeof targets)[number]) => m.entryDisplayName || claudeNames?.get(m.id) || m.displayName;
+  // Claude r56: a ticked running Claude agent that gets an effort keeps its current one until its next turn. `busy` is
+  // the same running rule as the row's 「正在运行：本轮结束后生效」 (lib/batchModel runningOn), so the two agree.
+  const effortNextTurn = ticked.some((r) => !r.block && !!r.effortSent && effortAppliesNextTurn(r.runtime, r.busy));
   const succeeded = s.results.filter((r) => r.ok);
   const failed = s.results.filter((r) => !r.ok);
 
@@ -107,16 +120,14 @@ function OpenBatchModelDialog() {
         {!done && (
           <div className="mt-3 grid grid-cols-[4.5rem_1fr] items-center gap-x-2 gap-y-2 text-sm">
             <span className="text-xs text-muted">{t("batchModel.scope")}</span>
-            <select className={SELECT} value={scopeKey} disabled={busy} data-testid="batch-model-scope"
-              onChange={(e) => { const next = scopeChoices.find((c) => c.key === e.target.value); if (next) setBatchScope(next.scope); }}>
-              {scopeChoices.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
-            </select>
+            <EntitySelect className={`flex w-full items-center justify-between gap-2 ${SELECT}`} value={scopeKey} disabled={busy} testId="batch-model-scope" label={t("batchModel.scope")}
+              onChange={(value) => { const next = scopeChoices.find((c) => c.key === value); if (next) setBatchScope(next.scope); }}
+              options={scopeChoices.map((c) => ({ value: c.key, label: c.label, entity: c.scope.projectId ? { kind: "project" as const, id: c.scope.projectId, hostId: scope.hostId } : null }))} />
             <span className="text-xs text-muted">{t("batchModel.from")}</span>
-            <select className={SELECT} value={s.sourceKey ?? ""} disabled={busy || sources.length === 0} data-testid="batch-model-source"
-              onChange={(e) => void chooseSource(sources.find((x) => x.key === e.target.value) ?? null, agents)}>
-              <option value="">{sources.length ? t("batchModel.pickSource") : t("batchModel.noSources")}</option>
-              {sources.map((x) => <option key={x.key} value={x.key}>{t("batchModel.sourceOption", { model: x.model, profile: x.profile, n: x.count })}</option>)}
-            </select>
+            <EntitySelect className={`flex w-full items-center justify-between gap-2 ${SELECT}`} value={s.sourceKey ?? ""} disabled={busy || sources.length === 0} testId="batch-model-source" label={t("batchModel.from")}
+              onChange={(value) => void chooseSource(sources.find((x) => x.key === value) ?? null, agents)}
+              options={[{ value: "", label: sources.length ? t("batchModel.pickSource") : t("batchModel.noSources") },
+                ...sources.map((x) => ({ value: x.key, label: t("batchModel.sourceOption", { model: x.model, profile: x.profile, n: x.count }), entity: { kind: "profile" as const, ref: x.profile, hostId: scope.hostId } }))]} />
             <span className="text-xs text-muted">{t("batchModel.to")}</span>
             <select className={SELECT} value={s.target ?? ""} disabled={busy || !source || !s.catalog} data-testid="batch-model-target"
               onChange={(e) => chooseTarget(e.target.value || null)}>
@@ -128,7 +139,8 @@ function OpenBatchModelDialog() {
               <option value="keep">{t("batchModel.effortKeep")}</option>
               {(target?.supportedReasoningEfforts ?? []).map((x) => <option key={x} value={x}>{x}</option>)}
             </select>
-            {source && <p className="col-start-2 text-xs text-subtle">{t("batchModel.sameProfile", { profile: source.profile })}</p>}
+            {effortNextTurn && <p className="col-start-2 text-xs text-warn-text" data-batch-effort-next-turn="">{t("composer.effort.nextTurn")}</p>}
+            {source && <p className="col-start-2 text-xs text-subtle">{tNodes(t, "batchModel.sameProfile", { profile: <EntityMention entity={{ kind: "profile", ref: source.profile, hostId: scope.hostId }}>{source.profile}</EntityMention> })}</p>}
             {s.catalogError && <p className="col-start-2 text-xs text-danger">{t("batchModel.catalogFailed", { error: s.catalogError })}</p>}
           </div>
         )}
@@ -165,7 +177,7 @@ function OpenBatchModelDialog() {
               </button>
               <ArmedButton
                 shape="flex items-center gap-1.5 rounded-md px-3 py-1 text-sm disabled:opacity-40"
-                idle="bg-accent text-white"
+                idle="bg-accent text-on-accent"
                 hint={t("batchModel.armed", { n: ticked.length, model: s.target ?? "" })}
                 resetKey={`${s.sourceKey}|${s.target}|${s.effort}|${ticked.map((r) => r.id).join(",")}`}
                 disabled={busy || ticked.length === 0 || s.pendingReads > 0}

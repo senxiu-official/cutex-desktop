@@ -12,9 +12,10 @@ export type SettingsSource = "local" | "host" | "codex" | "person";
 /**
  * Whether agents feel a declared setting (summarized mechanically at page/card/row):
  * none = only the UI; next = agents started (or restarted) afterwards; now = running agents at once;
- * newAgents = future creation requests only; access = immediate admission changes for subsequent requests (devices, users, peers).
+ * newAgents = future creation requests only; access = immediate admission changes for subsequent requests (devices, users, peers);
+ * chatsNow = quick chats at once, from their next message (自动标题; agents are not affected, so no agent glyph).
  */
-export type SettingsAgents = "none" | "next" | "now" | "newAgents" | "access" | "offNowOnNext" | "hostNowRuntimeNext" | "hostRestart" | "hostRestartRuntimeNext";
+export type SettingsAgents = "none" | "next" | "now" | "newAgents" | "access" | "chatsNow" | "offNowOnNext" | "hostNowRuntimeNext" | "hostRestart" | "hostRestartRuntimeNext";
 
 export type SettingsGroupId = "app" | "connection" | "agents" | "tools" | "data" | "system";
 

@@ -28,8 +28,8 @@ import { baseName, escapeFileHref, HOST_FILE_READ_FEATURE, resolveFileHref, root
 import { useHostHome } from "../lib/hostHome";
 import { LOCAL_HOST_ID } from "../../../shared/hosts";
 import { hostApi, useApp } from "../store";
-import { convFeaturesOf, convHostOf, convNotify, convSessionOf, useConvHost, useConvScope, useConvSession, useConvSidebar } from "../lib/conversationScope";
-import { selectionContextMenu, type SelectionSource } from "../lib/selectionMenu";
+import { convFeaturesOf, convNotify, useConvHost, useConvScope, useConvSession, useConvSidebar } from "../lib/conversationScope";
+import { useSelectionMenu } from "../lib/useSelectionMenu";
 import { api } from "../bridge";
 import { useI18n } from "../i18n";
 import { contextMenu, openMenuFrom, type MenuEntry } from "../lib/contextMenu";
@@ -52,7 +52,6 @@ import { restoreWindowsText, type HastNode } from "../lib/markdownPathText";
 import { preloadKatex } from "../lib/katexRender";
 import { MathNode } from "./MathNode";
 import { MarkdownOpenSource } from "../lib/markdownOpenSource";
-import { MarkdownTurn } from "../lib/markdownTurn";
 
 // Markdown math (lib/markdownMath.ts → components/MathNode.tsx): the parser goes in streamdown's math slot (after
 // the CJK plugins); KaTeX renders in MarkdownCode, so the slot's rehype step is empty. A streaming reply's
@@ -172,9 +171,19 @@ const RelativeFiles = createContext(true);
  */
 export type MarkdownFileReads = "auto" | "scoped";
 const FileReads = createContext<MarkdownFileReads>("auto");
+/**
+ * How links that point into a host behave, for every Markdown below the provider (nested ones too, e.g. a work
+ * group's). "default": as described above (file chips, thumbnails, `cutex:` look-ups, click menus). "inert": a client
+ * with no host file access (the iPad conversation): workspace / host file links and local image paths render as
+ * plain text, `cutex:` links, images and agent mentions as their text; nothing is looked up through hostApi and
+ * nothing opens on click. External http(s) links and data: images are unchanged.
+ */
+export type MarkdownLinkPolicy = "default" | "inert";
+export const MarkdownLinkPolicyContext = createContext<MarkdownLinkPolicy>("default");
 const ABSOLUTE_PATH = /^(?:[a-zA-Z]:[\\/]|[\\/]|~(?=$|[\\/]))/;
 
 function useFileLink(href: string | undefined): FileLink | null {
+  const inert = useContext(MarkdownLinkPolicyContext) === "inert";
   const relativeFiles = useContext(RelativeFiles);
   const scoped = useContext(FileReads) === "scoped";
   // Outside a conversation pane (a side chat, a note): opens target the scoped agent and host, not the selected one.
@@ -188,8 +197,8 @@ function useFileLink(href: string | undefined): FileLink | null {
   const hostId = useConvHost();
   const remote = hostId !== LOCAL_HOST_ID;
   const { t } = useI18n();
-  const home = useHostHome(!scoped && !!href && /^~(?=$|[\\/])/.test(href));
-  if (!href) return null;
+  const home = useHostHome(!inert && !scoped && !!href && /^~(?=$|[\\/])/.test(href));
+  if (!href || inert) return null;
   const scope = scopeFor(sidebar, selectedId);
   const root = scope ? rootFor(sidebar, scope) : null;
   const ref = resolveFileHref(href, root, home);
@@ -317,6 +326,7 @@ function FileAwareImage({ src: rawSrc, alt }: ImgHTMLAttributes<HTMLImageElement
   const images = useUiPrefs().messageImages;
   const src = typeof rawSrc === "string" ? unescapeFileHref(rawSrc) : undefined;
   const relativeFiles = useContext(RelativeFiles);
+  const inert = useContext(MarkdownLinkPolicyContext) === "inert";
   const link = useFileLink(src);
   if (link) {
     const label = alt?.trim() || baseName(link.path);
@@ -346,6 +356,8 @@ function FileAwareImage({ src: rawSrc, alt }: ImgHTMLAttributes<HTMLImageElement
       </a>
     );
   }
+  // Inert (MarkdownLinkPolicy): a local image path is its alt text (else the path), never fetched.
+  if (inert && src && !/^data:/i.test(src)) return <span title={src}>{alt?.trim() || src}</span>;
   // A relative image in a document without a base (RelativeFiles): a placeholder with its alt text.
   if (!relativeFiles && src && !/^data:/i.test(src))
     return (
@@ -362,6 +374,7 @@ function FileAwareImage({ src: rawSrc, alt }: ImgHTMLAttributes<HTMLImageElement
 /** `cutex:<kind>/<key>` (v1.7, §19.6) first: a separate component, so hooks never mix between the two. */
 function MarkdownLink(props: AnchorHTMLAttributes<HTMLAnchorElement> & { node?: unknown }) {
   const scoped = useContext(FileReads) === "scoped";
+  const inert = useContext(MarkdownLinkPolicyContext) === "inert";
   const { t } = useI18n();
   const conv = useConvScope();
   // Scoped: an agent of a host outside the device scope is not opened (that would widen the scope); the owner is told.
@@ -370,6 +383,7 @@ function MarkdownLink(props: AnchorHTMLAttributes<HTMLAnchorElement> & { node?: 
   };
   const href = unescapeCutexHref(props.href);
   const target = href ? parseCutexLink(href) : null;
+  if (href && target && inert) return <span title={href}>{props.children}</span>;
   if (href && target?.kind === "agent") {
     const mention = parseAgentMention(href);
     const text = typeof props.children === "string" ? props.children.replace(/^@/, "") : "";
@@ -383,8 +397,10 @@ function MarkdownLink(props: AnchorHTMLAttributes<HTMLAnchorElement> & { node?: 
 
 function MarkdownImage(props: ImgHTMLAttributes<HTMLImageElement> & { node?: unknown }) {
   const scoped = useContext(FileReads) === "scoped";
+  const inert = useContext(MarkdownLinkPolicyContext) === "inert";
   const src = unescapeCutexHref(typeof props.src === "string" ? props.src : null);
   const target = src ? parseCutexLink(src) : null;
+  if (src && target && inert) return <span title={src}>{props.alt?.trim() || target.key}</span>;
   // Scoped: a plain chip named by the alt text; the bytes only when the owner opens it.
   if (src && target && scoped) return <CutexLink href={src} target={target} plain>{props.alt?.trim() || target.key}</CutexLink>;
   if (src && target) return <CutexImage src={src} target={target} alt={props.alt ?? ""} />;
@@ -430,21 +446,13 @@ export const Markdown = memo(function Markdown({ text, streaming = false, compac
   const blockMode = streaming || streamed.current;
   // A new token per text / mode (not the whole text spliced into a string on every update).
   const revision = useMemo(() => ({ text, streaming }), [text, streaming]);
-  // 教学模式: right-click on selected text offers the modules' `selection` actions (解释这段) for the agent the text
-  // belongs to — the scoped one (a side chat, a note), else the conversation's (lib/selectionMenu; off = native menu).
-  const openSource = useContext(MarkdownOpenSource);
-  const conv = useConvScope();
-  const rowTurn = useContext(MarkdownTurn);
-  const selectionSource = (target: HTMLElement): SelectionSource | null => {
-    if (openSource) return openSource.sessionId ? { hostId: openSource.hostId, sessionId: openSource.sessionId } : null;
-    const s = useApp.getState();
-    const sessionId = convSessionOf(conv, s);
-    return sessionId ? { hostId: convHostOf(conv, s), sessionId, turnId: rowTurn ?? target.closest("[data-turn-id]")?.getAttribute("data-turn-id") ?? null } : null;
-  };
+  // Right-click on selected text offers the modules' `selection` actions (解释这段, 批注追问) for the agent the text
+  // belongs to — the scoped one (a side chat, a note), else the conversation's (lib/useSelectionMenu).
+  const selectionMenu = useSelectionMenu();
   return (
     <FileReads.Provider value={fileReads}>
     <RelativeFiles.Provider value={relativeFiles}>
-      <PreserveTextSelection revision={revision} style={{ "--prose-pixel": `${1 / dpr}px` } as CSSProperties} onContextMenu={(e) => void selectionContextMenu(e, () => selectionSource(e.currentTarget))}>
+      <PreserveTextSelection revision={revision} style={{ "--prose-pixel": `${1 / dpr}px` } as CSSProperties} onContextMenu={selectionMenu.onContextMenu} rootRef={selectionMenu.ref}>
         <Streamdown
           className={`markdown ${blockMode ? "markdown-streaming-prose " : "leading-relaxed "}${document ? "markdown-document " : ""}${compact ? "text-[length:calc(var(--chat-font-size,14px)-1px)]" : "text-[length:var(--chat-font-size,14px)]"}`}
           mode={blockMode ? "streaming" : "static"}

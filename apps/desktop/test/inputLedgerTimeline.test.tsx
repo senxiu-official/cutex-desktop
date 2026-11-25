@@ -128,7 +128,9 @@ describe("ledger bubble handoff", () => {
     expect(host.textContent).not.toContain("preview-a");
     expect(host.textContent).not.toContain("preview-b");
     expect([...host.querySelectorAll<HTMLElement>('[data-testid="input-status"]')].map(node => node.dataset.inputId)).toEqual(["result-a", "result-b"]);
-    expect(host.querySelector('[data-effect="retry"]')).not.toBeNull();
+    // History shows only what happened (delegation-347359): the unconfirmed word stays, its actions do not.
+    expect(host.querySelector('[data-input-id="result-b"][data-next-up-state="unconfirmed"]')).not.toBeNull();
+    expect(host.querySelector('[data-effect="retry"]')).toBeNull();
     await act(async () => root.unmount()); host.remove();
   });
   it.each(["uncertain", "inContext"] as const)("read-only %s history exposes no mutation actions", async state => {
@@ -221,5 +223,64 @@ describe("057 carried inputs", () => {
     // A record still waiting stays at the bottom, after everything.
     expect(at("still waiting")).toBe(rows.length - 1);
     await act(async () => root.unmount());
+  });
+});
+
+// Owner 2026-11-26: on the ledger path, delivery flipping between the turn and a delegation-lease hold took the turn's
+// live line away and brought it back, so the timeline grew and shrank each time. The lease's own turn keeps it.
+describe("live line through a delegation-lease hold", () => {
+  it("keeps the turn's line box mounted from turn to hold and back; the turn ending removes it", async () => {
+    const { host, root, show } = setup();
+    const lease = { holder: "ask" as const, turnId: "t1", since: new Date().toISOString(), runtimeGeneration: 1, inputIds: [], reconcile: { state: "checking" as const } };
+    const turn = { kind: "ask" as const, askId: "ask-1", turnId: "t1", inputIds: [], startedAt: new Date().toISOString() };
+    const at = (d: ReturnType<typeof delivery>) => Object.assign(fx.state, { inputs: { [key]: { ...ledger([]), delivery: d } } });
+    const line = () => host.querySelector<HTMLElement>('[data-testid="turn-working"]');
+    const running = native();
+    at(delivery("turn", 2, { turn, lease }));
+    await show(running);
+    expect(line()?.className).toBe("mt-1.5 flex h-4 items-center gap-2");
+    expect(line()?.textContent).toContain("turn.activity.working");
+    at(delivery("held", 3, { reason: "delegationLease", lease }));
+    await show(running);
+    expect(line()?.className).toBe("mt-1.5 flex h-4 items-center gap-2");
+    expect(line()?.hasAttribute("data-turn-held")).toBe(true);
+    expect(line()?.querySelector(".animate-bounce")).toBeNull();
+    at(delivery("turn", 4, { turn, lease }));
+    await show(running);
+    expect(line()?.textContent).toContain("turn.activity.working");
+    // The turn ended natively while the hold remains: no line.
+    at(delivery("held", 5, { reason: "delegationLease", lease }));
+    await show(timelineFromThreadRead({ thread: { id: "thread-s1", turns: [{ id: "t1", status: "completed", items: [] }] } } as never));
+    expect(line()).toBeNull();
+    act(() => root.unmount()); host.remove();
+  });
+});
+
+// Owner 2026-11-26: the tail's header slot is decided on the delivery's turn id but shows the thread's active turn. When the
+// ids differ and the active turn already has its header in its own row, a second divider sat at the end of the timeline
+// and came and went with the delivery's turn id (28.5 px at 1.875).
+describe("the active turn's divider is never shown twice", () => {
+  it("a delivery turn id other than the native one adds no second header; a turn with only its inputs keeps its tail header", async () => {
+    const { host, root, show } = setup();
+    const turnOf = (turnId: string) => ({ kind: "ask" as const, askId: "ask-1", turnId, inputIds: [], startedAt: new Date().toISOString() });
+    const at = (turnId: string) => Object.assign(fx.state, { inputs: { [key]: { ...ledger([]), delivery: delivery("turn", 2, { turn: turnOf(turnId) }) } } });
+    const read = (items: unknown[]) => timelineFromThreadRead({ thread: { id: "thread-s1", turns: [{ id: "t0", status: "completed", startedAt: 1699999000, completedAt: 1699999100, items: [{ type: "agentMessage", id: "old", text: "old reply" }] }, { id: "t1", status: "inProgress", startedAt: 1700000000, items }] } } as never);
+    const headers = () => [...host.querySelectorAll(".border-b.my-2")].map((h) => h.closest("[data-tl-row]")?.getAttribute("data-turn-id") ?? (h.closest("[data-tl-row]") ? "row" : "end"));
+    const working = read([{ type: "agentMessage", id: "a1", text: "reply text" }]);
+    at("t1");
+    await show(working);
+    expect(headers()).toEqual(["t0", "t1"]);
+    at("ledger-turn-elsewhere");
+    await show(working);
+    expect(headers()).toEqual(["t0", "t1"]);
+    // Only the turn's inputs so far: its divider is the tail's, once, whichever id the delivery carries.
+    const started = read([]);
+    at("ledger-turn-elsewhere");
+    await show(started);
+    expect(headers()).toEqual(["t0", "end"]);
+    at("t1");
+    await show(started);
+    expect(headers()).toEqual(["t0", "end"]);
+    act(() => root.unmount()); host.remove();
   });
 });

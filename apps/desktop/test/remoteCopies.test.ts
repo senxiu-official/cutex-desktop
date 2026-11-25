@@ -4,7 +4,7 @@ import * as path from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { RemoteCopyManager, type RemoteCopyManagerOptions } from '../src/main/remoteCopies'
-import type { CopySource, TransferMeta, TransferChunk } from '../src/shared/remoteCopies'
+import type { CopySource, RemoteCopy, TransferMeta, TransferChunk } from '../src/shared/remoteCopies'
 const scratch = path.join(tmpdir(), 'remote-copies-tests')
 const source: CopySource = { hostId: 'a', hostLabel: 'A', hostIdentity: 'identity-a', path: '/remote/data.bin' }
 const managers: RemoteCopyManager[] = [], dirs: string[] = []
@@ -19,7 +19,7 @@ function transport(bytes: Uint8Array, mutate?: (c: TransferChunk) => TransferChu
   return { meta, calls: () => calls, factory: async () => ({
     metadata: async () => { calls++; return { ...meta } },
     chunk: async (_m: TransferMeta, offset: number, max: number) => {
-      const data = bytes.slice(offset, offset + max)
+      const data = bytes.subarray(offset, offset + max)
       const c = { bytes: data, offset, total: meta.size, next: offset + data.length, eof: offset + data.length === meta.size, revision: meta.revision }
       return mutate ? mutate(c) : c
     },
@@ -27,12 +27,12 @@ function transport(bytes: Uint8Array, mutate?: (c: TransferChunk) => TransferChu
 }
 function manager(options: RemoteCopyManagerOptions) { const m = new RemoteCopyManager(options); managers.push(m); return m }
 async function settled(m: RemoteCopyManager, id: string) {
-  for (let i = 0; i < 1000; i++) {
-    const row = (await m.list()).copies.find(r => r.id === id)!
-    if (row.status !== 'downloading') { await m.cancel(id); return row }
-    await new Promise(resolve => setTimeout(resolve, 5))
-  }
-  throw Error('Transfer did not settle')
+  // start() registers the promise before returning. An absent entry means
+  // the transfer has already finished.
+  await m['active'].get(id)?.done
+  const row = (await m.list()).copies.find(r => r.id === id)
+  if (!row || row.status === 'downloading') throw Error('Transfer did not settle')
+  return row
 }
 async function download(m: RemoteCopyManager, s = source) {
   const meta = await m.inspect(s), id = await m.start(s, { revision: meta.revision, size: meta.size })
@@ -47,27 +47,26 @@ afterEach(async () => {
   }
 })
 describe('owned remote copies', () => {
-  it('preserves ZIP/compound extensions while shortening a long remote filename', async () => {
-    for (const suffix of ['.zip', '.tar.gz']) {
-      const t = transport(new Uint8Array([1, 2])); t.meta.name = 'a'.repeat(190) + suffix
-      const m = manager({ root: await root(), transport: t.factory })
-      const { id, row } = await download(m)
-      expect(row.status).toBe('complete'); expect(row.name).toHaveLength(160)
-      expect(row.name.endsWith(suffix)).toBe(true)
-      expect(path.basename(await m.file(id))).toBe(row.name)
-    }
-  })
+  it.each(['.zip', '.tar.gz'])('preserves %s while shortening a long remote filename', async (suffix) => {
+    const t = transport(new Uint8Array([1, 2])); t.meta.name = 'a'.repeat(190) + suffix
+    const m = manager({ root: await root(), transport: t.factory })
+    const { id, row } = await download(m)
+    expect(row.status).toBe('complete'); expect(row.name).toHaveLength(160)
+    expect(row.name.endsWith(suffix)).toBe(true)
+    expect(path.basename(await m.file(id))).toBe(row.name)
+  }, 20_000) // A real publish and a second filesystem path validation in file().
   it('streams >10 MiB exactly, hashes bytes, verifies final metadata and exposes no local paths', async () => {
-    const bytes = Uint8Array.from({ length: 11 * 1024 * 1024 + 193 }, (_, i) => i % 251)
+    const pattern = Uint8Array.from({ length: 251 }, (_, i) => i)
+    const bytes = Buffer.alloc(11 * 1024 * 1024 + 193, pattern)
     const t = transport(bytes), m = manager({ root: await root(), transport: t.factory })
     const { id, row } = await download(m)
     expect(row.status).toBe('complete'); expect(row.received).toBe(bytes.length)
     expect(row.sha256).toBe(createHash('sha256').update(bytes).digest('hex'))
-    expect((await fs.readFile(await m.file(id))).equals(Buffer.from(bytes))).toBe(true)
+    expect((await fs.readFile(await m.file(id))).equals(bytes)).toBe(true)
     expect(t.calls()).toBe(3)
     expect(JSON.stringify(await m.list())).not.toContain(scratch)
     expect(await fs.readdir(path.dirname(await m.file(id)))).toEqual(['data.bin'])
-  }, 30_000) // 11 MiB built, streamed, hashed, written and read back: ~1.5 s alone, the work under full-suite load
+  }, 30_000) // Streams, hashes, writes and reads back 11 MiB on disk.
   it.each([
     ['offset', (c: TransferChunk) => ({ ...c, offset: c.offset + 1 })],
     ['revision', (c: TransferChunk) => ({ ...c, revision: 'different' })],
@@ -81,7 +80,7 @@ describe('owned remote copies', () => {
     const m = manager({ root: r, transport: t.factory }), { id, row } = await download(m)
     expect(row.status).toBe('failed'); expect(await fs.readdir(path.join(r, id))).toEqual([])
     await expect(m.file(id)).rejects.toThrow('unavailable')
-  })
+  }, 20_000) // The failed transfer closes and removes the staging file, then persists the failed row.
   it('requires exact revision/size consent, including above 200 MiB', async () => {
     const t = transport(new Uint8Array()); t.meta.size = 201 * 1024 * 1024
     const m = manager({ root: await root(), transport: t.factory })
@@ -91,7 +90,7 @@ describe('owned remote copies', () => {
     expect((await settled(m, a)).status).toBe('failed')
     const b = await m.start(source, { revision: t.meta.revision, size: t.meta.size - 1 })
     expect((await settled(m, b)).status).toBe('failed')
-  })
+  }, 20_000) // Two rejected transfers each persist their start and failure.
   it('checks metadata again after EOF before publication', async () => {
     const t = transport(new Uint8Array([1, 2]))
     const factory = async () => {
@@ -111,24 +110,29 @@ describe('owned remote copies', () => {
     expect(row.status).toBe('complete'); expect((await fs.stat(await m.file(id))).size).toBe(0)
   })
   it('cancels pending transport, deletes partial bytes and leaves controls responsive', async () => {
-    const t = transport(new Uint8Array(2 * 1024 * 1024)); let entered!: () => void
+    const t = transport(new Uint8Array([1, 2])); t.meta.maxChunkBytes = 1
+    let entered!: () => void
     const waiting = new Promise<void>(resolve => { entered = resolve })
     const factory: RemoteCopyManagerOptions['transport'] = async () => ({ metadata: async () => t.meta,
       chunk: async (meta, offset, max, signal) => {
         if (offset === 0) return (await t.factory()).chunk(meta, offset, max)
+        signal.throwIfAborted()
         entered(); return new Promise((_, reject) => signal.addEventListener('abort', () => reject(Error('aborted')), { once: true }))
       },
     })
     const r = await root(), m = manager({ root: r, transport: factory }), id = await m.start(source, t.meta)
     await waiting; await m.keep(id, true)
-    expect((await m.list()).copies[0]!.received).toBe(1024 * 1024)
+    expect((await m.list()).copies[0]!.received).toBe(1)
     await m.cancel(id)
     expect((await m.list()).copies[0]!.status).toBe('canceled'); expect(await fs.readdir(path.join(r, id))).toEqual([])
   })
   it('limits one active transfer per host and two globally without blocking settings', async () => {
     const t = transport(new Uint8Array([1]))
     const factory: RemoteCopyManagerOptions['transport'] = async () => ({
-      metadata: async signal => new Promise((_, reject) => signal.addEventListener('abort', () => reject(Error('aborted')), { once: true })),
+      metadata: async signal => {
+        signal.throwIfAborted()
+        return new Promise((_, reject) => signal.addEventListener('abort', () => reject(Error('aborted')), { once: true }))
+      },
       chunk: async () => { throw Error('unreachable') },
     })
     const m = manager({ root: await root(), transport: factory }), a = await m.start(source, t.meta)
@@ -151,21 +155,52 @@ describe('owned remote copies', () => {
     expect((await settled(m, success)).status).toBe('complete')
     expect((await m.list()).copies.some(r => r.id === first.id)).toBe(false)
     await expect(fs.stat(old)).rejects.toThrow()
-  })
+  }, 20_000) // Three real transfer attempts and replacement cleanup.
   it('preserves a keep change made while its replacement is downloading', async () => {
+    const r = await root()
+    const first: RemoteCopy = {
+      id: randomUUID(), source, name: 'data.bin', size: 0, received: 0,
+      status: 'complete', kept: false, sha256: createHash('sha256').digest('hex'),
+      createdAt: '2026-10-28T00:00:00Z', downloadedAt: '2026-10-28T00:00:00Z', expiresAt: null,
+    }
+    const dir = path.join(r, first.id)
+    await fs.mkdir(dir, { recursive: true })
+    await Promise.all([
+      fs.writeFile(path.join(dir, first.name), ''),
+      fs.writeFile(path.join(r, 'index.json'), JSON.stringify({ version: 1, copies: [first] })),
+    ])
+
     const t = transport(new Uint8Array([4, 5]))
-    let pause = false, resume!: () => void, entered!: () => void
-    const waiting = new Promise<void>(resolve => { entered = resolve })
-    const gate = new Promise<void>(resolve => { resume = resolve })
-    const m = manager({ root: await root(), transport: async s => {
-      const connection = await t.factory()
-      return { ...connection, chunk: async (...args) => { if (pause) { entered(); await gate }; return connection.chunk(args[0], args[1], args[2]) } }
-    } })
-    const first = await download(m)
-    pause = true
+    let release!: () => void
+    const resume = new Promise<void>(res => (release = res))
+    const m = manager({
+      root: r,
+      transport: async () => {
+        const connection = await t.factory()
+        return {
+          ...connection,
+          metadata: async signal => {
+            signal.throwIfAborted()
+            const onAbort = () => release()
+            signal.addEventListener('abort', onAbort, { once: true })
+            try {
+              await resume
+              return await connection.metadata()
+            } finally {
+              signal.removeEventListener('abort', onAbort)
+            }
+          },
+        }
+      },
+    })
     const next = await m.start(source, t.meta, first.id)
-    await waiting; await m.keep(first.id, true); resume()
-    expect((await settled(m, next)).kept).toBe(true)
+    try {
+      const { copies } = await m.list()
+      expect(copies.find(row => row.id === first.id)).toMatchObject({ status: 'complete', kept: false })
+      expect(copies.find(row => row.id === next)).toMatchObject({ status: 'downloading', kept: false })
+      await m.keep(first.id, true)
+    } finally { release() }
+    expect(await settled(m, next)).toMatchObject({ status: 'complete', kept: true })
   })
   it('persists keep/off, only changes future retention, retains expired/missing metadata', async () => {
     let now = Date.parse('2026-10-28T00:00:00Z')

@@ -181,3 +181,14 @@ describe("plain @: the profile group beside the agents", () => {
   expect(atResult.atRows).toEqual([]); expect(atResult.open).toBe(false);
  });
 });
+
+// Owner 2026-11-24: picking a profile writes its ID and its name; the model step keeps the name.
+it("a picked profile writes `name` with its ID, kept through the model step", async () => {
+ const ceobe = { id: "a4afa1e0-1111-4222-8333-944455556666", name: "Ceobe", cliKind: "codex", model: "gpt-6-sol" } as ProfileItem;
+ mocks.list.mockResolvedValue({ defaultProfile: ceobe.id, profiles: [ceobe] });
+ await render(); await change("p@Ceo"); await act(async () => result.pick(0));
+ expect(draft).toBe(`[profile: "${ceobe.id}", name: "Ceobe"]`);
+ expect(result.sendText()).toBe(`[profile: "${ceobe.id}", name: "Ceobe"]`);
+ await change(draft + "ast"); await act(async () => result.pick(0));
+ expect(draft).toBe(`[profile: "${ceobe.id}", name: "Ceobe", model: "gpt-6-astra"] `);
+});

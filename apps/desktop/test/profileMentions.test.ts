@@ -43,3 +43,42 @@ it("round-trips optional effort while default omission preserves existing wire t
  expect(profileMentionTokens('[profile: "Ada", effort: "high"]')).toEqual([]);
  expect(profileMentionTokens('[model: "gpt-6-astra", effort: ""]')).toEqual([]);
 });
+
+// Owner 2026-11-24: an ID-only reference left the agent guessing which profile was meant; the name goes along.
+const PID = "a4afa1e0-1111-4222-8333-944455556666";
+it("writes the name with the ID; model / effort as before; no name when empty or the same as the ID",()=>{
+ expect(profileMentionText(PID,null,null,"Ceobe")).toBe(`[profile: "${PID}", name: "Ceobe"]`);
+ expect(profileMentionText(PID,"claude-opus-5-5","high","Ceobe")).toBe(`[profile: "${PID}", name: "Ceobe", model: "claude-opus-5-5", effort: "high"]`);
+ expect(profileMentionText(PID,null,null,"")).toBe(`[profile: "${PID}"]`);
+ expect(profileMentionText(PID,null,null,"  ")).toBe(`[profile: "${PID}"]`);
+ expect(profileMentionText("Ada",null,null,"Ada")).toBe('[profile: "Ada"]');
+ expect(profileMentionText(null,"gpt-6",null,"Ceobe")).toBe('[model: "gpt-6"]');
+ // One line, bounded.
+ expect(profileMentionTokens(profileMentionText(PID,null,null,"two\nlines\t here"))[0]!.name).toBe("two lines here");
+ const long=profileMentionTokens(profileMentionText(PID,null,null,"x".repeat(200)))[0]!.name!;
+ expect([...long]).toHaveLength(64);expect(long.endsWith("…")).toBe(true);
+});
+it("parses the new and the old form alike (old: no name)",()=>{
+ expect(profileMentionTokens(`hi [profile: "${PID}"] x`)).toMatchObject([{profile:PID,name:null,model:null,effort:null}]);
+ expect(profileMentionTokens(`hi [profile: "${PID}", name: "Ceobe"] x`)).toMatchObject([{profile:PID,name:"Ceobe",model:null}]);
+ expect(profileMentionTokens(`[profile: "${PID}", name: "Ceobe", model: "m", effort: "low"]`)).toMatchObject([{profile:PID,name:"Ceobe",model:"m",effort:"low"}]);
+ expect(profileMentionTokens(`[profile: "${PID}", model: "m"]`)).toMatchObject([{profile:PID,name:null,model:"m"}]);
+ // A name only follows a profile, and only in that place.
+ expect(profileMentionTokens('[model: "m", name: "x"]')).toEqual([]);
+ expect(profileMentionTokens(`[profile: "${PID}", model: "m", name: "x"]`)).toEqual([]);
+ // An empty written name is no name.
+ expect(profileMentionTokens(`[profile: "${PID}", name: ""]`)).toMatchObject([{profile:PID,name:null}]);
+});
+it("escapes quotes, backslashes, brackets and lookalike fields in the name; round-trips exactly",()=>{
+ for(const name of ['Ce"obe','back\\slash \\','a ], model: "evil"','[profile: "x"]','曲 · 名']){
+  const raw=profileMentionText(PID,"gpt-6",null,name);
+  const tokens=profileMentionTokens("x "+raw+" y");
+  expect(tokens).toHaveLength(1);
+  expect(tokens[0]).toMatchObject({profile:PID,name,model:"gpt-6",raw});
+  expect(composerMentionTokens(raw)).toHaveLength(1);
+ }
+});
+it("the model / effort steps keep the name picked with the profile",()=>{
+ const raw=profileMentionText(PID,null,null,"Ceobe"),cascade={profile:PID,name:"Ceobe",start:0,end:raw.length,raw};
+ expect(finishProfileCascade(raw,raw.length,cascade,"claude-opus-5-5",false,"high").text).toBe(`[profile: "${PID}", name: "Ceobe", model: "claude-opus-5-5", effort: "high"]`);
+});

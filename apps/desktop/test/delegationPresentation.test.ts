@@ -24,7 +24,7 @@ vi.mock("../src/renderer/src/lib/delegationsView", () => ({
   useAgentProfile: () => null,
   useOwnerSteered: () => false,
 }));
-vi.mock("../src/renderer/src/lib/delegationStore", () => ({ hasDelegationViews: () => true }));
+vi.mock("../src/renderer/src/lib/delegationStore", () => ({ hasDelegationViews: () => true, useDelegations: (select: (s: unknown) => unknown) => select({ details: {} }), loadDelegationDetail: vi.fn(async () => null) }));
 vi.mock("../src/renderer/src/lib/quotaContinue", () => ({ useQuotaContinue: () => null, continueClock: () => "" }));
 vi.mock("../src/renderer/src/lib/p2Access", () => ({ useP2Access: () => ({ files: true, attachments: true, delegations: true, owner: true }) }));
 vi.mock("../src/renderer/src/lib/delegationMenu", () => ({ delegationMenu: vi.fn(), runDelegationCommand: vi.fn() }));

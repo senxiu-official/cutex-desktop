@@ -7,7 +7,7 @@ export const zhCN = {
   "settings.provider.editHint": "同一服务商的预设可把地址、API-key 认证和可用的模型／兼容默认值填入草稿，保存才生效。已有模型目录保留，可在「模型与上下文」中刷新或编辑。更换服务商请新建 Profile，避免沿用旧服务商的专用配置与密钥。",
   "settings.provider.createOther": "{name}（请新建 Profile）",
   "settings.provider.openCreate": "新建 {name} Profile",
-  "settings.provider.createOtherHint": "当前 Profile 的配置保持不变。新页面会预选该服务商；本页未保存的修改不会带到新 Profile。",
+  "settings.provider.createOtherHint": "当前 Profile 的配置保持不变。新页面会预选该服务商；此页面上未保存的修改不会带到新 Profile。",
   "settings.provider.custom": "自定义／中转站",
   "settings.provider.customHint": "保留当前输入，所有可编辑项由你填写。地址必须提供 OpenAI Responses 接口；仅支持 Chat Completions 或 Anthropic Messages 的地址不能直接使用。",
   "settings.provider.anthropic": "Anthropic (Claude)",

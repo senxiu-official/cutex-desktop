@@ -12,6 +12,87 @@
 // `&browserNotice=certificate[,download,popup]`: main's one-click owner notices (ownerNotices.ts) on that page.
 import type { ModuleMock } from "../../dev/mockTypes";
 import { browserActivation, type BrowserTabView } from "../../../../shared/browser";
+import { DEFAULT_BROWSER_IDENTITY_ID, DEFAULT_BROWSER_IDENTITY_PREFS, type BrowserHistoryEntry, type BrowserIdentityBridge, type BrowserIdentityEvent, type BrowserIdentityPrefs, type BrowserIdentityView, type BrowserSavedLoginView } from "../../../../shared/browserIdentity";
+
+// `?browserIdentities` (浏览器身份, package 0 skeleton): an in-memory identities / history / prefs / passwords bridge for
+// the identity UI (switcher, settings, history page, password pages). The rest of the browser bridge is inert here.
+export function mockBrowserIdentities(): BrowserIdentityBridge {
+  const now = Date.now();
+  const view = (id: string, name: string, color: BrowserIdentityView["color"], initial: string, openTabs: number): BrowserIdentityView =>
+    ({ id, name, color, initial, isDefault: id === DEFAULT_BROWSER_IDENTITY_ID, createdAt: now - 864e5, updatedAt: now - 864e5, revision: 1, hosts: ["local"], openTabs });
+  let identities = [view(DEFAULT_BROWSER_IDENTITY_ID, "个人", null, "人", 1), view("1a2b3c4d", "工作 Outlook", "teal", "工", 2), view("5e6f7a8b", "学校", "violet", "学", 1)];
+  let current = "1a2b3c4d";
+  let prefs: BrowserIdentityPrefs = { ...DEFAULT_BROWSER_IDENTITY_PREFS };
+  const sites: [string, string][] = [["https://outlook.office.com/mail/", "邮件 - 工作 Outlook"], ["https://outlook.office.com/calendar/", "日历"], ["https://teams.microsoft.com/v2/", "Teams 聊天"], ["https://www.electronjs.org/docs/latest/api/session", "Electron session API"]];
+  let history: BrowserHistoryEntry[] = Array.from({ length: 60 }, (_, i) => {
+    const [url, title] = sites[i % sites.length] as [string, string];
+    return { id: `h${i}`, identityId: "1a2b3c4d", hostId: "local", url, title, visitedAt: now - i * 47 * 60_000, transition: i % 3 ? "link" as const : "typed" as const };
+  });
+  let logins: BrowserSavedLoginView[] = [
+    { id: "pw1", identityId: "1a2b3c4d", origin: "https://login.microsoftonline.com", username: "yang.j@company.com", createdAt: now - 5 * 864e5, updatedAt: now - 864e5 },
+    { id: "pw2", identityId: "1a2b3c4d", origin: "https://login.microsoftonline.com", username: "it-admin@company.com", createdAt: now - 9 * 864e5, updatedAt: now - 9 * 864e5 },
+  ];
+  let never: Record<string, string[]> = { "1a2b3c4d": ["https://accounts.example.org"] };
+  const listeners = new Set<(event: BrowserIdentityEvent) => void>();
+  const state = () => ({ identities: structuredClone(identities), current });
+  const emit = (event: BrowserIdentityEvent) => { for (const l of listeners) l(event); };
+  const changed = () => { emit({ kind: "identities", state: state() }); return state(); };
+  // `&browserPassword=save|update|fill|granted`: every preview tab gets that password prompt / fill offer.
+  const pw = typeof location === "undefined" ? null : new URLSearchParams(location.search).get("browserPassword");
+  if (pw && typeof window !== "undefined") {
+    const sent = new Set<string>();
+    window.addEventListener("cutex-preview-browser-tab", (event) => {
+      const { hostId, tabKey } = (event as CustomEvent<{ hostId: string; tabKey: string }>).detail;
+      if (sent.has(tabKey)) return;
+      sent.add(tabKey);
+      setTimeout(() => {
+        if (pw === "save" || pw === "update") emit({ kind: "passwordPrompt", prompt: { promptId: `preview-prompt-${tabKey}`, hostId, tabKey, identityId: "1a2b3c4d", origin: "https://login.microsoftonline.com", username: "sam@uni.example.edu", kind: pw } });
+        else emit({ kind: "fillOffer", offer: { offerId: `preview-offer-${tabKey}`, hostId, tabKey, identityId: "1a2b3c4d", origin: "https://login.microsoftonline.com", field: { x: 40, y: 120, width: 280, height: 32 },
+          logins: [{ id: "l1", username: "sam@uni.example.edu" }, { id: "l2", username: "sam.work@example.com" }], ...(pw === "granted" ? { grantedTo: { agentName: "Mika" } } : {}) } });
+      }, 400);
+    });
+  }
+  const find = (id: string) => { const v = identities.find((i) => i.id === id); if (!v) throw new Error("unknown_identity"); return v; };
+  return {
+    state: async () => state(),
+    create: async (name, color, initial) => { const v = view(Math.random().toString(16).slice(2, 10).padEnd(8, "0"), name, color, initial ?? [...name][0]!, 0); identities = [...identities, v]; changed(); return v; },
+    update: async (id, expectedRevision, change) => {
+      const v = find(id);
+      if (v.revision !== expectedRevision) throw new Error("revision_conflict");
+      Object.assign(v, change, { revision: v.revision + 1, updatedAt: Date.now() });
+      changed(); return structuredClone(v);
+    },
+    setCurrent: async (id) => { find(id); current = id; return changed(); },
+    signOut: async (id) => { find(id).openTabs = 0; changed(); },
+    remove: async (id) => { if (id === DEFAULT_BROWSER_IDENTITY_ID) throw new Error("default_identity"); identities = identities.filter((i) => i.id !== id); if (current === id) current = DEFAULT_BROWSER_IDENTITY_ID; changed(); },
+    storage: async () => [{ hostId: "local", siteDataBytes: 13 * 1024 * 1024, cacheBytes: 173 * 1024 * 1024 }],
+    signedInSites: async () => ["outlook.office.com", "login.microsoftonline.com", "teams.microsoft.com"],
+    clearData: async (request) => {
+      if (request.types.includes("history")) { history = history.filter((h) => h.identityId !== request.identityId); emit({ kind: "history", identityId: request.identityId, hostId: "local" }); }
+    },
+    prefs: async (patch) => (prefs = { ...prefs, ...patch }),
+    history: async (query) => {
+      const text = query.text?.toLowerCase();
+      const rows = history.filter((h) => h.identityId === query.identityId && h.hostId === query.hostId && (query.before === undefined || h.visitedAt < query.before) && (!text || `${h.title} ${h.url}`.toLowerCase().includes(text)));
+      const entries = rows.slice(0, query.limit ?? 100);
+      return { entries, nextBefore: rows.length > entries.length ? entries.at(-1)!.visitedAt : null };
+    },
+    topSites: async (identityId, hostId, limit = 8) => sites.slice(0, limit).map(([url, title], i) => ({ url, title, visits: 20 - i })).filter(() => identityId !== "" && hostId !== ""),
+    historyDelete: async (target) => { history = history.filter((h) => !("ids" in target ? target.ids.includes(h.id) : new URL(h.url).origin === target.origin)); emit({ kind: "history", identityId: target.identityId, hostId: target.hostId }); },
+    passwords: async (identityId) => logins.filter((l) => l.identityId === identityId),
+    passwordUpdate: async (id, username) => { logins = logins.map((l) => (l.id === id ? { ...l, username, updatedAt: Date.now() } : l)); },
+    passwordRemove: async (id) => { logins = logins.filter((l) => l.id !== id); },
+    passwordReveal: async () => {},
+    passwordStatus: async () => ({ available: true, keyLost: false, unreadable: 0, graceMinutes: prefs.passwordHelloGrace ? 5 : 0 }),
+    passwordCopy: async () => {},
+    neverSave: async (identityId, remove) => (never[identityId] = (never[identityId] ?? []).filter((o) => o !== remove)),
+    promptAnswer: async (promptId) => emit({ kind: "passwordPromptClosed", promptId }),
+    fill: async (offerId) => emit({ kind: "fillOfferClosed", offerId }),
+    dismissOffer: async (offerId) => emit({ kind: "fillOfferClosed", offerId }),
+    subscribe: (listener) => { listeners.add(listener); return () => listeners.delete(listener); },
+  };
+}
+
 
 function previewNotices(kinds: string[]): BrowserTabView["ownerNotices"] {
   const all = {
@@ -21,6 +102,12 @@ function previewNotices(kinds: string[]): BrowserTabView["ownerNotices"] {
     popup: { id: "preview-notice-popup", kind: "popup" as const, url: "https://accounts.example.com/oauth/authorize?client_id=demo" },
   };
   return kinds.flatMap(kind => kind in all ? [all[kind as keyof typeof all]] : []);
+}
+// `&browserIdentity=1a2b3c4d,default,5e6f7a8b`: the preview tabs take these 浏览器身份 in turn.
+let identityTurn = 0;
+function previewIdentity(params: URLSearchParams): { browserIdentityId?: string } {
+  const list = params.get("browserIdentity")?.split(",").filter(Boolean) ?? [];
+  return list.length ? { browserIdentityId: list[identityTurn++ % list.length] } : {};
 }
 function previewChrome(params: URLSearchParams): void {
   const state = params.get("browserChrome");
@@ -32,8 +119,9 @@ function previewChrome(params: URLSearchParams): void {
     const lease = state === "none" ? undefined : { leaseId: "preview-lease", sessionId: "s-moth", agentName: "Moth", state: state === "pending" ? "pending" as const : "active" as const, origin: "owner" as const };
     const view: BrowserTabView = {
       hostId, tabKey, guestId: "preview-guest", pageGeneration: 1, status: "attached", loading: false, canGoBack: true, canGoForward: false,
-      url: service ? url : "https://example.org/research/notes", title: service ? "RNA velocity" : "Research notes · Example",
-      pool: params.get("browserPool") === "agent" ? "agent" : "owner", zoom: Number(params.get("browserZoom")) || undefined, lease,
+      // `&browserBlank`: the page is about:blank (the new tab page of an owner tab).
+      url: service ? url : params.has("browserBlank") ? "about:blank" : "https://example.org/research/notes", title: service ? "RNA velocity" : params.has("browserBlank") ? "" : "Research notes · Example",
+      pool: params.get("browserPool") === "agent" ? "agent" : "owner", ...previewIdentity(params), zoom: Number(params.get("browserZoom")) || undefined, lease,
       control: lease && state !== "pending" ? { grantee: "Moth", state: state === "paused" ? "paused" : "granted", operating: state === "operating" } : undefined,
       ownerNotices: params.has("browserNotice") ? previewNotices(params.get("browserNotice")!.split(",")) : undefined,
       blockedNavigation: params.has("browserBlocked") ? { id: "preview-blocked-1", url: "http://10.0.0.20:8123/lovelace/0?kiosk", canOpen: params.get("browserBlocked") !== "noopen" } : undefined,
@@ -57,6 +145,12 @@ function drawThumbnail(tick: number): string | null {
 }
 export const mock: ModuleMock = {
   features: { new: ["browser-open-full-access"] },
+  bridge() {
+    // `?browserIdentities`: identities.ts takes this dev-only bridge while the preview has no browser bridge (set here,
+    // before the modules start).
+    if (typeof location !== "undefined" && new URLSearchParams(location.search).has("browserIdentities")) (window as { __cutexPreviewBrowserIdentities?: unknown }).__cutexPreviewBrowserIdentities = mockBrowserIdentities();
+    return {};
+  },
   start() {
     if (typeof document === "undefined") return;
     previewChrome(new URLSearchParams(location.search));

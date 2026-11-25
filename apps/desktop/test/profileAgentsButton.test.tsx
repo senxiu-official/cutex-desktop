@@ -25,8 +25,9 @@ describe("ProfileAgentsButton (owner 2026-11-09: searchable above ~8 agents)", (
     const input = document.querySelector<HTMLInputElement>("[data-menu-search]")!;
     expect(input).toBeTruthy();
     act(() => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "Agent 7"); input.dispatchEvent(new Event("input", { bubbles: true })); });
-    const rows = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')];
-    expect(rows.map((r) => r.textContent)).toEqual(["Agent 7"]);
+    const rows = [...document.querySelectorAll<HTMLButtonElement>('[role="option"]')];
+    // The row's label after its agent icon (components/EntityIcon).
+    expect(rows.map((r) => r.querySelector("[data-entity-icon]") && r.querySelector("span.flex-1")?.textContent)).toEqual(["Agent 7"]);
     act(() => rows[0]!.click());
     expect(pick).toHaveBeenCalledWith("s7");
   });

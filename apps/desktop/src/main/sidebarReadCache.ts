@@ -37,13 +37,16 @@ export class SidebarRefresh<T> {
   private lastStart = Number.NEGATIVE_INFINITY;
   constructor(private readonly minIntervalMs = 0) {}
   invalidate(): void { this.revision++; }
+  /** Data this client was waiting for has arrived: the next read starts without the spacing wait. */
+  invalidateNow(): void { this.revision++; this.unspaced = true; this.wake?.(); }
+  private unspaced = false;
   /** This client's own write has returned: a read asked from now on must begin after it (events never do this). */
   noteWrite(): void { this.writes++; this.revision++; this.wake?.(); }
 
   private async run(load: () => Promise<T>): Promise<{ value: T; revision: number }> {
     const wait = this.lastStart + this.minIntervalMs - Date.now();
     // The spacing is for event traffic: a write of this client's own is read at once.
-    if (wait > 0 && this.loadWrites === this.writes) {
+    if (wait > 0 && this.loadWrites === this.writes && !this.unspaced) {
       await new Promise<void>(resolve => {
         const timer = setTimeout(resolve, wait);
         this.wake = () => { clearTimeout(timer); resolve(); };
@@ -51,6 +54,7 @@ export class SidebarRefresh<T> {
       this.wake = undefined;
     }
     // Events received while waiting are already covered by the read about to start.
+    this.unspaced = false;
     const revision = this.revision;
     this.lastStart = Date.now();
     this.loadWrites = this.writes;

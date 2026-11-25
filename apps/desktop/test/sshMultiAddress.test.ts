@@ -65,42 +65,42 @@ describe("SSH multi-address tunnels", () => {
 
   it("tries addresses in order and returns to the first after an established connection drops", async () => {
     const tunnel = new SshTunnel({
-      targets: [parseSshTarget("hachimi-lan")!, parseSshTarget("hachimi-direct")!],
+      targets: [parseSshTarget("hostc-lan")!, parseSshTarget("hostc-direct")!],
       remotePort: 24270,
       pids: { add() {}, remove() {} } as any,
       onChange() {},
     });
     tunnel.start();
     await flush();
-    expect(processes.args[0]?.at(-1)).toBe("hachimi-lan");
+    expect(processes.args[0]?.at(-1)).toBe("hostc-lan");
 
     const first = processes.children[0]!;
     first.exitCode = 255;
     first.emit("close", 255);
     processes.sockets[0]!.emit("error", new Error("closed"));
     await flush();
-    expect(tunnel.state).toMatchObject({ status: "retrying", target: "hachimi-lan" });
+    expect(tunnel.state).toMatchObject({ status: "retrying", target: "hostc-lan" });
     await vi.advanceTimersByTimeAsync(1000);
     await flush();
-    expect(processes.args[1]?.at(-1)).toBe("hachimi-direct");
+    expect(processes.args[1]?.at(-1)).toBe("hostc-direct");
 
     processes.sockets[1]!.emit("connect");
     await flush();
-    expect(tunnel.state).toMatchObject({ status: "up", target: "hachimi-direct" });
+    expect(tunnel.state).toMatchObject({ status: "up", target: "hostc-direct" });
     const second = processes.children[1]!;
     second.exitCode = 255;
     second.emit("close", 255);
     await flush();
     await vi.advanceTimersByTimeAsync(2000);
     await flush();
-    expect(processes.args[2]?.at(-1)).toBe("hachimi-lan");
+    expect(processes.args[2]?.at(-1)).toBe("hostc-lan");
     tunnel.stop();
     await flush();
   });
 
   it("rejects a ready address with a specific daemon identity error", async () => {
     const tunnel = new SshTunnel({
-      targets: [parseSshTarget("hachimi-lan")!, parseSshTarget("hachimi-direct")!],
+      targets: [parseSshTarget("hostc-lan")!, parseSshTarget("hostc-direct")!],
       remotePort: 24270,
       pids: { add() {}, remove() {} } as any,
       onChange() {},
@@ -114,7 +114,7 @@ describe("SSH multi-address tunnels", () => {
     expect(tunnel.state).toMatchObject({ status: "retrying", error: { code: "hostMismatch" } });
     await vi.advanceTimersByTimeAsync(1000);
     await flush();
-    expect(processes.args[1]?.at(-1)).toBe("hachimi-direct");
+    expect(processes.args[1]?.at(-1)).toBe("hostc-direct");
     tunnel.stop();
     await flush();
   });

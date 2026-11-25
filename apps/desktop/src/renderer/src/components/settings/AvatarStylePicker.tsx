@@ -24,13 +24,16 @@ const familyCounts = (themes: readonly PortraitThemeInfo[]): string => {
   return (Object.keys(FAMILY_LABEL) as (keyof typeof FAMILY_LABEL)[]).filter((f) => sum[f]).map((f) => `${FAMILY_LABEL[f]} ${sum[f]}`).join(" · ");
 };
 
-const FACE = 56;
+// Owner 2026-11-24: compact rows (face about the text's height), at most two per row so names are not cut; one on narrow panes.
+const FACE = 24;
+/** At most two columns; one when two would be narrower than a row needs for its name. */
+const THEME_GRID = { gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, max(13rem, calc((100% - 0.375rem) / 2))), 1fr))" } as const;
 
 /** The theme's one face, whole (object-contain: horns, ears and hair stay in the frame). */
 function Face({ picture }: { picture: PortraitPicture }) {
   const url = useSampleUrl(picture, FACE);
   return (
-    <span data-portrait-face={picture.key} className="block shrink-0 overflow-hidden rounded-md bg-surface-2" style={{ width: FACE, height: FACE }}>
+    <span data-portrait-face={picture.key} className="block shrink-0 overflow-hidden rounded bg-surface-2" style={{ width: FACE, height: FACE }}>
       {url && <img src={url} alt="" draggable={false} className="h-full w-full object-contain" />}
     </span>
   );
@@ -42,12 +45,12 @@ function ThemeCard({ theme, on, locked, disabled, blocked, onToggle }: { theme: 
   // the Settings card (see the note this replaced in PortraitSettings).
   return (
     <label data-portrait-theme={theme.key} data-on={on ? "" : undefined} data-blocked={blocked ? "" : undefined} title={locked ? t("avatarStyle.portrait.keepOne") : undefined}
-      className={`relative flex min-w-0 items-center gap-2.5 rounded-lg border p-2 ${disabled || locked ? "cursor-default" : "cursor-pointer hover:bg-hover"} ${on ? (blocked ? "border-warn bg-selected" : "border-accent bg-selected") : "border-border"}`}>
+      className={`relative flex min-w-0 items-center gap-2 rounded-md border px-2 py-1 ${disabled || locked ? "cursor-default" : "cursor-pointer hover:bg-hover"} ${on ? (blocked ? "border-warn bg-selected" : "border-accent bg-selected") : "border-border"}`}>
       <Face picture={theme.cover} />
       <span className="flex min-w-0 flex-1 items-center gap-1.5">
         <input type="checkbox" checked={on} disabled={disabled || locked} data-settings-control="" onChange={(e) => settingsControlChanged(e.currentTarget, onToggle(e.target.checked))} className="peer sr-only" />
         <span aria-hidden className={`flex h-4 w-4 shrink-0 items-center justify-center rounded peer-focus-visible:ring-2 peer-focus-visible:ring-accent ${on ? "bg-accent text-[var(--on-accent)]" : "border border-border bg-background"}`}>{on && <Check size={11} strokeWidth={3} />}</span>
-        <span className="min-w-0 truncate text-ui/[inherit] font-medium">{theme.name}</span>
+        <span className="min-w-0 truncate text-ui/[inherit] font-medium" title={theme.name}>{theme.name}</span>
         <span className="ml-auto shrink-0 text-caption/[inherit] text-subtle">{theme.count}</span>
       </span>
     </label>
@@ -86,7 +89,7 @@ function PortraitChooser({ value, disabled, blocked, onChange }: { value: readon
                 <button type="button" data-pack-first="" disabled={disabled || onlyFirst} onClick={() => onChange([first])} className="rounded-md px-1.5 py-0.5 text-caption/[inherit] text-muted hover:bg-surface-2 hover:text-foreground disabled:opacity-40">{t("avatarStyle.portrait.selectNone")}</button>
               </span>
             </div>
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-1.5">
+            <div className="grid gap-1.5" style={THEME_GRID} data-portrait-grid="">
               {list.map((th) => {
                 const ticked = on.has(th.key);
                 return <ThemeCard key={th.key} theme={th} on={ticked} locked={ticked && value.length === 1} disabled={disabled} blocked={blocked?.includes(th.key)} onToggle={(next) => onChange(order(next ? [...value, th.key] : value.filter((k) => k !== th.key)))} />;

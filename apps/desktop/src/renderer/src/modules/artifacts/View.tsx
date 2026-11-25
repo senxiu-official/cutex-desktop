@@ -33,6 +33,7 @@ import { TextPreview } from "./TextPreview";
 import { KIND_ICON } from "./refTarget";
 import { loadContent, loadDiff, useDetail } from "./store";
 import { artifactRenderIdentity, largeRenderChoices } from "../../lib/largeRenderChoices";
+import { EntityMention } from "../../components/EntityIcon";
 
 const CSV_ROWS = 300;
 const TEXT_BYTES = 256 * 1024;
@@ -291,7 +292,7 @@ function Source({ hostId, version }: { hostId: string; version: ArtifactVersion 
             <ul className="mt-0.5 flex flex-col gap-0.5">
               {p.candidates.map((c) => (
                 <li key={`${c.sessionId}:${c.turnId ?? ""}`} className="flex items-center gap-1.5">
-                  <span>{sessionName(c)}</span>
+                  <span><EntityMention entity={c.sessionId ? { kind: "agent", id: c.sessionId, name: sessionName(c) } : null}>{sessionName(c)}</EntityMention></span>
                   {c.turnId && <TurnLink hostId={hostId} sessionId={c.sessionId} turnId={c.turnId} label={t("artifacts.src.jumpTurn")} />}
                 </li>
               ))}

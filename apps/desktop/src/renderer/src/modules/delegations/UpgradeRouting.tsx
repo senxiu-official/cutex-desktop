@@ -6,6 +6,7 @@ import { formatWhen, useClock } from "../../lib/time";
 import type { DelegationRef, UpgradeApproval, UpgradeActor, UpgradeIntent, UpgradeNode, UpgradeSectionProps } from "./upgradeTypes";
 import { partyName } from "./upgradeParty";
 import { APPROVAL_TONE, BLOCK, CHECK, FIELD, GROUP_TITLE, SECTION_TITLE } from "./upgradeLook";
+import { EntitySelect } from "../../components/EntitySelect";
 
 const field = `${FIELD} w-full`;
 const modes = ["approvalRequired", "allowlistedOnly", "open"] as const;
@@ -119,16 +120,12 @@ export function UpgradeRouting({ snapshot, busy, onAction }: UpgradeSectionProps
       </div>
       <fieldset disabled={locked || !canCreate} className="grid min-w-0 gap-3 sm:grid-cols-3">
         <label className="flex min-w-0 flex-col gap-1 text-meta text-muted">{t("delegations.upgrade.routing.requester")}
-          <select aria-label={t("delegations.upgrade.routing.requester")} required className={field} value={requesterKey} onChange={event => setRequesterKey(event.target.value)}>
-            <option value="">{t("delegations.upgrade.routing.choose")}</option>
-            {members.map(member => <option key={refKey(member)} value={refKey(member)}>{member.name} ({member.hostId} · {member.id})</option>)}
-          </select>
+          <EntitySelect label={t("delegations.upgrade.routing.requester")} className={`flex w-full items-center justify-between gap-2 ${field}`} value={requesterKey} onChange={setRequesterKey}
+            options={[{ value: "", label: t("delegations.upgrade.routing.choose") }, ...members.map(member => memberOption(member))]} />
         </label>
         <label className="flex min-w-0 flex-col gap-1 text-meta text-muted">{t("delegations.upgrade.routing.target")}
-          <select aria-label={t("delegations.upgrade.routing.target")} required className={field} value={targetKey} onChange={event => setTargetKey(event.target.value)}>
-            <option value="">{t("delegations.upgrade.routing.choose")}</option>
-            {members.map(member => <option key={refKey(member)} value={refKey(member)} disabled={refKey(member) === requesterKey}>{member.name} ({member.hostId} · {member.id})</option>)}
-          </select>
+          <EntitySelect label={t("delegations.upgrade.routing.target")} className={`flex w-full items-center justify-between gap-2 ${field}`} value={targetKey} onChange={setTargetKey}
+            options={[{ value: "", label: t("delegations.upgrade.routing.choose") }, ...members.map(member => ({ ...memberOption(member), disabled: refKey(member) === requesterKey }))]} />
         </label>
         <label className="flex min-w-0 flex-col gap-1 text-meta text-muted">{t("delegations.upgrade.routing.root")}
           <select aria-label={t("delegations.upgrade.routing.root")} required className={field} value={rootKey} onChange={event => setRootKey(event.target.value)}>
@@ -155,4 +152,9 @@ export function UpgradeRouting({ snapshot, busy, onAction }: UpgradeSectionProps
       </div>
     </div>
   </section>;
+}
+
+/** A routing party as a picker option: its name with its avatar; host and id stay searchable and on the label. */
+function memberOption(member: { hostId: string; id: string; name: string }) {
+  return { value: refKey(member), label: `${member.name} (${member.hostId} · ${member.id})`, searchText: member.id, entity: { kind: "agent" as const, id: member.id, name: member.name } };
 }

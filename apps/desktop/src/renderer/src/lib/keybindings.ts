@@ -44,6 +44,9 @@ export const COMMANDS = [
   { id: "terminal", desc: "shortcuts.terminal", context: "window", defaults: ["Mod+Backquote"], mac: ["Ctrl+Backquote"], terminal: { bare: true } },
   { id: "capsule", desc: "shortcuts.capsule", context: "conversation", defaults: ["Mod+Period"] },
   { id: "threadSearch", desc: "shortcuts.threadSearch", context: "conversation", defaults: ["Mod+KeyF"] },
+  // 提示词增强 (owner 2026-11-24): handled by the focused composer only (components/Composer.tsx). Ctrl+Shift+E: free in
+  // the composer, the window and the system; Ctrl+Alt would be AltGr (it types characters) on many layouts.
+  { id: "promptEnhance", desc: "shortcuts.promptEnhance", context: "conversation", defaults: ["Mod+Shift+KeyE"] },
   { id: "settingsSearch", desc: "shell.settingsSearch.shortcut", context: "settings", defaults: ["Mod+KeyF", "Slash"] },
   { id: "tray", desc: "shortcuts.tray", context: "window", defaults: ["Mod+KeyJ"] },
   { id: "sideToggle", desc: "shortcuts.sideToggle", context: "window", defaults: ["Mod+Alt+KeyB"], terminal: { bare: true } },

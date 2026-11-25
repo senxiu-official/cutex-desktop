@@ -227,9 +227,30 @@ export function lookOf(entry: Entry, profile: ProfileLook | null, override: read
   };
 }
 
+const lookKeys = new WeakMap<Entry, string>();
+
+/** Everything `lookOf` (and `sessionProfileName`) reads of an entry, as one string; cached per entry. */
+export function entryLookKey(entry: Entry): string {
+  let key = lookKeys.get(entry);
+  if (key === undefined) {
+    const s = entry.session;
+    const defaults = s.runtimeDefaults as { model?: unknown } | null;
+    key = JSON.stringify([entry.hostId, entry.row?.profileStyle ?? null, s.launchedProfile ?? null, s.configuredProfile ?? null, s.profile ?? null, s.runtime?.claudeRuntime ?? null, s.runtime?.backend ?? null, s.native?.schema?.protocol ?? null, s.effectiveNextLaunch?.model ?? null, defaults?.model ?? null, s.avatarMode ?? null, !!s.avatar, s.badge ?? null, entry.isDirector, entry.isOperator === true, entry.pinned, entry.project ?? null, entry.initial ?? null]);
+    lookKeys.set(entry, key);
+  }
+  return key;
+}
+
 /** The look of agent `seed` (its cutexSessionId), or null when the app does not hold it. */
 export function useAgentLook(seed: string | null | undefined): AgentLook | null {
-  const entry = useApp((s) => (seed ? (agentIndex(s).get(seed) ?? null) : null));
+  // Subscribed by what `lookOf` reads, not by entry: every sidebar snapshot rebuilds the index, and a new entry per
+  // refresh re-rendered every avatar on screen (perf 2026-11-26).
+  const key = useApp((s) => {
+    const entry = seed ? agentIndex(s).get(seed) : undefined;
+    return entry ? entryLookKey(entry) : null;
+  });
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- `key` stands for the entry's looked-at fields
+  const entry = useMemo(() => (seed && key !== null ? (agentIndex(useApp.getState()).get(seed) ?? null) : null), [seed, key]);
   const badges = useApp((s) => !!entry && featuresOf(s, entry.hostId).has("session-badge"));
   useProfileLooksVersion();
   useAvatarStyleVersion();

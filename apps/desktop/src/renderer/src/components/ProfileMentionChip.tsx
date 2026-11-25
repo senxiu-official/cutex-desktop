@@ -6,14 +6,15 @@ import { ProfileAvatar } from "./ProfileAvatar";
 
 /**
  * A labelled configuration reference, visually separate from the avatar/@agent links. A profile shows its name and
- * avatar from `hostId` (the conversation's host); unresolved, a short form of the reference and 「未知 Profile」 once the
+ * avatar from `hostId` (the conversation's host); unresolved, the name written with the reference (else a short form of it) and 「未知 Profile」 once the
  * host's list has been read. The text written and sent stays the reference itself (lib/profileMentionLabel).
  */
 export function ProfileMentionChip({ token, hostId }: { token: ProfileMentionToken; hostId?: string | null }) {
   const { t } = useI18n();
   const { profile, settled } = useMentionProfile(hostId, token.profile);
   const unknown = !!token.profile && !profile;
-  const name = token.profile ? (profile ? profile.name || shortProfileRef(profile.id) : shortProfileRef(token.profile)) : null;
+  // The current name by ID (a rename shows the new name); not found: the name written with the reference, else a short ID.
+  const name = token.profile ? (profile ? profile.name || shortProfileRef(profile.id) : token.name ? shortProfileRef(token.name) : shortProfileRef(token.profile)) : null;
   const label = [name, token.model, token.effort].filter(Boolean).join(" · ");
   const hover = [name ? (unknown ? `${t("mention.unknownProfile")} · ${name}` : t("mention.profileChip", { name })) : null, token.model, token.effort].filter(Boolean).join(" · ");
   return <span data-profile-mention-chip="" data-profile-mention-state={!token.profile ? "model" : profile ? "resolved" : settled ? "unknown" : "loading"}

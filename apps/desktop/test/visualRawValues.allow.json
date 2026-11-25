@@ -12,7 +12,7 @@
     { "file": "components/SystemAvatar.tsx", "match": "rounded-[22%]", "count": 1, "reason": "app-icon squircle: a proportional radius, not a token" },
     { "file": "components/settings/ProfilePictureCrop.tsx", "match": "shadow-[0_0_0_80px_#0004]", "count": 1, "reason": "the crop mask outside the circle (a spread, not an elevation)" },
     { "file": "components/side/SideDndLayer.tsx", "match": "shadow-[inset_0_-2px_0_color-mix(in_srgb,var(--danger)_45%,transparent)]", "count": 1, "reason": "the refused-drop underline of a Shelf head (an indicator line, not an elevation)" },
-    { "file": "components/side/WorkspaceRail.tsx", "match": "shadow-[inset_0_0_0_999px_rgba(59,130,246,0.1)]", "count": 1, "reason": "drop-target tint over the rail card (an overlay, not an elevation)" },
+    { "file": "components/side/WorkspaceRail.tsx", "match": "shadow-[inset_0_0_0_999px_color-mix(in_srgb,var(--accent)_10%,transparent)]", "count": 1, "reason": "drop-target tint over the rail card in the accent (an overlay, not an elevation)" },
     { "file": "modules/home/Tiles.tsx", "match": "shadow-[0_3px_10px_rgba(0,0,0,0.15)]", "count": 1, "reason": "app-icon drop shadow on the desktop glass (artwork, not an elevation level)" },
     { "file": "modules/home/Tiles.tsx", "match": "shadow-[0_8px_20px_rgba(0,0,0,0.28)]", "count": 1, "reason": "cover-art shadow of the media tile (artwork)" },
     { "file": "modules/project-view/pin.tsx", "match": "shadow-[0_3px_10px_rgba(0,0,0,0.15)]", "count": 1, "reason": "app-icon drop shadow, the same as the desktop tiles' (artwork)" }

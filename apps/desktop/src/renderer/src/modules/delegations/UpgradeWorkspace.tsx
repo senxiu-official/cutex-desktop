@@ -18,6 +18,8 @@ import { FIELD } from "./upgradeLook";
 import { ArmedButton } from "../../components/ArmedButton";
 import type { MessageKey } from "../../i18n";
 import { operationTargetLabel } from "./upgradeOperationLabel";
+import { EntitySelect } from "../../components/EntitySelect";
+import { projectEntity } from "../../lib/entityIcon";
 
 // The title (委托树) is the Shelf / tab header's; the workspace starts with its toolbar (`lead` = the page's
 // project picker), then run control, the tree, routing and members as sections on the panel.
@@ -65,8 +67,8 @@ export function UpgradeTreePage({ params }: { params: PageParams }) {
   const sidebar = useApp(s => sidebarOf(s, hostId));
   const { t } = useI18n();
   const projectId = params.project ?? sidebar?.projects?.projects[0]?.project_id;
-  const picker = <label className="flex min-w-0 items-center gap-2 text-meta text-muted">{t("delegations.upgrade.tree.project")}<select aria-label={t("delegations.upgrade.tree.project")} className={`${FIELD} max-w-[16rem]`} value={projectId ?? ""} onChange={event => services.ui.openPage("delegations.treePage", { project: event.target.value, host: hostId })}>
-    {sidebar?.projects?.projects.map(project => <option value={project.project_id} key={project.project_id}>{project.presentation.display_name || project.project_id}</option>)}
-  </select></label>;
+  const picker = <label className="flex min-w-0 items-center gap-2 text-meta text-muted">{t("delegations.upgrade.tree.project")}<EntitySelect label={t("delegations.upgrade.tree.project")} className={`flex w-56 max-w-[16rem] items-center justify-between gap-2 ${FIELD}`} value={projectId ?? ""}
+    onChange={value => services.ui.openPage("delegations.treePage", { project: value, host: hostId })}
+    options={(sidebar?.projects?.projects ?? []).map(project => ({ value: project.project_id, label: project.presentation.display_name || project.project_id, entity: projectEntity(hostId, project) }))} /></label>;
   return <PageBody>{projectId ? <UpgradeWorkspace key={`${hostId}/${projectId}`} hostId={hostId} projectId={projectId} lead={picker} /> : <>{picker}<p className="py-8 text-center text-ui text-subtle">{t("delegations.upgrade.tree.choose")}</p></>}</PageBody>;
 }

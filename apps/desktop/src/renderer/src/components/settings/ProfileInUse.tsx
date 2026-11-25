@@ -7,6 +7,7 @@
 // be deleted (one in a project can't be) — when only archived ones are left, 改用默认 Profile 并删除
 // deletes the profile with ?archived=detach (cutex clears their profile; a restore uses the default).
 import { useState } from "react";
+import { Trash2 } from "lucide-react";
 import type { CutexRefusal } from "../../../../shared/ipc";
 import { useI18n } from "../../i18n";
 import { ARMED_FORM_BUTTON, useArmed } from "../../lib/armedConfirm";
@@ -15,9 +16,13 @@ import { refusalText } from "../../lib/profileCreate";
 import { bulkArchivedRefs, canDetachArchived, PROFILE_DETACH_ARCHIVED_FEATURE, profileInUseCount, profileInUseMessage, profileRefs, type DeleteProfileOptions, type ProfileRef } from "../../lib/profileRefs";
 import { agentFeaturesOf, lacks } from "../../lib/agentFeatures";
 import { Avatar } from "../Avatar";
-import { ArmedRemove, Button, ListRow } from "./Form";
+import { Button, IconButton, ListRow } from "./Form";
+import { confirmPermanentDelete } from "../../lib/contextMenu";
 import { useTargetFeatures, useTargetHostId, useTargetSelect, useTargetSidebar } from "../../lib/targetHost";
 import { Tag } from "../../components/Tag";
+
+/** Names listed in the batch-delete dialog before 「等 N 个」. */
+const BULK_NAMES = 5;
 
 const without = <V,>(record: Record<string, V>, key: string) => Object.fromEntries(Object.entries(record).filter(([k]) => k !== key));
 
@@ -61,7 +66,14 @@ export function ProfileInUse({ refusal, color, profile, onDeleteProfile }: { ref
       });
     }
   };
+  // Permanent delete (high risk): the agent menu's dialog for one; for all, the same dialog with the count, the scope
+  // (this Profile's archived agents) and their names. Rows still fail one by one with their own error.
+  const confirmRemove = async (ref: ProfileRef) => {
+    if (await confirmPermanentDelete(t("menu.deleteConfirm", { name: ref.name }), { ok: t("menu.delete"), cancel: t("dialog.cancel") })) await remove(ref);
+  };
   const removeAll = async () => {
+    const names = bulk.slice(0, BULK_NAMES).map((ref) => ref.name).join(t("settings.profile.refs.nameSep")) + (bulk.length > BULK_NAMES ? t("settings.profile.refs.namesMore", { n: bulk.length - BULK_NAMES }) : "");
+    if (!(await confirmPermanentDelete(t("settings.profile.refs.deleteArchivedConfirm", { n: bulk.length, profile, names }), { ok: t("settings.profile.refs.deleteArchivedOk", { n: bulk.length }), cancel: t("dialog.cancel") }))) return;
     for (const ref of bulk) await remove(ref);
   };
 
@@ -77,7 +89,7 @@ export function ProfileInUse({ refusal, color, profile, onDeleteProfile }: { ref
     <div>
       <p className="mb-1 text-danger">{t(profileInUseMessage(refs, canDelete, canDetach), { n: profileInUseCount(refs, canDetach) })}</p>
       {refs.map((ref) => (
-        <RefRow key={ref.id} entry={ref} color={color} canDelete={canDelete && !lacks(agentFeaturesOf(ref.session), "threadDelete")} busy={busy.has(ref.id)} error={errors[ref.id]} onDelete={() => void remove(ref)} />
+        <RefRow key={ref.id} entry={ref} color={color} canDelete={canDelete && !lacks(agentFeaturesOf(ref.session), "threadDelete")} busy={busy.has(ref.id)} error={errors[ref.id]} onDelete={() => void confirmRemove(ref)} />
       ))}
       {(bulk.length > 0 || detach) && (
         <div className="mt-2 flex flex-wrap items-center justify-end gap-2">
@@ -134,7 +146,11 @@ function RefRow({ entry, color, canDelete, busy, error, onDelete }: { entry: Pro
               {entry.archived ? t("settings.profile.refs.history") : t("settings.profile.refs.open")}
             </Button>
           )}
-          {canDelete && <ArmedRemove title={t("settings.profile.refs.delete")} armedLabel={t("settings.profile.refs.deleteArmed")} disabled={busy} onRemove={onDelete} />}
+          {canDelete && (
+            <IconButton label={t("settings.profile.refs.delete")} danger disabled={busy} onClick={onDelete}>
+              <Trash2 size={14} />
+            </IconButton>
+          )}
         </>
       }
       below={error ? <p className="mt-1 text-xs text-danger">{error}</p> : undefined}
@@ -142,16 +158,12 @@ function RefRow({ entry, color, canDelete, busy, error, onDelete }: { entry: Pro
   );
 }
 
-/** 删除这 N 个已归档的, click twice. */
+/** 永久删除这 N 个已归档的: the permanent-delete dialog with the count and scope (removeAll). */
 function BulkDelete({ n, disabled, onConfirm }: { n: number; disabled: boolean; onConfirm(): void }) {
   const { t } = useI18n();
-  const [armed, setArmed] = useArmed();
-  return armed ? (
-    <button disabled={disabled} onClick={() => (setArmed(false), onConfirm())} className={ARMED_FORM_BUTTON}>
-      {t("settings.profile.refs.deleteArchivedArmed", { n })}
-    </button>
-  ) : (
-    <Button disabled={disabled} onClick={() => setArmed(true)}>
+  return (
+    <Button disabled={disabled} onClick={onConfirm}>
+      <Trash2 size={13} className="mr-1 -ml-0.5 inline align-[-2px]" />
       {t("settings.profile.refs.deleteArchived", { n })}
     </Button>
   );

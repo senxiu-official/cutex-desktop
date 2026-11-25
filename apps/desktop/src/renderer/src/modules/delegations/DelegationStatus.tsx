@@ -26,6 +26,8 @@ import type { AgentDelegations } from "./useDelegationsStatus";
 import { openDelegationDetailHere } from "./refTarget";
 import { HiddenUndo } from "../../components/HiddenUndo";
 import { hiddenKey, useHiddenRows, visibleRows } from "../../lib/legacyDelivery/hiddenRows";
+import { EntityMention } from "../../components/EntityIcon";
+import { tNodes } from "../../lib/textNodes";
 
 /** Time after a row's status: run time while running, since it stopped when interrupted, else how long it has waited. */
 function rowTime(d: AskSummary, ctx: DelegationContext, now: number, locale?: Locale): string | null {
@@ -193,7 +195,7 @@ export function DelegationLine({ data }: { data: AgentDelegations }) {
   const name = isOwnerRequest(handled.requester) ? t("delegation.you") : (requesterName(handled.requester) ?? (requester ? nameOf(requester) : ""));
   return (
     <span className="inline-flex min-w-0 items-center gap-1">
-      <span className="truncate">{t("delegations.handling", { name })}</span>
+      <span className="truncate">{tNodes(t, "delegations.handling", { name: requester && !isOwnerRequest(handled.requester) ? <EntityMention entity={{ kind: "agent", id: requester, name }}>{name}</EntityMention> : name })}</span>
       <DelegationTag askId={handled.askId} />
     </span>
   );

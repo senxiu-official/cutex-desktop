@@ -94,3 +94,29 @@ it.each(["close", "leave", "replace"])("ignores a late loader completion after %
   expect(available).not.toHaveBeenCalled(); expect(document.body.textContent).not.toContain("Late action");
   expect(document.querySelector('[data-flyout]')).toBeNull();
 });
+
+it("armed rows are red by default; armedTone accent uses the primary colour (non-destructive confirm)", async () => {
+  open(async () => [{ label: "Remove", armed: "Really remove", onSelect() {} }, { label: "Allow", armed: "Really allow", armedTone: "accent", onSelect() {} }]);
+  await act(async () => hover());
+  act(() => rows()[0]!.click());
+  expect(rows()[0]!.className).toContain("bg-danger-solid"); expect(rows()[0]!.className).not.toContain("bg-accent");
+  act(() => rows()[1]!.click());
+  expect(rows()[1]!.hasAttribute("data-armed")).toBe(true);
+  expect(rows()[1]!.className).toContain("bg-accent"); expect(rows()[1]!.className).not.toContain("bg-danger-solid");
+});
+
+it("a held Enter's auto-repeat never confirms an armed row, in a submenu too; a fresh press does", async () => {
+  const picked = vi.fn();
+  open(async () => [{ label: "Delete source", armed: "Really delete", onSelect: picked }]);
+  key("ArrowDown");
+  await act(async () => key("ArrowRight"));
+  act(() => rows()[0]!.focus());
+  key("Enter");
+  expect(rows()[0]!.hasAttribute("data-armed")).toBe(true);
+  const repeat = new KeyboardEvent("keydown", { key: "Enter", repeat: true, bubbles: true, cancelable: true });
+  act(() => { rows()[0]!.dispatchEvent(repeat); });
+  expect(repeat.defaultPrevented).toBe(true); expect(picked).not.toHaveBeenCalled();
+  expect(rows()[0]!.hasAttribute("data-armed")).toBe(true);
+  key("Enter");
+  expect(picked).toHaveBeenCalledOnce();
+});

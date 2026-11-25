@@ -2,7 +2,7 @@ import { featuresOf, useApp } from "../../store";
 import { DebugErrorDetails } from "../../components/DebugErrorDetails";
 import { isImeComposing } from "../../lib/ime";
 import { useEffect, useMemo, useRef } from "react";
-import { ArrowUp, Loader2, StickyNote, Square } from "lucide-react";
+import { ArrowUp, CornerUpLeft, Loader2, MessageSquareQuote, StickyNote, Square, X } from "lucide-react";
 import { Markdown } from "../../components/Markdown";
 import { AgentMarkdownScope } from "../../components/AgentMarkdownScope";
 import { InteractionDock } from "../../components/InteractionDock";
@@ -14,16 +14,25 @@ import { services } from "../app";
 import { useModulePref, useModuleStatuses } from "../react";
 import { SIDE_MESSAGE_LIMIT } from "../../../../shared/sideChat";
 import { sideErrorText } from "./errors";
-import { sideError, sideTimeline, SUMMARY_PROMPT } from "./model";
-import { interruptSide, loadSide, respondSide, sendSide, setSideDraft, sideKey, summarizeSide, useSides } from "./state";
+import { quoteLines, sideError, sideTimeline, splitQuoted, SUMMARY_PROMPT } from "./model";
+import { interruptSide, loadSide, respondSide, sendSide, setSideDraft, setSideQuote, sideKey, summarizeSide, useSides } from "./state";
+import { useTurnLabel } from "./hooks";
+import { turnRef } from "../../lib/refs";
 import { btn } from "../../components/Button";
+import { SelectionActions } from "../../components/SelectionActions";
 
 /** Replies use the conversation renderer (components/Markdown: math, highlighted code, CJK, file / cutex links). */
 export function SideEntry({ entry }: { entry: TimelineEntry }) {
   const { t } = useI18n();
-  if (entry.kind === "user") return <div className="selectable ml-auto max-w-[90%] rounded-2xl bg-surface-2 px-4 py-3 whitespace-pre-wrap break-words text-sm">{entry.text}</div>;
+  if (entry.kind === "user") {
+    // 批注追问: a message starting with a quote (model.quotedMessage) shows it as one, the note below.
+    const quoted = splitQuoted(entry.text);
+    return <SelectionActions className="selectable ml-auto max-w-[90%] rounded-2xl bg-surface-2 px-4 py-3 whitespace-pre-wrap break-words text-sm">
+      {quoted ? <><div data-side-sent-quote="" className="border-l-2 border-subtle/50 pl-2.5 text-muted">{quoted.quote}</div>{quoted.note && <div className="mt-2">{quoted.note}</div>}</> : entry.text}
+    </SelectionActions>;
+  }
   if (entry.kind === "agent" || entry.kind === "plan" || entry.kind === "review") return <div className="min-w-0" data-side-markdown=""><Markdown text={entry.text} streaming={entry.kind !== "review" && entry.streaming} /></div>;
-  if (entry.kind === "tool" || entry.kind === "other") return <details className="min-w-0 rounded-lg border border-border px-3 py-2 text-xs text-muted"><summary className="cursor-pointer truncate">{toolDetail(entry.item) || entry.item.type}</summary><pre className="selectable mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words">{toolOutput(entry.item) ?? JSON.stringify(entry.item, null, 2)}</pre></details>;
+  if (entry.kind === "tool" || entry.kind === "other") return <details className="min-w-0 rounded-lg border border-border px-3 py-2 text-xs text-muted"><summary className="cursor-pointer truncate">{toolDetail(entry.item) || entry.item.type}</summary><SelectionActions as="pre" className="selectable mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words">{toolOutput(entry.item) ?? JSON.stringify(entry.item, null, 2)}</SelectionActions></details>;
   if (entry.kind === "reasoning") return <details className="text-xs text-subtle"><summary className="cursor-pointer">{t("side-chat.reasoning")}</summary><div className="mt-2"><Markdown text={[...entry.summary, ...entry.content].join("\n\n")} streaming={entry.streaming} compact /></div></details>;
   return null;
 }
@@ -60,7 +69,7 @@ export function SideChatBody({ hostId: host, sessionId, chatId, revealed, visibl
     </div>
     <div ref={scroller} onScroll={e => { const el = e.currentTarget; following.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; }} className="min-h-0 flex-1 overflow-y-auto">
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-4 py-5">
-        {chat.anchorTurnId && <div className="truncate text-xs text-subtle" title={chat.anchorTurnId}>{t("side-chat.source", { turn: chat.anchorTurnId })}</div>}
+        {chat.anchorTurnId && <SourceTurn hostId={host} sessionId={sessionId} turnId={chat.anchorTurnId} />}
         {chat.truncated && <p className="text-xs text-muted">{t("side-chat.truncated")}</p>}
         {entries.length === 0 && <p className="py-8 text-center text-sm text-subtle">{t("side-chat.empty")}</p>}
         <AgentMarkdownScope paneId={`side-chat:${chatId}`} hostId={host} sessionId={sessionId} visible={visible}>{entries.map(entry => <SideEntry key={entry.id} entry={entry} />)}</AgentMarkdownScope>
@@ -80,12 +89,54 @@ export function SideChatBody({ hostId: host, sessionId, chatId, revealed, visibl
         </button>
         {busy && <button className="ml-auto flex items-center gap-1 rounded-md px-2 py-1 text-xs text-danger hover:bg-danger/10" onClick={() => void interruptSide(host, chatId)}><Square size={11} />{t("side-chat.stop")}</button>}
       </div>
-      <form className="flex items-end gap-2 rounded-2xl border border-border bg-surface px-3 py-2" onSubmit={e => { e.preventDefault(); if (!isImeComposing(e) && ready) void sendSide(host, chatId); }}>
-        <textarea ref={input} aria-label={t("side-chat.placeholder")} placeholder={t("side-chat.placeholder")} value={view.draft} maxLength={SIDE_MESSAGE_LIMIT} rows={2} disabled={chat.status === "stale" || chat.status === "closed" || !!view.pendingMessage} className="max-h-44 min-h-12 min-w-0 flex-1 resize-none bg-transparent py-1 text-sm outline-none" onChange={e => setSideDraft(host, chatId, e.target.value)} onKeyDown={e => {
+      <form className="rounded-2xl border border-border bg-surface px-3 py-2" onSubmit={e => { e.preventDefault(); if (!isImeComposing(e) && ready) void sendSide(host, chatId); }}>
+        {view.quote && <QuoteChip hostId={host} sessionId={sessionId} chatId={chatId} locked={!!view.pendingMessage} />}
+        <div className="flex items-end gap-2">
+        <textarea ref={input} aria-label={t(view.quote ? "side-chat.annotatePlaceholder" : "side-chat.placeholder")} placeholder={t(view.quote ? "side-chat.annotatePlaceholder" : "side-chat.placeholder")} value={view.draft}
+          maxLength={view.quote ? Math.max(0, SIDE_MESSAGE_LIMIT - quoteLines(view.quote.text).length - 2) : SIDE_MESSAGE_LIMIT} rows={2} disabled={chat.status === "stale" || chat.status === "closed" || !!view.pendingMessage} className="max-h-44 min-h-12 min-w-0 flex-1 resize-none bg-transparent py-1 text-sm outline-none" onChange={e => setSideDraft(host, chatId, e.target.value)} onKeyDown={e => {
           if (e.key === "Enter" && !e.shiftKey && !isImeComposing(e)) { e.preventDefault(); if (ready) void sendSide(host, chatId); }
         }} />
-        <button type="submit" disabled={!ready || !view.draft.trim()} aria-label={t(view.pendingMessage ? "side-chat.retrySend" : "side-chat.send")} title={t(view.pendingMessage ? "side-chat.retrySend" : "side-chat.send")} className="mb-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent text-white disabled:opacity-40"><ArrowUp size={17} /></button>
+        <button type="submit" disabled={!ready || !(view.draft.trim() || view.quote)} aria-label={t(view.pendingMessage ? "side-chat.retrySend" : "side-chat.send")} title={t(view.pendingMessage ? "side-chat.retrySend" : "side-chat.send")} className="mb-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent text-on-accent disabled:opacity-40"><ArrowUp size={17} /></button>
+        </div>
       </form>
     </div>
+  </div>;
+}
+
+/** Back to the turn a passage / the side chat came from: the main timeline scrolls to it (services.refs jump). */
+function useJumpToTurn(hostId: string, sessionId: string) {
+  const { t } = useI18n();
+  return async (turnId: string) => {
+    const result = await services.refs.open(turnRef({ hostId, sessionId, turnId }), { how: "jump" });
+    if (result.status !== "opened") services.ui.notice(t("side-chat.jumpFailed"), "error");
+  };
+}
+
+/** The side chat's start turn (from the host: chat.anchorTurnId), with a link back to it. */
+function SourceTurn({ hostId, sessionId, turnId }: { hostId: string; sessionId: string; turnId: string }) {
+  const { t } = useI18n();
+  const label = useTurnLabel(hostId, sessionId, turnId);
+  const jump = useJumpToTurn(hostId, sessionId);
+  return <div className="flex min-w-0 items-center gap-2 text-xs text-subtle" data-side-source="">
+    <span className="truncate" title={turnId}>{t("side-chat.source", { turn: label })}</span>
+    <button type="button" className="inline-flex shrink-0 items-center gap-1 text-accent hover:underline" onClick={() => void jump(turnId)}><CornerUpLeft size={12} aria-hidden />{t("side-chat.quoteJump")}</button>
+  </div>;
+}
+
+/** 批注追问: the quoted passage above the composer, its source link, and remove. */
+function QuoteChip({ hostId, sessionId, chatId, locked }: { hostId: string; sessionId: string; chatId: string; locked: boolean }) {
+  const { t } = useI18n();
+  const quote = useSides(s => s.views[sideKey(hostId, chatId)]?.quote);
+  const label = useTurnLabel(hostId, sessionId, quote?.turnId);
+  const jump = useJumpToTurn(hostId, sessionId);
+  if (!quote) return null;
+  return <div data-side-quote="" className="mb-2 rounded-lg border-l-2 border-accent bg-surface-2 px-2.5 py-1.5 text-xs">
+    <div className="flex min-w-0 items-center gap-2 text-subtle">
+      <MessageSquareQuote size={12} className="shrink-0" aria-hidden />
+      <span className="truncate">{quote.turnId ? t("side-chat.quoteFrom", { turn: label }) : t("side-chat.quoteLabel")}</span>
+      {quote.turnId && <button type="button" data-side-quote-jump="" className="inline-flex shrink-0 items-center gap-1 text-accent hover:underline" onClick={() => void jump(quote.turnId!)}><CornerUpLeft size={12} aria-hidden />{t("side-chat.quoteJump")}</button>}
+      <button type="button" disabled={locked} aria-label={t("side-chat.quoteRemove")} title={t("side-chat.quoteRemove")} className="ml-auto shrink-0 rounded p-0.5 hover:bg-hover disabled:opacity-40" onClick={() => setSideQuote(hostId, chatId, null)}><X size={12} /></button>
+    </div>
+    <p className="selectable mt-1 line-clamp-3 whitespace-pre-wrap break-words text-muted">{quote.text}</p>
   </div>;
 }

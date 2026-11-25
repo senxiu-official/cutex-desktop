@@ -1,5 +1,5 @@
 // LEGACY(input-ledger-v1): frozen delivery inference for older hosts.
-// Delete only when EVERY host advertises input-ledger-v1 (including hachimi).
+// Delete only when EVERY host advertises input-ledger-v1 (including hostc).
 import type { EventEnvelope } from "@cutex-desktop/protocol";
 import type { TimelineState } from "../timeline";
 

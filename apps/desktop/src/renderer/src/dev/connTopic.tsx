@@ -1,7 +1,7 @@
 // Variants topic 「连接：新结构」 (dev preview only): the redesigned 连接 group — 你 · 设备管理 ·
-// 访问管理 · 网络代理 — drawn with mock data (Sam on host-a; hosts host-a / host-b / hachimi).
+// 访问管理 · 网络代理 — drawn with mock data (Sam on host-a; hosts host-a / host-b / hostc).
 // A mini-nav inside the topic switches the mock page. `?p=me|devices|access` opens a page,
-// `&h=host-a|host-b|hachimi` picks the 访问管理 host. Mock state only, no prefs.
+// `&h=host-a|host-b|hostc` picks the 访问管理 host. Mock state only, no prefs.
 import { useState, type ReactNode } from "react";
 import { Check, ChevronDown, Copy, Laptop, MoreHorizontal, Server, Smartphone, Monitor, Plus } from "lucide-react";
 import { Button, LinkRow, ListRow, Section, Segmented, Select, SettingRow, TextField, Toggle } from "../components/settings/Form";
@@ -32,11 +32,11 @@ const NAV: { id: PageId; label: string; off?: boolean }[] = [
   { id: "proxy", label: "网络代理", off: true },
 ];
 
-type HostId = "host-a" | "host-b" | "hachimi";
+type HostId = "host-a" | "host-b" | "hostc";
 const HOSTS: { id: HostId; os: string; owner: string; self?: boolean }[] = [
   { id: "host-a", os: "Windows", owner: "sam", self: true },
   { id: "host-b", os: "Linux", owner: "sam" },
-  { id: "hachimi", os: "Linux", owner: "ema" },
+  { id: "hostc", os: "Linux", owner: "ema" },
 ];
 
 function Header({ hint, tags }: { hint?: string; tags: ReactNode }) {
@@ -130,7 +130,7 @@ function MePage({ go }: { go(p: PageId, h?: HostId): void }) {
   const mine: { id: HostId; grant: string; owner?: string }[] = [
     { id: "host-a", grant: "主人 · 全部项目" },
     { id: "host-b", grant: "主人 · 全部项目" },
-    { id: "hachimi", grant: "成员 · 全部项目 · 可以发消息", owner: "ema" },
+    { id: "hostc", grant: "成员 · 全部项目 · 可以发消息", owner: "ema" },
   ];
   return (
     <>
@@ -229,7 +229,7 @@ function DevicesPage() {
     { name: "host-b", kind: "host", os: "Linux", status: "已连接", role: "owner", connected: true },
     { name: "Sam 的手机", kind: "phone", os: "iPhone", status: "已配对到 host-b" },
   ];
-  const others: Machine[] = [{ name: "hachimi", kind: "host", os: "Linux", status: "已连接", role: "member", detail: "主人 ema · 你是成员", connected: true }];
+  const others: Machine[] = [{ name: "hostc", kind: "host", os: "Linux", status: "已连接", role: "member", detail: "主人 ema · 你是成员", connected: true }];
   return (
     <>
       <Header hint="你的设备和你能访问的设备，以及这台设备连着哪些主机。" tags={T.local} />
@@ -329,7 +329,7 @@ function OwnerAccess({ host }: { host: HostId }) {
         <SettingRow agents="none" source="local" label="新设备先待分配" hint="新设备要你分配给某个人后才能使用"><Toggle checked={hold} onChange={setHold} /></SettingRow>
       </Section>
       <Section title="别的主机" hint="和这台主机互联的主机，以及它们能看到什么。" actions={<Button onClick={() => {}}><span className="inline-flex items-center gap-1"><Plus size={12} />邀请主机</span></Button>}>
-        <ListRow leading={<Server size={15} className="text-subtle" />} title="hachimi" detail="归属 ema · 已连接" />
+        <ListRow leading={<Server size={15} className="text-subtle" />} title="hostc" detail="归属 ema · 已连接" />
         <SettingRow agents="none" source="local" label="它能看到这里的智能体" hint={see === "none" ? <span className="text-warn">对方现在看不到这里的任何智能体</span> : see === "some" ? "只看到你选的项目里的智能体" : "能看到这里的所有智能体"}>
           <Segmented value={see} onChange={setSee} options={[{ value: "all", label: "全部" }, { value: "some", label: "部分" }, { value: "none", label: "不可见" }]} />
         </SettingRow>
@@ -351,8 +351,8 @@ function OwnerAccess({ host }: { host: HostId }) {
 function MemberAccess() {
   return (
     <>
-      <div className="mb-6 rounded-xl border border-border bg-surface-2/50 px-4 py-3 text-sm text-muted">只有 hachimi 的主人（ema）能管理访问。</div>
-      <Section title="你在 hachimi 上">
+      <div className="mb-6 rounded-xl border border-border bg-surface-2/50 px-4 py-3 text-sm text-muted">只有 hostc 的主人（ema）能管理访问。</div>
+      <Section title="你在 hostc 上">
         <SettingRow agents="none" source="local" label="身份"><span className="inline-flex items-center gap-1.5 text-xs text-muted">{T.member}全部项目 · 可以发消息</span></SettingRow>
         <SettingRow agents="none" source="local" label="你的设备"><span className="text-xs text-muted">host-a</span></SettingRow>
       </Section>
@@ -381,7 +381,7 @@ export function ConnTopic() {
   const p0 = q.get("p");
   const h0 = q.get("h");
   const [page, setPage] = useState<PageId>(p0 === "devices" || p0 === "access" || p0 === "proxy" ? p0 : "me");
-  const [host, setHost] = useState<HostId>(h0 === "host-a" || h0 === "hachimi" ? h0 : "host-b");
+  const [host, setHost] = useState<HostId>(h0 === "host-a" || h0 === "hostc" ? h0 : "host-b");
   const go = (p: PageId, h?: HostId) => (setPage(p), h && setHost(h));
   return (
     <>

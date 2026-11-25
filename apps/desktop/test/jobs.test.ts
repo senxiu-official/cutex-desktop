@@ -59,8 +59,8 @@ describe("jobs", () => {
     const old = { j: row("j", "running", 1, { revision: 3 }) };
     expect(mergeJobs(old, [row("j", "running", 1, { revision: 2 })]).j?.revision).toBe(3);
     expect(mergeJobs(old, [row("j", "cancelled", 1, { revision: 4 })]).j?.state).toBe("cancelled");
-    expect(jobOperations(null)).toEqual({ cancel: false, output: false, markExternal: false, closeFollowUp: false });
-    expect(jobOperations({ humanOperations: ["list", "cancel", "readOutput"] })).toEqual({ cancel: true, output: true, markExternal: false, closeFollowUp: false });
+    expect(jobOperations(null)).toEqual({ cancel: false, output: false, markExternal: false, closeFollowUp: false, activeList: false, outputTail: false });
+    expect(jobOperations({ humanOperations: ["list", "cancel", "readOutput"] })).toEqual({ cancel: true, output: true, markExternal: false, closeFollowUp: false, activeList: false, outputTail: false });
     expect(jobOperations({ humanOperations: ["list", "closeFollowUp"] }).closeFollowUp).toBe(true);
   });
 });

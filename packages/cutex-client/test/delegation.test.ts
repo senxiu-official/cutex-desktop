@@ -13,6 +13,7 @@ const requests: DelegationControlRequest[] = [
  { kind: "pause", projectId: "project", body: { actionId: "action", expectedEpoch: 8, mode: "afterTurn", scope: "members" } },
  { kind: "resume", projectId: "project", body: { actionId: "action", pauseId: "pause", expectedEpoch: 9 } },
  { kind: "resumeContinuation", delegationId: "ask", body: { actionId: "action", expectedRevision: 13 } },
+ { kind: "continuationDecision", delegationId: "ask", body: { actionId: "action", expectedRevision: 2, expectedDigest: "a".repeat(64), expectedEpoch: 5, decision: "deny", decisionNote: "not needed" } },
 ];
 function fixture(featureList: string[] = features, response: unknown = {}, status = 200, user?: unknown) {
  const fetch = vi.fn(async (input: unknown) => String(input).endsWith("/v2/capabilities")
@@ -39,7 +40,7 @@ describe("r266 exact owner transport", () => {
   const {client,fetch}=fixture([]); await expect(client.closeBusMessage({messageId:"message",expectedEvidenceToken:"evidence",requestId:"stable",reason:"Synthetic owner review"})).rejects.toThrow("unsupported"); expect(fetch).toHaveBeenCalledTimes(1);
  });
  it.each(requests)("sends stable strict $kind body and exact path", async request => {
-  const paths = {policy:["PUT","/v2/projects/project/delegation-policy"],grant:["POST","/v2/projects/project/delegation-grants"],revoke:["POST","/v2/delegation-grants/grant/revoke"],decision:["POST","/v2/delegation-approvals/approval/decision"],stop:["POST","/v2/delegations/ask/stop"],pause:["POST","/v2/projects/project/pause"],resume:["POST","/v2/projects/project/resume"],resumeContinuation:["POST","/v2/delegations/ask/resume-continuation"]};
+  const paths = {policy:["PUT","/v2/projects/project/delegation-policy"],grant:["POST","/v2/projects/project/delegation-grants"],revoke:["POST","/v2/delegation-grants/grant/revoke"],decision:["POST","/v2/delegation-approvals/approval/decision"],stop:["POST","/v2/delegations/ask/stop"],pause:["POST","/v2/projects/project/pause"],resume:["POST","/v2/projects/project/resume"],resumeContinuation:["POST","/v2/delegations/ask/resume-continuation"],continuationDecision:["POST","/v2/delegations/ask/resume-continuation"]};
   const [method,path]=paths[request.kind]; const {client, fetch} = fixture();
   await client.delegationControl(request);
   const [url, init] = fetch.mock.calls[1] as unknown as [string, RequestInit];
@@ -86,5 +87,40 @@ describe("r266 exact owner transport", () => {
   const {client,fetch}=fixture(["agent-archive-kind-v1"],receipt);
   expect(await client.permanentRetirement({action_id:"stable",cutex_session_id:"agent",confirmed_name:"Exact pasted name",confirmation_token:"synthetic",expected_revision:7})).toEqual(receipt);
   expect(String(fetch.mock.calls[1]![0])).toContain("/permanent-retirement/execute");
+ });
+});
+
+describe("r296 continuation approval", () => {
+ const legacyFeatures = features.filter(f => f !== DELEGATION_CAPABILITIES.continuationApproval);
+ const decision = (body: Record<string, unknown>) => ({ kind: "continuationDecision", delegationId: "ask", body: { actionId: "action", expectedRevision: 2, expectedDigest: "a".repeat(64), expectedEpoch: 5, decision: "approve", decisionNote: null, ...body } }) as DelegationControlRequest;
+ it("the new decision fields need delegation-continuation-approval-v1; the legacy pair does not", async () => {
+  const { client, fetch } = fixture(legacyFeatures);
+  await expect(client.delegationControl(decision({}))).rejects.toThrow("unsupported");
+  expect(fetch).toHaveBeenCalledTimes(1);
+  await client.delegationControl(requests.find(r => r.kind === "resumeContinuation")!);
+  expect(JSON.parse((fetch.mock.calls.at(-1) as unknown as [string, RequestInit])[1].body as string)).toEqual({ actionId: "action", expectedRevision: 13 });
+ });
+ it.each([
+  ["a bad digest", { expectedDigest: "sha256:" + "a".repeat(64) }],
+  ["an unknown decision", { decision: "maybe" }],
+  ["a deny without reason", { decision: "deny", decisionNote: "   " }],
+  ["a reason over 200 characters", { decision: "deny", decisionNote: "x".repeat(201) }],
+ ])("refuses %s before any request", (_name, body) => {
+  expect(() => delegationControlRoute(decision(body))).toThrow("bad continuation decision");
+ });
+ it("trims the reason and sends null for an empty approve note", () => {
+  expect(delegationControlRoute(decision({ decision: "deny", decisionNote: "  stop  " })).body).toMatchObject({ decision: "deny", decisionNote: "stop" });
+  expect(delegationControlRoute(decision({ decisionNote: "" })).body).toMatchObject({ decisionNote: null });
+ });
+ it("lists a project's approvals or the project-less ones; [] when the list is absent", async () => {
+  const { client, fetch } = fixture(features, { routingApprovals: [], continuationApprovals: [{ id: "cap-1" }] });
+  expect(await client.continuationApprovals("project")).toEqual([{ id: "cap-1" }]);
+  expect(String(fetch.mock.calls[1]![0])).toBe("http://fixture.invalid/v2/projects/project/delegation-approvals?state=pending");
+  await client.continuationApprovals(null);
+  expect(String(fetch.mock.calls.at(-1)![0])).toBe("http://fixture.invalid/v2/delegations/continuation-approvals?state=pending");
+  expect(await fixture(features, { routingApprovals: [] }).client.continuationApprovals("project")).toEqual([]);
+  const old = fixture(legacyFeatures);
+  await expect(old.client.continuationApprovals("project")).rejects.toThrow("unsupported");
+  expect(old.fetch).toHaveBeenCalledTimes(1);
  });
 });

@@ -3,6 +3,7 @@ import { createRequire } from "node:module";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { STATIC_SCAN } from "./staticScan";
 import { SETTINGS_EFFECT_EXEMPTIONS } from "../src/renderer/src/lib/settingsEffectPolicy";
 
 // TypeScript 7 exposes no old compiler AST API. Reuse the existing React transform's
@@ -417,7 +418,7 @@ function customControlAudit() {
       }));
     }
 
-describe("exhaustive settings effect declarations", () => {
+describe("exhaustive settings effect declarations", STATIC_SCAN, () => {
   it("detects missing fields behind aliases/branches and refuses spreads that overwrite declarations", () => {
     const file = join(ROOT, "__settings_effect_fixture.tsx");
     try {
@@ -486,11 +487,11 @@ describe("exhaustive settings effect declarations", () => {
     expect(registered.filter(row => !registeredGraph().get(row.id)?.size).map(row => row.id)).toEqual([]);
     expect(pages.has("profiles")).toBe(true);
 
-  }, 30_000); // Builds every registered component graph; slow under full-suite load on Windows.
+  });
   it("requires explicit timing and source on every renderer row/group, including conditional and host-dependent JSX", () => {
     // Deliberately checks all source JSX, not one rendered host/runtime snapshot.
     expect(sources(ROOT).flatMap(declarationIssues)).toEqual([]);
-  }, 30_000); // Parses every settings source file; slow under full-suite load on Windows.
+  });
   it("allows exactly the named registered Profile placement exception with a reason", () => {
     expect(Object.keys(SETTINGS_EFFECT_EXEMPTIONS)).toEqual(["profiles", "access"]);
     for (const [page, exemption] of Object.entries(SETTINGS_EFFECT_EXEMPTIONS)) {
@@ -519,7 +520,7 @@ describe("exhaustive settings effect declarations", () => {
         issues.push(`${location(file, node)} page/card effect default`);
     });
     expect(issues).toEqual([]);
-  }, 30_000); // Walks every production source file; slow under full-suite load on Windows.
+  });
   it("keeps row effect types mandatory and rejects page/card defaults as a source of timing or scope", () => {
     const issues: string[] = [];
     let effectType: Node | undefined;

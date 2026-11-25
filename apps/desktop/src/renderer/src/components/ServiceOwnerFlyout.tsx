@@ -14,16 +14,19 @@ import { closeMenu } from "../lib/contextMenu";
 import { useApp } from "../store";
 import { useHostData } from "../lib/useHostScope";
 import { eligibleOwnerChoices, filterOwnerChoices, ownerChoices, type OwnerChoice } from "../lib/ownerPicker";
+import { EntityIcon } from "./EntityIcon";
+import { useStaggeredCount } from "../lib/useStagger";
 
 const ROW = "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-surface-2 focus:bg-surface-2 focus:outline-none disabled:opacity-40";
 const TAG = "shrink-0 rounded bg-surface-2 px-1 py-0.5 text-caption/[inherit] text-subtle";
 
-function OwnerRow({ choice, onPick, busy }: { choice: OwnerChoice; onPick(): void; busy: boolean }) {
+function OwnerRow({ choice, onPick, busy, icon = true }: { choice: OwnerChoice; onPick(): void; busy: boolean; icon?: boolean }) {
   const { t } = useI18n();
   return (
     <button type="button" role="menuitem" data-owner-id={choice.id} disabled={busy} onClick={onPick}
       title={choice.real ?? undefined} className={ROW}>
       <span className="flex w-4 shrink-0 justify-center text-muted">{choice.isCurrent && <Check size={13} />}</span>
+      {icon ? <EntityIcon entity={{ kind: "agent", id: choice.id, name: choice.name }} /> : <span className="h-4 w-4 shrink-0" aria-hidden />}
       <span className={`min-w-0 flex-1 truncate ${choice.unnamed ? "text-subtle" : ""}`}>{choice.name}</span>
       {choice.isDirector && <span className={TAG}>{t("services.owner.director")}</span>}
       {choice.offline && <span className={TAG}>{t("services.owner.offlineTag")}</span>}
@@ -67,6 +70,9 @@ export function ServiceOwnerFlyout({ service, hostId, onError }: { service: Serv
   const project = group("project");
   const all = group("all");
   const offline = group("offline");
+  // Every agent of the host can be listed: avatars past the first rows mount in steps (lib/useStagger).
+  const iconOrder = new Map([...project, ...all, ...offline].map((c, i) => [c, i]));
+  const icons = useStaggeredCount(iconOrder.size);
   const pick = (id: string | null) => {
     setBusy(true);
     void (host === focus ? api : apiFor(host))
@@ -111,7 +117,7 @@ export function ServiceOwnerFlyout({ service, hostId, onError }: { service: Serv
           return (
             <div key={g} data-owner-group={g}>
               <p className="px-2 pt-1 pb-0.5 text-caption/[inherit] text-subtle">{label[g]}</p>
-              {rows.map((c) => <OwnerRow key={c.id} choice={c} busy={busy} onPick={() => pick(c.id)} />)}
+              {rows.map((c) => <OwnerRow key={c.id} choice={c} busy={busy} icon={(iconOrder.get(c) ?? 0) < icons} onPick={() => pick(c.id)} />)}
             </div>
           );
         })}
@@ -122,7 +128,7 @@ export function ServiceOwnerFlyout({ service, hostId, onError }: { service: Serv
               <span className="min-w-0 flex-1 truncate">{t("services.owner.offline", { n: offline.length })}</span>
             </button>
             {/* A search expands the fold: a match must be visible even before the group is clicked open. */}
-            {(offlineOpen || query.trim() !== "") && offline.map((c) => <OwnerRow key={c.id} choice={c} busy={busy} onPick={() => pick(c.id)} />)}
+            {(offlineOpen || query.trim() !== "") && offline.map((c) => <OwnerRow key={c.id} choice={c} busy={busy} icon={(iconOrder.get(c) ?? 0) < icons} onPick={() => pick(c.id)} />)}
           </div>
         )}
         {!loading && error === undefined && (supported || sidebar) && !shown.length && <p className="px-2 py-2 text-caption/[inherit] text-subtle">{t("services.owner.none")}</p>}

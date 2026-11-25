@@ -1,5 +1,5 @@
 // 停止 holds everything (cutex stop-holds-ridealongs): which ride-alongs are held and why, how the
-// asks pause reads (已随停止暂停 vs 暂停委托) and which resume it offers, and the words in both locales.
+// asks pause reads (已随中断暂停 vs 暂停委托) and which resume it offers, and the words in both locales.
 import { describe, expect, it } from "vitest";
 import type { AdmissionNextStep, AsksPause } from "@cutex-desktop/protocol";
 import { asksPauseKind, asksPausedKeys, heldKeys, rideAlongHeld, splitHeld, stopHeld } from "../src/renderer/src/lib/stopHold";
@@ -50,17 +50,17 @@ describe("stop hold state", () => {
 });
 
 describe("labels", () => {
-  it("held groups: 已随停止暂停 / 新委托已暂停", () => {
-    expect(zhCN[heldKeys("ownerStop").strip]).toBe("已随停止暂停");
+  it("held groups: 已随中断暂停 / 新委托已暂停", () => {
+    expect(zhCN[heldKeys("ownerStop").strip]).toBe("已随中断暂停");
     expect(zhCN[heldKeys("ownerPause").strip]).toBe("新委托已暂停");
-    expect(en[heldKeys("ownerStop").strip]).toBe("Held by stop");
+    expect(en[heldKeys("ownerStop").strip]).toBe("Held by interrupt");
     expect(zhCN[heldKeys("ownerStop").hint]).toContain("继续发送");
   });
 
   it("the asks-paused section: a stop hold offers 继续发送 (queue resume); 暂停新委托 offers 继续 (asks resume)", () => {
     const stop = asksPausedKeys(pause("ownerStop", true));
     expect(stop.resume).toBe("queue");
-    expect(zhCN[stop.title]).toBe("新委托已随停止暂停");
+    expect(zhCN[stop.title]).toBe("新委托已随中断暂停");
     expect(zhCN[stop.button]).toBe("继续发送");
     expect(zhCN[stop.buttonHint]).toContain("全部");
     const owner = asksPausedKeys(pause("ownerPause"));
@@ -68,13 +68,13 @@ describe("labels", () => {
     expect(asksPausedKeys(pause("ownerPause", true)).hint).toBe("asksPause.titleHintStop");
   });
 
-  it("a closed runtime gate (runtime-gate-pause): 已暂停：上一轮被中断，工具效果不确定 · 恢复 (asks resume)", () => {
+  it("a closed runtime gate (runtime-gate-pause): 已暂停：上一回合被中断，工具效果不确定 · 恢复 (asks resume)", () => {
     const gate = pause("runtimeGate", false);
     expect(asksPauseKind(gate)).toBe("gate");
     expect(stopHeld(gate)).toBe(false);
     const keys = asksPausedKeys(gate);
     expect(keys.resume).toBe("asks");
-    expect(zhCN[keys.title]).toBe("已暂停：上一轮被中断，工具效果不确定");
+    expect(zhCN[keys.title]).toBe("已暂停：上一回合被中断，工具效果不确定");
     expect(zhCN[keys.button]).toBe("恢复");
     expect(en[keys.title]).toBe("Paused: the last turn was interrupted, tool effects uncertain");
     expect(en[keys.button]).toBe("Resume");

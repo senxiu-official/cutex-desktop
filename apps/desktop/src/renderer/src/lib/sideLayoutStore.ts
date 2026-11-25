@@ -124,7 +124,7 @@ export function previewShelfWidth(shelfId: string, width: number | null): void {
 const saveTimers = new Map<WindowKey, ReturnType<typeof setTimeout>>();
 
 /** The live layout prepared for saving (lib/sideLayout prepareForSave with the registry's persist flags). */
-function preparedNow(layout: SideLayout, peer?: { hostId: string; sessionId: string }): SideLayout {
+function preparedNow(layout: SideLayout, peer?: { hostId: string; sessionId: string }, otherPages?: ReadonlySet<string>): SideLayout {
   let ctx: ReturnType<typeof sideViewNow> | null = null;
   try {
     ctx = peer ? sideViewFor(peer.hostId, peer.sessionId) : sideViewNow();
@@ -141,6 +141,7 @@ function preparedNow(layout: SideLayout, peer?: { hostId: string; sessionId: str
   return prepareForSave(layout, {
     persist: (kind) => registry?.get(kind)?.item.persist !== false,
     visible: (id) => (ctx ? instanceVisible(layout, id, ctx) : true),
+    otherPages,
   });
 }
 
@@ -172,29 +173,44 @@ export function flushSideSave(): void {
     clearTimeout(timer);
     saveNow();
   }
-  for (const key of [...peerTimers.keys()]) savePeerNow(key);
+  for (const [key, pending] of [...peerTimers]) savePeerNow(key, pending.win);
 }
 
 // ── The other workspaces' live Shelves (§24.13: both workspaces live side by side) ─────────────────
 
-const peerTimers = new Map<string, ReturnType<typeof setTimeout>>();
+/**
+ * A peer's pending save, with the window that scheduled it: the save runs there (its scope, its shared pages), not
+ * in whichever window is active when the timer fires (review of fix/widget-placement-stale).
+ */
+const peerTimers = new Map<string, { timer: ReturnType<typeof setTimeout>; win: WindowKey }>();
 
-/** Stores a peer's own Shelf (its shared pages are the focused layout's, stored with it). */
-function savePeerNow(key: string): void {
-  const timer = peerTimers.get(key);
-  if (timer) clearTimeout(timer);
+/** Stores a peer's own Shelf, in window `win` (its shared pages are that window's focused layout's, stored with it). */
+function savePeerNow(key: string, win: WindowKey = currentWindow()): void {
+  const pending = peerTimers.get(key);
+  if (pending) clearTimeout(pending.timer);
   peerTimers.delete(key);
+  // A save another window still owed: made there first.
+  if (pending && pending.win !== win) inWindow(pending.win, () => writePeerShelf(key));
+  inWindow(win, () => writePeerShelf(key));
+}
+
+/** The current window's save of peer `key`'s own Shelf. */
+function writePeerShelf(key: string): void {
   const scope = useSide.getState().scope;
   const mem = ownMem.get(key);
   const k = parseConvKey(key);
   if (!scope || !mem || !k) return;
-  writeConvShelf(scope, key, preparedNow(growStoredLayout(mem.own, key), k), growStoredMeta(mem.meta, key), null);
+  // Its own Shelf only: the shared pages are in the focused layout, and a move onto one of them stays.
+  const shared = new Set(sharedPages(useSide.getState().layout).map((p) => p.id));
+  writeConvShelf(scope, key, preparedNow(growStoredLayout(mem.own, key), k, shared), growStoredMeta(mem.meta, key), null);
 }
 
 function schedulePeerSave(key: string): void {
-  const timer = peerTimers.get(key);
-  if (timer) clearTimeout(timer);
-  peerTimers.set(key, setTimeout(() => savePeerNow(key), 400));
+  const win = currentWindow();
+  const pending = peerTimers.get(key);
+  if (pending && pending.win !== win) savePeerNow(key, pending.win);
+  else if (pending) clearTimeout(pending.timer);
+  peerTimers.set(key, { timer: setTimeout(() => savePeerNow(key, win), 400), win });
 }
 
 /**
@@ -948,7 +964,7 @@ export function resetConvShelves(): void {
   setCurConv(null);
   ownMem.clear();
   collapseOnEnter.clear();
-  for (const timer of peerTimers.values()) clearTimeout(timer);
+  for (const pending of peerTimers.values()) clearTimeout(pending.timer);
   peerTimers.clear();
   useSide.setState({ peers: {} });
 }
@@ -1085,8 +1101,12 @@ function loadScope(scope: string): void {
   }
   pendingNow().clear();
   markPending(layout);
-  for (const timer of peerTimers.values()) clearTimeout(timer);
-  peerTimers.clear();
+  // This window's pending peer saves only (another window's Shelves are not reloaded here).
+  for (const [key, pending] of [...peerTimers]) {
+    if (pending.win !== currentWindow()) continue;
+    clearTimeout(pending.timer);
+    peerTimers.delete(key);
+  }
   useSide.setState({ scope, layout, mode: null, revealed: {}, tabInfo: {}, flash: null, focusedCard: null, peers: {} });
   repairLive(true);
   syncPeers();
@@ -1111,12 +1131,7 @@ export function switchConversation(key: string | null): void {
   const scope = s.scope;
   const live = splitShared(s.layout);
   // The conversation coming in may be the other workspace's live Shelf: its own Shelf is the peer's as it is now.
-  if (s.peers[key]) {
-    const t = peerTimers.get(key);
-    if (t) clearTimeout(t);
-    peerTimers.delete(key);
-    savePeerNow(key);
-  }
+  if (s.peers[key]) savePeerNow(key);
   const was = curConv();
   if (was) {
     ownMem.set(was, { own: live.own, meta: live.meta });

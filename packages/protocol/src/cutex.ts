@@ -73,6 +73,18 @@ export interface SessionRuntime {
    * repin waiting for the next fresh runtime start. Absent on other sessions and on older cutex.
    */
   claudeRuntime?: SessionClaudeRuntime;
+  /**
+   * claude-runtime-diagnostics-v1 (r295): a connected Claude runtime's startup warnings and running hooks.
+   * Empty arrays = observed, nothing to say; null / absent = unavailable (older host or runtime, offline).
+   */
+  claudeDiagnostics?: SessionClaudeDiagnostics | null;
+}
+
+export interface SessionClaudeDiagnostics {
+  /** Allowlisted codes: configurationNotApplied, managedHooksNotLoaded, mcpConnectionFailed, mcpAuthenticationRequired. */
+  warnings: string[];
+  /** Hooks running now; `startedAtMs` = UTC Unix ms on the runtime host; `event` is a Claude hook event name or "other". */
+  activeHooks: { event: string; startedAtMs: number }[];
 }
 
 export interface SessionBackgroundWork {
@@ -405,6 +417,9 @@ export interface AdmissionNextStep {
   from?: string | null;
   /** admission-ridealong-detail: the sending host's label of a cross-host tell (`from` = `name@host`). */
   fromHost?: string | null;
+  /** peer-delivery-receipts-v1: the sending host's cutex instance id (`ci-…`) of a cross-host item; matched against the
+   *  connected hosts' Management instance id for the current name. */
+  fromPeerInstanceId?: string;
   /** The sending agent's cutexSessionId on this host (a tell's sender, a local delegate), for its avatar; absent =
    *  not an agent of this host (alarm, system service, cross-host tell) or a cutex that does not send it yet — the
    *  row then shows the name only. Proposed for cutex (admission-ridealong-detail); desktop reads it when present. */
@@ -625,6 +640,18 @@ export interface OwnerNotification {
   systemKind?: string;
   /** claude-safety-grants: the runtime safety check this notice is about (`systemKind: safetyBlock`). */
   safetyBlock?: SafetyBlock;
+  /** cutex r296: the 定期任务 that needs re-confirming (`systemKind: assistantTemplateNeedsReview`). */
+  templateReview?: TemplateReview;
+}
+
+/** cutex r296 personal assistants: a recurring template whose run was refused as stale (its owner notice). */
+export interface TemplateReview {
+  assistantId: string;
+  scheduleId: string;
+  /** The template revision that was refused (a later one is a re-confirmation). */
+  templateRevision: number;
+  /** `confirmation_stale` or `director_changed` (others kept as text). */
+  reason: string;
 }
 
 // ---------- safety grants (capability `claude-safety-grants`; cutex docs/SAFETY-GRANTS.md) ----------
@@ -1502,6 +1529,34 @@ export interface QueueMutationResult {
   affectedQueueIds: string[];
   /** input-ledger-v1: the record of this request's input. */
   input?: InputRecord;
+}
+
+/** Who answered a saved question / approval (session-interaction-history-v1). */
+export type InteractionActor =
+  | { kind: "owner" }
+  | { kind: "user"; userId: string; name: string }
+  | { kind: "agent"; cutexSessionId: string };
+/** One answered question / approval cutex saved (`GET /v2/sessions/{id}/history/interactions`). */
+export interface InteractionHistoryRecord {
+  runtimeGeneration: number;
+  native: { id: string | number; method: string; params?: unknown };
+  turnId: string | null;
+  /** The reply as forwarded: `{answers}`, `{decision}` or `{permissions, scope}`; secret answer values left out. */
+  result: unknown;
+  actor: InteractionActor;
+  /** RFC 3339 UTC. */
+  answeredAt: string;
+  /** Secret questions that had an answer (its value is not kept). */
+  redactedQuestionIds: string[];
+  /** The backend may trim `native.params` and say so. */
+  truncated?: boolean;
+}
+/** Newest committed first; follow `nextCursor` (same host, session and turn filter) until null. */
+export interface InteractionHistoryPage {
+  contractVersion: number;
+  cutexSessionId: string;
+  interactions: InteractionHistoryRecord[];
+  nextCursor: string | null;
 }
 
 /** bootstrap-bounded-bus: one direction of an agent's bus messages. */

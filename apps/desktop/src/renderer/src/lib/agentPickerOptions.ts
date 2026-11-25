@@ -14,6 +14,8 @@ type Snapshot = Pick<SidebarSnapshot, "active" | "retired" | "projects" | "hostR
 export interface AgentPickerRow {
   /** The option's value (a session id, or a host-qualified key when the list spans hosts). */
   value: string;
+  /** The agent's session id (the Avatar seed) when `value` is a host-qualified key. */
+  sessionId?: string;
   name: string;
   projectId: string | null;
   projectName: string | null;
@@ -22,6 +24,8 @@ export interface AgentPickerRow {
   quickChat?: boolean;
   /** Set when the list spans hosts: shown after the group's name. */
   hostLabel?: string;
+  /** The row's host (its project group's header shows the project icon). */
+  hostId?: string;
   searchText: string;
 }
 
@@ -40,7 +44,7 @@ export interface AgentPickerLabels {
  */
 export function sidebarPickerRows(
   sidebar: Snapshot,
-  options: { include?: "active" | "all"; only?: ReadonlySet<string> | readonly string[]; hostLabel?: string; keyOf?: (id: string) => string } = {},
+  options: { include?: "active" | "all"; only?: ReadonlySet<string> | readonly string[]; hostLabel?: string; hostId?: string; keyOf?: (id: string) => string } = {},
 ): AgentPickerRow[] {
   const only = options.only ? new Set(options.only) : null;
   const projects = new Map((sidebar?.projects?.projects ?? []).map((p) => [p.project_id, p.presentation.display_name || p.project_id]));
@@ -56,12 +60,14 @@ export function sidebarPickerRows(
     const name = s.displayName || s.formalAgentName || id;
     rows.push({
       value: options.keyOf ? options.keyOf(id) : id,
+      ...(options.keyOf ? { sessionId: id } : {}),
       name,
       projectId,
       projectName,
       archived,
       ...(!projectId && isQuickChat(s, host) ? { quickChat: true } : {}),
       hostLabel: options.hostLabel,
+      ...(options.hostId ? { hostId: options.hostId } : {}),
       searchText: [name, s.formalAgentName, projectName, options.hostLabel, s.note, id].filter(Boolean).join("\n"),
     });
   };
@@ -117,13 +123,16 @@ export function agentPickerOptions(
         compareNames(a.name, b.name) ||
         a.value.localeCompare(b.value),
     );
-  const option = (r: AgentPickerRow, group: string, detail?: string | null): SearchablePickerOption => ({ value: r.value, label: r.name, group, searchText: r.searchText, ...(detail ? { detail } : {}) });
+  // Each row names its agent's face (owner 2026-11-24: an agent shows its icon wherever it is named).
+  const option = (r: AgentPickerRow, group: string, detail?: string | null): SearchablePickerOption => ({ value: r.value, label: r.name, group, searchText: r.searchText, entity: { kind: "agent", id: r.sessionId ?? r.value, name: r.name }, ...(detail ? { detail } : {}) });
   return [
     ...topValues.map((v) => {
       const r = byValue.get(v)!;
       return option(r, labels.top, r.archived ? labels.archived : (r.projectName ?? (r.quickChat ? labels.chats : labels.independent)) + (r.hostLabel ? ` · ${r.hostLabel}` : ""));
     }),
-    ...rest.map((r) => (r.quickChat && !r.archived ? { ...option(r, groupOf(r)), hiddenUntilSearch: true } : option(r, groupOf(r)))),
+    ...rest.map((r) => (r.quickChat && !r.archived ? { ...option(r, groupOf(r)), hiddenUntilSearch: true }
+      : r.projectId && r.hostId && !r.archived ? { ...option(r, groupOf(r)), groupEntity: { kind: "project" as const, id: r.projectId, hostId: r.hostId } }
+      : option(r, groupOf(r)))),
   ];
 }
 

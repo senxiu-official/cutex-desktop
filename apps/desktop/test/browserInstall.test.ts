@@ -1,11 +1,13 @@
 import { EventEmitter } from "node:events";
+import { mkdtempSync, rmSync } from "node:fs";
 import { basename, join } from "node:path";
-import { networkInterfaces } from "node:os";
+import { networkInterfaces, tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BrowserWindow, IpcMainInvokeEvent } from "electron";
 import type { HostManager } from "../src/main/hosts";
 import type { BrowserEvent, BrowserRequest, BrowserTabMount, BrowserTabView } from "../src/shared/browser";
 import { BROWSER_CHANNEL, DEFAULT_BROWSER_CONTROL_SETTINGS } from "../src/shared/browser";
+import { BROWSER_IDENTITY_CHANNEL, browserIdentityPartition } from "../src/shared/browserIdentity";
 import { BROWSER_PAUSE_MEDIA_SCRIPT, browserAppZoom, browserDisplayUrl, installBrowser, navigationFailure, syncBrowserHosts } from "../src/main/browser/install";
 import { BrowserLeases } from "../src/main/browser/leases";
 import { InAppProvider } from "../src/main/browser/provider";
@@ -24,6 +26,7 @@ const electron = vi.hoisted(() => ({
   menus: [] as { popup: ReturnType<typeof vi.fn> }[],
   buildFromTemplate: vi.fn((template: any[]) => { const menu = { popup: vi.fn() }; electron.menus.push(menu); return menu; }),
   messageBox: vi.fn(async (..._args: any[]) => ({ response: 1, checkboxChecked: false })),
+  userData: "",
 }));
 vi.mock("../src/main/browser/guestView", async importOriginal => {
   const actual = await importOriginal<typeof import("../src/main/browser/guestView")>();
@@ -70,7 +73,7 @@ vi.mock("electron", () => ({
     return value;
   } },
   app: {
-    getPath: () => "memory-only-user-data",
+    getPath: (name: string) => name === "downloads" ? "memory-only-user-data" : electron.userData,
     get isPackaged() { return electron.packaged; },
     on: (name: string, fn: (...args: any[]) => void) => {
       let listeners = electron.appListeners.get(name);
@@ -172,6 +175,9 @@ async function until(predicate: () => boolean) {
 const cleanup: (() => void)[] = [];
 let nextContentsId = 1;
 function fixture(session = new SessionMock(), permissiveAppSender = false, localKind: "local" | "ssh" = "local") {
+  const userData = mkdtempSync(join(tmpdir(), "cutex-browser-install-"));
+  electron.userData = userData;
+  cleanup.push(() => rmSync(userData, { recursive: true, force: true }));
   electron.sessions.set("persist:browser-local", session);
   const owner = new ContentsMock(nextContentsId++, session);
   const events: BrowserEvent[] = [];
@@ -237,6 +243,44 @@ beforeEach(() => {
   });
 });
 afterEach(() => { for (const dispose of cleanup.splice(0).reverse()) dispose(); vi.unstubAllEnvs(); });
+
+describe("installed owner identities and history", () => {
+  it("binds the named owner partition to its receipt and records only an eligible owner commit", async () => {
+    vi.stubEnv("CUTEX_DESKTOP_BROWSER_EGRESS", "n2");
+    const f = fixture();
+    await f.ipc({ op: "setEnabled", enabled: true });
+    const identity = electron.handlers.get(BROWSER_IDENTITY_CHANNEL)!;
+    const ownerFrame = { sender: f.owner, senderFrame: f.owner.mainFrame };
+    const profile = await identity(ownerFrame, { op: "create", name: "Work", color: "teal" });
+    const partition = browserIdentityPartition(profile.id, "local"), session = new SessionMock();
+    electron.sessions.set(partition, session);
+    const { tabKey } = await f.ipc({ op: "reserveOwnerTab", browserIdentityId: profile.id });
+    const url = "https://example.test/welcome?ticket=discard&tag=keep";
+    const reserved = await f.reserve(tabKey, url);
+    expect(reserved).toMatchObject({ partition, pool: "owner", browserIdentityId: profile.id });
+    expect(f.willAttach(reserved).denied).toBe(false);
+    const guest = f.didAttach(new ContentsMock(nextContentsId++, session));
+    guest.loadURL = async address => {
+      guest.emit("did-start-navigation", {}, address, false, true);
+      guest.url = address;
+      guest.emit("did-navigate", {}, address, 200);
+    };
+    expect(await f.receipt(reserved, guest, url)).toMatchObject({ browserIdentityId: profile.id });
+    await flush();
+    const query = { op: "history", query: { identityId: profile.id, hostId: "local" } };
+    expect((await identity(ownerFrame, query)).entries).toMatchObject([{ url: "https://example.test/welcome?tag=keep" }]);
+    await expect(identity({ sender: guest, senderFrame: guest.mainFrame }, query)).rejects.toThrow("untrusted_sender");
+
+    const agentInput = vi.spyOn(InAppProvider.prototype, "agentInput").mockReturnValue(true);
+    try { await guest.loadURL("https://example.test/agent-click"); }
+    finally { agentInput.mockRestore(); }
+    await guest.loadURL("http://127.0.0.1:26180/owner-private");
+    guest.emit("did-start-navigation", {}, "https://example.test/refused", false, true);
+    guest.emit("did-navigate", {}, "https://example.test/refused", 403);
+    expect((await identity(ownerFrame, query)).entries).toMatchObject([{ url: "https://example.test/welcome?tag=keep" }]);
+    expect((await identity(ownerFrame, { op: "history", query: { identityId: "default", hostId: "local" } })).entries).toEqual([]);
+  });
+});
 
 describe("main browser display URL redaction", () => {
   it("owner pages survive daemon generations and still navigate in the same guest", async () => {
@@ -1462,7 +1506,7 @@ describe("installed controlled tabs, downloads and site permissions (0.1.3)", ()
     expect(check(guest, "media", "http://localhost:26180", { mediaType: "audio" })).toBe(true);
     expect(await ask("media", { mediaTypes: ["audio"], requestingUrl: "http://localhost:26181/" })).toBe(false); // cross-origin frame
     expect(electron.messageBox).toHaveBeenCalledOnce();
-    expect(await f.ipc({ op: "sitePermissions" })).toEqual([{ pool: "owner", origin: "http://localhost:26180", permission: "microphone", allow: true }]);
+    expect(await f.ipc({ op: "sitePermissions" })).toEqual([{ pool: "owner", browserIdentityId: "default", origin: "http://localhost:26180", permission: "microphone", allow: true }]);
     expect(await f.ipc({ op: "sitePermissions", forget: "all" })).toEqual([]);
     expect(check(guest, "media", "http://localhost:26180", { mediaType: "audio" })).toBe(false);
     await expect(f.ipc({ op: "sitePermissions", forget: { pool: "root", origin: "x" } })).rejects.toThrow();
@@ -1532,6 +1576,22 @@ describe("installed controlled tabs, downloads and site permissions (0.1.3)", ()
     await expect(f.ipc({ op: "setMuted", tabKey: "missing", muted: true })).rejects.toThrow("target_closed");
     await expect(f.ipc({ op: "setMuted", tabKey: "side-one", muted: "yes" })).rejects.toThrow("invalid_browser_request");
     await expect(f.ipc({ op: "pauseMedia", tabKey: "side-one", code: "alert(1)" })).rejects.toThrow("invalid_browser_request");
+  });
+  it("Ctrl+H in an owner page asks for 浏览历史 and the page never sees it; not the agent's own keys or other chords", async () => {
+    const f = fixture(); await f.ipc({ op: "setEnabled", enabled: true });
+    const { guest } = await f.mount("side-one", "http://localhost:26180/");
+    const ctrlH = { type: "keyDown", key: process.platform === "darwin" ? "y" : "h", code: process.platform === "darwin" ? "KeyY" : "KeyH", control: process.platform !== "darwin", meta: process.platform === "darwin" };
+    const history = () => f.events.filter(event => event.kind === "history");
+    const event = { preventDefault: vi.fn() };
+    guest.emit("before-input-event", event, ctrlH);
+    expect(event.preventDefault).toHaveBeenCalled();
+    expect(history()).toEqual([expect.objectContaining({ hostId: "local", tabKey: "side-one", pool: "owner", kind: "history" })]);
+    guest.emit("before-input-event", { preventDefault: vi.fn() }, { ...ctrlH, shift: true });
+    guest.emit("before-input-event", { preventDefault: vi.fn() }, { ...ctrlH, type: "keyUp" });
+    const input = vi.spyOn(InAppProvider.prototype, "agentInput").mockReturnValue(true);
+    try { guest.emit("before-input-event", { preventDefault: vi.fn() }, ctrlH); }
+    finally { input.mockRestore(); }
+    expect(history()).toHaveLength(1);
   });
   it("guest zoom: Ctrl+= and the wheel step per site, publish in the view, persist across tabs and follow the app zoom", async () => {
     const f = fixture(); await f.ipc({ op: "setEnabled", enabled: true });

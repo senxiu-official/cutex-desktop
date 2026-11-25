@@ -81,6 +81,25 @@ export function claudeTaskStatusFromEvent(envelope: EventEnvelope, timeline: Tim
   return null;
 }
 
+/**
+ * cutex r295: a background Claude subagent's tool asked for approval while nobody could answer; the adapter
+ * declined it (`task.approvalState: "deniedUnattended"` on `claude/task/updated`). Not an approval to act on and
+ * not an end: the task's own status stays authoritative. Keyed like claudeTaskStatusFromEvent; `denied` false
+ * when the task's newest update carries no such flag.
+ */
+export function claudeTaskApprovalFromEvent(envelope: EventEnvelope, timeline: TimelineState | null): { threadId: string; denied: boolean } | null {
+  const message = envelope.native?.kind === "notification" ? envelope.native.message : null;
+  if (!message || message.method !== "claude/task/updated" || !timeline) return null;
+  const params = (message.params ?? {}) as { threadId?: unknown; task?: { taskId?: unknown; approvalState?: unknown } };
+  const taskId = params.task?.taskId;
+  if (params.threadId !== timeline.threadId || typeof taskId !== "string") return null;
+  for (const entry of orderedEntries(timeline)) {
+    const ref = (entry as { item?: RawItem }).item?.agentThreadId;
+    if (claudeTaskIdOf(ref) === taskId) return { threadId: ref as string, denied: params.task?.approvalState === "deniedUnattended" };
+  }
+  return null;
+}
+
 /** Settled status of a child thread from its `thread/read` result (null: nothing known yet). */
 export function childStatusFromThreadRead(result: unknown): string | null {
   const thread = (result as { thread?: { status?: { type?: unknown }; turns?: { status?: unknown }[] } } | null)?.thread;

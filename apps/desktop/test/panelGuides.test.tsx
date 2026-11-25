@@ -29,7 +29,7 @@ vi.mock("../src/renderer/src/lib/agentFeatures", () => ({
   lacks: (f: Set<string>, name: string) => f.has(name),
 }));
 vi.mock("../src/renderer/src/lib/agentList", () => ({ runtimeOf: (s: { runtime: string }) => s.runtime }));
-vi.mock("../src/renderer/src/lib/openModifiers", () => ({ newInstanceKey: () => "Ctrl+" }));
+vi.mock("../src/renderer/src/lib/openModifiers", () => ({ newInstanceKey: () => "Ctrl" }));
 vi.mock("../src/renderer/src/lib/sideDnd", () => ({ sideDragging: () => false }));
 vi.mock("../src/renderer/src/lib/onboarding", () => ({ openOnboarding: vi.fn(), finishOnboarding: vi.fn() }));
 vi.mock("../src/renderer/src/lib/contextMenu", () => ({ useOverlayState: () => overlay }));

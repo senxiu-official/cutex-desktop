@@ -40,6 +40,9 @@ import { dismissReceipt } from "../src/renderer/src/lib/legacyDelivery/busReceip
 import { useCleanupFocus } from "../src/renderer/src/lib/cleanupNav";
 import { latestReceiptState } from "./receiptVisibilityStorage";
 
+// The store double is too thin for the avatar stack (agent looks, Profile pictures): icons are stubbed.
+vi.mock("../src/renderer/src/components/EntityIcon", () => import("./helpers/entityIconStub"));
+
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const ago = (secs: number) => new Date(Date.now() - secs * 1000).toISOString();
 const message = (id: string, extra: Partial<StuckBusMessage> = {}): StuckBusMessage => ({

@@ -24,7 +24,7 @@ import type { AskCommandMethod, AskDetail, AskQuestion, AskSummary, DaemonApi, M
 import { hostEpoch, type HostsState } from "../../../shared/hosts";
 import { api, apiFor, bridge } from "../bridge";
 import { translate } from "../i18n";
-import { applyAskEvent, ASKS_FEATURE, DELEGATION_VIEWS_FEATURE, followUpActionId, mergeSummaries, summaryFromRecord, type DelegationRecords, type ProgressNote } from "./delegations";
+import { applyAskEvent, ASKS_FEATURE, DELEGATION_VIEWS_FEATURE, followUpActionId, mergeSummaries, summaryFromRecord, withoutLink, type DelegationRecords, type ProgressNote } from "./delegations";
 import { delegationRefresh } from "./delegationRefresh";
 import { focusHostId, hostKey, parseHostKey, type HostKey } from "./hostKeys";
 import { onEveryAppWindow } from "./appWindowSet";
@@ -236,6 +236,19 @@ function mergeRows(hostId: string, rows: AskSummary[], extra: Partial<Delegation
 /** Daemon calls of a host's delegations (answers, artifacts of its cards). */
 export function delegationApi(hostId: string): DaemonApi {
   return daemonOf(hostId);
+}
+
+/** Events that may change whether a limited delegation can continue now (允许继续 re-reads on them). */
+export function onContinuationGate(hostId: string, projectId: string | null, listener: () => void): () => void {
+  return bridge.on("hostEvent", (event) => {
+    if (event.hostId !== hostId) return;
+    const method = event.envelope.cutex?.method;
+    // r296: an approval change (routingApprovalChanged) too; a project-less one carries projectId null.
+    if (method !== "cutex/project/runControlChanged" && method !== "cutex/delegation/continuationChanged" && method !== "cutex/delegation/routingApprovalChanged") return;
+    const params = event.envelope.cutex?.params as { projectId?: unknown } | undefined;
+    const scope = params?.projectId;
+    if (scope === undefined || (scope === null && projectId === null) || scope === projectId || (typeof scope !== "string" && scope !== null)) listener();
+  });
 }
 
 /**
@@ -503,7 +516,10 @@ export function withDetailState(row: AskSummary, detail: AskDetail): AskSummary 
   if (fresh.revision === row.revision && fresh.followUpEnded && !row.followUpEnded && row.closed) return { ...row, followUpEnded: true };
   if (fresh.revision <= row.revision) return row;
   const { execution, hold, holdSince, review, closed, closedAt, revision, updatedAt, attempt, attempts } = fresh;
-  return { ...row, execution, hold, holdSince, review, closed, closedAt, revision, updatedAt, attempt: attempt ?? row.attempt, attempts, answerId: fresh.answerId ?? row.answerId, ...(fresh.followUpEnded ? { followUpEnded: true } : {}), ...("continuationWait" in fresh ? { continuationWait: fresh.continuationWait } : {}) };
+  // Review references too (r295): a renewed approval replaces a stale one on the record; omitted fields stay as they were.
+  const refs = { ...("reviewRef" in fresh ? { reviewRef: fresh.reviewRef } : {}), ...("reviewRefs" in fresh ? { reviewRefs: fresh.reviewRefs } : {}), ...("reviewDenialReason" in fresh ? { reviewDenialReason: fresh.reviewDenialReason } : {}) };
+  // The list row's `activityLink` described the older revision (the full record has none): dropped until the next list read.
+  return { ...withoutLink(row), execution, hold, holdSince, review, closed, closedAt, revision, updatedAt, attempt: attempt ?? row.attempt, attempts, answerId: fresh.answerId ?? row.answerId, ...(fresh.followUpEnded ? { followUpEnded: true } : {}), ...("continuationWait" in fresh ? { continuationWait: fresh.continuationWait } : {}), ...(fresh.crossHost ? { crossHost: fresh.crossHost } : {}), ...refs };
 }
 
 /**

@@ -79,7 +79,8 @@ describe("Side request identity and lifecycle", () => {
     expect(current().pendingMessage).not.toBeNull();
     const pending = current().pendingMessage;
     await sendSide("host-a", "side-1");
-    expect(harness.api.sideSend.mock.calls[1]![2]).toBe(pending);
+    // The same message again (same text and id); the local note / quote it was made from stay out of the call.
+    expect(harness.api.sideSend.mock.calls[1]![2]).toEqual({ text: pending!.text, clientMessageId: pending!.clientMessageId });
   });
 
   it("shows the field-specific validation reason instead of invalid text", () => {

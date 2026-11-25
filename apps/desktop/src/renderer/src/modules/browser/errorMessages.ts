@@ -37,7 +37,7 @@ export const browserErrorMessagesZhCN = {
   "browser.error.serviceReclaimed": "这个服务已被 cutex 回收（闲置或到期），页面不再可用。请让{{agent}}重新登记，或在「服务」页查看。",
   "browser.error.serviceStopped": "这个服务已停止（或崩溃后正在等待重启）。左键点击「重新加载」会再次启动它。",
   "browser.error.serviceNotFound": "找不到这个服务：它可能已被删除或改名。请在「服务」页查看。",
-  "browser.error.serviceStartFailed": "这个服务没能启动。请在「服务」页查看日志，然后重新加载。",
+  "browser.error.serviceStartFailed": "这个服务未能启动。请在「服务」页查看日志，然后重新加载。",
   "browser.error.serviceCrashLooped": "这个服务反复崩溃，cutex 已停止自动重启。请在「服务」页查看日志，修好后重新加载。",
   "browser.error.serviceChanged": "这个服务刚刚重启或换了端口，请重新加载。",
   "browser.error.upstreamUnreachable": "服务没有响应（可能还在启动，或进程已经退出）。稍后重新加载。",

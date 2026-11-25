@@ -1,4 +1,7 @@
 import { EventEmitter } from "node:events";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import type { BrowserWindow, IpcMainInvokeEvent } from "electron";
 import type { HostManager } from "../src/main/hosts";
@@ -13,7 +16,7 @@ import type { ApprovalRecord } from "../src/shared/ipc";
 // This suite exercises the installed owner IPC boundary and the real registry, lease
 // coordinator, provider, network and visibility guards. Only Electron primitives,
 // device/provenance persistence and the already independently tested relay transport
-// are replaced. No Electron process, socket, daemon, model or filesystem writes.
+// are replaced. A private fixture contains the browser identity state.
 interface RelayStub {
   options: BrowserRelayOptions;
   online: boolean;
@@ -26,6 +29,7 @@ interface RelayStub {
   noteOwnerActivity: Mock<() => void>;
 }
 const mocks = vi.hoisted(() => ({
+  userData: "",
   handlers: new Map<string, (...args: any[]) => Promise<any>>(),
   sessions: new Map<string, unknown>(),
   appListeners: new Map<string, Set<(...args: any[]) => void>>(),
@@ -105,7 +109,7 @@ vi.mock("electron", () => ({
   BrowserWindow: vi.fn(), screen: { getDisplayMatching: vi.fn(() => ({ scaleFactor: 1.5 })) }, nativeTheme: { shouldUseDarkColors: false, on: vi.fn(), off: vi.fn() }, nativeImage: { createFromBuffer: vi.fn(() => { throw Error("No image expected in wiring test"); }) },
   ipcMain: { handle: (name: string, fn: (...args: any[]) => Promise<any>) => mocks.handlers.set(name, fn),
     removeHandler: (name: string) => mocks.handlers.delete(name) },
-  app: { isPackaged: false, getPath: () => "memory-only-user-data",
+  app: { isPackaged: false, getPath: (name: string) => name === "downloads" ? "memory-only-user-data" : mocks.userData,
     on(name: string, fn: (...args: any[]) => void) { let set = mocks.appListeners.get(name); if (!set) mocks.appListeners.set(name, set = new Set()); set.add(fn); },
     removeListener(name: string, fn: (...args: any[]) => void) { mocks.appListeners.get(name)?.delete(fn); } },
   session: { fromPartition(name: string) { const session = mocks.sessions.get(name); if (!session) throw Error(`Unexpected test partition ${name}`); return session; } },
@@ -169,6 +173,9 @@ async function until(predicate: () => boolean) {
 }
 const cleanups: (() => void)[] = [];
 function fixture(hostIds = ["local"], relayCapability = true, kinds: Record<string, "local" | "ssh" | "dev-direct"> = {}) {
+  const userData = mkdtempSync(join(tmpdir(), "cutex-browser-relay-install-"));
+  mocks.userData = userData;
+  cleanups.push(() => rmSync(userData, { recursive: true, force: true }));
   const connections = new Map(hostIds.map((id, index) => {
     mocks.sessions.set(`persist:browser-${id}`, new SessionMock());
     mocks.sessions.set(`persist:browser-agent-${id}`, new SessionMock());

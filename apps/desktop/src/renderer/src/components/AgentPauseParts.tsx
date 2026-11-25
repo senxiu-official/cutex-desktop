@@ -87,7 +87,7 @@ export function AgentPausedSendHint({ hostId, sessionId, send }: { hostId: strin
           void resumeAndSend(hostId, sessionId, send).finally(() => setBusy(false));
         }}
         title={t("agentPause.resumeAndSendHint")}
-        className="shrink-0 rounded-md bg-accent px-2 py-0.5 text-xs text-white hover:opacity-90 disabled:opacity-50"
+        className="shrink-0 rounded-md bg-accent px-2 py-0.5 text-xs text-on-accent hover:opacity-90 disabled:opacity-50"
         data-testid="agent-resume-send"
       >
         {t("agentPause.resumeAndSend")}

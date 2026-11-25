@@ -18,6 +18,8 @@ import { useModulePref } from "../react";
 import type { Json } from "../types";
 import { BrowserClaimController, browserClaimApproval, browserClaimTabDisplay, type BrowserClaimScope } from "./browserClaimUi";
 import { ApprovalSource } from "../../components/ApprovalSource";
+import { EntityMention } from "../../components/EntityIcon";
+import { tNodes } from "../../lib/textNodes";
 
 const BUTTON = "shrink-0 rounded-md border border-border px-2.5 py-1 text-xs text-foreground enabled:hover:bg-hover disabled:opacity-40";
 const PRIMARY = btn({ variant: "primary", size: "sm" });
@@ -129,7 +131,7 @@ export function BrowserClaimPanel(props: BrowserClaimPanelProps) {
     {props.variant === "card" && <div className="flex items-start gap-2">
       <Globe size={15} className="mt-0.5 shrink-0 text-accent" />
       <div className="min-w-0 flex-1 text-sm">
-        <span className="font-medium">{tab ? t("approvals.claim.title", { name: details.agentName, tab: tabName }) : t("approvals.claim.titleNoTab", { name: details.agentName })}</span>
+        <span className="font-medium">{tNodes(t, tab ? "approvals.claim.title" : "approvals.claim.titleNoTab", { name: <EntityMention entity={{ kind: "agent", id: details.cutexSessionId, name: details.agentName }}>{details.agentName}</EntityMention>, tab: tabName })}</span>
         {tab && <span className={tab.pool === "agent" ? "text-subtle" : "text-warn"}>{t(tab.pool === "agent" ? "approvals.claim.agentPool" : "approvals.claim.ownerLogin")}</span>}
         <p className="mt-0.5 line-clamp-2 text-xs text-subtle" title={details.reason}>{t("approvals.claim.reason", { reason: details.reason })}</p>
       </div>

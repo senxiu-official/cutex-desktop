@@ -7,6 +7,8 @@ import { setAppearance, useAppearance, useFontStatus, type Density } from "../..
 import { settingsAnchorId } from "../../lib/settingsNav";
 import { applyContrast, applyDarkPalette, applyLightPalette, applyTheme, DARK_PALETTES, LIGHT_PALETTES, PALETTE_SWATCH, loadContrast, loadDarkPalette, loadLightPalette, loadTheme, type ContrastPref, type DarkPalette, type LightPalette, type ThemePref } from "../../lib/theme";
 import { ScriptText } from "../ScriptText";
+import { applyAccent, DEFAULT_ACCENT, loadAccent, type AccentPref } from "../../lib/accent";
+import { AccentPicker, AccentSample } from "./AccentPicker";
 import { AppearanceNumberRow, FontRow } from "./AppearanceRows";
 import { ResetButton, Section, Segmented, Select, SettingRow, SwatchPicker, Toggle } from "./Form";
 import { PreviewBand } from "./PreviewBand";
@@ -51,6 +53,11 @@ export function AppearancePage() {
   const [contrast, setContrast] = useState<ContrastPref>(loadContrast);
   const [lightPalette, setLightPalette] = useState<LightPalette>(loadLightPalette);
   const [darkPalette, setDarkPalette] = useState<DarkPalette>(loadDarkPalette);
+  const [accent, setAccent] = useState<AccentPref>(loadAccent);
+  const pickAccent = (v: AccentPref) => {
+    setAccent(v);
+    applyAccent(v);
+  };
   return (
     <>
       <Section id={settingsAnchorId("colors")} title={t("appearance.colors")}  >
@@ -86,6 +93,12 @@ export function AppearancePage() {
               applyDarkPalette(v);
             }}
           />
+        </SettingRow>
+        {/* 强调色 (owner 2026-11-25): switches, links, focus and selection; each theme gets a readable value (lib/accent). */}
+        <SettingRow agents="none" source="local" label={t("appearance.accent")} info={t("appearance.accentHint")}
+          reset={<ResetButton disabled={accent === DEFAULT_ACCENT} onClick={() => pickAccent(DEFAULT_ACCENT)} />}
+          sample={<AccentSample value={accent} />}>
+          <AccentPicker label={t("appearance.accent")} value={accent} onChange={pickAccent} />
         </SettingRow>
         <SettingRow agents="none" source="local" label={t("shell.contrast")} info={t("shell.contrastHint")}>
           <Segmented

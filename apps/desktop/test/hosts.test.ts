@@ -181,11 +181,11 @@ describe("tunnel state", () => {
   });
 
   it("carries the active SSH address through reconnects and stop", () => {
-    let s = tunnelReduce(initialTunnel(), { type: "spawn", localPort: 53122, target: "hachimi-direct" });
-    expect(s.target).toBe("hachimi-direct");
+    let s = tunnelReduce(initialTunnel(), { type: "spawn", localPort: 53122, target: "hostc-direct" });
+    expect(s.target).toBe("hostc-direct");
     s = tunnelReduce(s, exit(255, "Connection reset", 100));
-    expect(s.target).toBe("hachimi-direct");
-    expect(tunnelReduce(s, { type: "stop" })).toMatchObject({ status: "idle", target: "hachimi-direct" });
+    expect(s.target).toBe("hostc-direct");
+    expect(tunnelReduce(s, { type: "stop" })).toMatchObject({ status: "idle", target: "hostc-direct" });
   });
 });
 
@@ -219,11 +219,11 @@ describe("hosts file", () => {
   });
 
   it("migrates one target to a rollback-compatible ordered address list", () => {
-    const old = parseHostsFile({ version: 2, hosts: [{ id: "ssh-aaaa1111", target: "hachimi-lan" }] }).hosts[0]!;
-    expect(old).toMatchObject({ target: "hachimi-lan", targets: ["hachimi-lan"], daemonHostId: null });
-    const current = parseHostsFile({ version: 2, hosts: [{ id: "ssh-aaaa1111", target: "hachimi-lan", targets: ["hachimi-direct", "hachimi-direct", "hachimi-tail"], daemonHostId: "HOST-H" }] }).hosts[0]!;
-    expect(current).toMatchObject({ target: "hachimi-direct", targets: ["hachimi-direct", "hachimi-tail"], daemonHostId: "HOST-H" });
-    expect(parseHostsFile({ version: 2, hosts: [{ id: "ssh-aaaa1111", target: "hachimi-lan", targets: ["-oProxyCommand=x"] }] }).hosts[0]).toMatchObject({ target: "hachimi-lan", targets: ["hachimi-lan"] });
+    const old = parseHostsFile({ version: 2, hosts: [{ id: "ssh-aaaa1111", target: "hostc-lan" }] }).hosts[0]!;
+    expect(old).toMatchObject({ target: "hostc-lan", targets: ["hostc-lan"], daemonHostId: null });
+    const current = parseHostsFile({ version: 2, hosts: [{ id: "ssh-aaaa1111", target: "hostc-lan", targets: ["hostc-direct", "hostc-direct", "hostc-tail"], daemonHostId: "HOST-H" }] }).hosts[0]!;
+    expect(current).toMatchObject({ target: "hostc-direct", targets: ["hostc-direct", "hostc-tail"], daemonHostId: "HOST-H" });
+    expect(parseHostsFile({ version: 2, hosts: [{ id: "ssh-aaaa1111", target: "hostc-lan", targets: ["-oProxyCommand=x"] }] }).hosts[0]).toMatchObject({ target: "hostc-lan", targets: ["hostc-lan"] });
   });
 
   it("v1 → v2 (one way): lastActive becomes the scope, every host auto-connects, palette colors in order", () => {

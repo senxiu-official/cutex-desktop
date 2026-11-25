@@ -39,9 +39,12 @@ export function isMac(): boolean {
   return (bridge as { platform?: string } | undefined)?.platform === "darwin";
 }
 
-/** The modifier as shown in hints: "Ctrl+" or "⌘+". */
+/**
+ * The modifier as shown in hints: "Ctrl" or "⌘", without a separator — the hint text writes it (「{key} + 左键点击」), so
+ * every modifier+click hint (window top bar, sidebar, launcher, tray, foretell) reads the same, with one plus.
+ */
 export function newInstanceKey(mac: boolean = isMac()): string {
-  return mac ? "⌘+" : "Ctrl+";
+  return mac ? "⌘" : "Ctrl";
 }
 
 /** Ctrl/⌘ + Enter on a focused row: the same as Ctrl/⌘ + click. Returns the modifiers, or null for other keys. */

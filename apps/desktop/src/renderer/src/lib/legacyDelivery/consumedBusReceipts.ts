@@ -1,5 +1,5 @@
 // LEGACY(input-ledger-v1): frozen delivery inference for older hosts.
-// Delete only when EVERY host advertises input-ledger-v1 (including hachimi).
+// Delete only when EVERY host advertises input-ledger-v1 (including hostc).
 // A visible external-event item alone is not a model receipt: Claude also presents inputs for
 // turns rejected by the provider. Only the same exact input in a completed turn is positive evidence.
 import { useEffect, useMemo } from "react";

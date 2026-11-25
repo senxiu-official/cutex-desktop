@@ -4,6 +4,7 @@ import { agentFeaturesOf, lacks } from "../../lib/agentFeatures";
 // 左侧栏 (+ 会话两侧), 状态显示 — plus 归档 (数据) and 键盘快捷键, 关于 (系统: versions, licenses, the dragon). Desktop-local prefs live in localStorage
 // (lib/prefs, lib/appearance) or the main process (close behaviour, update interval).
 import { useEffect, useState } from "react";
+import { Trash2 } from "lucide-react";
 import type { CapabilitiesView, CloseBehavior, ShellState, UpdateStatus } from "../../../../shared/ipc";
 import { api, bridge } from "../../bridge";
 import { useI18n, type Locale, type MessageKey } from "../../i18n";
@@ -16,7 +17,7 @@ import { IMAGE_INPUT_STEERING_FEATURE, imageBusyPatch, readImageBusyBehavior } f
 import type { ImageBusyBehavior } from "../../../../shared/ipc";
 import { setOwnerMayPassAsks } from "../../lib/admissionOrderView";
 import { FOLD_LINE_OPTIONS, migrateFoldLines } from "../../lib/messageFold";
-import { deleteAgentNow, SESSION_FEATURES } from "../../lib/menus";
+import { deleteAgent, SESSION_FEATURES } from "../../lib/menus";
 import { archivedProjectOf, projectOfArchived } from "../../lib/archivedAgent";
 import { restoreWithDirector } from "../../lib/projectArchive";
 import type { AgentRow } from "../../lib/sidebar";
@@ -24,6 +25,7 @@ import { PERF_MODES, setUiPref, useUiPrefs, type PerfMode } from "../../lib/pref
 import { setMultiWindow, useMultiWindow } from "../../lib/multiWindowPref";
 import { displayKey, shortcutsFor } from "../../lib/shortcuts";
 import { KeybindingsSection } from "./KeybindingsSection";
+import { PromptEnhanceSection } from "./PromptEnhanceSettings";
 import { GestureGuide } from "./GestureGuide";
 import { useSidebarModel } from "../../lib/sidebarView";
 import { useTargetFeatures, useTargetHostId, useTargetSelect, useTargetSidebar } from "../../lib/targetHost";
@@ -46,9 +48,7 @@ import { UpdateButton } from "../UpdateButton";
 import { AboutDragon } from "./AboutDragon";
 import { SidebarSettingsCards } from "./regions/SidebarSettings";
 import { OwnerNotifySection } from "./OwnerNotifySettings";
-import { ArmedRemove, Button, useCompactSettings, EmptyState, ErrorNote, HintAction, LinkRow, ListFilter, ListRow, PartHeading, PartNav, Section, Segmented, Select, SettingRow, SubPageRow, TextLink, Toggle, SettingsGroup } from "./Form";
-import { matchesFilter } from "../../lib/listFilter";
-import { useScrollToSettingsAnchor } from "../../lib/settingsFocus";
+import { Button, IconButton, useCompactSettings, EmptyState, ErrorNote, HintAction, LinkRow, ListRow, PartHeading, PartNav, Section, Segmented, Select, SettingRow, SubPageRow, TextLink, Toggle, SettingsGroup } from "./Form";
 import { StatusPlaceTable } from "./StatusPlaceTable";
 import { TermsSection } from "./TermsSettings";
 import { SettingsSections } from "../../modules/Outlet";
@@ -715,6 +715,11 @@ export function ComposerPage() {
             onChange={(v) => setUiPref("sendKeys", v)}
           />
         </SettingRow>
+        {/* Owner 2026-11-24 (方案 B): off by default; only drafts that already have a line break (lib/sendKeys). */}
+        <SettingRow agents="none" source="local" label={t("settings.multilineEnter", { key: displayKey("Ctrl+Enter", bridge.platform === "darwin") })}
+          hint={t(ui.sendKeys === "cli" ? "settings.multilineEnterHint.cli" : "settings.multilineEnterHint.queueFirst", { key: displayKey("Ctrl+Enter", bridge.platform === "darwin") })}>
+          <Toggle checked={ui.multilineEnterNewline} onChange={(v) => setUiPref("multilineEnterNewline", v)} />
+        </SettingRow>
         {asks && (
           <SettingRow agents="none" source="local" label={t("conversation.delegationSteerKeys")} hint={t("conversation.delegationSteerKeysHint")}>
             <Toggle checked={ui.delegationSteerKeys} onChange={(v) => setUiPref("delegationSteerKeys", v)} />
@@ -723,6 +728,8 @@ export function ComposerPage() {
         {/* 运行中的图片消息 is the host's (r264): on 协作 next to 排队顺序; here only a way there. */}
         {imageSteer && !panel && <LinkRow agents="none" source="local" label={t("queue.imageBusy")} link={t("queue.imageBusy.link")} onClick={() => openSettings("collab", { anchor: "imageBusy" })} />}
       </Section>
+      {/* 提示词增强 (owner 2026-11-24, experimental): only where the host offers text-rewrite-v1. */}
+      {!panel && <PromptEnhanceSection />}
       <Section id={settingsAnchorId("queuePanel")} title={t("queue.panelFold")}>
         <SettingRow agents="none" source="local" label={t("shell.composer.panelOpen")} hint={t(ui.queuePanelFold === "auto" ? "queue.panelFold.autoHint" : "queue.panelFold.openHint")}>
           <Segmented
@@ -803,7 +810,7 @@ export function ShortcutsPage() {
       <Section id={settingsAnchorId("gestures")} title={t("gestures.title")}>
         <GestureGuide />
       </Section>
-      {shortcutsFor(ui.sendKeys).map((group) => (
+      {shortcutsFor(ui.sendKeys, ui.multilineEnterNewline).map((group) => (
         <Section key={group.id} id={settingsAnchorId(`shortcuts-${group.id}`)} title={t(group.title)}>
           {group.items.map((s, i) => (
             <div key={i} className="flex items-center gap-4 border-b border-border py-2 last:border-b-0">
@@ -846,30 +853,23 @@ export function ArchivePage() {
   );
 }
 
-/** 归档 → 已归档的智能体: every one, with a filter. */
-export function ArchivedSubPage() {
-  useScrollToSettingsAnchor();
-  return <ArchivedList all />;
-}
-
-function ArchivedList({ all = false }: { all?: boolean }) {
+/** The first archived agents; all of them, with filters, batch actions and figures: 归档 → 已归档的智能体 (modules/archive/ArchivedManager). */
+function ArchivedList() {
   const { t } = useI18n();
   // The settings host's archived agents (the page header's host picker; lib/targetHost).
   const { archived } = useSidebarModel();
   const canDelete = useTargetFeatures().has(SESSION_FEATURES.delete);
-  const [filter, setFilter] = useState("");
-  const rows = all ? archived.filter((row) => matchesFilter(filter, row.name)) : archived.slice(0, ARCHIVED_ON_PAGE);
+  const rows = archived.slice(0, ARCHIVED_ON_PAGE);
   return (
-    <Section id={all ? settingsAnchorId("list-all") : settingsAnchorId("list")} title={all ? t("archive.all", { n: archived.length }) : t("archive.list")} hint={archived.length && !all ? t(canDelete ? "archive.archiveHintDelete" : "archive.archiveHint") : undefined}>
+    <Section id={settingsAnchorId("list")} title={t("archive.list")} hint={archived.length ? t(canDelete ? "archive.archiveHintDelete" : "archive.archiveHint") : undefined}>
       {archived.length === 0 ? (
         <EmptyState>{t("archive.archiveEmpty")}</EmptyState>
       ) : (
         <div>
-          {all && <div role="search" className="contents"><ListFilter count={archived.length} value={filter} onChange={setFilter} /></div>}
           {rows.map((row) => (
             <ArchivedRow key={row.id} row={row} canDelete={canDelete} />
           ))}
-          {!all && archived.length > ARCHIVED_ON_PAGE && <SubPageRow title={t("archive.all", { n: archived.length })} onOpen={() => useApp.getState().openSettings("archive", { sub: "list" })} />}
+          {archived.length > ARCHIVED_ON_PAGE && <SubPageRow title={t("archive.all", { n: archived.length })} onOpen={() => useApp.getState().openSettings("archive", { sub: "list" })} />}
         </div>
       )}
     </Section>
@@ -914,7 +914,12 @@ function ArchivedRow({ row, canDelete }: { row: AgentRow; canDelete: boolean }) 
           <Button disabled={busy} onClick={() => void act(() => restoreWithDirector(session, t, hostId))} title={archivedProject ? t("archive.banner.projectArchived", { project: archivedProject.name }) : undefined}>
             {t("archive.row.restore")}
           </Button>
-          {canDelete && !lacks(agentFeaturesOf(session), "threadDelete") && <ArmedRemove title={t("archive.row.delete")} armedLabel={t("archive.row.deleteArmed")} disabled={busy} onRemove={() => void act(() => deleteAgentNow(session, t, undefined, hostId))} />}
+          {/* Permanent delete: the same high-risk dialog as the agent menu's 永久删除 (deleteAgent). */}
+          {canDelete && !lacks(agentFeaturesOf(session), "threadDelete") && (
+            <IconButton label={t("archive.row.delete")} danger disabled={busy} onClick={() => void act(() => deleteAgent(session, t, hostId))}>
+              <Trash2 size={14} />
+            </IconButton>
+          )}
         </>
       }
       below={error ? <p className="mt-1 text-xs text-danger">{error}</p> : undefined}

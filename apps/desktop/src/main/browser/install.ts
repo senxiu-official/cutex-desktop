@@ -6,9 +6,17 @@ import { randomBytes, randomUUID } from "node:crypto";
 import type { BrowserOperationResult } from "@cutex-desktop/browser-protocol";
 import { join } from "node:path";
 import { networkInterfaces } from "node:os";
-import { app, dialog, ipcMain, Menu, nativeImage, screen, session, type AuthInfo, type ContextMenuParams, type DownloadItem, type BrowserWindow, type IpcMainInvokeEvent, type Session, type WebContents, type WebPreferences } from "electron";
+import { app, clipboard, dialog, ipcMain, Menu, nativeImage, powerMonitor, safeStorage, screen, session, type AuthInfo, type ContextMenuParams, type DownloadItem, type BrowserWindow, type IpcMainInvokeEvent, type Session, type WebContents, type WebPreferences } from "electron";
 import type { EventEnvelope } from "@cutex-desktop/protocol";
-import { BROWSER_CHANNEL, DEFAULT_BROWSER_CONTROL_SETTINGS, type BrowserControlSettings, type BrowserEvent, type BrowserRequest, type BrowserMediaView, type BrowserSitePermissionPromptView, type BrowserOwnerNoticeKind, type BrowserTabMount, type BrowserTabView, type BrowserViewMemory } from "../../shared/browser";
+import { BROWSER_IDENTITY_CHANNEL, DEFAULT_BROWSER_IDENTITY_ID, DEFAULT_BROWSER_IDENTITY_PREFS } from "../../shared/browserIdentity";
+import { createBrowserIdentityChannel } from "./identity/channel";
+import { browserIdentityServices } from "./identity/contract";
+import { BrowserIdentities } from "./identity/identities";
+import { BrowserHistory } from "./identity/history";
+import { browserIdentityPartition, DEFAULT_BROWSER_IDENTITY_ID as DEFAULT_ID, type BrowserHistoryTransition } from "../../shared/browserIdentity";
+import { createBrowserPasswordService, createPlatformPasswordStore } from "./passwords";
+import { createOwnerGestures } from "./passwords/gesture";
+import { BROWSER_CHANNEL, DEFAULT_BROWSER_CONTROL_SETTINGS, type BrowserControlSettings, type BrowserEvent, type BrowserRequest, type BrowserMediaView, type BrowserSitePermissionPromptView, type BrowserOwnerNoticeKind, type BrowserTabMount, type BrowserTabView, type BrowserViewMemory, browserHistoryShortcut } from "../../shared/browser";
 import { browserClaimOrigin, type BrowserClaimAutoReason, type BrowserClaimTab } from "../../shared/browserClaim";
 import type { ApprovalRecord } from "../../shared/ipc";
 import type { HostBinding } from "../../shared/hosts";
@@ -48,6 +56,8 @@ import { BrowserLeases } from "./leases";
 import { loadBrowserDeviceId } from "./device";
 import { createBrowserTabIdentity, browserTabIdentityStorage } from "./tabIdentity";
 import { createBrowserOwnerApi } from "./ownerApi";
+import { WhatsAppObserver } from "./whatsAppObserver";
+import { isWhatsAppWeb } from "./whatsAppUnread";
 import { modelScreenshot } from "./modelOutput";
 import { BrowserClaimAudit, BrowserClaimCoordinator, BrowserClaimPolicyStore, BrowserClaimSessionAllows } from "./claims";
 import { createBrowserCarrier, guardBrowserCarrierDialogs, type BrowserCarrier, type BrowserCarrierDialogGuard } from "./carrier";
@@ -57,7 +67,7 @@ import { createBrowserCarrier, guardBrowserCarrierDialogs, type BrowserCarrier, 
 type Reservation = BrowserAttachReservation & { guestId: string; epoch: string; tabKey: string; url: string; requestUrl: string; admitted: boolean; expires: number; actor: BrowserActor; post?: BrowserPopupPost; popupGrant?: PopupGrant; desktopLoopback?: true; ownerNavigation?: boolean; popupOrigin?: string; embedderId?: number };
 /** A popup main turned into an app tab: the exact URL (display URLs drop secrets) and form body,
  * redeemed once by that new tab's first open. */
-type PopupTarget = { url: string; post?: BrowserPopupPost; pool: "owner" | "agent"; expires: number; grant?: PopupGrant; ownerNavigation?: true; desktopLoopback?: true; popupOrigin?: string };
+type PopupTarget = { url: string; post?: BrowserPopupPost; pool: "owner" | "agent"; expires: number; grant?: PopupGrant; ownerNavigation?: true; desktopLoopback?: true; popupOrigin?: string; byAgent?: true };
 /** The opener's active lease when its agent's own click opened the tab (host has browser-popup-grant). */
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
 type PopupGrant = { openerLeaseId: string; sessionId: string };
@@ -75,12 +85,15 @@ const HANDOVER_TIMEOUT_MS = 15_000;
  * The exact target stays here; the renderer sees the display URL and redeems by id. One per kind per tab. */
 type OwnerNotice = { id: string; url: string }
   & ({ kind: "certificate"; origin: string; fingerprint: string } | { kind: "download"; filename: string } | { kind: "popup"; post?: BrowserPopupPost });
-type TabData = { url: string; title: string; blockedNavigation?: BrowserTabView["blockedNavigation"]; notices?: OwnerNotice[]; loadFailure?: RelayErrorDetail; loginOrigin?: string; confirmedOpen?: string; sitePermission?: BrowserSitePermissionPromptView; documentEpoch?: number; favicon?: string; error?: string; service?: BrowserServiceSession; navigation: number; authRetries: number; subresourceReticketAt?: number; zoom?: number; media?: { playing: boolean; audible: boolean }; dispose?: () => void };
+type HistoryIntent = { url: string; transition: BrowserHistoryTransition | null; at: number };
+type TabData = { url: string; title: string; blockedNavigation?: BrowserTabView["blockedNavigation"]; notices?: OwnerNotice[]; loadFailure?: RelayErrorDetail; loginOrigin?: string; confirmedOpen?: string; sitePermission?: BrowserSitePermissionPromptView; documentEpoch?: number; favicon?: string; error?: string; service?: BrowserServiceSession; navigation: number; authRetries: number; subresourceReticketAt?: number; zoom?: number; media?: { playing: boolean; audible: boolean }; dispose?: () => void;
+  loginLeaseId?: string; historyIntent?: HistoryIntent; historyTransition?: BrowserHistoryTransition | null; historyVisit?: { id: string; url: string } };
 const AUTH_PATH = "/__cutex/auth";
 /** The owner's 停止 (正在播放): every audio / video element of the page's main document and its same-origin frames pauses. */
 export const BROWSER_PAUSE_MEDIA_SCRIPT = `(() => { const docs = [document]; for (const f of document.querySelectorAll('iframe')) { try { if (f.contentDocument) docs.push(f.contentDocument); } catch {} }
   let n = 0; for (const d of docs) for (const m of d.querySelectorAll('audio,video')) { try { if (!m.paused) { m.pause(); n++; } } catch {} } return n; })()`;
 const SECRET = /(?:^|[-_])(?:access[-_]?token|refresh[-_]?token|id[-_]?token|token|auth|authorization|password|passwd|secret|signature|sig|jwt|bearer|otp|credential|api[-_]?key|key|code|ticket|session|sessionid)(?:$|[-_])/i;
+const identitySessionHooks = new WeakMap<Session, Promise<void>>();
 let previousWindow: (() => void) | undefined;
 let currentAddWindow: ((window: BrowserWindow) => boolean) | undefined;
 /**
@@ -104,6 +117,8 @@ export function browserAppZoom(factor: number): void { currentAppZoom?.(factor);
 // 「本次运行内一直允许」 and the auto-grant log live for this app run only (never on disk).
 const claimAllows = new BrowserClaimSessionAllows();
 const loginWarningDismissals = new BrowserLoginWarningDismissals();
+const loginWarningScope = (record: BrowserGuestRecord): string =>
+  record.identityId ? `${record.hostId}\n${record.identityId}` : record.hostId;
 const claimAudit = new BrowserClaimAudit();
 let claimPolicies: BrowserClaimPolicyStore | undefined;
 let cursorPreferences: BrowserCursorPreferencesStore | undefined;
@@ -167,6 +182,44 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
     const guest = registry.getWebContents(guestId);
     return guest && !guest.isDestroyed() ? embedderOf(guest.hostWebContents)?.window ?? null : null;
   };
+  // Saved passwords (E1 + the secure store, ./passwords): owner identity tabs only; Windows Hello before any read.
+  let passwordGrace = false, lockWatch = false;
+  // The owner's native presses / keys on the app windows (main + desks), observed here: copy, show, fill and turning
+  // the grace on each need one (renderer code alone cannot start them).
+  const appGestures = createOwnerGestures();
+  const lockPasswords = () => passwords.lock();
+  const passwordStore = createPlatformPasswordStore({ userData: app.getPath("userData"), packaged: app.isPackaged, env: process.env,
+    separateData: !!process.env.CUTEX_DESKTOP_USER_DATA,
+    locale: () => locale() ?? app.getLocale(), graceEnabled: () => passwordGrace, safeStorage: () => safeStorage,
+    // Screen lock and suspend forget a 5-minute unlock; listened for from the first unlock the grace keeps.
+    onUnlocked: () => { if (lockWatch || disposed) return; lockWatch = true; powerMonitor.on("lock-screen", lockPasswords); powerMonitor.on("suspend", lockPasswords); } });
+  const passwords = createBrowserPasswordService({
+    store: passwordStore,
+    emit: event => browserIdentityServices.emit(event),
+    prefs: async () => {
+      const prefs = (await browserIdentityServices.identities?.prefs()) ?? DEFAULT_BROWSER_IDENTITY_PREFS;
+      passwordGrace = prefs.passwordHelloGrace;
+      return prefs;
+    },
+    ownerWindow: () => (window.isDestroyed() ? null : window),
+    ownerGesture: () => appGestures.consume(),
+    graceChanged: on => { passwordGrace = on; },
+    clipboard: { writeText: text => clipboard.writeText(text), readText: () => clipboard.readText(), clear: () => clipboard.clear() },
+    showSecret: async (target, login, password) => {
+      const zh = (locale() ?? app.getLocale()).startsWith("zh");
+      const options = { type: "none" as const, title: zh ? "保存的密码" : "Saved password", message: login.origin,
+        detail: `${login.username ? `${login.username}\n\n` : ""}${password}`, buttons: [zh ? "关闭" : "Close"], noLink: true };
+      if (target && !target.isDestroyed()) await dialog.showMessageBox(target, options); else await dialog.showMessageBox(options);
+    },
+  });
+  browserIdentityServices.passwords = passwords;
+  /** The 浏览器身份 of an owner tab: package A's partition map, else today's owner partition = the default identity. */
+  const passwordIdentity = (record: BrowserGuestRecord): string | null => {
+    if (record.pool === "agent") return null;
+    const mapped = browserIdentityServices.identities?.identityOfPartition(record.partition);
+    if (mapped) return mapped.hostId === record.hostId ? mapped.identityId : null;
+    return record.partition === `persist:browser-${record.hostId}` ? DEFAULT_BROWSER_IDENTITY_ID : null;
+  };
   const windowVisible = (target: BrowserWindow | null) => { try { return !!target && !target.isDestroyed() && target.isVisible() && !target.isMinimized(); } catch { return false; } };
   // Stands in for "no admitted window": every visibility / focus check on it fails closed (target hidden).
   const nowhere = { isDestroyed: () => true, isVisible: () => false, isMinimized: () => true,
@@ -201,6 +254,29 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
   const ownerNavigations = new WeakMap<object, BrowserOwnerNavigation>();
   const viewMemos = new ViewMemos();
   const blockedNotices = new Map<string, number>();
+  const whatsApp = new WhatsAppObserver({
+    userData: app.getPath("userData"), locale,
+    client: hostId => networkHost(hostId)?.kind === "local" ? getHosts()?.connection(hostId)?.daemon.activeClient() ?? null : null,
+    hasTab: (hostId, tabKey) => !!registry.getByTab(hostId, tabKey),
+    source(hostId, tabKey) {
+      if (!moduleEnabled || disposed || networkHost(hostId)?.kind !== "local") return null;
+      const record = registry.getByTab(hostId, tabKey);
+      if (!record || record.pool !== "owner" || record.status !== "attached" || isBackground(record.guestId)) return null;
+      const guest = registry.getWebContents(record.guestId), tab = data.get(record.guestId);
+      if (!guest || guest.isDestroyed() || guest.isLoadingMainFrame() || !tab || !isWhatsAppWeb(guest.getURL())) return null;
+      const document = tab.documentEpoch, navigation = tab.navigation, generation = record.pageGeneration;
+      const current = () => moduleEnabled && !disposed && !guest.isDestroyed() && !guest.isLoadingMainFrame()
+        && registry.getWebContents(record.guestId) === guest && data.get(record.guestId) === tab
+        && registry.get(record.guestId)?.pageGeneration === generation && tab.documentEpoch === document && tab.navigation === navigation
+        && isWhatsAppWeb(guest.getURL()) && !leases.forGuest(record.guestId) && !provider.hasGrant(record.guestId);
+      if (!current()) return null;
+      return { guest, current, reading: () => {
+        const target = windowOf(record.guestId);
+        return windowVisible(target) && !!target?.isFocused() && guest.isFocused()
+          && Date.now() - (ownerGestures.get(record.guestId) ?? -Infinity) < 45_000;
+      } };
+    },
+  });
   let sitePermissionStore: BrowserSitePermissionStore | undefined;
   const sitePermissionsStore = () => sitePermissionStore ??= new BrowserSitePermissionStore(join(app.getPath("userData"), "browser-site-permissions.json"));
   // Page zoom (owner 2026-10-28): remembered per service / site host, applied relative to the app's own zoom.
@@ -269,6 +345,7 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
     return !!record && record.pool === "agent" && record.partition === `persist:browser-agent-${record.hostId}` && !!carrier && !!guest && carrier.guest === guest && !guest.isDestroyed();
   }
   let moduleEnabled = false;
+  let resettingRegistry = false;
   let lifecycle = 0;
   const registry = new BrowserRegistry<WebContents>({
     onRevoke(record, reason, guest) {
@@ -300,10 +377,64 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
       // still has browser tabs. Never rely only on Chromium's guest destruction.
       if (!registry.list().some(current => current.partition === record.partition)) egress.revokeSession(session.fromPartition(record.partition));
       if (registry.list().length === 0) egress.stop();
-      publish(record, record.kind === "closed" || record.kind === "host_changed" || record.kind === "host_removed" ? "closed" : undefined);
-      if (["closed", "host_changed", "host_removed"].includes(record.kind)) { data.delete(record.guestId); admissions.delete(record.guestId); lanTargets.release(record.guestId); }
+      const retired = record.kind === "closed" || record.kind === "host_changed" || record.kind === "host_removed";
+      if (retired && !resettingRegistry) whatsApp.retire(record.hostId, record.tabKey);
+      if (record.identityId && (retired || record.kind === "created")) identitiesService.changed();
+      publish(record, retired ? "closed" : undefined);
+      if (retired) { data.delete(record.guestId); admissions.delete(record.guestId); lanTargets.release(record.guestId); }
     },
   });
+  const identitiesService = new BrowserIdentities({
+    userData: app.getPath("userData"), sessionData: app.getPath("sessionData"),
+    hostIds: () => getHosts()?.state().hosts.map(host => host.id) ?? [],
+    tabs: () => registry.list(),
+    session: partition => session.fromPartition(partition),
+    close: (id, hostId) => {
+      for (const record of registry.list(hostId)) if (record.identityId === id) registry.close(record.guestId);
+    },
+    revoke: partition => {
+      const pending = policies.get(partition);
+      if (!pending) return;
+      const target = session.fromPartition(partition);
+      egress.revokeSession(target);
+      revokeBrowserSessionPolicy(target);
+      policies.delete(partition);
+      void pending.catch(() => {});
+    },
+    forgetAdmissions: id => {
+      desktopLoopback().forgetIdentity(id);
+      sitePermissionsStore().forgetIdentity(id);
+      certificateExceptions().forget(id);
+    },
+    forgetHostAdmissions: hostId => certificateExceptions().forget(undefined, hostId),
+    reload: (id, hostId) => {
+      for (const record of registry.list(hostId)) {
+        if (record.identityId !== id) continue;
+        const guest = registry.getWebContents(record.guestId);
+        if (guest && !guest.isDestroyed()) {
+          const tab = data.get(record.guestId);
+          if (tab) tab.historyIntent = { url: guest.getURL(), transition: null, at: Date.now() };
+          guest.reload();
+        }
+      }
+    },
+    dropIdentity: async id => {
+      await browserIdentityServices.passwords?.removeIdentity(id);
+      await browserIdentityServices.history?.dropIdentity(id);
+    },
+    dropHost: async hostId => { await browserIdentityServices.history?.dropHost(hostId); },
+    retentionChanged: () => { void historyService.pruneAll().catch(() => {}); },
+    emit: event => { if (!disposed) browserIdentityServices.emit(event); },
+  });
+  browserIdentityServices.identities = identitiesService;
+  const identityOfPartition = (partition: string) => identitiesService.identityOfPartition(partition);
+  const historyService = new BrowserHistory({
+    userData: app.getPath("userData"), retention: () => identitiesService.preferences().historyRetention,
+    allowed: (identityId, hostId) => !!identityOfPartition(browserIdentityPartition(identityId, hostId)),
+    emit: event => { if (!disposed) browserIdentityServices.emit(event); },
+  });
+  browserIdentityServices.history = historyService;
+  let initialHistoryPrune = false;
   const provider = new InAppProvider({
     getGuest(guestId) {
       syncHosts();
@@ -369,7 +500,8 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
   function syncThrottling(guestId: string, renew = false): void {
     const guest = registry.getWebContents(guestId);
     if (!guest || guest.isDestroyed() || isBackground(guestId)) return;
-    const leased = !!leases.forGuest(guestId);
+    const record = registry.get(guestId);
+    const leased = !!leases.forGuest(guestId) || !!record && whatsApp.observing(record.hostId, record.tabKey);
     if (leased === unthrottled.has(guest) && !(renew && leased)) return;
     if (leased) unthrottled.add(guest); else unthrottled.delete(guest);
     try { guest.setBackgroundThrottling(!leased); } catch { /* Destroyed meanwhile. */ }
@@ -386,15 +518,21 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
     const tab = data.get(record.guestId);
     const guest = registry.getWebContents(record.guestId);
     const alive = guest && !guest.isDestroyed();
+    const loginLease = record.pool === "owner" ? leases.forGuest(record.guestId) : undefined;
+    const loginAgent = loginLease && loginLease.leaseId === tab?.loginLeaseId ? loginLease.agentName : undefined;
+    const loginOrigin = (record.pool === "agent" || !!loginAgent) && tab?.loginOrigin
+      && loginWarningDismissals.allows(loginWarningScope(record), tab.loginOrigin) ? tab.loginOrigin : null;
     return { guestId: record.guestId, hostId: record.hostId, tabKey: record.tabKey, pageGeneration: record.pageGeneration,
       url: tab?.url ?? "about:blank", title: tab?.title ?? "", loading: alive ? guest.isLoading() : false,
       canGoBack: alive ? guest.navigationHistory.canGoBack() : false, canGoForward: alive ? guest.navigationHistory.canGoForward() : false,
-      loginOrigin: record.pool === "agent" && tab?.loginOrigin && loginWarningDismissals.allows(record.hostId, tab.loginOrigin) ? tab.loginOrigin : null,
+      loginOrigin, ...(loginOrigin && loginAgent ? { grantedLoginAgent: loginAgent } : {}),
       blockedNavigation: tab?.blockedNavigation ? { ...tab.blockedNavigation, url: browserDisplayUrl(tab.blockedNavigation.url) } : null,
       ownerNotices: tab?.notices?.length ? tab.notices.map(noticeView) : null,
       status: status ?? record.status, control: provider.controlView(record.guestId),
+      ...(record.identityId ? { browserIdentityId: record.identityId } : {}),
       cursor: provider.cursorView(record.guestId) ? { ...provider.cursorView(record.guestId)!, color: cursorPreferencesStore().get().color } : undefined, pool: record.pool, lease: leaseView(record.guestId),
       ...(tab?.confirmedOpen ? { confirmedOpen: tab.confirmedOpen } : {}),
+      ...(whatsApp.protected(record.hostId, record.tabKey) ? { whatsAppWatch: { enabled: whatsApp.observing(record.hostId, record.tabKey) } } : {}),
       ...(tab && networkHost(record.hostId)?.kind === "ssh" && desktopLoopbackUrl(tab.url) ? { desktopLoopback: true as const } : {}),
       ...(tab?.sitePermission ? { sitePermission: { ...tab.sitePermission, permissions: [...tab.sitePermission.permissions] } } : {}),
       ...(tab?.error ? { error: tab.error } : {}), ...(tab?.favicon ? { favicon: tab.favicon } : {}), ...(tab?.zoom && tab.zoom !== 1 ? { zoom: tab.zoom } : {}),
@@ -477,13 +615,21 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
     if (!current || current.pool === "agent" || disposed || !moduleEnabled) return false;
     const origin = certificateOrigin(url);
     if (!origin || !isBrowserCertificateFingerprint(fingerprint)) return false;
-    if (certificateExceptions().matches(current.hostId, origin, fingerprint)) return true;
+    if (certificateExceptions().matches(current.hostId, origin, fingerprint, current.identityId)) return true;
     if (mainFrame) ownerNotice(current, { kind: "certificate", url, origin, fingerprint }, previous => previous.kind === "certificate" && previous.url === url && previous.fingerprint === fingerprint);
     return false;
   }
   function syncHosts(): void {
     const manager = getHosts();
-    if (manager) try { desktopLoopback().retain(manager.state().hosts.map(host => host.id)); } catch { /* In-memory removal still fails closed. */ }
+    if (manager) {
+      const known = manager.state().hosts.map(host => host.id);
+      identitiesService.reconcileHosts(known);
+      try { desktopLoopback().retain(known); } catch { /* In-memory removal still fails closed. */ }
+      if (!initialHistoryPrune) {
+        initialHistoryPrune = true;
+        setImmediate(() => { if (!disposed) void historyService.pruneAll().catch(() => {}); });
+      }
+    }
     for (const hostId of registry.hostIds()) {
       const conn = getHosts()?.connection(hostId);
       // Reachability is not identity: a health-check retry must not destroy a local page's DOM.
@@ -707,12 +853,13 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
    */
   async function grantRecord(hostId: string, record: BrowserGuestRecord, sessionId: string, settings: BrowserControlSettings, approvalId: string | undefined,
     options: { auto?: BrowserClaimAutoReason; remember?: boolean } = {}): Promise<void> {
+    if (whatsApp.protected(hostId, record.tabKey)) throw new BrowserRelayError("permission_denied");
     const guest = registry.getWebContents(record.guestId), tab = data.get(record.guestId);
     if (registry.get(record.guestId) !== record || record.status !== "attached" || !guest || guest.isDestroyed() || guest.isLoading() || !tab) throw new BrowserRelayError("stale_request");
     const documentEpoch = tab.documentEpoch, navigation = tab.navigation, consentUrl = guest.getURL(), origin = browserClaimOrigin(tab.url);
     // CDP attachment allocates a new ref generation without navigating. Freeze the actual
     // guest/document separately across grant HTTP, hold readiness and activation.
-    const consentCurrent = () => registry.getWebContents(record.guestId) === guest && !guest.isDestroyed()
+    const consentCurrent = () => !whatsApp.protected(hostId, record.tabKey) && registry.getWebContents(record.guestId) === guest && !guest.isDestroyed()
       && data.get(record.guestId) === tab && tab.documentEpoch === documentEpoch && tab.navigation === navigation && guest.getURL() === consentUrl;
     const peer = relayFor(hostId), binding = peer.binding()!;
     const lease = await leases.grant(peer, { deviceId: binding.deviceId, guestId: record.guestId, cutexSessionId: sessionId,
@@ -724,7 +871,7 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
   }
   function claimTab(record: BrowserGuestRecord): BrowserClaimTab | null {
     const guest = registry.getWebContents(record.guestId), tab = data.get(record.guestId);
-    if (desktopLoopbackPage(record) || record.status !== "attached" || !guest || guest.isDestroyed() || guest.isLoading() || !tab || tab.error || leases.forGuest(record.guestId)
+    if (whatsApp.protected(record.hostId, record.tabKey) || desktopLoopbackPage(record) || record.status !== "attached" || !guest || guest.isDestroyed() || guest.isLoading() || !tab || tab.error || leases.forGuest(record.guestId)
       || provider.hasGrant(record.guestId) || [...pendingOpens.values()].some(p => p.record.guestId === record.guestId)) return null;
     return { guestId: record.guestId, tabKey: record.tabKey, url: tab.url, title: tab.title, pageGeneration: record.pageGeneration, pool: record.pool ?? "owner" };
   }
@@ -814,7 +961,10 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
       admitted: (webContentsId, origin) => {
         const record = registry.getByWebContentsId(webContentsId);
         return !!record && record.hostId === hostId && record.partition === partition && admissions.get(record.guestId)?.has(origin) === true;
-      }, desktopLoopback: context => partition === `persist:browser-${hostId}` && (context.allowDesktopLoopback === true || desktopLoopback().enabled(hostId)) });
+      }, desktopLoopback: context => {
+        const owner = identityOfPartition(partition);
+        return owner?.hostId === hostId && (context.allowDesktopLoopback === true || desktopLoopback().enabled(hostId, owner.identityId));
+      } });
   }
   function desktopLoopbackUrl(raw: string): boolean {
     try { return isBrowserLoopbackHost(new URL(raw).hostname); } catch { return false; }
@@ -965,7 +1115,7 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
     if (disposed || !moduleEnabled || owner.isDestroyed()) return;
     const tabKey = randomUUID();
     if (record.pool === "agent") tabIdentities().register(record.hostId, tabKey);
-    else tabIdentities().registerOwner(record.hostId, tabKey);
+    else tabIdentities().registerOwner(record.hostId, tabKey, record.identityId);
     const now = Date.now();
     for (const [key, value] of popupTargets) if (value.expires < now) popupTargets.delete(key);
     if (popupTargets.size >= 16) popupTargets.delete(popupTargets.keys().next().value!);
@@ -981,7 +1131,7 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
       const record = registry.getByWebContentsId(webContentsId), guest = record && registry.getWebContents(record.guestId);
       if (!record || !guest || guest.isDestroyed() || disposed || !moduleEnabled) return undefined;
       const lease = leases.forGuest(record.guestId);
-      return { guestId: record.guestId, pool: record.pool ?? "owner", url: guest.getURL(), ...(lease ? { agentName: lease.agentName } : {}) };
+      return { guestId: record.guestId, pool: record.pool, identityId: record.identityId, url: guest.getURL(), ...(lease ? { agentName: lease.agentName } : {}) };
     },
     agentInput: guestId => provider.agentInput(guestId),
     // The tab shows the open dialog (and how the last one ended without the owner) next to the page.
@@ -1028,7 +1178,7 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
     // ever sees the display URL, the exact URL and form body wait here for that tab.
     const newTabKey = randomUUID();
     if (record.pool === "agent") tabIdentities().register(record.hostId, newTabKey);
-    else tabIdentities().registerOwner(record.hostId, newTabKey);
+    else tabIdentities().registerOwner(record.hostId, newTabKey, record.identityId);
     const now = Date.now();
     // A same-origin owner popup carries only the opener's existing admission. It gets
     // no receipt or redirect authority and cannot mint a different private origin.
@@ -1047,7 +1197,8 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
       ? { openerLeaseId: opener.leaseId, sessionId: opener.cutexSessionId } : undefined;
     for (const [key, value] of popupTargets) if (value.expires < now) popupTargets.delete(key);
     if (popupTargets.size >= 16) popupTargets.delete(popupTargets.keys().next().value!);
-    popupTargets.set(JSON.stringify([record.hostId, newTabKey]), { url, ...(post ? { post } : {}), ...(grant ? { grant } : {}), ...(ownerNavigation ? { ownerNavigation } : {}), ...inherited, pool: record.pool ?? "owner", expires: now + 30_000 });
+    popupTargets.set(JSON.stringify([record.hostId, newTabKey]), { url, ...(post ? { post } : {}), ...(grant ? { grant } : {}), ...(ownerNavigation ? { ownerNavigation } : {}),
+      ...(agent ? { byAgent: true } : {}), ...inherited, pool: record.pool, expires: now + 30_000 });
     scheduleClaimRetry(record.hostId);
     emit("browserEvent", { ...view(record), epoch: record.epoch, kind: "new-tab", newTabUrl: popupDisplayUrl(record.hostId, url), newTabKey, ...(agent ? { newTabAgent: true as const } : {}), ...(grant ? { newTabGranted: true as const } : {}) });
   }
@@ -1187,13 +1338,15 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
     const check = () => {
       if (disposed || !moduleEnabled || admitted !== lifecycle || registry.get(record.guestId) !== record) throw new BrowserRelayError("lease_revoked");
       currentFence(record).check();
+      if (record.identityId && identitiesService.partition(record.identityId, record.hostId) !== record.partition)
+        throw new BrowserRelayError("browser_identity_unavailable");
     };
     check();
     const target = session.fromPartition(record.partition);
     let pending = policies.get(record.partition);
     if (!pending) {
-      pending = installBrowserSessionPolicy(target, { partition: record.partition, registeredHostIds: registry.hostIds(), policy: policy(record.hostId, record.partition),
-        acceptWebContents: id => registry.getByWebContentsId(id)?.hostId === record.hostId && !!networkHost(record.hostId),
+      pending = installBrowserSessionPolicy(target, { partition: record.partition, registeredHostIds: registry.hostIds(), identityOfPartition, policy: policy(record.hostId, record.partition),
+        acceptWebContents: id => registry.getByWebContentsId(id)?.partition === record.partition && !!networkHost(record.hostId),
         download: (id, item) => decideDownload(id, item), permissions: sitePermissions,
         // B5: a refused LAN / loopback certificate in the owner's pool goes to the tab (certificateError); never the agent's.
         ...(record.pool !== "agent" ? { certificateOverridable: isBrowserPrivateCertificateHost } : {}),
@@ -1210,6 +1363,8 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
             currentFence(current).check();
             if (registry.getWebContents(current.guestId) !== guest || provider.agentInput(current.guestId)) return false;
             admit(current, url); revokeDesktopLoopbackGrant(current, url); intent.markPrepared();
+            const tab = data.get(current.guestId);
+            if (tab && tab.historyTransition === undefined && current.identityId && !provider.agentInput(current.guestId)) tab.historyTransition = "link";
             return intent.request(requestId, url);
           };
           const origin = browserTargetOrigin(url);
@@ -1265,6 +1420,19 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
     await pending;
     // A delayed base setProxy must not start a fresh N2 generation after close/disable.
     check();
+    const identity = identityOfPartition(record.partition);
+    if (identity) {
+      let hooks = identitySessionHooks.get(target);
+      if (!hooks) {
+        hooks = Promise.resolve().then(async () => {
+          for (const hook of browserIdentityServices.onIdentitySession) await hook(target, identity);
+        });
+        identitySessionHooks.set(target, hooks);
+      }
+      await hooks;
+      check();
+      identitiesService.used(record.partition);
+    }
     // An N2 failure (listener could not start, revoked mid-setup) must not break local pages: the
     // session stays on (or is restored to) the blackhole proxy and external URLs stay refused.
     await egress.enableSession(target).catch(() => {});
@@ -1337,12 +1505,17 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
       // The relay gets the collapsed code; the owner's tab / IPC message keeps cutex's precise one.
       catch (error) { cancel(); operation?.check(); throw new BrowserRelayError(browserServiceRelayError(error), browserServiceError(error)); }
     } else { tab.url = browserDisplayUrl(url); admit(record, url); }
-    try { check(); registry.nextPageGeneration(record.guestId); publish(registry.get(record.guestId)!); }
+    try {
+      check();
+      tab.historyIntent = { url: target, transition: actor === "owner" ? "other" : null, at: Date.now() };
+      registry.nextPageGeneration(record.guestId);
+      publish(registry.get(record.guestId)!);
+    }
     catch (error) { cancel(); throw error; }
     preparing = false;
     return { target, check, cancel, guest, servicePost };
   }
-  async function navigate(record: BrowserGuestRecord, url: string, authenticationRetry = false, actor: BrowserActor = "owner", post?: BrowserPopupPost, allowDesktopLoopback = false, stage = "navigation", ownerIntent = true, popupOrigin?: string): Promise<void> {
+  async function navigate(record: BrowserGuestRecord, url: string, authenticationRetry = false, actor: BrowserActor = "owner", post?: BrowserPopupPost, allowDesktopLoopback = false, stage = "navigation", ownerIntent = true, popupOrigin?: string, transition?: BrowserHistoryTransition): Promise<void> {
     const { target, check, guest, servicePost } = await prepareNavigation(record, url, authenticationRetry, undefined, actor, allowDesktopLoopback, ownerIntent, popupOrigin, post !== undefined);
     if (actor === "owner") { ownerGestures.set(record.guestId, Date.now()); if (ownerIntent) ownerNavigations.get(guest)?.ownerNavigation(target); else ownerNavigations.get(guest)?.reset(); }
     // A popup's form body is replayed once, only to the exact target it was submitted to, never to a ticket / auth URL.
@@ -1351,7 +1524,10 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
     const options = body && target === url ? body : undefined;
     // Navigation errors never echo the raw (possibly ticket-bearing) URL into renderer/logs.
     try {
-      check(); await guest.loadURL(target, options); check();
+      check();
+      const tab = data.get(record.guestId);
+      if (tab?.historyIntent && transition && actor === "owner") tab.historyIntent.transition = transition;
+      await guest.loadURL(target, options); check();
       if (body && servicePost) { await guest.loadURL(servicePost, body); check(); }
     }
     catch (error) {
@@ -1464,7 +1640,7 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
   function wireGuest(record: BrowserGuestRecord, guest: WebContents): void {
     const tab = data.get(record.guestId)!;
     const ownerIntent = new BrowserOwnerNavigation(
-      () => record.pool !== "agent" && record.partition === `persist:browser-${record.hostId}` && registry.getWebContents(record.guestId) === guest && !disposed && moduleEnabled,
+      () => !!record.identityId && !!identityOfPartition(record.partition) && registry.getWebContents(record.guestId) === guest && !disposed && moduleEnabled,
       () => provider.agentInput(record.guestId), undefined, {
         privateTarget: raw => { const url = new URL(raw); return desktopLoopbackUrl(raw) || !!parseBrowserServiceUrl(raw, networkHost(record.hostId)?.connectionPort)
           || lanTargets.has(url.hostname.replace(/^\[|\]$/g, ""), Number(url.port || (url.protocol === "https:" ? 443 : 80))); },
@@ -1478,10 +1654,12 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
     let queuedLoginInput: { typing: boolean; epoch: number } | undefined;
     const loginInput = (typing: boolean) => {
       const current = registry.get(record.guestId);
-      if (record.pool !== "agent" || !moduleEnabled || disposed || provider.agentInput(record.guestId)
+      const leaseId = leases.forGuest(record.guestId)?.leaseId;
+      if ((record.pool !== "agent" && !leaseId) || !moduleEnabled || disposed || provider.agentInput(record.guestId)
         || guest.isDestroyed() || registry.getWebContents(record.guestId) !== guest || !current) return;
       const raw = guest.getURL(), origin = browserLoginOrigin(raw);
-      if (!origin || !loginWarningDismissals.allows(record.hostId, origin) || tab.loginOrigin === origin) return;
+      const scope = loginWarningScope(record);
+      if (!origin || !loginWarningDismissals.allows(scope, origin) || tab.loginOrigin === origin && tab.loginLeaseId === leaseId) return;
       if (loginProbePending) {
         queuedLoginInput = { typing: typing || !!queuedLoginInput?.typing, epoch: loginDocumentEpoch };
         return;
@@ -1496,8 +1674,9 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
           || latest.pageGeneration !== generation || tab.documentEpoch !== documentEpoch || tab.navigation !== navigation || loginDocumentEpoch !== loginEpoch
           || guest.isDestroyed() || provider.agentInput(record.guestId) || data.get(record.guestId) !== tab
           || registry.getWebContents(record.guestId) !== guest || guest.getURL() !== raw
-          || !loginWarningDismissals.allows(record.hostId, origin)) return;
-        tab.loginOrigin = origin; publish(latest);
+          || record.pool === "owner" && leases.forGuest(record.guestId)?.leaseId !== leaseId
+          || !loginWarningDismissals.allows(scope, origin)) return;
+        tab.loginOrigin = origin; tab.loginLeaseId = leaseId; publish(latest);
       }).catch(() => {}).finally(() => {
         loginProbePending = false;
         const queued = queuedLoginInput; queuedLoginInput = undefined;
@@ -1522,8 +1701,17 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
       if (value.type === "mouseDown" && moduleEnabled && !disposed && !provider.agentInput(record.guestId) && registry.getWebContents(record.guestId) === guest)
         emit("browserEvent", { ...view(record), epoch: record.epoch, kind: "pressed" });
     };
-    const keyboardInput = (event: unknown, value: { type: string; key?: string; code?: string; control?: boolean; meta?: boolean; alt?: boolean }) => {
+    const keyboardInput = (event: unknown, value: { type: string; key?: string; code?: string; control?: boolean; meta?: boolean; alt?: boolean; shift?: boolean }) => {
       popupInput(event, value);
+      // Ctrl+H in an owner-identity page (never an agent-pool or service tab, never the agent's own dispatched key):
+      // the renderer opens 浏览历史 of this tab's identity. The page does not see the key (as in Chrome); it still
+      // counts as the owner's gesture above. The app window's own gesture observer (passwords/gesture) is separate.
+      if (record.pool !== "agent" && !data.get(record.guestId)?.service && browserHistoryShortcut(value, process.platform) && !provider.agentInput(record.guestId)) {
+        (event as { preventDefault?(): void }).preventDefault?.();
+        const current = registry.get(record.guestId);
+        if (current && registry.getWebContents(current.guestId) === guest) emit("browserEvent", { ...view(current), epoch: current.epoch, kind: "history" });
+        return;
+      }
       if (value.type === "keyDown" || value.type === "rawKeyDown" || value.type === "char") loginInput(browserLoginTypingInput(value));
       // Owner typing in the page: agent writes wait for a short quiet; never a pause.
       if (value.type === "keyDown" || value.type === "rawKeyDown" || value.type === "char") provider.ownerActivity(record.guestId, "guest-keyboard");
@@ -1582,6 +1770,16 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
         .popup({ window: shown, x: params.x, y: params.y });
     };
     guest.on("before-input-event", keyboardInput); guest.on("before-mouse-event", mouseInput);
+    // Saved passwords: capture on the owner's submit, fill offers on the owner's click; never while any lease holds the tab.
+    const stopPasswords = record.pool === "agent" ? () => {} : passwords.attach({
+      hostId: record.hostId, tabKey: record.tabKey, guestId: record.guestId, guest,
+      identityId: () => (tab.service ? null : passwordIdentity(record)),
+      grantedTo: () => { const lease = leases.view(record.guestId); return lease ? { agentName: lease.agentName } : provider.controlView(record.guestId) ? { agentName: "" } : null; },
+      ownerInput: () => !provider.agentInput(record.guestId),
+      live: () => moduleEnabled && !disposed && registry.getWebContents(record.guestId) === guest && data.get(record.guestId) === tab && !guest.isDestroyed(),
+      documentEpoch: () => tab.documentEpoch ?? 0,
+      window: () => windowOf(record.guestId) ?? (window.isDestroyed() ? null : window),
+    });
     guest.on("zoom-changed", zoomWheel); guest.on("context-menu", contextMenu);
     const stopPolicy = hardenBrowserGuest(guest, { hostId: record.hostId, policy: policy(record.hostId, record.partition),
       ownerNavigation: (url, kind) => ownerIntent.navigation(url, kind),
@@ -1633,6 +1831,12 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
       queuedLoginInput = undefined;
       ++loginDocumentEpoch; // A same-URL child-frame navigation also invalidates an in-flight probe.
       if (!mainFrame) return;
+      tab.historyVisit = undefined;
+      const historyIntent = tab.historyIntent;
+      tab.historyIntent = undefined;
+      if (historyIntent?.url === url && Date.now() - historyIntent.at <= 15_000) tab.historyTransition = historyIntent.transition;
+      else if (!record.identityId || provider.agentInput(record.guestId)) tab.historyTransition = null;
+      else tab.historyTransition = leases.forGuest(record.guestId) ? undefined : "link";
       if (!inPlace) { tab.blockedNavigation = null; clearNotices(tab, ["certificate"]); }
       tab.documentEpoch = (tab.documentEpoch ?? 0) + 1;
       tab.loginOrigin = undefined;
@@ -1640,8 +1844,36 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
       // Before the new document paints: an own page starts in the app's scheme, a site leaving one drops it.
       if (!inPlace && typeof url === "string") { ownPage = !!parseBrowserServiceUrl(url, networkHost(record.hostId)?.connectionPort); rescheme(); }
     };
-    const inPage = () => { syncThrottling(record.guestId); ++loginDocumentEpoch; tab.documentEpoch = (tab.documentEpoch ?? 0) + 1; tab.loginOrigin = undefined; tab.blockedNavigation = null; changed(); };
-    const navigated = () => { syncThrottling(record.guestId, true); ++loginDocumentEpoch; tab.documentEpoch = (tab.documentEpoch ?? 0) + 1; tab.loginOrigin = undefined; tab.favicon = undefined; tab.media = undefined; tab.blockedNavigation = null; clearNotices(tab); if (tab.sitePermission?.state !== "waiting") tab.sitePermission = undefined; if (registry.get(record.guestId)) registry.nextPageGeneration(record.guestId); changed(); };
+    let lastHistoryUrl: string | undefined;
+    const commitHistory = (url: string, code: number | undefined, inPage: boolean) => {
+      const transition = tab.historyTransition;
+      tab.historyTransition = undefined;
+      if (!record.identityId || !transition || provider.agentInput(record.guestId) || tab.service || code !== undefined && code !== -1 && (code < 200 || code >= 400)
+        || registry.getWebContents(record.guestId) !== guest || isControlUrl(url)
+        || parseBrowserServiceUrl(url, networkHost(record.hostId)?.connectionPort)) return;
+      try {
+        const address = new URL(url);
+        if (lanTargets.has(address.hostname.replace(/^\[|\]$/g, ""), Number(address.port || (address.protocol === "https:" ? 443 : 80)))) return;
+        const display = browserDisplayUrl(url);
+        if (inPage && display === lastHistoryUrl) return; // Fragment-only navigation has the same display URL.
+        lastHistoryUrl = display;
+        const id = historyService.record({ identityId: record.identityId, hostId: record.hostId, url: display,
+          title: guest.getTitle(), visitedAt: Date.now(), transition });
+        if (id) tab.historyVisit = { id, url: display };
+      } catch { /* A history failure never breaks a page or logs its private URL. */ }
+    };
+    const inPage = (_event: unknown, url: string, mainFrame: boolean) => {
+      if (mainFrame) commitHistory(url, undefined, true);
+      syncThrottling(record.guestId); ++loginDocumentEpoch; tab.documentEpoch = (tab.documentEpoch ?? 0) + 1; tab.loginOrigin = undefined; tab.blockedNavigation = null; changed();
+    };
+    const navigated = (_event: unknown, url: string, code: number) => {
+      commitHistory(url, code, false);
+      syncThrottling(record.guestId, true); ++loginDocumentEpoch; tab.documentEpoch = (tab.documentEpoch ?? 0) + 1;
+      tab.loginOrigin = undefined; tab.favicon = undefined; tab.media = undefined; tab.blockedNavigation = null; clearNotices(tab);
+      if (tab.sitePermission?.state !== "waiting") tab.sitePermission = undefined;
+      if (registry.get(record.guestId)) registry.nextPageGeneration(record.guestId);
+      changed();
+    };
     const favicon = (_event: unknown, urls: string[]) => {
       const sequence = ++faviconSequence;
       const current = registry.get(record.guestId);
@@ -1658,8 +1890,16 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
     };
     // Loading begins while getURL() may still name the previous document. Never use it to
     // release the lease just acquired for an in-flight service navigation.
-    const loading = () => { const current = registry.get(record.guestId); if (current) publish(current); };
-    const title = () => { tab.title = guest.getTitle().slice(0, 200); loading(); };
+    const loading = () => { whatsApp.changed(record.hostId, record.tabKey); const current = registry.get(record.guestId); if (current) publish(current); };
+    const title = () => {
+      tab.title = guest.getTitle().slice(0, 200);
+      const visit = tab.historyVisit;
+      if (record.identityId && visit && visit.url === browserDisplayUrl(guest.getURL()) && !leases.forGuest(record.guestId) && !provider.agentInput(record.guestId)) {
+        try { historyService.retitle(record.identityId, record.hostId, visit.url, tab.title, visit.id); }
+        catch { /* The page title remains usable when history is unavailable. */ }
+      }
+      loading();
+    };
     guest.on("did-start-navigation", documentStarted); guest.on("did-navigate", navigated); guest.on("did-navigate-in-page", inPage);
     guest.on("page-favicon-updated", favicon);
     guest.on("page-title-updated", title); guest.on("did-start-loading", loading); guest.on("did-stop-loading", loading);
@@ -1680,7 +1920,7 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
     tab.dispose = () => {
       if (!wired) return;
       wired = false;
-      stopPolicy(); stopOwnerIntent(); ownerNavigations.delete(guest); guest.removeListener("before-input-event", keyboardInput); guest.removeListener("before-mouse-event", mouseInput);
+      stopPolicy(); stopOwnerIntent(); stopPasswords(); ownerNavigations.delete(guest); guest.removeListener("before-input-event", keyboardInput); guest.removeListener("before-mouse-event", mouseInput);
       guest.removeListener("zoom-changed", zoomWheel); guest.removeListener("context-menu", contextMenu);
       guest.removeListener("did-start-navigation", documentStarted); guest.removeListener("did-navigate", navigated); guest.removeListener("did-navigate-in-page", inPage);
       guest.removeListener("page-favicon-updated", favicon);
@@ -1691,17 +1931,30 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
     guestDisposers.set(guest, tab.dispose);
     syncThrottling(record.guestId);
   }
-  async function execute(request: Exclude<BrowserRequest, { op: "setEnabled" | "resetOrigins" | "externalPages" | "systemProxy" | "sitePermissions" | "cursorColor" | "carrierFrameRate" }>, hostId: string, fence?: HostFence<DaemonService>): Promise<unknown> {
+  async function execute(request: Exclude<BrowserRequest, { op: "setEnabled" | "resetOrigins" | "externalPages" | "systemProxy" | "sitePermissions" | "cursorColor" | "carrierFrameRate" | "whatsAppModule" }>, hostId: string, fence?: HostFence<DaemonService>): Promise<unknown> {
     if (!moduleEnabled || disposed) throw new BrowserRelayError("browser_disabled");
     const admittedLifecycle = lifecycle;
     const checkLifecycle = () => { if (!moduleEnabled || disposed || admittedLifecycle !== lifecycle) throw new BrowserRelayError("browser_disabled"); };
     syncHosts();
+    if (request.op === "whatsAppWatch") return whatsApp.view(hostId);
+    if (request.op === "setWhatsAppWatch" || request.op === "unbindWhatsAppWatch") {
+      if (!fence) throw new BrowserRelayError("stale_connection");
+      const check = () => { fence.check(); checkLifecycle(); };
+      check();
+      const view = request.op === "unbindWhatsAppWatch" ? whatsApp.unbind(hostId, request.tabKey)
+        : await whatsApp.configure(hostId, request.tabKey, request.enabled, request.preview, check);
+      const record = registry.getByTab(hostId, request.tabKey);
+      if (record) { syncThrottling(record.guestId, true); publish(record); }
+      return view;
+    }
     if (request.op === "reserveOwnerTab") {
       if (!fence) throw new BrowserRelayError("stale_connection");
       await prepareHost(hostId, fence, false); fence.check(); checkLifecycle();
       const tabKey = randomUUID();
-      tabIdentities().registerOwner(hostId, tabKey);
-      registry.ensure(hostId, tabKey, "owner");
+      const id = request.browserIdentityId ?? identitiesService.current();
+      identitiesService.partition(id, hostId);
+      tabIdentities().registerOwner(hostId, tabKey, id);
+      registry.ensure(hostId, tabKey, "owner", id);
       return { tabKey };
     }
     if (request.op === "list") return registry.list(hostId).map(record => view(record));
@@ -1776,8 +2029,10 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
       // A fresh owner identity; exact query/hash stays in main's existing one-use target store.
       // Opening the copy still goes through the ordinary mount/egress checks.
       const tabKey = randomUUID(), now = Date.now();
-      tabIdentities().registerOwner(hostId, tabKey);
-      registry.ensure(hostId, tabKey, "owner");
+      const id = identitiesService.current();
+      identitiesService.partition(id, hostId);
+      tabIdentities().registerOwner(hostId, tabKey, id);
+      registry.ensure(hostId, tabKey, "owner", id);
       for (const [key, value] of popupTargets) if (value.expires < now) popupTargets.delete(key);
       if (popupTargets.size >= 16) popupTargets.delete(popupTargets.keys().next().value!);
       popupTargets.set(JSON.stringify([hostId, tabKey]), { url: raw, pool: "owner", ownerNavigation: true, expires: now + 30_000 });
@@ -1787,10 +2042,11 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
       const record = registry.getByTab(hostId, request.tabKey);
       const tab = record && data.get(record.guestId);
       const guest = record && registry.getWebContents(record.guestId);
-      if (!record || record.pool !== "agent" || !tab || !guest || guest.isDestroyed()
+      if (!record || !tab || !guest || guest.isDestroyed()
+        || record.pool !== "agent" && (!tab.loginLeaseId || tab.loginLeaseId !== leases.forGuest(record.guestId)?.leaseId)
         || tab.loginOrigin !== request.origin || browserLoginOrigin(guest.getURL()) !== request.origin)
         throw new BrowserRelayError("invalid_request");
-      loginWarningDismissals.dismiss(hostId, request.origin);
+      loginWarningDismissals.dismiss(loginWarningScope(record), request.origin);
       return;
     }
     if (request.op === "ownerInput") {
@@ -1809,7 +2065,9 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
         // The owner's explicit retry does not grant LAN authority to the agent's cookie pool or
         // its active lease. The continuation is a fresh owner tab beside the refused tab.
         const tabKey = randomUUID(), now = Date.now();
-        tabIdentities().registerOwner(hostId, tabKey);
+        const id = identitiesService.current();
+        identitiesService.partition(id, hostId);
+        tabIdentities().registerOwner(hostId, tabKey, id);
         for (const [key, value] of popupTargets) if (value.expires < now) popupTargets.delete(key);
         if (popupTargets.size >= 16) popupTargets.delete(popupTargets.keys().next().value!);
         popupTargets.set(JSON.stringify([hostId, tabKey]), { url: blocked.url, pool: "owner", ownerNavigation: true,
@@ -1830,7 +2088,7 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
         // Owner pool only; the origin must still be a LAN / loopback https origin. The exception is this exact
         // certificate: another fingerprint for the origin asks again.
         if (current.pool === "agent" || certificateOrigin(notice.url) !== notice.origin) throw new BrowserRelayError("permission_denied");
-        certificateExceptions().set(hostId, notice.origin, notice.fingerprint);
+        certificateExceptions().set(hostId, notice.origin, notice.fingerprint, current.identityId);
         return navigate(current, notice.url, false, "owner");
       }
       const guest = registry.getWebContents(current.guestId);
@@ -1901,7 +2159,10 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
       else if (request.op === "close" && request.unmount) registry.unmount(record.guestId); else registry.close(record.guestId);
       return;
     }
-    if (request.op === "desktopLoopback") return request.enabled === undefined ? { enabled: desktopLoopback().enabled(hostId) } : desktopLoopback().set(hostId, request.enabled);
+    if (request.op === "desktopLoopback") {
+      const id = identitiesService.current();
+      return request.enabled === undefined ? { enabled: desktopLoopback().enabled(hostId, id) } : desktopLoopback().set(hostId, request.enabled, id);
+    }
     if (request.op === "desktopLoopbackChallenge") {
       const nonce = desktopLoopbackChallenges.nonce(hostId, request.tabKey, request.url);
       if (!nonce) throw new BrowserRelayError("remote_loopback");
@@ -1914,6 +2175,8 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
         const key = browserAttachId(request.receipt.src), reservation = key && reservations.get(key);
         const pending = unbound.get(request.receipt.webContentsId);
         const record = registry.getByTab(hostId, request.tabKey);
+        if (record?.identityId && request.identity?.browserIdentityId !== undefined && request.identity.browserIdentityId !== record.identityId)
+          throw new BrowserRelayError("permission_denied");
         if (!reservation || !reservation.admitted || reservation.expires < Date.now() || reservation.hostId !== hostId || reservation.tabKey !== request.tabKey
           || reservation.requestUrl !== request.url || reservation.guestId !== record?.guestId || reservation.epoch !== record.epoch || !pending
           // Embedded by the very app window (main or a desk) whose will-attach consumed this ticket, still admitted.
@@ -1936,7 +2199,8 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
           if (agentOpen && agentOpen.record.guestId === record.guestId) agentOpen.ready();
         }).catch(error => { const code = relayError(error); if (code === "private_address_blocked" || code === "remote_loopback") navigationRefused(record, reservation.url, code); else fail(record, browserServiceError(error)); grant(); if (agentOpen && agentOpen.record.guestId === record.guestId) agentOpen.reject(new BrowserRelayError(code, undefined, undefined, relayErrorDetail(error))); })
           .finally(() => { if (replacing) void finishHandover(record.guestId, handover!); });
-        return { guestId: record.guestId, tabKey: record.tabKey, partition: record.partition, pool: record.pool, src: request.receipt.src } satisfies BrowserTabMount;
+        return { guestId: record.guestId, tabKey: record.tabKey, partition: record.partition, pool: record.pool, src: request.receipt.src,
+          ...(record.identityId ? { browserIdentityId: record.identityId } : {}) } satisfies BrowserTabMount;
       }
       if (request.identity?.pendingOpen) pendingOpens.get(openKey(hostId, request.identity.pendingOpen))?.context.stage?.("mount");
       await prepareHost(hostId, fence, !!request.identity?.agentOpened || !!request.identity?.pendingOpen || !!parseBrowserServiceUrl(request.url, networkHost(hostId)?.connectionPort));
@@ -1947,24 +2211,33 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
       // provenance tombstone survives restart/close; legacy non-UUID owner IDs predate I3.
       const canonical = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(request.tabKey);
       const knownOwner = canonical && tabIdentities().owner(hostId, request.tabKey);
+      const provenIdentity = known?.identityId ?? (knownOwner ? tabIdentities().identity(hostId, request.tabKey) : undefined);
+      const requestedIdentity = request.identity?.browserIdentityId;
+      if (provenIdentity && requestedIdentity && provenIdentity !== requestedIdentity) throw new BrowserRelayError("permission_denied");
+      if (requestedIdentity && !identitiesService.has(requestedIdentity)) throw new BrowserRelayError("target_closed");
       const recovery = !known && (canonical ? tabIdentities().unproven(hostId, request.tabKey) : tabIdentities().requiresProof());
       const agentOrigin = known?.pool === "agent" || !!agentOpen || recovery || (!known && canonical && tabIdentities().agent(hostId, request.tabKey));
       if (request.identity?.agentOpened && !agentOrigin) throw new BrowserRelayError("permission_denied");
+      if (agentOrigin && requestedIdentity && !recovery) throw new BrowserRelayError("permission_denied");
+      const identityId = agentOrigin ? undefined : provenIdentity ?? requestedIdentity ?? DEFAULT_ID;
+      if (identityId && !identitiesService.has(identityId)) throw new BrowserRelayError("target_closed");
+      if (identityId && identityId !== DEFAULT_ID && !canonical) throw new BrowserRelayError("browser_identity_unavailable");
+      const partition = identityId ? identitiesService.partition(identityId, hostId) : `persist:browser-agent-${hostId}`;
       // A popup's new tab: main's exact URL and body, once, for the pool that minted the key.
       const popupKey = JSON.stringify([hostId, request.tabKey]), popup = popupTargets.get(popupKey);
       if (popup) popupTargets.delete(popupKey);
       const fromPopup = popup && popup.expires >= Date.now() && popup.pool === (agentOrigin ? "agent" : "owner") && !agentOpen ? popup : undefined;
       const url = agentOpen && agentOpen.command.operation.kind === "tabs.open" ? agentOpen.command.operation.url : fromPopup ? fromPopup.url : request.url;
       // An agent chose this URL (agent pool / agent-open / a claim's local page): agent actor.
-      const actor: BrowserActor = agentOrigin || claimTabs.has(JSON.stringify([hostId, request.tabKey])) ? "agent" : "owner";
+      const actor: BrowserActor = agentOrigin || fromPopup?.byAgent || claimTabs.has(JSON.stringify([hostId, request.tabKey])) ? "agent" : "owner";
       // An owner LAN / tailnet URL is admitted (and its proxy started) by the mount's own navigation.
       const lanUrl = actor === "owner" && !isControlUrl(url) && !!(await lanTargets.classify(url));
       fence.check(); checkLifecycle();
       const allowDesktopLoopback = actor === "owner" && (fromPopup?.desktopLoopback === true || !!request.desktopLoopback && desktopLoopbackChallenges.consume(hostId, request.tabKey, url, request.desktopLoopback));
-      if (!egress.isEnabled() && !lanUrl) checkTarget(hostId, url, undefined, actor, allowDesktopLoopback, request.tabKey);
+      if (!egress.isEnabled() && !lanUrl) checkTarget(hostId, url, partition, actor, allowDesktopLoopback, request.tabKey);
       fence.check();
       checkLifecycle();
-      const record = registry.ensure(hostId, request.tabKey, agentOrigin ? "agent" : "owner");
+      const record = registry.ensure(hostId, request.tabKey, agentOrigin ? "agent" : "owner", identityId);
       // The background carrier is for agent-pool tabs only: an owner tab (or an owner tab granted
       // to an agent) keeps the visible webview path, whatever the renderer asks for.
       const background = request.identity?.carrier === "background";
@@ -1979,7 +2252,7 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
       }
       const target = handover?.url ?? url, targetActor: BrowserActor = handover ? "agent" : actor;
       if (!agentOrigin && canonical) {
-        try { tabIdentities().registerOwner(hostId, request.tabKey); }
+        try { tabIdentities().registerOwner(hostId, request.tabKey, identityId); }
         catch (error) {
           if (!(error instanceof BrowserRelayError) || error.code !== "browser_identity_unavailable") throw error;
           // Refreshing LRU order is best effort for an already proven owner.
@@ -2026,13 +2299,14 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
       if (!handover) { data.set(record.guestId, initialTab()); publish(record, "pending"); }
       else publish(record);
       return { guestId: record.guestId, tabKey: record.tabKey, partition: record.partition, pool: record.pool,
+        ...(record.identityId ? { browserIdentityId: record.identityId } : {}),
         ...(recovery ? { recovery: "browser_identity_recovered" as const } : {}), src: browserAttachSource(attachId) } satisfies BrowserTabMount;
     }
     const record = registry.getByTab(hostId, request.tabKey), guest = record && registry.getWebContents(record.guestId);
     if (!record || !guest || guest.isDestroyed()) throw new BrowserRelayError("target_closed");
     if (request.op === "navigate") {
       const allow = !!request.desktopLoopback && desktopLoopbackChallenges.consume(hostId, request.tabKey, request.url, request.desktopLoopback);
-      return navigate(record, request.url, false, "owner", undefined, allow);
+      return navigate(record, request.url, false, "owner", undefined, allow, "navigation", true, undefined, "typed");
     }
     if (request.op === "toBackground") return moveToBackground(record);
     if (request.op === "reload") {
@@ -2047,6 +2321,7 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
       revokeDesktopLoopbackGrant(record, raw);
       if (tab) { tab.navigation++; tab.authRetries = 0; tab.error = undefined; tab.loadFailure = undefined; tab.favicon = undefined; }
       ownerNavigations.get(guest)?.ownerNavigation(raw);
+      if (tab) tab.historyIntent = { url: raw, transition: "reload", at: Date.now() };
       guest.reload();
       return;
     }
@@ -2057,10 +2332,13 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
     checkTarget(hostId, entry.url, record.partition, "owner", hasDesktopLoopbackAdmission(record, entry.url), record.tabKey); fence?.check(); admit(record, entry.url);
     revokeDesktopLoopbackGrant(record, entry.url);
     ownerNavigations.get(guest)?.ownerNavigation(entry.url);
+    const tab = data.get(record.guestId);
+    if (tab) tab.historyIntent = { url: entry.url, transition: "backForward", at: Date.now() };
     guest.navigationHistory.goToOffset(offset);
   }
-  const stopLoginWarningNotifications = loginWarningDismissals.subscribe((hostId, origin) => {
-    for (const sibling of registry.list(hostId)) if (data.get(sibling.guestId)?.loginOrigin === origin) publish(sibling);
+  const stopLoginWarningNotifications = loginWarningDismissals.subscribe((scope, origin) => {
+    for (const sibling of registry.list(scope.split("\n")[0]))
+      if (loginWarningScope(sibling) === scope && data.get(sibling.guestId)?.loginOrigin === origin) publish(sibling);
   });
   const handle = createBrowserChannel({
     // Do not delegate this security boundary solely to the caller's general app-origin predicate.
@@ -2077,7 +2355,7 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
     }, resetOrigins() { tabIdentities().reset(registry.list()); }, sitePermissions(forget) {
       const store = sitePermissionsStore();
       if (forget) store.forget(forget);
-      return store.list();
+      return store.list().map(entry => entry.pool === "owner" ? { ...entry, browserIdentityId: entry.browserIdentityId ?? DEFAULT_ID } : entry);
     }, cursorColor(color) {
       const store = cursorPreferencesStore();
       if (color !== undefined) { store.set(color); for (const record of registry.list()) publish(record); }
@@ -2086,6 +2364,12 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
       const store = carrierPreferencesStore();
       if (frameRate !== undefined) { store.set(frameRate); for (const carrier of carriers.values()) carrier.setFrameRate(frameRate); }
       return store.get();
+    }, whatsAppModule(enabled) {
+      if (enabled === undefined) return { enabled: whatsApp.moduleEnabled() };
+      const view = whatsApp.setModuleEnabled(enabled);
+      // Off: the tab is an ordinary owner tab again (no owner-only status), on: held again.
+      for (const record of registry.list()) if (record.pool === "owner") publish(record);
+      return view;
     }, systemProxy(enabled) {
       if (enabled === undefined) return systemProxy().view();
       const view = systemProxy().set(enabled);
@@ -2114,6 +2398,12 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
     },
   });
   ipcMain.handle(BROWSER_CHANNEL, (event, request: unknown, binding: HostBinding | null) => handle(event, request, binding));
+  // 浏览器身份 (identities, history, search prefs, passwords): same sender rule as the browser channel.
+  const identityHandle = createBrowserIdentityChannel({
+    isAppSender: (event: IpcMainInvokeEvent) => !disposed && !owner.isDestroyed() && event.sender === owner && event.senderFrame === owner.mainFrame && isAppSender(event),
+    services: browserIdentityServices,
+  });
+  ipcMain.handle(BROWSER_IDENTITY_CHANNEL, (event, request: unknown) => identityHandle(event, request));
   /**
    * The attach hooks of one app window (the main window, and each desk added after its hardening, P5): the same
    * checks for every embedder. will-attach consumes the one-use ticket before any validation, also when the
@@ -2126,7 +2416,7 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
       const key = browserAttachId(params.src), candidate = key && reservations.get(key);
       const reservation = candidate && !candidate.admitted && candidate.expires >= Date.now() && registry.get(candidate.guestId)?.epoch === candidate.epoch ? candidate : undefined;
       if (candidate) candidate.admitted = true; // consume before any validation/side effect, including denial
-      const result = evaluateBrowserAttach({ moduleEnabled, popupGuardInstalled, registeredHostIds: registry.hostIds(), appWebContentsId: contents.id,
+      const result = evaluateBrowserAttach({ moduleEnabled, popupGuardInstalled, registeredHostIds: registry.hostIds(), identityOfPartition, appWebContentsId: contents.id,
         senderWebContentsId: event.sender?.id ?? contents.id, reservation, params: params as unknown as Record<string, unknown>, webPreferences: prefs as Record<string, unknown> });
       if (!result.allowed || disposed || !embedderOf(contents)) { event.preventDefault(); if (key) reservations.delete(key); }
       else if (reservation) reservation.embedderId = contents.id;
@@ -2167,6 +2457,7 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
   }
   const timer = setInterval(() => {
     syncHosts();
+    if (moduleEnabled && !disposed) whatsApp.tick(Date.now());
     for (const [key, value] of reservations) if (value.expires < Date.now()) reservations.delete(key);
     for (const [id, value] of unbound) if (value.expires < Date.now()) { unbound.delete(id); if (!value.guest.isDestroyed()) value.guest.close({ waitForBeforeUnload: false }); }
   }, 250);
@@ -2182,7 +2473,7 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
     const contents = target.webContents;
     // The main window is added at install, as it is created (its own teardown is dispose()).
     if (disposed || !contents || embedders.has(contents.id) || (contents !== owner && contents.isDestroyed())) return false;
-    const removeHooks = embedderHooks(contents);
+    const removeHooks = [...embedderHooks(contents), appGestures.listen(contents, target)];
     target.on("focus", ownerActivity);
     const entry: Embedder = { window: target, contents, remove: () => {
       if (embedders.get(contents.id) !== entry) return;
@@ -2223,7 +2514,10 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
     egress.stop();
     reservations.clear(); admissions.clear(); lanTargets.clear(); popupTargets.clear(); ownerGestures.clear(); blockedNotices.clear();
     for (const { guest } of unbound.values()) if (!guest.isDestroyed()) guest.close({ waitForBeforeUnload: false });
-    unbound.clear(); registry.dispose(); data.clear(); hostCapabilities.clear(); capabilityRevisions.clear(); capabilityRecovery.clear(); capabilityRetryAfter.clear(); hostGenerations.clear(); hostEpochs.clear(); hostDaemons.clear();
+    unbound.clear();
+    resettingRegistry = true;
+    try { registry.dispose(); } finally { resettingRegistry = false; }
+    data.clear(); hostCapabilities.clear(); capabilityRevisions.clear(); capabilityRecovery.clear(); capabilityRetryAfter.clear(); hostGenerations.clear(); hostEpochs.clear(); hostDaemons.clear();
   };
   // The app's zoom change re-applies every remembered page zoom on top (Electron has meanwhile reset
   // each guest to its window's new level; a 100 % page needs nothing and keeps following the window).
@@ -2240,8 +2534,14 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
   owner.on("render-process-gone", () => { moduleEnabled = false; reset(); });
   const dispose = () => {
     if (disposed) return;
-    reset(); disposed = true; clearInterval(timer); stopSchemes(); ipcMain.removeHandler(BROWSER_CHANNEL);
+    reset(); disposed = true; clearInterval(timer); stopSchemes(); ipcMain.removeHandler(BROWSER_CHANNEL); ipcMain.removeHandler(BROWSER_IDENTITY_CHANNEL);
+    passwords.dispose();
+    if (lockWatch) { powerMonitor.removeListener("lock-screen", lockPasswords); powerMonitor.removeListener("suspend", lockPasswords); }
+    if (browserIdentityServices.passwords === passwords) browserIdentityServices.passwords = undefined;
     provider.dispose();
+    if (browserIdentityServices.identities === identitiesService) delete browserIdentityServices.identities;
+    if (browserIdentityServices.history === historyService) delete browserIdentityServices.history;
+    historyService.dispose();
     // Background carriers are hidden windows: they would keep the app alive past the last app window.
     for (const carrier of [...carriers.values()]) { try { carrier.destroy(); } catch { /* Already gone. */ } }
     carriers.clear();

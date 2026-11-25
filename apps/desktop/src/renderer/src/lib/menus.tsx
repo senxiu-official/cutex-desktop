@@ -56,13 +56,15 @@ import { MAIN_WINDOW } from "./windowScope";
 import type { SessionBadge, SessionAvatar, SessionResource } from "@cutex-desktop/protocol";
 import { translate, type MessageKey } from "../i18n";
 import { creatorPathsBlock } from "../../../shared/creatorPaths";
+import { pinnedModelBlock } from "../../../shared/pinnedModel";
+import { isRuntimeUnreachable } from "../../../shared/runtimeUnreachable";
 import { agentHost, featuresOf, hostApi, pinnedOn, sidebarOf, useApp, viewHostOf, viewOf } from "../store";
 import type { FileRef } from "./workspace";
 import { apiFor } from "../bridge";
 import { LOCAL_HOST_ID } from "../../../shared/hosts";
 import { MEMORY_INJECTION_FEATURE, memoryInjectionOf } from "../../../shared/memoryInjection";
 import { promoteOffered } from "./quickChatPromote";
-import { agentInfoDialog, agentMcpDialog, promoteChatDialog, confirmDialog, noticeDialog, promptDialog, type MenuAction, type MenuEntry } from "./contextMenu";
+import { agentInfoDialog, agentMcpDialog, promoteChatDialog, confirmDialog, confirmPermanentDelete, noticeDialog, promptDialog, type MenuAction, type MenuEntry } from "./contextMenu";
 import { showsAgentMcp } from "./agentMcp";
 import { refActionEntries } from "./refActions";
 import { agentRef } from "./refs";
@@ -97,7 +99,7 @@ import { isOwnerFeatures } from "../../../shared/users";
 import { abandonRuntimeStart, runtimeStartView, START_DEADLINE_MS } from "./runtimeStart";
 import { formatAbsolute } from "./time";
 import { archiveWord } from "./archiveWords";
-import { repinApplies, repinMenuOffer, runRepinFlow } from "./claudeRepin";
+import { repinApplies, repinMenuOffer, runRepinFlow, type RepinFlowResult } from "./claudeRepin";
 import { avatarSwitchOf, hiddenAvatar, shownAvatar } from "./avatarDefault";
 import { themedEmoji } from "./avatarThemes";
 import { agentIndex, agentThemesNow } from "./agentLook";
@@ -119,6 +121,10 @@ function reportError(error: unknown): void {
   if (feature !== null) return useApp.getState().notify(unsupportedNotice(feature));
   // A child agent whose folders moved: its conversation says so and offers 重新批准文件夹 (CreatorPathsNote).
   if (creatorPathsBlock(error)) return useApp.getState().notify(translate("creatorPaths.notice"), "error");
+  // An old agent whose saved model / effort is no longer offered: its conversation offers 更换模型 (PinnedModelNote).
+  if (pinnedModelBlock(error)) return useApp.getState().notify(translate("pinnedModel.notice"), "error");
+  // r295: cutex could not reach the runtime (classified): plain words, never the wire text.
+  if (isRuntimeUnreachable(error)) return useApp.getState().notify(translate("runtime.unreachable"), "error");
   // So is a busy Claude agent's refusal of fork / revert (it got busy after the menu opened).
   const structural = structuralErrorText(error);
   if (structural.refused) return useApp.getState().notify(structural.text);
@@ -160,7 +166,7 @@ export async function deleteAgent(session: SessionResource, t: T, host = hostOfS
   const current = fenceOf(host);
   const expectedRevision = session.revision;
   const busy = !!session.runtime.activeTurnId;
-  if (!(await confirmDialog(t(busy ? "menu.deleteConfirmBusy" : "menu.deleteConfirm", { name: session.displayName }), true))) return false;
+  if (!(await confirmPermanentDelete(t(busy ? "menu.deleteConfirmBusy" : "menu.deleteConfirm", { name: session.displayName }), { ok: t("menu.delete"), cancel: t("dialog.cancel") }))) return false;
   if (!current()) return false;
   // The owner confirmed deleting a working agent (r290 P11 / B7): stop the turn, then delete.
   if (busy) return stopThenDelete(session, t, host);
@@ -664,7 +670,7 @@ function restartItem(session: SessionResource, t: T, host: string): MenuAction |
  * session-claude-runtime; older cutex: the cached view, loaded now for the next open); the click reloads
  * the view, confirms and repins; a running agent is offered the restart.
  */
-function repinItem(session: SessionResource, t: T, host: string): MenuAction | null {
+function repinItem(session: SessionResource, t: T, host: string, after?: (result: RepinFlowResult) => void): MenuAction | null {
   const app = useApp.getState();
   if (!repinApplies(featuresOf(app, host), session)) return null;
   const id = session.cutexSessionId;
@@ -679,7 +685,7 @@ function repinItem(session: SessionResource, t: T, host: string): MenuAction | n
     hint: `${offer.from} → ${offer.to}`,
     onSelect: guarded(async () => {
       const current = fenceOf(host);
-      await runRepinFlow({
+      const result = await runRepinFlow({
         api: hostApi(host),
         hostId: host,
         session,
@@ -695,9 +701,16 @@ function repinItem(session: SessionResource, t: T, host: string): MenuAction | n
           await live.sessionAction(id, "cutex/runtime/online", { openVisibleTerminal: false }, host);
         },
       });
+      after?.(result);
     }),
   };
 }
+
+/**
+ * The same 升级运行时 for a conversation's note (an old Claude adapter refusing an offline model change,
+ * components/PinnedModelNote); `after` hears how it ended, so the note can offer the effort again once applied.
+ */
+export const upgradeRuntimeAction = repinItem;
 
 /**
  * The agent menu (sidebar row, title bar, 全部 agent dialog). `hostId`: the agent's host (default: the

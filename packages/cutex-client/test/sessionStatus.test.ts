@@ -111,3 +111,25 @@ it("rejects malformed, foreign-session and foreign-stream status envelopes", asy
   }
   expect(h.event).not.toHaveBeenCalled();
 });
+
+// claude-runtime-diagnostics-v1 (r295): same non-durable channel, whole snapshot or null.
+const diagnostics = (claudeDiagnostics: unknown) => ({ ...sessionStatus(), cutex: { method: "cutex/session/claudeDiagnostics/changed", params: { cutexSessionId: "session", runtimeGeneration: 3, claudeDiagnostics } } });
+
+it("passes Claude diagnostics snapshots on, without moving the durable position", async () => {
+  const h = await setup({ sessionStatus: true });
+  const snapshot = { warnings: ["mcpConnectionFailed"], activeHooks: [{ event: "PreToolUse", startedAtMs: 1_764_000_000_000 }] };
+  await h.send(statusWire(diagnostics(snapshot)));
+  await h.send(statusWire(diagnostics(null)));
+  expect(h.event.mock.calls.map(([e]) => e.cutex.params.claudeDiagnostics)).toEqual([snapshot, null]);
+  expect(h.event.mock.calls[0]![0].correlation.runtimeGeneration).toBe(3);
+  expect(h.feed.position).toEqual({ streamId: "stream", after: "c0" });
+});
+
+it("rejects malformed Claude diagnostics and unknown status methods", async () => {
+  const h = await setup({ sessionStatus: true });
+  for (const value of [diagnostics({ warnings: [] }), diagnostics({ warnings: [1], activeHooks: [] }), diagnostics({ warnings: [], activeHooks: [{ event: "Stop", startedAtMs: -1 }] }),
+    diagnostics(undefined), { ...sessionStatus(), cutex: { method: "cutex/session/other/changed", params: { cutexSessionId: "session", runtimeGeneration: 3 } } }]) {
+    await h.send(statusWire(value));
+  }
+  expect(h.event).not.toHaveBeenCalled();
+});

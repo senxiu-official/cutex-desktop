@@ -8,10 +8,15 @@ vi.mock("../src/renderer/src/bridge",()=>({apiFor:()=>({forkPreview:env.preview,
 vi.mock("../src/renderer/src/store",()=>({featuresOf:()=>env.features,useApp:Object.assign((selector:(v:object)=>unknown)=>selector({}),{getState:()=>({forkSession:env.fork})})}));
 vi.mock("../src/renderer/src/lib/profileSnapshot",()=>({loadProfileList:env.profiles}));
 vi.mock("../src/renderer/src/lib/contextMenu",()=>({closeDialog:env.close,forkProfileDialog:env.choose}));
-vi.mock("../src/renderer/src/lib/hostSwitch",()=>({captureHostAction:()=>()=>env.live,onHostReset:(fn:(host:string)=>void)=>{env.resets.add(fn);return()=>env.resets.delete(fn);}}));
+vi.mock("../src/renderer/src/lib/hostSwitch",()=>({captureHostAction:()=>()=>env.live,onHostSwitch:()=>()=>{},onHostReset:(fn:(host:string)=>void)=>{env.resets.add(fn);return()=>env.resets.delete(fn);}}));
 vi.mock("../src/renderer/src/i18n",()=>({useI18n:()=>({t:(k:string,v?:Record<string,unknown>)=>v?`${k} ${Object.values(v).join(" ")}`:k})}));
+// The dialog's own logic over a native stand-in; the real picker in this dialog (Escape, pick): forkProfileRealPicker.test.tsx.
+vi.mock("../src/renderer/src/components/EntitySelect",()=>import("./helpers/entitySelectStub"));
 import { ForkProfileDialog } from "../src/renderer/src/components/ForkProfileDialog";
 import { requestFork } from "../src/renderer/src/lib/requestFork";
+
+// The store double is too thin for the avatar stack (agent looks, Profile pictures): icons are stubbed.
+vi.mock("../src/renderer/src/components/EntityIcon", () => import("./helpers/entityIconStub"));
 (globalThis as {IS_REACT_ACT_ENVIRONMENT?:boolean}).IS_REACT_ACT_ENVIRONMENT=true;
 let root:Root,host:HTMLDivElement; const resolve=vi.fn();
 function preview(request:SessionForkPreviewRequest={}):SessionForkPreview{return {contractVersion:2,cutexSessionId:"source",afterTurnId:request.afterTurnId??null,profile:request.profile??null,sourceProfile:"locked-source",sourceCliKind:"claude",sourceProviderFamily:"anthropic",targets:[

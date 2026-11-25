@@ -1,4 +1,6 @@
 import { ownerDispositionSupport } from "../../../shared/ownerDispositions";
+import { mockAnsweredAsksFeatures, mockAnsweredAsksPage } from "./mockAnsweredAsks";
+import { mockCancelTextRewrite, mockTextRewrite } from "./mockTextRewrite";
 import type { BrowserSitePermissionForget } from "../../../shared/browser";
 import { mockLayoutInstance, mockUserLayoutApi, prepareMockLayout } from "./mockUserLayout";
 import { mockNotificationPage, mockNotificationRows, registerMockOwnerNotes } from "./mockNotificationPages";
@@ -41,6 +43,7 @@ import { fileNameType } from "../../../shared/localFiles";
 import { MOCK_BASE_FEATURES, MOCK_NEW_FEATURES, mockScenarioFeatures } from "./mockFeatures";
 import { mockNameHistory, mockRename, mockRestoreRefusal, seedMockNames } from "./mockAgentRename";
 import { mockCreatorPathsRefusal, mockReapprovePaths } from "./mockCreatorPaths";
+import { mockRetiredModelRefusal, mockRetiredModelSave } from "./mockRetiredModel";
 import { mockPromote } from "./mockQuickChatPromote";
 import { mockProjectColor } from "./mockProjectColor";
 import { bindNewSession, variantApi, variantCreate, variantFields, variantPatch, VARIANTS_SCENE } from "./mockProfileVariants";
@@ -57,11 +60,14 @@ import type { MockCore, MockEvents, MockProfileRef } from "./mockTypes";
 import { mockAutoPickPreview } from "./mockAutoPick";
 import { autoFamily } from "../../../shared/profileAutoPick";
 import { applyContrast, applyDarkPalette, applyLightPalette, applyTheme } from "../lib/theme";
+import { applyAccent, DEFAULT_ACCENT, parseAccentPref } from "../lib/accent";
 import { MEDIA_BLOBS_SCENE, installDevMediaBlobs, mediaBlobsThread, mockEventBlob, mockMediaImageAction, prepareMediaBlobs } from "./devMediaBlobs";
 import { IMAGE_SWITCH_SCENE, imageSwitchMedia, imageSwitchThread, installDevImageSwitch } from "./devImageSwitch";
 import { MENTION_AGENTS_SCENE, MENTION_REMOTE_ID, installDevMentionAgents, mentionAgentsThread } from "./devMentionAgents";
 import { IMAGE_PATH_STEER_SCENE, IMAGE_PATH_STEER_READABLE, IMAGE_PATH_STEER_UNAVAILABLE, imagePathSteerThread } from "./devImagePathSteer";
 import { mockDeskBridge } from "./mockDesks";
+import { mockSessionSearch, type MockSearchTurn } from "./mockSessionSearch";
+import { MOCK_DIAG_KAI_ITEMS, MOCK_DIAG_SORA_TURNS, mockDiagOnlineRefusal, startMockDiagTaskEvents, withMockClaudeDiagnostics } from "./mockClaudeDiagnostics";
 
 /** cutex profile-presets-v2 `GET /v2/profile-presets` (src/profiles/providers.rs presets_json). */
 const mp = (id: string, label: string, providerId: string, baseUrl: string | null, defaultModel: string | null, family: string | null, familyLabel: string | null, extra: { aliases?: string[]; quotaReader?: string; modelCatalog?: boolean; webSearch?: string | null; toolSchemaCompat?: "strict" | null } = {}) => ({
@@ -438,6 +444,15 @@ const mockProfiles: Record<string, { name: string; cliKind?: "codex" | "claude" 
     config: {}, models: [mockModel("sonnet", 200_000, { supportedReasoningEfforts: [], defaultReasoningEffort: null })],
   },
 };
+// `?entityscale` (with `?rosterscale`; entity icons perf 2026-11-24): about 30 Profiles, each with its own colour.
+if (typeof location !== "undefined" && new URLSearchParams(location.search).has("entityscale")) {
+  const colors = ["#e8590c", "#1971c2", "#2f9e44", "#ae3ec9", "#f08c00", "#0c8599", "#c2255c", "#5f3dc4", "#66a80f", "#495057"];
+  for (let i = 0; i < 22; i++) {
+    const base = i % 3 === 0 ? mockProfiles["claude-work"]! : mockProfiles.gamma!;
+    const name = `scale-${i % 3 === 0 ? "claude" : "gpt"}-${String(i + 1).padStart(2, "0")}`;
+    mockProfiles[name] = { ...structuredClone(base), name, color: colors[i % colors.length]! };
+  }
+}
 /** profile-auto-pick inputs (dev/mockAutoPick). */
 // Opt-in fork review profiles keep unrelated mock snapshots unchanged.
 if (!LEGACY && new URLSearchParams(typeof location === "undefined" ? "" : location.search).has("forkprofile")) {
@@ -694,7 +709,33 @@ const mockThreadDefaults: NewThreadDefaults = {
   agent: { ...clonePerms(BUILTIN_THREAD_DEFAULTS.agent), approvalsReviewer: "auto_review" },
   quickChat: { ...clonePerms(BUILTIN_THREAD_DEFAULTS.quickChat), approvalsReviewer: "auto_review", networkAccess: true },
 };
-const settingsView = () => (LEGACY ? mockSettings : { ...mockSettings, queue: { ownerMayPassAsks: true, ...(mockSettings as { queue?: object }).queue }, queueDefault: { ownerMayPassAsks: true }, ...(IMAGE_STEER ? { imageInput: { busyBehavior: IMAGE_Q.get("imgbusy") === "steer" ? "steer" as const : "queue" as const, ...(mockSettings as { imageInput?: object }).imageInput } } : {}), ...moduleSettings(), newThreadDefaults: structuredClone(mockThreadDefaults), newThreadDefaultsBuiltin: structuredClone(MOCK_BUILTIN_THREAD_DEFAULTS), agentSecurity: structuredClone(mockSecurity) });
+/**
+ * r295 heavy-read slots per host (主机详情 → 高级 → 性能): this machine automatic 4, workstation automatic 2, alpha an
+ * older cutex without the fields. `?heavyread=pending`: this machine saved 6 while 4 runs (管理服务重启后生效);
+ * `?heavyread=fail`: every save is refused. `mockHeavyReadRestart(host)` = the Management service restarted.
+ */
+const HEAVY_READ_SCENE = typeof location !== "undefined" ? new URLSearchParams(location.search).get("heavyread") : null;
+const mockHeavyRead = new Map<string, { override: number | null; auto: number; active: number } | null>([
+  ["local", { override: HEAVY_READ_SCENE === "pending" ? 6 : null, auto: 4, active: 4 }],
+  // workstation (WORKSTATION, declared further down); any other host (alpha) is an older cutex.
+  ["ssh-7a3f01c2", { override: null, auto: 2, active: 2 }],
+]);
+const heavyReadOf = (hostId: string) => mockHeavyRead.get(hostId) ?? null;
+const heavyReadView = (hostId: string) => {
+  const h = LEGACY ? null : heavyReadOf(hostId);
+  return h ? { heavyReadConcurrency: h.override, heavyReadConcurrencyDefault: h.auto, heavyReadConcurrencyActive: h.active, heavyReadConcurrencyOptions: [2, 4, 6, 8] } : {};
+};
+/** PATCH heavyReadConcurrency on a host: validated like cutex; lists it in restartRequired when it differs from the running number. */
+const patchHeavyRead = (hostId: string, value: unknown, restartRequired: string[]) => {
+  const h = LEGACY ? null : heavyReadOf(hostId);
+  if (!h) throw new Error("400 invalid_request: unknown field heavyReadConcurrency");
+  if (HEAVY_READ_SCENE === "fail") throw new Error("503 settings_store_unavailable: settings could not be saved");
+  if (value !== null && ![2, 4, 6, 8].includes(value as number)) throw new Error("400 invalid_request: heavyReadConcurrency must be one of 2, 4, 6, 8 or null");
+  h.override = value as number | null;
+  if ((h.override ?? h.auto) !== h.active) restartRequired.push("heavyReadConcurrency");
+};
+export const mockHeavyReadRestart = (hostId: string) => { const h = heavyReadOf(hostId); if (h) h.active = h.override ?? h.auto; };
+const settingsView = () => (LEGACY ? mockSettings : { ...mockSettings, queue: { ownerMayPassAsks: true, ...(mockSettings as { queue?: object }).queue }, queueDefault: { ownerMayPassAsks: true }, ...(IMAGE_STEER ? { imageInput: { busyBehavior: IMAGE_Q.get("imgbusy") === "steer" ? "steer" as const : "queue" as const, ...(mockSettings as { imageInput?: object }).imageInput } } : {}), ...moduleSettings(), newThreadDefaults: structuredClone(mockThreadDefaults), newThreadDefaultsBuiltin: structuredClone(MOCK_BUILTIN_THREAD_DEFAULTS), agentSecurity: structuredClone(mockSecurity), ...heavyReadView("local") });
 const QUICK_CHAT_SETTINGS = { model: "deepseek-v4-flash", modelProvider: "deepseek", effort: "high", approvalPolicy: "on-request", sandboxPolicy: { type: "workspaceWrite", writableRoots: [], networkAccess: false } };
 /** A quick chat as cutex reports it: local-only owned session, no formal agent name, scratch cwd. */
 function quickChat(id: string, name: string, minutesAgo: number, over: { output?: string } = {}): SessionResource {
@@ -1067,7 +1108,7 @@ const archivedMore = [
 ];
 snapshot = {
   ...snapshot,
-  active: [...snapshot.active, ...desktopOffline, ...independentOffline],
+  active: [...snapshot.active, ...desktopOffline, ...independentOffline].map(withMockClaudeDiagnostics),
   retired: [...snapshot.retired, ...archivedMore],
   hostRows: {
     ...snapshot.hostRows,
@@ -1076,6 +1117,18 @@ snapshot = {
     ...Object.fromEntries(independentOffline.map((s) => [s.cutexSessionId, hostRow(s.cutexSessionId, null)])),
   },
 };
+
+// `?manyArchived`: 100 more archived agents across projects, model families and half a year (设置 → 归档 → 已归档的智能体:
+// filters, batch restore / delete, figures). Their local copies and usage come from the storage / usage module mocks.
+if (typeof location !== "undefined" && new URLSearchParams(location.search).has("manyArchived")) {
+  const projects = ["desktop", "waveline", "proto", "demo", "ifm-ema", null, null];
+  const words = ["sweep", "probe", "refactor", "triage", "bench", "docs", "spike", "audit", "port", "fixup", "review", "migrate", "deploy", "lint", "i18n", "perf", "schema", "fuzz", "ui-pass", "notes"];
+  const many = Array.from({ length: 100 }, (_, i) =>
+    offlineAgent(`arch-${i}`, `${i % 3 ? "" : "AUTO_"}${words[i % words.length]}-${Math.floor(i / words.length) + 1}`, 60 * (6 + ((i * 37) % 180) * 24), {
+      lifecycle: "retired", claude: i % 4 === 1, model: i % 4 === 1 ? "opus" : undefined, profile: i % 4 === 2 ? "deepseek" : i % 4 === 3 ? "GLM" : undefined,
+    }));
+  snapshot = { ...snapshot, retired: [...snapshot.retired, ...many], hostRows: { ...snapshot.hostRows, ...Object.fromEntries(many.map((s, i) => [s.cutexSessionId, hostRow(s.cutexSessionId, projects[i % projects.length]!)])) } };
+}
 
 const SCP_MORE: [string, string, number, Parameters<typeof offlineAgent>[3]][] = [
   ["demo-pm-codex", "demo-polyadb-mouse-codex-r1", 120, { note: "PolyA DB：小鼠数据的 Codex 版本", output: "小鼠 polyA 位点表导出完成。" }],
@@ -1181,6 +1234,16 @@ if (ROSTER_SCALE) {
     rosterScaleProjects.push({ id, name: id, badge: id.slice(0, 2).toUpperCase(), color, director: null, members: 1 + (k % 3) });
     for (let i = 0; i <= k % 3; i++) add(id, `rs-${id}-${i}`, nameOf(id, i), { status: "offline", output: said[(k + i) % said.length], idle: days * DAY_MIN + i * 300 });
   });
+  // `&entityscale` (entity icons perf 2026-11-24): 24 more projects of 5 agents (about 300 agents, 40 projects in all),
+  // text, symbol and letter icons mixed (the first three: the owner's wide text badges).
+  if (new URLSearchParams(location.search).has("entityscale")) {
+    const colors = ["red", "blue", "green", "magenta", "yellow", "cyan", "#f4a6b0", "#9fd3ff", "#ffd38a", "#c9b6ff"];
+    for (let k = 0; k < 24; k++) {
+      const id = `scale-${words[(k * 5) % words.length]}-${k}`;
+      rosterScaleProjects.push({ id, name: id, badge: (["MAST", "音声", "AE"] as const)[k] ?? id.slice(6, 8).toUpperCase(), color: colors[k % colors.length]!, director: k % 2 ? null : `rs-${id}-0`, members: 5 });
+      for (let i = 0; i < 5; i++) add(id, `rs-${id}-${i}`, nameOf(id, i), i === 0 && k % 2 === 0 ? { output: said[k % said.length], idle: 5 + k } : { status: "offline", output: said[(k + i) % said.length], idle: (k + 1) * 600 + i * 90 });
+    }
+  }
 }
 snapshot = {
   ...snapshot,
@@ -1558,6 +1621,7 @@ const soraRead = {
           { type: "plan", id: "sp2", text: "## PlanCard 的 Claude 审批选项\n\n1. Claude agent 显示「执行，自动接受编辑」「执行，编辑逐个审批」「继续规划」。\n2. 模式与计划模式在一次 thread/settings/update 里切换。\n3. 补单元测试。" },
         ],
       },
+      ...(MOCK_DIAG_SORA_TURNS as never[]),
     ],
   },
 };
@@ -1584,6 +1648,7 @@ const kaiRead = {
         items: [
           { type: "userMessage", id: "ku2", content: [{ type: "text", text: PROFILE_MENTION_SCENE ? String.raw`跑一下相关的 vitest，用 [profile: "54138256-6444-4908-8106-c6e96d7f9ee0", model: "gpt-6-astra", effort: "high"] 开一个；之前那个 [profile: "0f3c9a2e-7d41-4b8e-9c3a-6e2f1d0b5a77"] 已经删了。` : "跑一下相关的 vitest。" }] },
           { type: "commandExecution", id: "kc2", command: "npx vitest run test/structuralGate.test.ts", status: "inProgress", aggregatedOutput: "" },
+          ...(MOCK_DIAG_KAI_ITEMS as never[]),
         ],
       },
     ],
@@ -1830,6 +1895,8 @@ function mockThread(id: string): MockThread {
 // first posts an `update_plan` snapshot, so the status capsule has a line while the reply streams; `text`:
 // stream that reply once, in 4-character deltas, instead of repeating the sample for `seconds`).
 const PERF_Q = typeof location !== "undefined" ? new URLSearchParams(location.search) : new URLSearchParams();
+/** `?notesslow`: Eva's bootstrap waits 3 s (her old owner notes: modules/owner-notify/mock). */
+const NOTES_SLOW_SCENE = PERF_Q.has("notesslow");
 const PERF_TURNS = PERF_Q.has("perf") ? Math.max(0, Number(PERF_Q.get("perfturns")) || 0) : 0;
 // `&perfagent=<id>`: whose thread gets the synthetic turns (default Eva).
 const PERF_AGENT = PERF_Q.get("perfagent") || "eva";
@@ -2115,6 +2182,7 @@ const nativeEvent = (sessionId: string, method: string, params: unknown) => {
   emit("sessionEvent", { sessionId, envelope: e });
   emit("hostEvent", e);
 };
+startMockDiagTaskEvents(nativeEvent);
 
 // `?live-deltas[=gap|subscription-gap]`: r260 non-durable preview. Re-run with
 // window.__cutexMockLiveDeltas.stream("eva", { gap: "item", stepMs: 400 });
@@ -2567,6 +2635,9 @@ if (!LEGACY) {
     last: null,
   });
 }
+// `?quotaHistory`: Kai's own last quota continuation (2026-11-18), unrelated to any delegation shown to it now.
+if (typeof location !== "undefined" && new URLSearchParams(location.search).has("quotaHistory"))
+  quotaViews.set("kai", { cutexSessionId: "kai", enabled: true, pending: null, last: { at: "2026-11-18T05:41:00Z", result: "fired", reason: "started", resetAt: null } });
 const quotaViewOf = (sessionId: string): MockQuotaView => quotaViews.get(sessionId) ?? { cutexSessionId: sessionId, enabled: true, pending: null, last: null };
 /** cutex: the owner's message / stop / offline ends a pending continuation (host event). */
 function quotaCancel(sessionId: string, reason: string): MockQuotaView | null {
@@ -2771,7 +2842,8 @@ const ALPHA = "ssh-ae3e47b1";
 /** workstation runs an older cutex (the switcher marks the differing version). */
 const WORKSTATION_CUTEX_BUILD: CutexBuild = { ...MOCK_CUTEX_BUILD, release: "r217", commit: "46bbfcc0e1d2c3b4a5968778695a4b3c2d1e0f9a" };
 /** …and so lacks notes and side chats (like the real r225): per-host gating of the notes / side-chat entries. */
-const WORKSTATION_MISSING_FEATURES: readonly string[] = ["notes", "side-chat", ...(typeof location !== "undefined" && new URLSearchParams(location.search).has("copyLegacy") ? ["fs-file-transfer-v1"] : []), ...(OLD_SERVICES ? ["services-organize"] : [])];
+// `?searchlegacy`: workstation's cutex predates session-search-v1 (its sidebar search stays name / preview only).
+const WORKSTATION_MISSING_FEATURES: readonly string[] = ["notes", "side-chat", ...(typeof location !== "undefined" && new URLSearchParams(location.search).has("searchlegacy") ? ["session-search-v1"] : []), ...(typeof location !== "undefined" && new URLSearchParams(location.search).has("copyLegacy") ? ["fs-file-transfer-v1"] : []), ...(OLD_SERVICES ? ["services-organize"] : [])];
 const withoutWorkstationGaps = (featureList: string[]) => featureList.filter((f) => !WORKSTATION_MISSING_FEATURES.includes(f));
 /** What such a cutex answers on the notes / side-chat routes. */
 const routeNotFound = async (): Promise<never> => { throw new Error("route_not_found: management v2 route not found"); };
@@ -3003,12 +3075,28 @@ function startWorkstationBackground(epoch: string) {
 function remoteApi(hostId: string, rootApi: DesktopApi): Partial<DesktopApi> {
   const emitHost = (sessionId: string, method: string, params: Record<string, unknown>) => emitOn(hostId, "hostEvent", hostEnvelope(hostId, sessionId, method, params));
   return {
+    // Its own agents' directories and threads (dev/mockSessionSearch).
+    async sessionSearch(query) {
+      return mockSessionSearch({ name: mockHosts.hosts.find((h) => h.id === hostId)?.label ?? hostId, sessions: () => { const r = remoteSnapshot(); return [...r.active, ...r.retired]; }, turns: (id) => mockThread(id).thread.turns as MockSearchTurn[], projectOf: (id) => remoteSnapshot().hostRows?.[id]?.projectId ?? null }, query);
+    },
     // Its own profiles (P1 step 2c: the new-agent form / Settings → Profiles follow the chosen host):
     // a subset of this machine's with another default.
     async listProfiles() {
       return { defaultProfile: "gamma", profiles: ["gamma", "claude", "relay"].filter((n) => mockProfiles[n]).map((n) => mockProfileItem(n, hostId)) };
     },
     async getProfile(name) { return mockProfileDetail(name, hostId); },
+    // Its own heavy-read slots (another automatic number; alpha: an older cutex without them).
+    async getSettings() {
+      const { heavyReadConcurrency: _h, heavyReadConcurrencyDefault: _hd, heavyReadConcurrencyActive: _ha, heavyReadConcurrencyOptions: _ho, ...shared } = await rootApi.getSettings();
+      return { ...shared, ...heavyReadView(hostId) };
+    },
+    async patchSettings(patch) {
+      const { heavyReadConcurrency, ...rest } = patch;
+      const restartRequired: string[] = [];
+      if (heavyReadConcurrency !== undefined) patchHeavyRead(hostId, heavyReadConcurrency, restartRequired);
+      const { heavyReadConcurrency: _h, heavyReadConcurrencyDefault: _hd, heavyReadConcurrencyActive: _ha, heavyReadConcurrencyOptions: _ho, restartRequired: shared, ...view } = Object.keys(rest).length ? await rootApi.patchSettings(rest) : { ...(await rootApi.getSettings()), restartRequired: [] as string[] };
+      return { ...view, ...heavyReadView(hostId), restartRequired: [...shared, ...restartRequired] };
+    },
     async patchProfile(name, patch) {
       const { accountLink: _accountLink, color: _color, avatarThemes: _themes, avatarStyle: _style, avatarStyleImportIfUnset: _importStyle, introGreeting: _greeting, ...other } = patch;
       if (Object.keys(other).length) await rootApi.patchProfile(name, other);
@@ -3186,13 +3274,18 @@ function retiredProjection(s: SessionResource): SessionResource {
   const project = LEGACY ? {} : { projectId, projectName: known.find((p) => p.project_id === projectId)?.presentation.display_name ?? null };
   return { contractVersion, cutexSessionId, revision, lifecycle, retiredAt, hostId, displayName, formalAgentName, threadName, cwd, profile, groups, registrationClass, avatar: s.avatar ?? null, avatarMode: s.avatarMode ?? null, native: { threadId: s.native.threadId }, runtime, runtimeDefaults, activity, createdAt, updatedAt, ...project } as unknown as SessionResource;
 }
+// `?projscale` (项目 table, option B 2026-11-25; with `mh=1`): workstation gets 12 more projects of 2–5 agents, some online.
+const PROJ_SCALE: [string, string][] = typeof location !== "undefined" && new URLSearchParams(location.search).has("projscale")
+  ? [["ws-render", "blue"], ["ws-ingest", "green"], ["ws-notebook", "#f4a6b0"], ["ws-trainer", "yellow"], ["ws-gpu-pool", "magenta"], ["ws-fetcher", "cyan"], ["ws-thesis", "#c9b6ff"], ["ws-backup", "#ffd38a"], ["ws-sweep", "red"], ["ws-labeler", "#9fd3ff"], ["ws-archive-io", "#8fe0d6"], ["ws-paper-2027", "#ffb199"]]
+  : [];
 function remoteSnapshot(): SidebarSnapshot {
   const keep = new Set(["wave", "scratch", "chat-trip"]);
   const active = snapshot.active.filter((s) => keep.has(s.cutexSessionId)).map((s) => (s.cwd ? { ...s, cwd: s.cutexSessionId === "scratch" ? "/home/alex/scratch" : "/home/alex/projects/waveline" } : s));
   const wave = snapshot.projects?.projects.find((p) => p.project_id === "waveline");
   // Multi-host sidebar (P1 2a): workstation also has its own project and agents.
   const kks = wave && { ...wave, project_id: "kks", director_cutex_session_id: "kks-lead", workspace_root: "/home/alex/projects/kks", presentation: { ...wave.presentation, display_name: "kks", badge_label: "K", color: "green" } };
-  const projects = snapshot.projects ? { ...snapshot.projects, projects: [...snapshot.projects.projects.filter((p) => p.project_id === "waveline").map((p) => ({ ...p, workspace_root: "/home/alex/projects/waveline" })), ...(kks ? [kks] : [])] } : null;
+  const scaled = wave ? PROJ_SCALE.map(([id, color], k) => ({ ...wave, project_id: id, director_cutex_session_id: k % 4 === 3 ? null : `ps-${id}-0`, workspace_root: `/home/alex/projects/${id}`, active_member_count: 2 + (k % 4), presentation: { display_name: id, badge_label: id.slice(0, 2).toUpperCase(), color } })) : [];
+  const projects = snapshot.projects ? { ...snapshot.projects, projects: [...snapshot.projects.projects.filter((p) => p.project_id === "waveline").map((p) => ({ ...p, workspace_root: "/home/alex/projects/waveline" })), ...(kks ? [kks] : []), ...scaled] } : null;
   const own = workstationAgents();
   return {
     active: [...active, ...own.filter((x) => x.session.lifecycle !== "retired").map((x) => x.session)],
@@ -3210,6 +3303,15 @@ function workstationAgents() {
     { session: session("kks-data", "Datasmith", { cwd: "/home/alex/datasets", status: "offline" }), project: "kks" },
     { session: session("ops", "Ops", { cwd: "/home/alex", output: "磁盘清理完了，/mnt/data 还剩 1.2T。" }), project: null },
   ];
+  if (PROJ_SCALE.length && !workstationOwn.some((x) => x.session.cutexSessionId.startsWith("ps-"))) {
+    PROJ_SCALE.forEach(([id], k) => {
+      for (let i = 0; i < 2 + (k % 4); i++) {
+        const online = i === 0 ? k % 3 !== 2 : i === 1 && k % 2 === 0;
+        const sid = `ps-${id}-${i}`;
+        workstationOwn!.push({ session: session(sid, `${id}-${["Lead", "Builder", "Tester", "Writer", "Scout"][i]}`, { cwd: `/home/alex/projects/${id}`, ...(online ? (i === 1 ? { turn: `${sid}-t`, tool: "$ cargo test" } : { output: "Done, waiting for review.", idle: 4 + k * 37 }) : { status: "offline", output: "Merged.", idle: (k + 1) * 900 + i * 60 }) }), project: id });
+      }
+    });
+  }
   if (MENTION_AGENTS_SCENE && !workstationOwn.some(item => item.session.cutexSessionId === MENTION_REMOTE_ID)) workstationOwn.push({ session: session(MENTION_REMOTE_ID, "Astra", { cwd: "/home/alex/projects/kks", output: "Ready to review" }), project: "kks" });
   return workstationOwn;
 }
@@ -3369,7 +3471,7 @@ function seedPreviewSetup(mode: string): Promise<void> {
     }
   };
   persist();
-  applyContrast("standard"); applyLightPalette("plain"); applyDarkPalette("graphite");
+  applyContrast("standard"); applyLightPalette("plain"); applyDarkPalette("graphite"); applyAccent(DEFAULT_ACCENT);
   applyTheme(upgrade ? "light" : "system");
   if (!upgrade) localStorage.removeItem("cutex-desktop.theme");
   return Promise.all([import("../lib/prefs"), import("../lib/trayPrefs"), import("../lib/appearance")]).then(([prefs, trayPrefs, sizes]) => {
@@ -3391,6 +3493,9 @@ export function startPreviewOnboarding(): void {
   const setup = mode !== null ? seedPreviewSetup(mode) : Promise.resolve();
   const theme = q.get("theme");
   if (theme === "light" || theme === "dark") applyTheme(theme);
+  // ?accent=pink (a preset) or ?accent=%23ff66aa: the 强调色 for screenshots.
+  const accent = q.get("accent");
+  if (accent) applyAccent(parseAccentPref(accent));
   startPreviewGuides();
   if (mode === null) return;
   if (mode === "ask") localStorage.removeItem("cutex-desktop.guides");
@@ -3763,6 +3868,10 @@ export function installMockBridge(): void {
         mockSetScope(scopeAfterRemoval(mockHosts.scope, { hosts: mockHosts.hosts.filter((h) => h.kind !== "local").map((h) => h.id), groups: r.groups }));
         return mockHostsOut();
       },
+      // One 项目 table batch at a time (main/projectBatchLease; one window in the preview).
+      async projectBatchLease(request) {
+        return request.op === "begin" ? { ok: true, token: "mock-lease" } : { ok: true, token: request.token };
+      },
       // profile-transfer (main → main in the app): the mock profiles are shared by every mock host, so the
       // copy lands in the same list under its new name; warnings as cutex answers them.
       async copyProfileToHost(request) {
@@ -3824,6 +3933,8 @@ export function installMockBridge(): void {
       async sidebarLoadArchived() {},
       async bootstrap(id, turnLimit) {
         if (MEDIA_BLOBS_SCENE && id === "eva") await prepareMediaBlobs();
+        // `?notesslow`: Eva's first history page takes 3 s (an agent with many owner notes opened over a slow link).
+        if (NOTES_SLOW_SCENE && id === "eva") await new Promise((r) => setTimeout(r, 3000));
         // Like cutex: bootstrap only knows active sessions (archived ones read GET /history).
         if (snapshot.retired.some((s) => s.cutexSessionId === id)) throw new Error("session_not_found: the owner-visible cutex session does not exist on this host");
         if (IMAGE_HEAVY && id === IMAGE_HEAVY_SESSION) { await prepareImageHeavy(); return imageHeavyResponse(bootstrap(id, turnLimit), "bootstrap"); }
@@ -3842,6 +3953,15 @@ export function installMockBridge(): void {
         return LEGACY ? null : mockEventBlob(sessionId, sha256, expected);
       },
       imageAction: mockMediaImageAction,
+      // session-search-v1 (sidebar 工作目录 / 查找旧任务): this host's sessions and threads; Rei has no readable history (partial).
+      async sessionSearch(query) {
+        return mockSessionSearch({ name: "HOST-A", sessions: () => [...snapshot.active, ...snapshot.retired], turns: (id) => (id === "rei" ? null : (mockThread(id).thread.turns as MockSearchTurn[])), projectOf: (id) => snapshot.hostRows?.[id]?.projectId ?? null }, query);
+      },
+      // session-interaction-history-v1 (`?answeredasks`, dev/mockAnsweredAsks): saved answered questions / approvals.
+      async interactionHistoryPage(id, request) {
+        await new Promise((r) => setTimeout(r, 300));
+        return mockAnsweredAsksPage(id, request, mockThread(id).thread.turns as { id: string; items?: { id?: string }[] }[]);
+      },
       async history(id, cursor, limit = 20) {
         if (IMAGE_HEAVY && id === IMAGE_HEAVY_SESSION) { await prepareImageHeavy(); const { thread, page } = mockPage(mockThread(id), limit, cursor ?? null); return imageHeavyResponse({ contractVersion: 2, cutexSessionId: id, threadId: thread.id, source: "live", native: { method: "thread/read", result: { thread } }, page }, "history"); }
         if (MEDIA_BLOBS_SCENE && id === "eva") await prepareMediaBlobs();
@@ -4434,6 +4554,14 @@ export function installMockBridge(): void {
       async listProfiles() {
         return { defaultProfile: mockSettings.defaultProfile, profiles: Object.values(mockProfiles).map((p) => mockProfileItem(p.name)) };
       },
+      // text-rewrite-v1 (提示词增强; dev/mockTextRewrite.ts): the agent's own Profile is the default one here.
+      async textRewrite(request) {
+        if (LEGACY) throw new Error("route_not_found: POST /v2/text-rewrite");
+        return mockTextRewrite(request, mockProfileItem(mockSettings.defaultProfile ?? Object.keys(mockProfiles)[0]!).id);
+      },
+      cancelTextRewrite(requestId) {
+        mockCancelTextRewrite(requestId);
+      },
       async getProfile(name) {
         return mockProfileDetail(name);
       },
@@ -4602,8 +4730,9 @@ export function installMockBridge(): void {
         return settingsView();
       },
       async patchSettings(patch) {
-        const { newThreadDefaults: _current, newThreadDefaultsBuiltin: _builtin, ...rest } = patch;
+        const { newThreadDefaults: _current, newThreadDefaultsBuiltin: _builtin, heavyReadConcurrency, heavyReadConcurrencyDefault: _hd, heavyReadConcurrencyActive: _ha, heavyReadConcurrencyOptions: _ho, ...rest } = patch;
         const restartRequired: string[] = [];
+        if (heavyReadConcurrency !== undefined) patchHeavyRead("local", heavyReadConcurrency, restartRequired);
         if ("managementListen" in rest) {
           const list = rest.managementListen;
           if (list && !list.some((e) => /^(127\.|\[?::1\]?|0\.0\.0\.0|\[?::\]?)/.test(e))) throw new Error("400 invalid_request: managementListen: keep a loopback entry (127.0.0.1 or ::1); the desktop and CLI connect over loopback");
@@ -4704,13 +4833,18 @@ export function installMockBridge(): void {
           s.lifecycle = retire ? "retired" : "active";
           snapshot = { ...snapshot, active: retire ? snapshot.active.filter((x) => x !== s) : [...snapshot.active, s], retired: retire ? [...snapshot.retired, s] : snapshot.retired.filter((x) => x !== s) };
         } else if (method === "cutex/session/defaults/update") {
+          mockRetiredModelSave(id, params.patch as Record<string, unknown>);
           s.runtimeDefaults = { ...(s.runtimeDefaults ?? {}), ...(params.patch as Record<string, boolean>) };
         } else if (method === "cutex/runtime/online") {
           // Starting a runtime takes a moment; `…fail…` agents refuse (bulk start shows 失败).
           await new Promise((r) => setTimeout(r, 700 + Math.random() * 1300));
           if (id.includes("fail")) throw new Error("runtime start failed: profile omega has no credentials on this host (mock)");
+          const unreachable = mockDiagOnlineRefusal(id);
+          if (unreachable) throw new Error(unreachable);
           const pathsChanged = s.runtime.status !== "online" ? mockCreatorPathsRefusal(id) : null;
           if (pathsChanged) throw new Error(pathsChanged);
+          const retired = s.runtime.status !== "online" ? mockRetiredModelRefusal(id) : null;
+          if (retired) throw new Error(retired);
           // A new runtime occurrence: cutex advances runtimeGeneration on every launch.
           if (s.runtime.status !== "online") s.runtime = { ...s.runtime, status: "online" as typeof s.runtime.status, runtimeGeneration: s.runtime.runtimeGeneration + 1 };
         } else if (method === "cutex/runtime/offline") {
@@ -4754,6 +4888,10 @@ export function installMockBridge(): void {
         if (scene === null) return { requestedModel: model, observedForRequestedModel: null, observedModels: [], lastObservedModel: null };
         if (scene) return { requestedModel: model, observedForRequestedModel: model, observedModels: [scene], lastObservedModel: scene };
         return { requestedModel: model, observedForRequestedModel: model, observedModels: [answered[model] ?? model], lastObservedModel: answered[model] ?? model };
+      },
+      async projectLifecycle(projectId, expected, kind) {
+        try { await this.projectMutation!(projectId, expected, { kind }); return { outcome: "done" }; }
+        catch (e) { return { outcome: "refused", code: e instanceof Error ? e.message : String(e) }; }
       },
       async projectMutation(projectId, _expected, op) {
         if ("presentation" in op && op.presentation) mockProjectColor(op.presentation.color, LEGACY);
@@ -4906,7 +5044,7 @@ export function installMockBridge(): void {
         return {
           ...(LEGACY ? {} : { cutexBuild: MOCK_CUTEX_BUILD }),
           hostId: (() => { const d = mockDaemonOf(mockHosts.active); return d.kind === "connected" ? d.hostId : "HOST-A"; })(),
-          featureList: ((list: string[]) => (mockHosts.active === WORKSTATION ? withoutWorkstationGaps(list) : list).filter((f) => !NO_FEATURES.has(f)))([...remoteFeatures, ...MOCK_BASE_FEATURES, ...mockScenarioFeatures(location.search), ...((MEDIA_BLOBS_SCENE || IMAGE_HEAVY || IMAGE_SWITCH_SCENE) && !LEGACY ? ["event-media-blobs"] : []), ...(LEGACY ? [] : MOCK_NEW_FEATURES.filter((f) => !(OLD_RIDEALONG && f === "admission-ridealong-detail") && (IMAGE_STEER || f !== "image-input-steering"))), ...(LEGACY || NO_AGENT_PAUSE ? [] : [AGENT_PAUSE_FEATURE])]),
+          featureList: ((list: string[]) => (mockHosts.active === WORKSTATION ? withoutWorkstationGaps(list) : list).filter((f) => !NO_FEATURES.has(f)))([...remoteFeatures, ...MOCK_BASE_FEATURES, ...mockScenarioFeatures(location.search), ...mockAnsweredAsksFeatures(), ...((MEDIA_BLOBS_SCENE || IMAGE_HEAVY || IMAGE_SWITCH_SCENE) && !LEGACY ? ["event-media-blobs"] : []), ...(LEGACY ? [] : MOCK_NEW_FEATURES.filter((f) => !(OLD_RIDEALONG && f === "admission-ridealong-detail") && (IMAGE_STEER || f !== "image-input-steering"))), ...(LEGACY || NO_AGENT_PAUSE ? [] : [AGENT_PAUSE_FEATURE])]),
           ...(LEGACY ? {} : { user: mockConnectionUser() }),
         };
       },

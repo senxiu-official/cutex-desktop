@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.2.8 "Beautiful World" (2026-11-26)
+
+- Adds browser identities with separate logins, history and browser settings. Grants name the identity and signed-in sites; agent tabs keep their separate login environment.
+  新增浏览器身份，分别保留登录状态、历史记录和浏览设置。授权标签页时会说明身份及已登录网站；智能体标签页继续使用独立的登录环境。
+- Adds saved passwords for owner tabs. Windows uses Credential Manager and Windows Hello; Linux requires a supported system keyring, and macOS uses the Keychain. Filling, showing and copying remain controlled by main and owner input.
+  新增自用标签页的密码保存。Windows 使用凭据管理器及 Windows Hello，Linux 需要受支持的系统密钥环，macOS 使用钥匙串；填充、显示和复制由主进程及用户操作控制。
+- Adds a background-playback switch for each owner tab and a history keyboard shortcut. Tabs without background playback pause when off screen.
+  每个自用标签页可单独选择后台播放，并提供历史记录快捷键；未启用后台播放的标签页在离开屏幕后暂停。
+- Improves past-task search with time, sender, content-kind and project filters, newest-first results and turn timestamps on hosts that provide the new search capability. Older hosts retain their supported search.
+  支持新搜索能力的主机可按时间、发送者、内容类型和项目筛选历史任务，结果按最新排序并显示回合时间；旧主机继续使用原有搜索能力。
+- Makes delegation waits, approvals and terminal notices clearer, with links to the relevant result or approval where the host provides them. Updates project controls and activity information on supporting hosts.
+  更清楚地显示委托等待、审批及结束原因，并在主机提供相关信息时直达结果或审批位置；支持的主机还提供项目控制和活动信息。
+- Improves conversation rendering, scrolling and updates to reduce visible flicker. Module settings now distinguish a module's source, version and active registration more clearly.
+  改进会话渲染、滚动和更新，减少可见闪动；模块设置更清楚地显示来源、版本和实际加载状态。
+- Provides WhatsApp observation as a separate module, off by default, while retaining service notifications as the general channel for services.
+  WhatsApp 观察作为独立模块提供，默认关闭；服务通知继续作为各项服务的通用通知渠道。
+
+- The matching host and runtime releases have their own upgrade steps and signatures. Existing agents retain their selected runtime. Linux Native requires a capable system bubblewrap and host support for sandbox startup; see Known issues.
+  配套主机和运行时发布各自提供升级步骤与签名。已有智能体保留所选运行时。Linux 原生运行时需要可用的系统 bubblewrap，以及主机支持沙盒启动；详见已知问题。
+
 ## 0.2.7 "Beautiful World" (2026-11-23)
 
 - Shows reasoning effort as an explicit level and labels Claude aliases with their model family and reported version. Unsupported or unreported values have clear explanations; older hosts use the available fallback.

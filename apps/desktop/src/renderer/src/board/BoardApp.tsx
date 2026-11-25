@@ -9,6 +9,7 @@ import type { BoardActivityKind, BoardBridge, BoardMemberState, BoardMemberView,
 import { healthOf, orderProjects } from "../../../shared/boardModel";
 import { agoText, boardText, projectColor, type BoardText } from "./i18n";
 import { usePending } from "../lib/usePending";
+import { ProjectBadgeView } from "../components/ProjectBadgeView";
 
 type Open = (target: BoardTarget | null) => void;
 
@@ -96,8 +97,8 @@ function FirstProblem({ p, open, t }: { p: BoardProjectView; open: Open; t: Boar
   const tone = a.soft ? "bg-warn/10 text-warn-text hover:bg-warn/20" : "bg-danger/10 text-danger-text hover:bg-danger/20";
   return (
     <button type="button" data-board-problem={a.soft ? "soft" : "hard"} onClick={(e) => { e.stopPropagation(); open(a.target); }} className={`press flex w-full items-start gap-1.5 rounded-md px-2 py-1 text-left text-sm ${tone}`}>
-      <TriangleAlert className="mt-0.5 size-4 shrink-0" /><span className="min-w-0 flex-1 truncate">{t.problem(a.kind, a.subject, a.detail)}</span>
-      {p.problemCount > 1 && <span className="shrink-0 text-xs">{t.moreProblems(p.problemCount - 1)}</span>}
+      <TriangleAlert className="mt-0.5 size-4 shrink-0" /><span className="min-w-0 flex-1 truncate">{a.group ? t.problemGroup(a.kind, a.group.count, a.group.names) : t.problem(a.kind, a.subject, a.detail)}</span>
+      {p.problemCount > (a.group?.count ?? 1) && <span className="shrink-0 text-xs">{t.moreProblems(p.problemCount - (a.group?.count ?? 1))}</span>}
     </button>
   );
 }
@@ -121,7 +122,7 @@ function ProjectTitle({ p, s, open, t, now, pinned, size = "xl" }: { p: BoardPro
   const place = p.places[0];
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <span className="size-3.5 shrink-0 rounded" style={{ background: projectColor(p.color) }} />
+      <ProjectBadgeView icon={p.icon} badge={p.badge} hex={projectColor(p.color)} size={size === "xl" ? "lg" : "sm"} className="self-center" />
       <button type="button" onClick={() => open(place ? { kind: "project", hostId: place.hostId, projectId: place.projectId } : null)} className={`press min-w-0 truncate rounded ${size === "xl" ? "text-xl" : "text-lg"} font-semibold hover:underline`}>{p.name}</button>
       {pinned && <Pin className="size-3.5 text-subtle" />}
       <HostChips p={p} s={s} />
@@ -229,7 +230,7 @@ function Manage({ s, t, set }: { s: BoardState; t: BoardText; set: (patch: Board
         const hidden = s.prefs.hidden.includes(k), pinned = s.prefs.pinned.includes(k);
         return (
           <div key={k} className={`flex items-center gap-1.5 rounded px-1 py-1 text-sm ${hidden ? "opacity-50" : ""}`}>
-            <span className="size-2.5 shrink-0 rounded-sm" style={{ background: projectColor(p.color) }} />
+            <ProjectBadgeView icon={p.icon} badge={p.badge} hex={projectColor(p.color)} size="md" />
             <span className="min-w-0 flex-1 truncate">{p.name}</span>
             <button type="button" title={t.up} disabled={i === 0} onClick={() => move(i, -1)} className="press-icon rounded text-muted hover:text-foreground disabled:opacity-30"><ArrowUp className="size-4" /></button>
             <button type="button" title={t.down} disabled={i === order.length - 1} onClick={() => move(i, 1)} className="press-icon rounded text-muted hover:text-foreground disabled:opacity-30"><ArrowDown className="size-4" /></button>

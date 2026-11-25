@@ -15,7 +15,7 @@ export const en: Record<keyof typeof zhCN, string> = {
   "delegations.description": "Delegations between {{agents}}, shown in the status row and capsule",
   "delegations.statusTitle": "Delegations",
   "delegations.count": "Delegations {n}",
-  "delegations.mine": "Sent by me",
+  "delegations.mine": "Delegated by me",
   "delegations.toMe": "Sent to me",
   "delegations.handling": "Handling · {name}'s delegation",
   "delegations.oldest": "oldest {t}",
@@ -42,4 +42,8 @@ export const en: Record<keyof typeof zhCN, string> = {
   "delegations.detail.gone": "This delegation was not found (purged, or not visible on this host)",
   "delegations.detail.created": "created {when}",
   "delegations.detail.attempts": "attempt {n}",
+  "delegations.detail.newerResult": "The result has a newer version; this is the current one",
+  "delegations.detail.noResult": "This delegation has no result you can view yet",
+  "delegations.detail.reviewDone": "This approval was already decided, or it is not here",
+  "delegations.detail.openApprovals": "Open “Approvals”",
 };

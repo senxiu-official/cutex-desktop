@@ -17,8 +17,10 @@ import sideChat from "./side-chat";
 import backgroundTerminals from "./background-terminals";
 import claudeAccounts from "./claude-accounts";
 import kimiAccounts from "./kimi-accounts";
+import featureProfiles from "./feature-profiles";
 import profileImport from "./profile-import";
 import claudeScience from "./claude-science";
+import whatsapp from "./whatsapp";
 import codexConfig from "./codex-config";
 import connection from "./connection";
 import conversation from "./conversation";
@@ -28,11 +30,14 @@ import goal from "./goal";
 import home from "./home";
 import intro from "./intro";
 import jobs from "./jobs";
+import sessionSearch from "./session-search";
 import nci from "./nci";
 import notifications from "./notifications";
 import ownerNotify from "./owner-notify";
+import serviceNotify from "./service-notify";
 import plan from "./plan";
 import projects from "./projects";
+import personalAssistants from "./personal-assistants";
 import projectView from "./project-view";
 import quickChats from "./quick-chats";
 import remoteAccess from "./remote-access";
@@ -99,6 +104,8 @@ export const MODULES: readonly AppModule[] = [
   projectView,
   // Conversation search (native thread/searchOccurrences; cutex thread-search-occurrences).
   threadSearch,
+  // 查找旧任务 as a page (cutex session-search-v1): the sidebar's 在页面中查找.
+  sessionSearch,
   sideChat,
   // Status categories (step 2); their order in the capsule / status row is the items' `order`.
   goal,
@@ -114,6 +121,8 @@ export const MODULES: readonly AppModule[] = [
   workflows,
   // Pages + sidebar entries (step 3); the sidebar order is the items' `order`.
   quickChats,
+  // 个人助理 (cutex personal-assistants-local-v1): the front desk entry, its page and a project tab.
+  personalAssistants,
   projects,
   services,
   // Claude Science (default off): several Claude Science accounts as cutex managed services.
@@ -126,6 +135,10 @@ export const MODULES: readonly AppModule[] = [
   storage,
   archive,
   ownerNotify,
+  // 服务通知 (cutex service-notifications-v1): per-service alerts and history, for every service.
+  serviceNotify,
+  // WhatsApp (default off): main watches an owner WhatsApp Web tab and posts service notifications.
+  whatsapp,
   // claude-safety-grants: the owner's decision on a declined tool row (the 需要你 card is core).
   safetyGrants,
   remoteAccess,
@@ -146,6 +159,8 @@ export const MODULES: readonly AppModule[] = [
   claudeAccounts,
   // Kimi 账户 (cutex kimi-accounts, r266): a section of Settings → Profile after Claude 账户.
   kimiAccounts,
+  // 功能 Profile (cutex feature-profiles): Settings → 工具 → 功能 Profile, endpoints only app features use.
+  featureProfiles,
   // 从 CC Switch 导入 (cutex profile-import-cc-switch): a section of Settings → Profile after Claude 账户.
   profileImport,
 ];

@@ -1,5 +1,5 @@
 // Settings pages over cutex global settings (`/v2/settings`) and the shared user-level AGENTS.md
-// (`/v2/user-instructions`): 新建默认 (new agent + quick-start defaults, auto
+// (`/v2/user-instructions`): 新建默认 (new agent + quick-start defaults with their auto
 // titles), 指令 (AGENTS.md, 运行环境说明 = cutex agent-harness); plus the 协作 page's agent 间消息格式 (消息总线 lives in modules/agent-bus/BusSettings.tsx).
 import { useEffect, useState } from "react";
 import type { AgentHarnessPreview, AgentHarnessSectionId, GlobalSettings, ProfileItem, UserInstructions } from "../../../../shared/ipc";
@@ -23,6 +23,7 @@ import { ACP_RUNTIME_INFO, isAcpRuntime } from "../../lib/acpRuntimes";
 import { useOwnerWindow } from "../../lib/ownerContext";
 import { SearchableSelect } from "../SearchablePicker";
 import { useAgentPicker } from "../../lib/useAgentPicker";
+import type { EntityRef } from "../../lib/entityIcon";
 
 function errorText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
@@ -50,7 +51,8 @@ export function DefaultsPage() {
   const threads = useThreadDefaults();
   const profiles = useProfiles();
   const focus = useApp((s) => s.settingsFocus);
-  const windowsHost = useHostPlatform(useTargetHostId()) === "windows";
+  const targetHost = useTargetHostId();
+  const windowsHost = useHostPlatform(targetHost) === "windows";
   const windowsSandbox = useTargetFeatures().has(WINDOWS_SANDBOX_FEATURE);
   // openSettings("defaults", { anchor: "quickWork" }) scrolls to the 快速启动 section.
   useEffect(() => {
@@ -66,13 +68,14 @@ export function DefaultsPage() {
       </Section>
     );
   const names = (profiles ?? []).map((p) => p.name);
+  const profileEntity = (name: string): EntityRef => ({ kind: "profile", ref: name, hostId: targetHost, profile: profiles?.find((p) => p.name === name) });
   return (
     <>
       {(error || threads.error) && <ErrorNote>{error ?? threads.error}</ErrorNote>}
       {!threads.supported && <Notice>{t("agent-config.threadDefaults.unsupported")}</Notice>}
       <Section id={settingsAnchorId("newAgent")} title={t("agent-config.defaults.newAgent")} hint={t("agent-config.defaults.newAgentHint")}>
         <SettingRow agents="newAgents" source="host" label={t("agent-config.defaults.profile")}>
-          <Select value={settings.defaultProfile ?? ""} options={names.map((n) => ({ value: n, label: n }))} onChange={(v) => void patch({ defaultProfile: v })} />
+          <Select value={settings.defaultProfile ?? ""} options={names.map((n) => ({ value: n, label: n, entity: profileEntity(n) }))} onChange={(v) => void patch({ defaultProfile: v })} />
         </SettingRow>
         <SettingRow agents="newAgents" source="host" label={t("agent-config.defaults.directLaunch")} hint={t("agent-config.defaults.directLaunchHint")}>
           <Toggle checked={settings.defaultProfileDirectLaunch} onChange={(v) => void patch({ defaultProfileDirectLaunch: v })} />
@@ -81,7 +84,6 @@ export function DefaultsPage() {
       </Section>
       {windowsHost && <WindowsSandboxSection supported={windowsSandbox} />}
       <QuickWorkSection profiles={names} quickChatDefaultProfile={settings.quickChatDefaultProfile ?? null} onProfile={(v) => void patch({ quickChatDefaultProfile: v })} threads={threads} />
-      <ThreadTitleSection />
       <PromptCacheKeySection />
     </>
   );
@@ -92,34 +94,44 @@ function QuickWorkSection({ profiles, quickChatDefaultProfile, onProfile, thread
   const hasProfile = useTargetFeatures().has(QUICK_CHAT_PROFILE_FEATURE);
   const current = quickChatDefaultProfile ?? "";
   // "" = follow the 新建 agent default; a profile that no longer exists still shows (cutex reports it).
-  const options = [{ value: "", label: t("agent-config.quickChats.profileGlobal") }, ...[...new Set([...profiles, ...(current ? [current] : [])])].map((n) => ({ value: n, label: n }))];
+  const hostId = useTargetHostId();
+  const options = [{ value: "", label: t("agent-config.quickChats.profileGlobal") }, ...[...new Set([...profiles, ...(current ? [current] : [])])].map((n) => ({ value: n, label: n, entity: { kind: "profile" as const, ref: n, hostId } }))];
   return (
     <Section id={settingsAnchorId("quickWork")} title={t("agent-config.quickChats")} hint={t("agent-config.quickChats.hint")}>
       <SettingRow agents="newAgents" source="host" label={t("agent-config.quickChats.profile")} hint={hasProfile ? t("agent-config.quickChats.profileHintOn") : t("agent-config.quickChats.profileHint")}>
         <Select disabled={!hasProfile} options={hasProfile ? options : options.slice(0, 1)} value={hasProfile ? current : ""} onChange={(v) => onProfile(v || null)} />
       </SettingRow>
       {threads.state && <ThreadDefaultRows kind="quickChat" current={threads.state.current.quickChat} builtin={threads.state.builtin.quickChat} onPatch={(f) => void threads.patch("quickChat", f)} />}
+      <ThreadTitleRows />
     </Section>
   );
 }
 
-/** 自动标题: `autoThreadTitles` / `threadTitleModel` (cutex auto-thread-titles). */
-function ThreadTitleSection() {
+/**
+ * 自动标题: `autoThreadTitles` / `threadTitleModel` (cutex auto-thread-titles), rows of 快速启动. cutex names only quick
+ * chats (cli_app/thread_titles.rs: an owned session without a name; Claude sessions skipped; agents keep their own
+ * names), so it sits with the quick-chat defaults (owner 2026-11-24: it read as an agent setting). Unlike them it is
+ * not limited to new creations: cutex re-reads the toggle and the model on every user message, so an existing unnamed
+ * quick chat is named after its next one. Hence `chatsNow` (快速会话 · 立即生效, a chat glyph, no agent glyph); the
+ * section turns mixed and each row shows its own marker instead of the header's 仅新建时.
+ * `titles` stays an anchor (settings search, openSettings("defaults", { anchor: "titles" })).
+ */
+function ThreadTitleRows() {
   const { t } = useI18n();
   const supported = useTargetFeatures().has(AUTO_TITLES_FEATURE);
   const { settings, error, patch } = useGlobalSettings();
   if (!supported) return null;
   const enabled = settings?.autoThreadTitles ?? true;
   return (
-    <Section id={settingsAnchorId("titles")} title={t("agent-config.titles")} hint={t("agent-config.titles.hint")}>
+    <div id={settingsAnchorId("titles")} data-settings-titles="" className="scroll-mt-4">
       {error && <ErrorNote>{error}</ErrorNote>}
-      <SettingRow agents="now" source="host" label={t("agent-config.titles.auto")}>
+      <SettingRow agents="chatsNow" source="host" label={t("agent-config.quickChats.titles.auto")} hint={t("agent-config.quickChats.titles.hint")}>
         <Toggle disabled={!settings} checked={enabled} onChange={(v) => void patch({ autoThreadTitles: v })} />
       </SettingRow>
-      <SettingRow agents="now" source="host" label={t("agent-config.titles.model")} info={t("agent-config.titles.modelHint")}>
-        <TextField mono maxLength={200} disabled={!settings || !enabled} placeholder={t("agent-config.titles.modelAuto")} value={settings?.threadTitleModel ?? ""} onCommit={(v) => patch({ threadTitleModel: v.trim() || null })} />
+      <SettingRow agents="chatsNow" source="host" label={t("agent-config.quickChats.titles.model")} info={t("agent-config.quickChats.titles.modelHint")}>
+        <TextField mono maxLength={200} disabled={!settings || !enabled} placeholder={t("agent-config.quickChats.titles.modelAuto")} value={settings?.threadTitleModel ?? ""} onCommit={(v) => patch({ threadTitleModel: v.trim() || null })} />
       </SettingRow>
-    </Section>
+    </div>
   );
 }
 

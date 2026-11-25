@@ -51,6 +51,11 @@ function mockKey(): { line: string; fingerprint: string } {
 let key: { line: string; fingerprint: string; source: "generated" | "uploaded"; pending: boolean } | null = null;
 let config: { enabled: boolean; username: string; hostKeys: string[]; pollIntervalSeconds: number } | null = null;
 let queries = { count: 0, last: null as number | null, success: null as number | null };
+// `?nciready`: the Gadi check already set up and on (the 作业 page NCI line); default: nothing configured (setup guide).
+if (typeof location !== "undefined" && new URLSearchParams(location.search).has("nciready")) {
+  config = { enabled: true, username: "ab1234", hostKeys: ["gadi.nci.org.au ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPreviewOnlyGadiHostKey00000000000000000"], pollIntervalSeconds: 21600 };
+  queries = { count: 14, last: now() - 9 * 60, success: now() - 9 * 60 };
+}
 
 function nciStatus(): NciVerificationStatus {
   return {
@@ -75,6 +80,13 @@ function nciStatus(): NciVerificationStatus {
     lastQueryAt: queries.last,
     lastSuccessAt: queries.success,
     nextQueryAllowedAt: null,
+    // r296 (`?jobv1`: an older host without them).
+    ...(typeof location !== "undefined" && new URLSearchParams(location.search).has("jobv1") ? {} : {
+      lastVerifiedAt: queries.success,
+      nextCheckAt: config?.enabled === false ? null : Math.floor(Date.now() / 1000) + 25 * 60,
+      pendingDeliveries: 1,
+      deliveryErrorCode: null,
+    }),
   };
 }
 

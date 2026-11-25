@@ -10,6 +10,9 @@ export interface SessionCatalogSource {
   hostRow(id: string): Promise<HostSessionRow | null>;
   /** Every archived session in one list (`GET /v2/sessions?lifecycle=retired`), read only once they are wanted. */
   retired(): Promise<SessionResource[]>;
+  /** Active catalog pages carry each row's resource and host row (`include=resource,hostRow`): a whole-catalog
+   * reread then walks those pages (a few requests) instead of reading every row on its own (two requests each). */
+  pagedResources?: boolean;
 }
 export interface SessionCatalogSnapshot {
   active: SessionResource[];
@@ -37,6 +40,8 @@ interface CatalogState {
 class ResyncRequired extends Error {}
 const lifecycleOf = (state: CatalogState, id: string, fallback: SessionLifecycle = "active"): SessionLifecycle =>
   state.rows.get(id)?.lifecycle ?? (state.retiredIds.has(id) ? "retired" : fallback);
+/** With paged resources, a status gap rereads by pages once more rows than this are stale (fewer: one read each). */
+const PAGED_REREAD_MIN = 8;
 
 /** Per connection/access generation. Durable cursors survive SSE reconnects, never access changes.
  * Reads are single-flight; each keyed read has a dirty bit for hints arriving during hydration.
@@ -116,19 +121,27 @@ export class SessionDeltaCatalog {
           : { rows: new Map(), hostRows: new Map(), cursor: null, retiredIds: new Set() };
         let changed = !previous;
         const reindexed = !previous || previous.cursor === null;
+        // Every active row is to be read again (a project / Agent Management event, a status gap): with paged
+        // resources, walk the catalog pages once (perf audit 2026-11-24 #1: 280 rows were 560 reads, now 6 pages).
+        const paged = !!this.source.pagedResources && (this.refreshAll || this.staleCount(state) > PAGED_REREAD_MIN);
+        if (paged || (reindexed && this.source.pagedResources)) { this.refreshAll = false; this.staleBefore = 0; }
         if (reindexed) {
           const initial = await this.bootstrap();
           Object.assign(state, initial);
           changed = true;
+        } else if (paged) {
+          await this.reread(state);
+          changed = true;
         }
         if (state.cursor !== null) changed = await this.drain(state) || changed;
-        if (this.refreshAll) {
+        // Paged resources: a whole-catalog hint arriving during this read waits for the next read's pages.
+        if (this.refreshAll && !this.source.pagedResources) {
           this.refreshAll = false;
           // Archived rows come again as one list, not one read each.
           for (const [id, row] of state.rows) if (row.lifecycle === "active") this.dirty.add(id);
           if (state.archivedLoaded) this.archivedStale = true;
         }
-        if (this.staleBefore) {
+        if (this.staleBefore && !(this.source.pagedResources && this.staleCount(state) > PAGED_REREAD_MIN)) {
           const before = this.staleBefore;
           this.staleBefore = 0;
           for (const [id, row] of state.rows) if (row.lifecycle === "active" && (this.fetchedAt.get(id) ?? 0) <= before) this.dirty.add(id);
@@ -156,6 +169,72 @@ export class SessionDeltaCatalog {
       }
     }
     throw new Error("session catalog recovery exhausted");
+  }
+
+  /** Active rows the pending status gap makes stale. */
+  private staleCount(state: CatalogState): number {
+    if (!this.staleBefore) return 0;
+    let stale = 0;
+    for (const [id, row] of state.rows) if (row.lifecycle === "active" && (this.fetchedAt.get(id) ?? 0) <= this.staleBefore) stale++;
+    return stale;
+  }
+
+  /**
+   * Rereads every row by the catalog pages (`include=resource,hostRow`), as the first read does, without its progress.
+   * The pages' first head replaces the cursor, so the changes drained after it cover writes made while paging. Rows
+   * missing from both lifecycles' pages are gone; rows moved to the archive keep only their ID until the archived
+   * list is read again. Hints that arrived before the pages were asked are covered by them: they are taken off the
+   * dirty set now, so a hint for the same row arriving while the pages are read marks it again (read after them).
+   * The transport sequence restarts with the pages' head (a replaced store numbers its changes anew), as on a first read.
+   */
+  private async reread(state: CatalogState): Promise<void> {
+    const covered = new Set(this.dirty);
+    this.dirty.clear();
+    const delivered = new Set<string>();
+    const keys = new Map<string, SessionLifecycle>();
+    const active = new Set<string>(), retired = new Set<string>();
+    let first = true;
+    for (const lifecycle of ["active", "retired"] as const) {
+      let cursor: string | undefined;
+      const seen = new Set<string>();
+      do {
+        const started = Date.now();
+        const page = await this.source.page(lifecycle, cursor);
+        this.assertCurrent();
+        if ("resyncRequired" in page) throw new ResyncRequired(page.reason);
+        if (first) { state.cursor = page.changeCursor; state.sequence = undefined; first = false; }
+        if (page.claudeRuntime) state.claudeRuntime = page.claudeRuntime;
+        for (const key of page.sessions) {
+          const id = key.cutexSessionId;
+          if (lifecycle === "retired") { retired.add(id); continue; }
+          active.add(id);
+          if (key.resource !== undefined && key.hostRow !== undefined) {
+            this.applyRow(state, id, key.resource, key.hostRow, started);
+            delivered.add(id);
+          } else keys.set(id, lifecycle);
+        }
+        cursor = page.nextCursor ?? undefined;
+        if (cursor && seen.has(cursor)) throw new Error("session page cursor did not advance");
+        if (cursor) seen.add(cursor);
+      } while (cursor);
+    }
+    // An earlier hint whose row the pages did not carry with a resource is still to be read.
+    for (const id of covered) if (!delivered.has(id)) this.dirty.add(id);
+    this.writable(state);
+    for (const id of retired) {
+      if (active.has(id)) continue;
+      const row = state.rows.get(id);
+      if (row && row.lifecycle !== "retired") { state.rows.delete(id); state.hostRows.delete(id); state.membershipChanged = true; }
+      if (!state.retiredIds.has(id)) { state.retiredIds.add(id); state.membershipChanged = true; }
+    }
+    for (const id of [...state.rows.keys(), ...state.retiredIds]) {
+      if (active.has(id) || retired.has(id)) continue;
+      state.rows.delete(id); state.hostRows.delete(id); state.retiredIds.delete(id);
+      this.fetchedAt.delete(id); this.failed.delete(id); this.dirty.delete(id);
+      state.membershipChanged = true;
+    }
+    if (state.archivedLoaded) this.archivedStale = true;
+    await this.hydrate(state, keys);
   }
 
   private project(state: CatalogState): SessionCatalogSnapshot {

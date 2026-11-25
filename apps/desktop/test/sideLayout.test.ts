@@ -1066,8 +1066,8 @@ describe("persistence", () => {
   });
 
   it("over MAX_OVERRIDES the oldest overrides go", () => {
-    const overrides = Object.fromEntries(Array.from({ length: MAX_OVERRIDES + 3 }, (_, k) => [`m${k}.c`, { page: "p1", groups: [], at: k }]));
-    const saved = prepareForSave({ ...emptyLayout(), overrides }, all);
+    const overrides = Object.fromEntries(Array.from({ length: MAX_OVERRIDES + 3 }, (_, k) => [`m${k}.c`, { page: "p1", groups: ["g0"], at: k }]));
+    const saved = prepareForSave({ ...pagesLayout(1, 1), overrides }, all);
     expect(Object.keys(saved.overrides)).toHaveLength(MAX_OVERRIDES);
     expect(saved.overrides["m0.c"]).toBeUndefined();
   });

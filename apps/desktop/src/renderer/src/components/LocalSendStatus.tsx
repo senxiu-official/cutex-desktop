@@ -11,7 +11,7 @@ import { bridge } from "../bridge";
 import { useApp } from "../store";
 
 const TONE = { neutral: "text-subtle", warn: "text-warn-text", danger: "text-danger-text" } as const;
-const RESEND_FAILED = { zh: "没能重新发送，这一行还在", en: "Could not resend; the row stays" } as const;
+const RESEND_FAILED = { zh: "未能重新发送，这一行还在", en: "Could not resend; the row stays" } as const;
 
 export function LocalSendStatus({ entry, sessionId, hostId, readOnly = false }: { entry: LedgerOwnerOutbox; sessionId: string; hostId: string; readOnly?: boolean }) {
   const { t, locale } = useI18n();

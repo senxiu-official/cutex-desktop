@@ -1,8 +1,9 @@
 // Service popup form (cross-review of fix/service-tab-jumps, 2026-11-18): a same-service POST target=_blank keeps its body
 // through the ticket hop. Fixture: installBrowser's IPC/event boundary with the Electron mock (copied from browserInstall.test.ts).
 import { EventEmitter } from "node:events";
+import { mkdtempSync, rmSync } from "node:fs";
 import { basename, join } from "node:path";
-import { networkInterfaces } from "node:os";
+import { networkInterfaces, tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BrowserWindow, IpcMainInvokeEvent } from "electron";
 import type { HostManager } from "../src/main/hosts";
@@ -15,6 +16,7 @@ import { BrowserLanTargets } from "../src/main/browser/lanTargets";
 
 // Exercise installBrowser's public IPC/event boundary, not private functions or an alternate adapter.
 const electron = vi.hoisted(() => ({
+  userData: "",
   handlers: new Map<string, (...args: any[]) => Promise<any>>(),
   sessions: new Map<string, unknown>(),
   requested: [] as string[],
@@ -72,7 +74,7 @@ vi.mock("electron", () => ({
     return value;
   } },
   app: {
-    getPath: () => "memory-only-user-data",
+    getPath: (name: string) => name === "downloads" ? "memory-only-user-data" : electron.userData,
     get isPackaged() { return electron.packaged; },
     on: (name: string, fn: (...args: any[]) => void) => {
       let listeners = electron.appListeners.get(name);
@@ -174,6 +176,9 @@ async function until(predicate: () => boolean) {
 const cleanup: (() => void)[] = [];
 let nextContentsId = 1;
 function fixture(session = new SessionMock(), permissiveAppSender = false, localKind: "local" | "ssh" = "local") {
+  const userData = mkdtempSync(join(tmpdir(), "cutex-browser-popup-"));
+  electron.userData = userData;
+  cleanup.push(() => rmSync(userData, { recursive: true, force: true }));
   electron.sessions.set("persist:browser-local", session);
   const owner = new ContentsMock(nextContentsId++, session);
   const events: BrowserEvent[] = [];

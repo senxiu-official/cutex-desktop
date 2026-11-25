@@ -4,6 +4,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
+import { STATIC_SCAN } from "./staticScan";
 import { DEFAULT_APPEARANCE, type Appearance } from "../src/renderer/src/lib/appearanceModel";
 import { buildFontPlan, FontRoutingController, uiCjkFamilies, type FontVariables, type RoutedFace } from "../src/renderer/src/lib/fontFaces";
 import { FONT_UNICODE_RANGES } from "../src/renderer/src/lib/fontRanges";
@@ -110,7 +111,7 @@ function sources(dir: string): string[] {
 }
 
 describe("monospace stacks guard", () => {
-  it("no monospace font stack names a CJK family of its own", () => {
+  it("no monospace font stack names a CJK family of its own", STATIC_SCAN, () => {
     const offenders: string[] = [];
     for (const file of sources(SRC)) {
       readFileSync(file, "utf8").split("\n").forEach((line, i) => {

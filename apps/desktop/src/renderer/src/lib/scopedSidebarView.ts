@@ -72,7 +72,7 @@ export function useScopedSidebar(options?: { reachableOnly?: boolean }): ScopedS
   const sessions = useApp((s) => sessionsMetaOf(s.sessions));
   // The focus host's requests seen on its host feed: agents not open here are ⚠ rows too.
   const hostWaiting = useApp((s) => s.hostWaiting);
-  return useMemo(() => {
+  const built = useMemo(() => {
     const source = { hosts: hostsState, sidebar, byHost, features };
     const parts: HostSidebarPart[] = [];
     const hosts: ScopedSidebar["hosts"] = [];
@@ -89,9 +89,31 @@ export function useScopedSidebar(options?: { reachableOnly?: boolean }): ScopedS
       parts.push({ hostId: look.id, snapshot, pinned: focus ? pinned : pinnedOn(look.id), needsInput: focus ? new Set(Object.keys(pendingByAgent(views, hostWaiting))) : needsInputIds(views), chats: featuresOf(source, look.id).has("human-create-session"), statusUnknown: state === "loading", liveStatus: state === "loading" ? liveStatuses(views) : undefined });
       hosts.push({ look, state, hasRows: !!snapshot });
     }
-    const stateOf = (hostId: string | undefined) => hosts.find((h) => h.look.id === (hostId ?? scope.focus))?.state ?? "live";
-    return { scope, model: mergeHostSidebars(parts), hosts, stateOf };
+    return { scope, model: mergeHostSidebars(parts), hosts };
   }, [scope, sidebar, byHost, features, hostsState, pinned, sessions, hostWaiting, reachableOnly]);
+  // The same function while every host's state reads the same: the sidebar hands it to all rows (SidebarHostsContext),
+  // so a new one per snapshot re-rendered every visible row on each refresh (perf 2026-11-26).
+  const statesKey = hostStatesKey(built.hosts);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- `statesKey` stands for `built.hosts`' states
+  const stateOf = useMemo(() => stateLookup(built.hosts, built.scope.focus), [statesKey, built.scope.focus]);
+  return useMemo(() => ({ ...built, stateOf }), [built, stateOf]);
+}
+
+/** What `stateOf` answers depends on: each host's id and state, in order. */
+export function hostStatesKey(hosts: readonly { look: { id: string }; state: HostSidebarState }[]): string {
+  return hosts.map((h) => `${h.look.id}\u0000${h.state}`).join("\n");
+}
+
+/**
+ * What sidebar rows read of the scope through `SidebarHosts` (marks, focus, each host's mark: HostMark's label, color and
+ * status, and `local`): the context value is rebuilt only when this changes.
+ */
+export function sidebarHostsKey(scope: Pick<HostScope, "showHostMarks" | "focus" | "hosts">): string {
+  return [scope.showHostMarks ? "1" : "0", scope.focus, ...scope.hosts.map((h) => [h.id, h.label, h.color, h.local ? "1" : "0", h.indicator.status].join("\u0000"))].join("\n");
+}
+
+function stateLookup(hosts: readonly { look: { id: string }; state: HostSidebarState }[], focus: string): (hostId: string | undefined) => HostSidebarState {
+  return (hostId) => hosts.find((h) => h.look.id === (hostId ?? focus))?.state ?? "live";
 }
 
 /** Signals / needs-you of the merged rows (keyed by row key), each from its own host's sources. */

@@ -476,7 +476,7 @@ function HostRow({ look, shown, member, onRemoved }: { look: HostLook; shown: bo
               {form.targets.map((target, index) => (
                 <div className="flex items-center gap-1" key={index}>
                   <span className="w-5 shrink-0 text-center font-mono text-caption/[inherit] text-subtle">{index + 1}</span>
-                  <TextInput width="w-full" mono label={`${t("host.targets")} ${index + 1}`} value={target} placeholder="hachimi-lan / me@host:22" onChange={(value) => setForm((current) => ({ ...current, targets: current.targets.map((item, itemIndex) => itemIndex === index ? value : item) }))} />
+                  <TextInput width="w-full" mono label={`${t("host.targets")} ${index + 1}`} value={target} placeholder="hostc-lan / me@host:22" onChange={(value) => setForm((current) => ({ ...current, targets: current.targets.map((item, itemIndex) => itemIndex === index ? value : item) }))} />
                   <IconButton label={t("host.removeAddress")} danger disabled={form.targets.length === 1} onClick={() => {
                     editCard.changed();
                     setForm((current) => ({ ...current, targets: current.targets.filter((_, itemIndex) => itemIndex !== index) }));

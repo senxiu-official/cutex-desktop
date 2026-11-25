@@ -6,6 +6,7 @@
 // removed host, and always replaced by the host's own list once read. Archived agents are not kept (they are
 // read on demand). Never shared between hosts: each entry is read only for its own host id.
 import type { SidebarSnapshot } from "../../../shared/ipc";
+import { withoutClaudeDiagnostics } from "../../../shared/claudeDiagnostics";
 
 const DB_NAME = "cutex-sidebar-cache";
 const STORE = "sidebars";
@@ -71,7 +72,7 @@ export async function cachedSidebar(hostId: string, capabilities: { hostId?: str
   const entry = await run<Entry | undefined>("readonly", (store) => store.get(hostId));
   if (!entry) return null;
   if (entry.identity !== identity || entry.hostId !== hostId) { await dropCachedSidebar(hostId, false); return null; }
-  return { ...entry.snapshot, retired: [], partial: true, cached: true, archivedPending: { count: entry.snapshot.archivedPending?.count ?? null } };
+  return { ...withoutClaudeDiagnostics({ ...entry.snapshot, retired: [] }), partial: true, cached: true, archivedPending: { count: entry.snapshot.archivedPending?.count ?? null } };
 }
 
 /** Keeps `hostId`'s whole list (a peek or a kept list is never kept), at most every 10 s. */
@@ -87,7 +88,8 @@ export function saveSidebar(hostId: string, snapshot: SidebarSnapshot): void {
     save.next = undefined;
     if (!next || !identity) return;
     save.at = Date.now();
-    const { retired: _retired, partial: _partial, ...kept } = next;
+    // Claude diagnostics (r295) describe a live connection: never kept across a restart.
+    const { retired: _retired, partial: _partial, ...kept } = withoutClaudeDiagnostics(next);
     void run("readwrite", (store) => { store.put({ hostId, identity, savedAt: save.at, snapshot: { ...kept, retired: [] } } satisfies Entry); });
   };
   const wait = save.at + SAVE_EVERY_MS - Date.now();

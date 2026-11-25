@@ -70,13 +70,13 @@ describe("结束跟进 on a stuck message (S9, N8)", () => {
 });
 
 describe("live-only withdraw (L2, N7, N9)", () => {
-  it("a live-only message says 从队列撤下, with （可能被再次排入） on a host without tombstones; a durable one keeps 丢弃", () => {
+  it("a live-only message says 从队列撤下, with （可能再次排队） on a host without tombstones; a durable one keeps 丢弃", () => {
     expect(discardWords(msg({ durable: false }), true)).toMatchObject({ label: "agent-bus.stuck.withdraw", tip: "agent-bus.stuck.withdrawTip" });
     expect(discardWords(msg({ durable: false }), false)).toMatchObject({ label: "agent-bus.stuck.withdrawMayRequeue", tip: "agent-bus.stuck.withdrawMayRequeueTip" });
     expect(discardWords(msg(), true)).toEqual({ label: "agent-bus.stuck.discard", armed: "agent-bus.stuck.discardArmed" });
     expect(discardWords(msg({ protectedControl: true }), false).armed).toBe("agent-bus.cleanup.discardProtectedArmed");
     expect(busZh["agent-bus.stuck.withdraw"]).toBe("从队列撤下");
-    expect(busZh["agent-bus.stuck.withdrawMayRequeue"]).toBe("从队列撤下（可能被再次排入）");
+    expect(busZh["agent-bus.stuck.withdrawMayRequeue"]).toBe("从队列撤下（可能再次排队）");
     expect(busEn["agent-bus.stuck.withdraw"]).toBe("Withdraw from queue");
     expect(busEn["agent-bus.stuck.withdrawMayRequeue"]).toBe("Withdraw from queue (may be queued again)");
   });

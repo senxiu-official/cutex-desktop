@@ -52,7 +52,8 @@ export function showOpenFailed(text: string): void {
  * A service pin of a host the Shelf does not show now: the open agent is another host's (lib/sideServices
  * sideShowsHost), so an in-app tab bound to the pin's host would land out of view and the open is refused
  * (owner 2026-10-25: 「打不开（unavailable）」 on the 看板 pin while a remote agent was open). It opens in the
- * system browser instead, like the 服务 page's 打开 (cutex starts an on-demand service first).
+ * system browser instead, like the 服务 page's 打开 (cutex starts an on-demand service first) — this machine's
+ * services only; a remote host's gets a notice instead (lib/services systemBrowserOpens, owner 2026-11-23).
  */
 export function serviceOutOfView(pin: HomePin): boolean {
   return pin.kind === "service" && !sideShowsHost(pin.hostId);
@@ -61,7 +62,7 @@ export function serviceOutOfView(pin: HomePin): boolean {
 /** Opens a pin; a failure is a toast above the tray (`explain` turns a reason into text). */
 export async function openPin(pin: HomePin, explain: (reason: string) => string, path = "/"): Promise<void> {
   try {
-    if (serviceOutOfView(pin)) return await openServiceExternal({ slug: pin.key }, pin.hostId, path);
+    if (serviceOutOfView(pin)) return void (await openServiceExternal({ slug: pin.key }, pin.hostId, path));
     switch (pin.kind) {
       case "agent": {
         const r = services.panes.open("core.conversation", { sessionId: pin.key, hostId: pin.hostId }, { focus: true });

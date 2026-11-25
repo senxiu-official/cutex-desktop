@@ -3,6 +3,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { STATIC_SCAN } from "./staticScan";
 import { stubServices } from "./serviceStub";
 import type { AppModule, AppModuleHost, StatusItem, StatusPlace, StatusSurfaceItem } from "../src/renderer/src/modules/slots";
 
@@ -266,7 +267,7 @@ describe("S6 turning the capsule off releases it", () => {
     expect(overlayInsets(m.values())).toEqual({ top: false, bottom: false, stickyTop: false });
   });
 
-  it("only the capsule (and the right-side status card, §18.9) call an item's useStatus (mounted-view polling stops with them); the conversation never names it", () => {
+  it("only the capsule (and the right-side status card, §18.9) call an item's useStatus (mounted-view polling stops with them); the conversation never names it", STATIC_SCAN, () => {
     const files = (dir: string): string[] => readdirSync(dir).flatMap((n) => (statSync(join(dir, n)).isDirectory() ? files(join(dir, n)) : /\.tsx?$/.test(n) ? [join(dir, n)] : []));
     const callers = files(SRC).filter((f) => /\.item\.useStatus\(|\bitem\.useStatus\(/.test(readFileSync(f, "utf8"))).map((f) => relative(SRC, f).replaceAll("\\", "/"));
     // lib/sideComponents.tsx: the status:<id> card body, mounted only while that card is shown.

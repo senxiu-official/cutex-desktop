@@ -9,11 +9,15 @@
 import {
   type Axis,
   type BoxStyle,
+  COVER,
+  type CoverCheck,
   NATIVE_SCROLLBAR_ATTR,
   type Rect,
   type ScrollIntent,
   THUMB,
+  changeMayCover,
   clippingAncestors,
+  coverReusable,
   coverSamples,
   innermostScrollers,
   intersect,
@@ -68,6 +72,10 @@ interface Thumb {
   clippers: Element[] | null;
   /** Last layout, for dragging. */
   layout: { view: number; content: number; track: number; size: number } | null;
+  /** Last cover check (uncovered) and its result; reused while nothing could have covered the part (COVER). */
+  cover: (CoverCheck & { open: Rect | null }) | null;
+  /** Last DOM change / resize that could put something over this bar (ms). */
+  changedAt: number;
   /** Read-phase result for the write phase (screen px). */
   plan: { clip: Rect; strip: Rect; on: boolean } | null;
   dom: { clip: HTMLDivElement; hit: HTMLDivElement } | null;
@@ -107,10 +115,31 @@ export function installOverlayScrollbars(win: Window = window): () => void {
   let lastMove = 0;
   let drags = 0;
 
-  const ro = new win.ResizeObserver(() => schedule());
+  /** Nodes changed since the last frame (MutationObserver targets): looked at in the read phase, which keeps the cover
+   *  checks of bars they cannot reach and the hovered scroller when they are away from the pointer. */
+  const changed = new Set<Node>();
+  /** More changes than are worth looking at one by one: everything is redone. */
+  let changedAll = false;
+  /** The hovered scrollers may have changed under the resting pointer (DOM change around it, a scroll, a resize). */
+  let hoverStale = true;
+  let hoverResolvedAt = -Infinity;
+  const MAX_CHANGED = 256;
+  const changeEverything = () => {
+    changedAll = true;
+    hoverStale = true;
+    schedule();
+  };
+  const ro = new win.ResizeObserver(changeEverything);
   // A menu / popover opening over a shown thumb must clip it in the same frame, not at the next
   // WATCH_MS tick (the bar briefly covered the new popover). Observed only while thumbs exist.
-  const mo = new MutationObserver(() => schedule());
+  const mo = new MutationObserver((records) => {
+    for (const r of records) {
+      if (inLayer(r.target)) continue;
+      if (changed.size >= MAX_CHANGED) changedAll = true;
+      else changed.add(r.target);
+    }
+    schedule();
+  });
   const all = (): Thumb[] => [...thumbs.y.values(), ...thumbs.x.values()];
   const schedule = () => {
     if (!frame) frame = win.requestAnimationFrame(run);
@@ -229,6 +258,56 @@ export function installOverlayScrollbars(win: Window = window): () => void {
     return axis === "y" ? { left: part.left, width: part.width, top: lo, height: hi - lo } : { left: lo, width: hi - lo, top: part.top, height: part.height };
   }
 
+  /** `uncovered` of a shown thumb's part, or the last result while it still holds (COVER). */
+  function coverOf(t: Thumb, part: Rect): Rect | null {
+    const now = performance.now();
+    if (coverReusable(t.cover, part, now)) return t.cover!.open;
+    const open = uncovered(t.el, t.axis, part);
+    t.cover = { part, at: now, stable: now - t.changedAt >= COVER.settle, open };
+    return open;
+  }
+
+  /** Read phase: the cover checks and the hover resolution that the DOM changes since the last frame invalidate. */
+  function absorbChanges(list: Thumb[], now: number): void {
+    if (!changedAll && changed.size === 0) return;
+    const clips = new Map<Element, boolean>();
+    const boxes = new Map<Element, Rect>();
+    const boxOf = (el: Element): Rect => {
+      let r = boxes.get(el);
+      if (!r) boxes.set(el, (r = clientBox(el)));
+      return r;
+    };
+    function* chain(n: Node, scroller: Element | null) {
+      for (let c: Element | null = isElement(n) ? n : n.parentElement; c && c !== doc.documentElement; c = c.parentElement) {
+        let clip = clips.get(c);
+        if (clip === undefined) clips.set(c, (clip = boxStyle(getComputedStyle(c)).clips));
+        const el = c;
+        yield { clips: clip, around: !!scroller && el.contains(scroller), box: () => boxOf(el) };
+      }
+    }
+    const mayCover = (n: Node, area: Rect, scroller: Element | null) => {
+      if (!n.isConnected) return true;
+      // The scroller's own content: coveredAt never counts it.
+      if (scroller && scroller.contains(n)) return false;
+      return changeMayCover(chain(n, scroller), area);
+    };
+    const nodes = [...changed];
+    for (const t of list) {
+      const area = t.cover?.part;
+      if (!area) continue;
+      if (changedAll || nodes.some((n) => mayCover(n, area, t.el))) {
+        t.cover = null;
+        t.changedAt = now;
+      }
+    }
+    if (!hoverStale) {
+      const area = pointer ? { left: pointer.x, top: pointer.y, width: 1, height: 1 } : null;
+      if (changedAll || !area || nodes.some((n) => mayCover(n, area, null))) hoverStale = true;
+    }
+    changed.clear();
+    changedAll = false;
+  }
+
   function plan(t: Thumb, metrics: Map<Element, Metrics>, viewport: Rect): void {
     const el = t.el;
     if (!el.isConnected) {
@@ -264,7 +343,7 @@ export function installOverlayScrollbars(win: Window = window): () => void {
     }
     const part = intersect(strip, visible);
     // While dragging the thumb stays whole; otherwise it is clipped to the part nothing covers.
-    const open = !t.shown || part === null || t.dragging ? part : uncovered(el, t.axis, part);
+    const open = !t.shown || part === null || t.dragging ? part : coverOf(t, part);
     const clip = open && open !== part ? intersect(visible, t.axis === "y" ? { left: visible.left, width: visible.width, top: open.top, height: open.height } : { left: open.left, width: open.width, top: visible.top, height: visible.height }) : visible;
     const on = t.shown && open !== null && clip !== null;
     t.plan = { clip: clip ?? visible, strip, on };
@@ -333,8 +412,13 @@ export function installOverlayScrollbars(win: Window = window): () => void {
   function run(): void {
     frame = 0;
     // Reads: hover, scrolls, metrics, clipping, hit tests.
+    const now = performance.now();
+    const list = all();
+    absorbChanges(list, now);
     if (hoverDirty) {
       hoverDirty = false;
+      hoverStale = false;
+      hoverResolvedAt = now;
       let target = hoverTarget?.isConnected ? hoverTarget : null;
       hoverTarget = null;
       if (!target && pointer) target = doc.elementFromPoint(pointer.x, pointer.y);
@@ -349,7 +433,6 @@ export function installOverlayScrollbars(win: Window = window): () => void {
     pendingScroll.clear();
     const metrics = new Map<Element, Metrics>();
     const viewport = { left: 0, top: 0, width: win.innerWidth, height: win.innerHeight };
-    const list = all();
     for (const t of list) plan(t, metrics, viewport);
     const scale = layerScale();
     // Writes.
@@ -359,7 +442,7 @@ export function installOverlayScrollbars(win: Window = window): () => void {
   // ── state ──────────────────────────────────────────────────────────────────────────────────────
 
   function create(el: Element, axis: Axis): Thumb {
-    const t: Thumb = { el, axis, hovered: false, dragging: false, shown: false, hideTimer: undefined, dropTimer: undefined, clippers: null, layout: null, plan: null, dom: null, css: "", on: false };
+    const t: Thumb = { el, axis, hovered: false, dragging: false, shown: false, hideTimer: undefined, dropTimer: undefined, clippers: null, cover: null, changedAt: performance.now(), layout: null, plan: null, dom: null, css: "", on: false };
     thumbs[axis].set(el, t);
     ro.observe(el);
     if (watch === undefined) {
@@ -380,6 +463,7 @@ export function installOverlayScrollbars(win: Window = window): () => void {
       clearInterval(watch);
       watch = undefined;
       mo.disconnect();
+      changed.clear();
     }
   }
 
@@ -571,7 +655,8 @@ export function installOverlayScrollbars(win: Window = window): () => void {
   };
   /** While thumbs exist: re-measure, and re-resolve the hover from the resting pointer. */
   const tick = () => {
-    if (pointer && drags === 0) hoverAt(null);
+    // The hovered scroller is looked up again only when something could have moved it under the pointer (or COVER.ttl).
+    if (pointer && drags === 0 && (hoverStale || performance.now() - hoverResolvedAt >= COVER.ttl)) hoverAt(null);
     else schedule();
   };
   const onWheel = (e: Event) => {
@@ -587,6 +672,7 @@ export function installOverlayScrollbars(win: Window = window): () => void {
     if (!el || inLayer(el) || el.closest(OPT_OUT)) return;
     const user = userScroll(intent, performance.now(), el, contains);
     pendingScroll.set(el, (pendingScroll.get(el) ?? false) || user);
+    hoverStale = true;
     schedule();
   };
 
@@ -602,7 +688,7 @@ export function installOverlayScrollbars(win: Window = window): () => void {
   win.addEventListener("touchmove", onWheel, passive);
   win.addEventListener("keydown", onKey, passive);
   doc.addEventListener("scroll", onScroll, passive);
-  win.addEventListener("resize", schedule, passive);
+  win.addEventListener("resize", changeEverything, passive);
 
   const remove = () => {
     win.removeEventListener("pointerdown", onPointerDown, capture);
@@ -615,7 +701,7 @@ export function installOverlayScrollbars(win: Window = window): () => void {
     win.removeEventListener("touchmove", onWheel, passive);
     win.removeEventListener("keydown", onKey, passive);
     doc.removeEventListener("scroll", onScroll, passive);
-    win.removeEventListener("resize", schedule, passive);
+    win.removeEventListener("resize", changeEverything, passive);
     if (frame) win.cancelAnimationFrame(frame);
     for (const t of all()) drop(t);
     ro.disconnect();

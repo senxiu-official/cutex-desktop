@@ -27,7 +27,7 @@ export const en: Record<keyof typeof zhCN, string> = {
   "about.fixedIn": "Fix planned: {version}",
   "about.workaround": "Workaround: {text}",
   "about.changelog": "Changelog",
-  "about.changelogHint": "What each version of this desktop app brought (shipped with the app, works offline)",
+  "about.changelogHint": "What each version of the desktop app brought (shipped with the app, works offline)",
   "about.changelog.keywords": "changelog release notes version history what's new",
   "about.changelog.installed": "Installed",
   "about.changelog.new": "New",

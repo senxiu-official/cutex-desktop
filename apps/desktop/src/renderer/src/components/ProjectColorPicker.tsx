@@ -58,7 +58,7 @@ export function ProjectColorPicker({ value, onChange, disabled = false, preview 
           </span>
         </div>
         {!hex && <span className="text-caption text-danger">{t("projects.color.invalid")}</span>}
-        <button type="button" disabled={!hex || disabled} onClick={apply} className="w-fit rounded-md bg-accent px-2 py-1 text-xs text-white disabled:opacity-50">{t("settings.save")}</button>
+        <button type="button" disabled={!hex || disabled} onClick={apply} className="w-fit rounded-md bg-accent px-2 py-1 text-xs text-on-accent disabled:opacity-50">{t("settings.save")}</button>
       </div>}
     </div>
   );

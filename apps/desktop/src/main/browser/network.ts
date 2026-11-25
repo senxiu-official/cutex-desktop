@@ -187,6 +187,7 @@ export function isBrowserPrivateCertificateHost(hostname: string): boolean {
 export interface BrowserSessionOptions {
   partition: string;
   registeredHostIds: Iterable<string>;
+  identityOfPartition?: import("./attachPolicy").BrowserIdentityPartitionLookup;
   policy: BrowserUrlPolicy;
   /** Unknown guests and workers without a current registry association fail closed. */
   acceptWebContents: (id: number) => boolean;
@@ -233,7 +234,7 @@ export function revokeBrowserSessionPolicy(session: Session): void { installed.g
 
 /** Call only on session.fromPartition(main-derived partition), before permitting attach. */
 export function installBrowserSessionPolicy(session: Session, options: BrowserSessionOptions): Promise<BrowserSessionPolicy> {
-  const partition = matchBrowserPartition(options.partition, options.registeredHostIds);
+  const partition = matchBrowserPartition(options.partition, options.registeredHostIds, options.identityOfPartition);
   if (!partition) return Promise.reject(new Error("Unregistered browser partition"));
   // Only the owner partition may hand a refused certificate to its guest; the agent partition rejects outright.
   const certificateOverridable = partition.pool === "owner" ? options.certificateOverridable : undefined;

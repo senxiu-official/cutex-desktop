@@ -100,7 +100,7 @@ export function ClaudeSkillsImportDialog({ hostId, onClose, onImported }: { host
               </ul>
             )}
             <div className="mt-3 flex justify-end">
-              <button autoFocus onClick={onClose} className={`${button} press-solid bg-accent text-white hover:brightness-110`}>
+              <button autoFocus onClick={onClose} className={`${button} press-solid bg-accent text-on-accent hover:brightness-110`}>
                 {t("claudeSkillsImport.close")}
               </button>
             </div>
@@ -180,7 +180,7 @@ export function ClaudeSkillsImportDialog({ hostId, onClose, onImported }: { host
               <button type="button" onClick={onClose} disabled={busy} className={`${button} press text-muted hover:bg-surface-2`}>
                 {t("claudeSkillsImport.cancel")}
               </button>
-              <button type="submit" disabled={!names.length || busy} className={`${button} press-solid bg-accent text-white enabled:hover:brightness-110`} data-testid="claude-skills-import-run">
+              <button type="submit" disabled={!names.length || busy} className={`${button} press-solid bg-accent text-on-accent enabled:hover:brightness-110`} data-testid="claude-skills-import-run">
                 {busy ? t("claudeSkillsImport.importing") : t("claudeSkillsImport.submit", { n: names.length })}
               </button>
             </div>

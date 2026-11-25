@@ -17,8 +17,8 @@ export const BROWSER_SITE_PERMISSIONS = ["camera", "microphone", "geolocation", 
   "idle-detection", "window-management", "storage-access", "speaker-selection", "protected-media"] as const;
 export type BrowserSitePermission = typeof BROWSER_SITE_PERMISSIONS[number];
 /** One remembered owner decision, per login pool (owner / agent) and origin. */
-export interface BrowserSitePermissionView { pool: "owner" | "agent"; origin: string; permission: BrowserSitePermission; allow: boolean }
-export type BrowserSitePermissionForget = "all" | { pool: "owner" | "agent"; origin: string };
+export interface BrowserSitePermissionView { pool: "owner" | "agent"; origin: string; permission: BrowserSitePermission; allow: boolean; browserIdentityId?: string }
+export type BrowserSitePermissionForget = "all" | { pool: "owner" | "agent"; origin: string; browserIdentityId?: string };
 export const DEFAULT_BROWSER_EXTERNAL_PAGES = true;
 
 export interface BrowserControlSettings {
@@ -62,7 +62,9 @@ export interface BrowserHostSettings { agentOpenApproval: "off" | "ask" }
 export interface BrowserIdempotencyClearResult { deleted: number; outcomeUnknown: number; abandonedForwarded: number; scope: "session" | "all"; warning: string }
 /** carrier "background": an agent-pool tab main renders off screen (agents act on it while the card
  * or window is hidden); main refuses it for owner tabs. Omitted: the visible webview path. */
-export interface BrowserMountIdentity { pendingOpen?: string; agentOpened?: true; carrier?: "background" }
+export interface BrowserMountIdentity { pendingOpen?: string; agentOpened?: true; carrier?: "background";
+  /** 浏览器身份 of a new owner tab (shared/browserIdentity); absent = the default identity. Ignored for agent pools. */
+  browserIdentityId?: string }
 export interface BrowserOpenIntent { requestId: string; hostId: string; epoch: string; tabKey: string; cutexSessionId: string; url: string; remainingMs: number }
 export type BrowserOpenRefusal = "lease_limit" | "scope_invalid" | "scope_unsupported" | "target_closed" | "stale_connection" | "browser_disabled" | "invalid_request";
 /** Owner-only history projection; no filesystem path, arbitrary RPC or agent access. */
@@ -84,6 +86,10 @@ export type BrowserOwnerNoticeKind = "certificate" | "download" | "popup";
 /** url: display-safe. detail: certificate = SHA-256 fingerprint (hex), download = suggested file name. */
 export interface BrowserOwnerNoticeView { id: string; kind: BrowserOwnerNoticeKind; url: string; detail?: string }
 export interface BrowserTabView {
+  /** 浏览器身份 of an owner tab (shared/browserIdentity); absent = the default identity (and for agent pools). */
+  browserIdentityId?: string;
+  /** The main-owned WhatsApp service is attached to this owner tab. */
+  whatsAppWatch?: { enabled: boolean };
   /** Main retains the exact refused URL; the app may redeem this one-use owner retry. Null clears it. */
   blockedNavigation?: { id: string; url: string; canOpen: boolean; /** SSH host: retry explicitly opens this desktop, not that host. */ desktopLoopback?: true } | null;
   /** What main stopped in this tab that the owner may still allow with one click (an untrusted LAN / loopback
@@ -92,6 +98,8 @@ export interface BrowserTabView {
   ownerNotices?: BrowserOwnerNoticeView[] | null;
   /** Main-detected owner login input in an agent pool; null clears the inline reminder. */
   loginOrigin?: string | null;
+  /** An owner identity's structural login reminder while this tab is explicitly granted. */
+  grantedLoginAgent?: string;
   guestId: string;
   tabKey: string;
   hostId: string;
@@ -138,6 +146,8 @@ export interface BrowserTabMount {
   /** Main-authoritative pool, including safe isolated recovery of corrupt provenance. */
   pool?: "owner" | "agent";
   recovery?: "browser_identity_recovered";
+  /** An owner tab's 浏览器身份 (absent = default); its partition is browserIdentityPartition(this, hostId). */
+  browserIdentityId?: string;
   /** One-use main-issued about:blank admission envelope; never persisted. Empty for a background carrier. */
   src: string;
   /** Main created an offscreen carrier for this agent tab: the renderer creates no webview. */
@@ -145,7 +155,8 @@ export interface BrowserTabMount {
 }
 /** Main opens an owner tab for a claim: the renderer shows it (held) in the requesting agent's lane. */
 export interface BrowserClaimOpenIntent { tabKey: string; url: string; sessionId: string }
-export type BrowserEvent = HostTag & BrowserTabView & { kind: "changed" | "new-tab" | "diagnostic" | "reveal" | "agent-open" | "agent-open-cancel" | "agent-open-confirm" | "claim-open" | "claim-granted" | "blocked" | "thumbnail" | "pressed"; newTabUrl?: string;
+export type BrowserEvent = HostTag & BrowserTabView & { kind: "changed" | "new-tab" | "diagnostic" | "reveal" | "agent-open" | "agent-open-cancel" | "agent-open-confirm" | "claim-open" | "claim-granted" | "blocked" | "thumbnail" | "pressed" | "history"; newTabUrl?: string;
+  /** history: the owner pressed Ctrl+H in this owner-identity page (main only sends it for owner tabs). */
   /** pressed: the owner pressed the mouse in this tab's page (never the agent's own dispatch); the renderer takes it as a press in its pane (design 017). */
   /** thumbnail: a bounded data:image/jpeg of a background agent tab (at most ~1 per second, MAX_BROWSER_THUMBNAIL_URL_LENGTH). */
   thumbnail?: string;
@@ -160,7 +171,18 @@ export type BrowserEvent = HostTag & BrowserTabView & { kind: "changed" | "new-t
   claimOpen?: BrowserClaimOpenIntent; claimGrant?: { agentName: string; reason: BrowserClaimAutoReason } };
 /** Completion of a one-use owner UI mount, not an agent target identifier. */
 export interface BrowserAttachReceipt { src: string; webContentsId: number }
+export interface WhatsAppWatchView {
+  tabKey: string | null;
+  enabled: boolean;
+  preview: boolean;
+  status: "link" | "ready" | "offline" | "unknown" | "disabled" | "waiting" | "credential";
+  linked: boolean;
+}
 export type BrowserRequest =
+  | { op: "whatsAppWatch" }
+  | { op: "whatsAppModule"; enabled?: boolean }
+  | { op: "setWhatsAppWatch"; tabKey: string; enabled: boolean; preview: boolean }
+  | { op: "unbindWhatsAppWatch"; tabKey: string }
   | { op: "openBlockedNavigation"; tabKey: string; id: string }
   | { op: "openOwnerNotice"; tabKey: string; id: string }
   | { op: "dismissLoginWarning"; tabKey: string; origin: string }
@@ -174,7 +196,7 @@ export type BrowserRequest =
   | { op: "desktopLoopback"; enabled?: boolean }
   | { op: "desktopLoopbackChallenge"; tabKey: string; url: string }
   | { op: "sitePermissions"; forget?: BrowserSitePermissionForget }
-  | { op: "reserveOwnerTab" }
+  | { op: "reserveOwnerTab"; browserIdentityId?: string }
   | { op: "list" }
   | { op: "turnShots"; sessionId: string; turnId: string }
   | { op: "turnShot"; id: string }
@@ -206,6 +228,9 @@ export type BrowserRequest =
 /** Service view cache (viewMemory): the page process's private memory in MB (null: unknown) and the machine's memory state. */
 export interface BrowserViewMemory { pid: number | null; privateMB: number | null; pressure: boolean }
 export interface HostBrowserBridge {
+  whatsAppWatch?(): Promise<WhatsAppWatchView>;
+  setWhatsAppWatch?(tabKey: string, enabled: boolean, preview: boolean): Promise<WhatsAppWatchView>;
+  unbindWhatsAppWatch?(tabKey: string): Promise<WhatsAppWatchView>;
   /** Opens the exact navigation main refused, after the owner's explicit retry. */
   openBlockedNavigation(tabKey: string, id: string): Promise<void>;
   /** Redeems one of the tab's ownerNotices (main checks the id and decides; the owner's click in the app). */
@@ -213,8 +238,8 @@ export interface HostBrowserBridge {
   dismissLoginWarning(tabKey: string, origin: string): Promise<void>;
   /** Fresh owner identity; exact target is retained transiently in main, URL here is display-safe. */
   openOwnerCopy(tabKey: string): Promise<{ tabKey: string; url: string }>;
-  /** Main allocates a fresh identity; callers cannot nominate or promote an old tab key. */
-  reserveOwnerTab(): Promise<{ tabKey: string }>;
+  /** Main allocates a fresh tab key. Without a browserIdentityId it uses the selected owner identity. */
+  reserveOwnerTab(browserIdentityId?: string): Promise<{ tabKey: string }>;
   list(): Promise<BrowserTabView[]>;
   turnShots(sessionId: string, turnId: string): Promise<BrowserTurnShot[]>;
   turnShot(id: string): Promise<BrowserImage>;
@@ -277,6 +302,8 @@ export interface BrowserBridge {
   resetOrigins(): Promise<void>;
   /** Owner switch 「允许浏览外部网页」: read (no argument) or set. Host-independent. */
   externalPages(enabled?: boolean): Promise<BrowserExternalPagesView>;
+  /** The WhatsApp module switch main keeps (read, or set when the owner toggles the module). Host-independent. */
+  whatsAppModule?(enabled?: boolean): Promise<{ enabled: boolean }>;
   /** 「浏览器通过系统代理上网」 (default off): read, or ask main to flip it. */
   systemProxy?(enabled?: boolean): Promise<{ enabled: boolean }>;
   cursorColor(color?: string | null): Promise<BrowserCursorPreferences>;
@@ -286,6 +313,8 @@ export interface BrowserBridge {
   sitePermissions(forget?: BrowserSitePermissionForget): Promise<BrowserSitePermissionView[]>;
   forHost(hostId: string): HostBrowserBridge;
   subscribe(listener: (event: BrowserEvent) => void): () => void;
+  /** 浏览器身份 (identities, history, search prefs, passwords); absent on older preloads. */
+  identities?: import("./browserIdentity").BrowserIdentityBridge;
 }
 
 /** Fixed UI keys only; no page/daemon message is ever an owner-facing fallback. */
@@ -398,3 +427,10 @@ export interface BrowserProfileTools { enabled: boolean; surface?: BrowserToolSu
 /** A background tab's thumbnail frame: JPEG bytes at most this long (main keeps it under, renderer checks the URL). */
 export const MAX_BROWSER_THUMBNAIL_BYTES = 1024 * 1024;
 export const MAX_BROWSER_THUMBNAIL_URL_LENGTH = "data:image/jpeg;base64,".length + Math.ceil(MAX_BROWSER_THUMBNAIL_BYTES / 3) * 4;
+
+/** Ctrl+H (⌘Y on macOS, like Chrome) in a page: the owner's 浏览历史. Exact modifiers; a page never gets it. */
+export function browserHistoryShortcut(input: { type: string; key?: string; code?: string; control?: boolean; meta?: boolean; alt?: boolean; shift?: boolean }, platform: string): boolean {
+  if ((input.type !== "keyDown" && input.type !== "rawKeyDown") || input.alt || input.shift) return false;
+  if (platform === "darwin") return !!input.meta && !input.control && (input.key === "y" || input.key === "Y" || input.code === "KeyY");
+  return !!input.control && !input.meta && (input.key === "h" || input.key === "H" || input.code === "KeyH");
+}

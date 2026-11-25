@@ -4,6 +4,9 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { directorZh } from "../src/renderer/src/modules/project-view/directorI18n";
 
+// The store double is too thin for the avatar stack (agent looks, Profile pictures): icons are stubbed.
+vi.mock("../src/renderer/src/components/EntityIcon", () => import("./helpers/entityIconStub"));
+
 const mock = vi.hoisted(() => ({
   features: new Set<string>(),
   api: {} as Record<string, ReturnType<typeof vi.fn>>,
@@ -144,10 +147,10 @@ describe("Director panel", () => {
   });
   it("requires reading the source before reissue", async () => {
     await mount();
-    expect(button("重新发出").disabled).toBe(true);
+    expect(button("重新发送").disabled).toBe(true);
     await click("查看原始任务与送达状态");
     expect(el.textContent).toContain("Original task");
-    expect(button("重新发出").disabled).toBe(false);
+    expect(button("重新发送").disabled).toBe(false);
   });
   it("never reissues unknown delivery even after reading the source", async () => {
     mock.api.directorStartReviews!.mockResolvedValue(
@@ -162,7 +165,7 @@ describe("Director panel", () => {
     );
     await mount();
     await click("查看原始任务与送达状态");
-    expect(button("重新发出").disabled).toBe(true);
+    expect(button("重新发送").disabled).toBe(true);
     expect(button("丢弃待办").disabled).toBe(false);
   });
   it("refreshes after an epoch conflict without repeating the mutation", async () => {
@@ -255,7 +258,7 @@ describe("Director panel", () => {
     expect(el.textContent).toContain("{{Director}}已取消");
     expect(button("接管").disabled).toBe(true);
     await click("查看原始任务与送达状态");
-    expect(button("重新发出").disabled).toBe(true);
+    expect(button("重新发送").disabled).toBe(true);
     expect(button("丢弃待办").disabled).toBe(false);
     await click("丢弃待办");
     await click("确认");

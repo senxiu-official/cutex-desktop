@@ -3,6 +3,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { STATIC_SCAN } from "./staticScan";
 import type { PreloadBridge } from "../src/shared/ipc";
 import { accountState, claudeAccountOptions } from "../src/renderer/src/lib/claudeAccounts";
 
@@ -51,7 +52,7 @@ describe("module mocks", () => {
     expect(dirs).toEqual(expect.arrayContaining(["delegations", "jobs", "owner-notify", "runtime-packages", "codex-config"]));
   });
 
-  it("mock code is only imported from dev/ (never from app code, so never bundled)", () => {
+  it("mock code is only imported from dev/ (never from app code, so never bundled)", STATIC_SCAN, () => {
     const files = (dir: string): string[] => readdirSync(dir).flatMap((n) => {
       const p = join(dir, n);
       return statSync(p).isDirectory() ? files(p) : /\.tsx?$/.test(n) ? [p] : [];

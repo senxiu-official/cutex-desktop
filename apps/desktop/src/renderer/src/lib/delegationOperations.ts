@@ -110,7 +110,7 @@ export function isUpgradePreconditionFailure(error: unknown): boolean {
     "resume_not_allowed", "member_scope_changed", "retirement_not_allowed", "lifecycle_not_allowed", "owner_delegation_context_required",
     "unsupported agent activity", "unsupported retirement lifecycle", "grant_revision_required",
     "routing_scope_mismatch", "delegation_approval_stale", "approval_already_decided", "approval_revision_conflict",
-    "approval_digest_mismatch", "invalid_decision_note", "delegation_grant_not_found", "delegation_root_closed",
+    "approval_digest_mismatch", "invalid_decision_note", "approval_changed", "approval_not_pending", "approval_guarded", "approval_not_allowed", "delegation_grant_not_found", "delegation_root_closed",
     "delegation_root_unverified", "cross_host_scope_unverified", "scope_mismatch", "approval_not_found", "routing_approval_not_found"]).has(code);
 }
 

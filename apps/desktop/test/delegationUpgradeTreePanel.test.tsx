@@ -234,7 +234,7 @@ describe("delegation upgrade TreePanel", () => {
     props.continuation = continuation;
     props.snapshot.nodes = [node("limited", { continuation: limited() })]; render();
     expect(host.querySelector("[data-continuation-state]")).toBeNull();
-    expect(host.textContent).not.toContain("Approve another segment");
+    expect(host.textContent).not.toContain("Allow to continue");
     expect(host.textContent).not.toContain("In progress (round");
     expect(onAction).not.toHaveBeenCalled();
   });
@@ -244,8 +244,8 @@ describe("delegation upgrade TreePanel", () => {
     props.snapshot.nodes = [node("limited", { continuation: limited() })];
     props.snapshot.runControl.phase = phase; render();
     expect(host.querySelector('[data-continuation-state="limited"]')).not.toBeNull();
-    expect(host.textContent).toContain("Each segment allows 3 rounds / 2 hours, including waiting and pauses");
-    const approve = button("Approve another segment");
+    expect(host.textContent).toContain("Each segment allows 3 runs / 2 hours, including waiting and pauses");
+    const approve = button("Allow to continue");
     expect(approve.disabled).toBe(phase !== "running");
     await click(approve);
     if (phase === "running") expect(onAction).toHaveBeenCalledExactlyOnceWith({ kind: "resumeContinuation", nodeId: "limited", nodeHostId: "host-a", expectedRevision: 29 });
@@ -258,9 +258,9 @@ describe("delegation upgrade TreePanel", () => {
       allowedActions: allowed({ resumeContinuation: state !== "forbidden" }) })];
     props.busy = state === "busy"; render();
     if (state === "busy") {
-      const approve = button("Approve another segment");
+      const approve = button("Allow to continue");
       expect(approve.disabled).toBe(true); await click(approve);
-    } else expect(host.textContent).not.toContain("Approve another segment");
+    } else expect(host.textContent).not.toContain("Allow to continue");
     expect(onAction).not.toHaveBeenCalled();
   });
 
@@ -330,7 +330,7 @@ describe("delegation upgrade TreePanel", () => {
     else Reflect.deleteProperty(malformed.allowedActions, key);
     props.continuation = true; props.snapshot.nodes = [malformed]; render();
     expect(article("malformed").querySelector('button[aria-label="Stop delegation"]')).toBeNull();
-    expect(host.textContent).not.toContain("Approve another segment");
+    expect(host.textContent).not.toContain("Allow to continue");
     expect(onAction).not.toHaveBeenCalled();
   });
 

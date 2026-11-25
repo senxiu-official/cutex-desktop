@@ -381,7 +381,10 @@ describe("RosterStick", () => {
     // With the stacks the list scrolls on the compositor (the stacks never trail the rows by a frame) through the card's
     // opaque colour painted with its contents, which keeps LCD text — not will-change, which turns it grayscale.
     expect(css).toContain('nav[data-sidebar-roster="roster"][data-stick-js]:not([data-stick-off]) { background: var(--bg) local; }');
-    expect(css).not.toMatch(/data-sidebar-roster[^{]*{[^}]*will-change: scroll-position/);
+    const promoted = [...css.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/([^{}]*data-sidebar-roster[^{]*)\{[^}]*will-change: scroll-position/g)].map((m) => m[1]!.trim());
+    // A see-through (acrylic) card has no opaque colour: there the list is promoted, or Chrome scrolls it by re-rastering
+    // while the titles' animations move on the compositor, out of step (owner 2026-11-24, Linux at 145%). Only there.
+    expect(promoted).toEqual([':root[data-card-material="acrylic"]:not([data-edge-to-edge]) nav[data-sidebar-roster="roster"][data-stick-js]:not([data-stick-off])']);
   });
 
   // Owner 2026-11-19 (the titles jumped as the list reached the very top): a title stuck at an edge must sit exactly where

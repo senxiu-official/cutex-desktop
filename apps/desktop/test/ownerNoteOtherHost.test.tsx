@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// Owner report 2026-10-19: host-a's desktop showing a hachimi Claude agent — a safety check stopped a
+// Owner report 2026-10-19: host-a's desktop showing a hostc Claude agent — a safety check stopped a
 // command, the timeline said 「已拦下，等Master决定 查看」 and 需要你, but 查看 answered 「这条消息不在已加载的历史里」:
 // the card read the notice from the focus host only, so a notice of another host drew nothing, and its
 // 批准一次 / 不批准 (and 知道了 / 回复 of an ordinary notice) went to the focus host.
@@ -9,7 +9,7 @@ import { createRoot } from "react-dom/client";
 import { describe, expect, it, vi } from "vitest";
 
 const fx = vi.hoisted(() => ({
-  notes: { local: {} as Record<string, unknown>, hachimi: {} as Record<string, unknown> } as Record<string, Record<string, unknown>>,
+  notes: { local: {} as Record<string, unknown>, hostc: {} as Record<string, unknown> } as Record<string, Record<string, unknown>>,
   safety: [] as [string, string, string][],
   acts: [] as [string, string, string][],
 }));
@@ -50,11 +50,11 @@ globalThis.ResizeObserver ??= class {
 
 const { OwnerNotifyCard } = await import("../src/renderer/src/components/OwnerNotifyCard");
 
-const AGENT = "cutex.hachimi-dev";
+const AGENT = "cutex.hostc-dev";
 const blockNote = {
   notificationId: "ntf-safety",
   agentId: AGENT,
-  agentName: "hachimi-cutex-dev",
+  agentName: "hostc-cutex-dev",
   level: "attention",
   state: "pending",
   createdAt: "2026-10-19T03:20:00Z",
@@ -73,20 +73,20 @@ function render(el: ReturnType<typeof h>) {
 
 describe("owner notices of an agent on another host than the focus one", () => {
   it("the safety block card is drawn from that host and its decision goes there", async () => {
-    fx.notes.hachimi = { "ntf-safety": blockNote };
-    const { div, unmount } = render(h(OwnerNotifyCard, { notificationId: "ntf-safety", sessionId: AGENT, hostId: "hachimi" }));
+    fx.notes.hostc = { "ntf-safety": blockNote };
+    const { div, unmount } = render(h(OwnerNotifyCard, { notificationId: "ntf-safety", sessionId: AGENT, hostId: "hostc" }));
     expect(div.querySelector("[data-safety-block]")).not.toBeNull();
     const grant = [...div.querySelectorAll("button")].find((b) => /grant|批准/i.test(b.textContent ?? ""));
     expect(grant).toBeTruthy();
     await act(async () => grant!.click());
-    expect(fx.safety).toEqual([[AGENT, "grant", "hachimi"]]);
+    expect(fx.safety).toEqual([[AGENT, "grant", "hostc"]]);
     unmount();
   });
 
   it("the focus host's notices do not stand in for another host's", () => {
-    fx.notes.hachimi = {};
+    fx.notes.hostc = {};
     fx.notes.local = { "ntf-safety": blockNote };
-    const { div, unmount } = render(h(OwnerNotifyCard, { notificationId: "ntf-safety", sessionId: AGENT, hostId: "hachimi" }));
+    const { div, unmount } = render(h(OwnerNotifyCard, { notificationId: "ntf-safety", sessionId: AGENT, hostId: "hostc" }));
     expect(div.querySelector("[data-safety-block]")).toBeNull();
     unmount();
   });

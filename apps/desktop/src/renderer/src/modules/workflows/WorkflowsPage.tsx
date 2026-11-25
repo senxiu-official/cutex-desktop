@@ -21,6 +21,9 @@ import { services } from "../app";
 import type { PageParams } from "../slots";
 import { autoExpandWaiting } from "./model";
 import { loadRun, loadRuns, useFocusHost, useRunDetailState, useRuns } from "./store";
+import { EntityMention } from "../../components/EntityIcon";
+import { tNodes } from "../../lib/textNodes";
+import type { ReactNode } from "react";
 
 type Scope = "open" | "closed" | "all";
 
@@ -71,13 +74,14 @@ function StateWord({ run }: { run: Pick<WorkflowRunSummary, "state" | "stopReaso
   );
 }
 
-function useAuthorName(run: WorkflowRunSummary): string {
+function useAuthorName(run: WorkflowRunSummary): ReactNode {
   const { t } = useI18n();
   const sidebar = useApp((s) => s.sidebar);
   if (run.author.kind === "owner") return t("workflows.byOwner");
   const id = run.author.cutex_session_id;
   const session = [...(sidebar?.active ?? []), ...(sidebar?.retired ?? [])].find((s) => s.cutexSessionId === id);
-  return t("workflows.by", { name: session?.displayName ?? run.author.name ?? id });
+  const name = session?.displayName ?? run.author.name ?? id;
+  return tNodes(t, "workflows.by", { name: <EntityMention entity={{ kind: "agent", id, name }}>{name}</EntityMention> });
 }
 
 function RunRow({ run, open, onToggle }: { run: WorkflowRunSummary; open: boolean; onToggle(): void }) {

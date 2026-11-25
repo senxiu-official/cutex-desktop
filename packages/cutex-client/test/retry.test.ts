@@ -19,6 +19,18 @@ function setup(reply: (attempt: number) => Response | Promise<Response>, random 
 afterEach(() => vi.useRealTimers());
 
 describe("HTTP overload retries", () => {
+  it("sends a cutex request once when told retryable: false, even on a retryable 429 / 503 (defaults save, Z5)", async () => {
+    for (const status of [503, 429]) {
+      const once = setup(() => overload(status));
+      await expect(once.client.cutex("s1", "cutex/session/defaults/update", { expectedRevision: 4, patch: { model: "m" } }, { retryable: false })).rejects.toMatchObject({ code: "heavy_read_capacity_exceeded" });
+      expect(once.calls).toHaveLength(1);
+      expect(once.delays).toEqual([]);
+    }
+    // The same request without it is retried (its requestId makes it replayable): what the save must not do.
+    const retried = setup((n) => (n < 3 ? overload(503) : new Response(JSON.stringify({ contractVersion: 2, cutex: { result: { ok: true } } }), { status: 200 })));
+    await retried.client.cutex("s1", "cutex/session/defaults/update", { expectedRevision: 4, patch: { model: "m" } });
+    expect(retried.calls).toHaveLength(3);
+  });
   it("does not replay a cached admission_busy refusal under the same wire request ID",async()=>{
     const f=setup(()=>new Response(JSON.stringify({contractVersion:2,error:{code:"admission_busy",message:"busy",retryable:true,details:{reason:"hostBusy",retryAfterMs:1000}}}),{status:503}));
     await expect(f.client.cutex("s1","cutex/runtime/online",{expectedRuntimeGeneration:7})).rejects.toMatchObject({code:"admission_busy"});

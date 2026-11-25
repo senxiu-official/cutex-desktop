@@ -1,3 +1,5 @@
+import { browserIdentityServices } from "./browser/identity/contract";
+import { cleanDeletedBrowserPartitions } from "./browser/identity/identities";
 import { ImageCache, currentImageCache, installImageCache } from "./imageCache";
 import { DEBUG_CHANNEL, debugEntries, type DebugRequest } from "../shared/debug";
 import { DebugMode } from "./debugMode";
@@ -47,6 +49,7 @@ import { packArtOf } from "./deskPetPackArt";
 import { demoOwnerAlertRequested, OwnerAlerts } from "./ownerAlert";
 import { BoardWindow, demoBoardRequested } from "./board";
 import { DesktopNotifications } from "./notifications";
+import { ServiceNotifications } from "./serviceNotifications";
 import { sanitizeEventAlert, sanitizeRetract, sanitizeShellNotification } from "../shared/notificationLevels";
 import { createPluginNetworkLockdown, PLUGIN_WEBRTC_POLICY } from "./pluginNetwork";
 import { FRAMES_CHANNEL, type FrameRequest } from "../shared/frames";
@@ -182,6 +185,7 @@ function createDaemon(hostId: string, epoch: string): DaemonService {
       const state = payload as DaemonEvents["daemonState"];
       manager.onDaemonState(hostId, epoch, state);
       ownerAlerts.onDaemonState(hostId, state);
+      serviceNotifications.onHost(hostId);
       clientPresence?.onDaemonState(hostId, state);
       board.onHostChanged(hostId);
       return sendEvent("daemonState", { ...tag, state });
@@ -270,7 +274,17 @@ desktopShell.onAllowRemoteCloseChanged = (allowed) => {
 };
 
 // Desktop notifications the renderer's notifications module raises (shell op `notify`).
-const desktopNotifications = new DesktopNotifications(desktopShell, (key) => sendEvent("notifyClick", { key }));
+const desktopNotifications = new DesktopNotifications(desktopShell, (key) => {
+  if (!serviceNotifications.click(key)) sendEvent("notifyClick", { key });
+});
+const serviceNotifications = new ServiceNotifications({
+  userData: () => app.getPath("userData"),
+  daemon: hostId => hosts?.connection(hostId)?.daemon ?? null,
+  show: notice => desktopNotifications.show(notice),
+  open: target => sendEvent("serviceNotificationOpen", target),
+  muted: () => desktopShell.notifyOff.desktop,
+});
+app.on("will-quit", () => serviceNotifications.dispose());
 
 // Created after app ready (it needs userData / safeStorage).
 let hosts: HostManager | null = null;
@@ -339,15 +353,25 @@ const ALLOWED: ReadonlySet<InvokeMethod> = new Set<InvokeMethod>([
   "delegationUpgradeSnapshot",
   "delegationUpgradeAction",
   "delegationUpgradeApproval",
+  "delegationContinuationResume",
+  "delegationContinuationApprovals",
+  "delegationContinuationDecision",
   "delegationRoutingApprovals",
   "delegationUpgradeOperation",
   "delegationRetirementReview",
   "closeBusMessage",
   "busMessageEvidence",
   "busMessages",
+  "interactionHistoryPage",
   "runtimes",
   "runtimePrunePlan",
   "cancelRuntimePrunePlan",
+  "textRewrite",
+  "cancelTextRewrite",
+  "featureProfiles",
+  "createFeatureProfile",
+  "patchFeatureProfile",
+  "deleteFeatureProfile",
   "pruneRuntimes",
   "claudeAccounts",
   "addProfileVariant",
@@ -388,6 +412,9 @@ const ALLOWED: ReadonlySet<InvokeMethod> = new Set<InvokeMethod>([
   "serviceAction",
   "openService",
   "serviceLogs",
+  "serviceNotificationSettings",
+  "setServiceNotificationSettings",
+  "serviceNotificationHistory",
   "patchServicesSettings",
   "profileAccount",
   "profileLogin",
@@ -403,6 +430,9 @@ const ALLOWED: ReadonlySet<InvokeMethod> = new Set<InvokeMethod>([
   "subscribe",
   "notesList", "notesGet", "notesCreate", "notesUpdate", "notesDelete",
   "sideOpen", "sideList", "sideRead", "sideSend", "sideInterrupt", "sideRespond", "sideClose",
+  "sessionSearch", "sessionSearchTurn",
+  "paList", "paGet", "paCreate", "paUpdate", "paAgenda", "paAudit", "paRequests", "paRequest", "paConfirm", "paCancel",
+  "paOwnerRequests", "paNotes", "paTemplates", "paTemplateConfirm", "paTemplateStop", "paTemplateRuns", "paCalendar", "paCalendarImport", "paCalendarClear",
   "unsubscribe",
   "submit",
   "interrupt",
@@ -471,6 +501,10 @@ const ALLOWED: ReadonlySet<InvokeMethod> = new Set<InvokeMethod>([
   "operatorAction",
   "operatorRuntimeNotice",
   "projectMutation",
+  "projectLifecycle",
+  "projectBatchRunControl",
+  "projectBatchControl",
+  "projectBatchLease",
   "projectPresentation",
   "projectMemory",
   "projectMemoryFile",
@@ -481,6 +515,7 @@ const ALLOWED: ReadonlySet<InvokeMethod> = new Set<InvokeMethod>([
   "setAgentMcpDisabled",
   "asks",
   "ask",
+  "askIdLookup",
   "askAnswer",
   "artifact",
   "artifactStoreList",
@@ -709,7 +744,9 @@ ipcMain.handle(INVOKE_CHANNEL, async (event, method: InvokeMethod, args: unknown
   const daemon = fence.daemon;
   const fn = daemon[method as keyof DaemonApi] as (...a: unknown[]) => Promise<unknown>;
   try {
-    const result = (await fn.apply(daemon, args)) as Awaited<ReturnType<DesktopApi[typeof method]>>;
+    // 提示词增强: the call belongs to this renderer (main/textRewrite.ts RewriteOwner), never to a renderer-supplied value.
+    const callArgs = method === "textRewrite" ? [args?.[0], event.sender] : args;
+    const result = (await fn.apply(daemon, callArgs)) as Awaited<ReturnType<DesktopApi[typeof method]>>;
     // A reply from a connection that has since been replaced or closed must not reach the UI.
     fence.check();
     return result;
@@ -1138,6 +1175,7 @@ function createWindow(): void {
   // Before tracking: the bounds Windows gave it are not quite the ones asked for (it grew on every start).
   settleRestoredBounds(mainWindow, initial.bounds);
   installBrowser(mainWindow, () => hosts, isAppSender, sendEvent, () => desktopShell.locale);
+  browserIdentityServices.emit = (event) => sendEvent("browserIdentityEvent", event);
   mainWindow.once("ready-to-show", () => {
     if (initial.maximized) mainWindow?.maximize();
     mainWindow?.show();
@@ -1256,6 +1294,8 @@ app.on("web-contents-created", (_event, contents) => contents.setWebRTCIPHandlin
 
 app.whenReady().then(async () => {
   if (!primaryInstance) return;
+  try { cleanDeletedBrowserPartitions(app.getPath("userData"), app.getPath("sessionData")); }
+  catch { console.warn("browser identity partition cleanup will retry at startup"); }
   const imageCache = new ImageCache(join(app.getPath("userData"), "image-cache"));
   installImageCache(imageCache);
   void imageCache.cleanup().catch(() => {});

@@ -12,6 +12,7 @@ import { openNoteSource } from "./actions";
 import { NoteEditor } from "./NoteEditor";
 import { notesCache, setNoteDraft, useNoteDrafts, useHostSidebar } from "./store";
 import { noteErrorText } from "./errors";
+import { EntityMention } from "../../components/EntityIcon";
 
 export function NoteCard({ hostId, note, projectId, readOnly = false, onDismissEditor }: { hostId: string; note: Note; projectId?: string; readOnly?: boolean; onDismissEditor?(): void }) {
   const { t, locale } = useI18n();
@@ -65,6 +66,6 @@ export function NoteCard({ hostId, note, projectId, readOnly = false, onDismissE
       }}><Quote size={12} className="mr-1 inline" />{t("notes.quote")}</Button>
       {[{ kind: "host" as const }, ...(project ? [project] : [])].map((scope) => <button key={scope.kind} disabled={busy} aria-pressed={hasPin(note.pins, scope)} title={t("notes.pinHint")} className={`press rounded px-1 py-1 text-xs hover:bg-hover disabled:opacity-50 disabled:hover:bg-transparent ${hasPin(note.pins, scope) ? "text-accent" : "text-subtle"}`} onClick={() => pin(scope)}><Pin size={11} className="mr-1 inline" />{t(scope.kind === "host" ? "notes.scope.host" : "notes.scope.project")}</button>)}</>}
     </div>
-    <p className="text-caption/[inherit] text-subtle" title={Number.isFinite(updated) ? formatAbsolute(updated) : undefined}>{sourceName ? `${sourceName} · ` : ""}{t("notes.savedAt", { time: Number.isFinite(updated) ? formatWhen(updated, now, locale) : note.updatedAt })}</p>
+    <p className="text-caption/[inherit] text-subtle" title={Number.isFinite(updated) ? formatAbsolute(updated) : undefined}>{sourceName && sourceSession ? <><EntityMention entity={{ kind: "agent", id: sourceSession, name: sourceName }}>{sourceName}</EntityMention> · </> : ""}{t("notes.savedAt", { time: Number.isFinite(updated) ? formatWhen(updated, now, locale) : note.updatedAt })}</p>
   </article>;
 }

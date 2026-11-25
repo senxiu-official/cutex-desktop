@@ -128,6 +128,16 @@ describe("grouping and folding", () => {
 });
 
 describe("activity derivation", () => {
+  it("an approval rejection (closed completed, execution rejected) is not 完成: it ends with its status (audit P2-1)", () => {
+    const items = deriveActivity(input({ asks: [
+      ask("r1", "dir", "b", { createdAt: iso(40), execution: "rejected", closed: "completed", closedAt: iso(4) }),
+      ask("r2", "dir", "b", { createdAt: iso(40), execution: "interrupted", closed: "completed", closedAt: iso(4) }),
+      ask("r3", "dir", "b", { createdAt: iso(40), execution: "answered", closed: "completed", closedAt: iso(4), answerId: "a" }),
+    ] }));
+    expect(items.find((i) => i.id === "complete:r1")).toMatchObject({ failed: false, ended: "rejected" });
+    expect(items.find((i) => i.id === "complete:r2")).toMatchObject({ failed: false, ended: "stopped" });
+    expect(items.find((i) => i.id === "complete:r3")).toMatchObject({ failed: false, ended: null });
+  });
   it("a delegation gives 委托 at its creation, 完成 when answered, 进度 for its notes and 需要你 while it waits for the owner", () => {
     const items = deriveActivity(
       input({

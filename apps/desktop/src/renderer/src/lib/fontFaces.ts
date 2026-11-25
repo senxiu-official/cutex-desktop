@@ -71,6 +71,12 @@ export interface RoutedFace {
    * family's regular face loaded.
    */
   lazy?: true;
+  /**
+   * The family's regular face: whether it loaded decides whether the family loaded. A file face's weight may be a
+   * variable range ("100 900", Bitter / Literata), so this is marked when planning rather than read back from
+   * `weight === "400"` (that check reported loaded variable fonts as fallen back: 「以下字体未能加载」 for Bitter, Literata).
+   */
+  regular?: true;
 }
 export interface FontPlan { faces: RoutedFace[]; variables: FontVariables; requestedFamilies: string[] }
 
@@ -103,11 +109,11 @@ export function buildFontPlan(a: Appearance, generation: number, fileFaces: (fam
         // A font that comes with the desktop: its own files, never a same-named installed font.
         const regular = files.find((f) => f.style === "normal" && weightCovers(f.weight, 400)) ?? files[0];
         for (const face of files) {
-          faces.push({ alias, family, source: face.source, descriptors: { weight: face.weight, style: face.style, unicodeRange, display: "swap" }, ...(face === regular ? {} : { lazy: true as const }) });
+          faces.push({ alias, family, source: face.source, descriptors: { weight: face.weight, style: face.style, unicodeRange, display: "swap" }, ...(face === regular ? { regular: true as const } : { lazy: true as const }) });
         }
       } else {
         for (const { weight, style, names } of localStyles(family)) {
-          faces.push({ alias, family, source: names.map((name) => `local(${cssString(name)})`).join(", "), descriptors: { weight, style, unicodeRange, display: "swap" } });
+          faces.push({ alias, family, source: names.map((name) => `local(${cssString(name)})`).join(", "), descriptors: { weight, style, unicodeRange, display: "swap" }, ...(weight === "400" && style === "normal" ? { regular: true as const } : {}) });
         }
       }
     }
@@ -209,7 +215,7 @@ export class FontRoutingController<F extends LoadableFont> {
       if (!spec.lazy || !loadedAliases.has(spec.alias)) continue;
       try { ready.push({ face: this.environment.createFace(spec), spec }); } catch { /* an unusable source: the browser synthesizes that style */ }
     }
-    const regularFamilies = new Set(ready.filter(({ spec }) => spec.descriptors.weight === "400" && spec.descriptors.style === "normal").map(({ spec }) => spec.family.toLowerCase()));
+    const regularFamilies = new Set(ready.filter(({ spec }) => spec.regular).map(({ spec }) => spec.family.toLowerCase()));
     const failedFamilies = plan.requestedFamilies.filter((family) => !regularFamilies.has(family.toLowerCase()));
     const previous = this.active;
     this.environment.beforePublish?.();

@@ -60,6 +60,7 @@ import { PeerParty } from "./PeerParty";
 import { Tag } from "./Tag";
 import { CancelSendButton } from "./CancelSendButton";
 import { matchCancelable, useCancelableSends } from "../lib/cancelSend";
+import { NextUpEndingBy } from "./NextUpEndingBy";
 import { dismissReceipt, isDismissibleReceipt } from "../lib/legacyDelivery/busReceiptVisibility";
 
 const DELIVERY_ICONS: Record<RideAlongKind, typeof Mail> = { answer: CornerDownLeft, question: MessageCircleQuestion, status: Activity, alarm: AlarmClock, tell: MessageSquareText, peer: Globe, bus: Mail };
@@ -126,6 +127,8 @@ export function LedgerAdmissionRow({ record, sessionId, hostId, body, queuedAt, 
     {statusNotice && openAsk ? <button type="button" onClick={openAsk} className="min-w-0 flex-1 truncate text-left text-ui hover:text-accent hover:underline" data-tip={rowTip(full, time.exact)} data-tip-overflow="" data-testid="row-text">{rowText(text)}</button>
       : inline && !statusNotice ? inline((words) => <RowFullText full={full} exact={time.exact} className="flex shrink items-center gap-1 overflow-hidden">{words}</RowFullText>)
       : <RowFullText full={full} exact={time.exact} className="flex-1 truncate text-ui">{rowText(text)}</RowFullText>}
+    {/* Registry 2.11 (§三之六): who / what ended the delegation (or failed its attempt), after its title. */}
+    {statusNotice && ask && <NextUpEndingBy host={rowHost} ask={ask} preview={record.preview} />}
     {!owner && <RowAge age={time.age} exact={time.exact} />}
     {afterStop && <TimingMeta label={t("queue.turn.afterStopHint")} text={t("queue.turn.afterStop")} testId="timing-after-stop" />}
     {/* Today's look: the status always shows; an owner's waiting row keeps its queue buttons on hover (owner 2026-11-02). */}
@@ -352,9 +355,9 @@ function RideAlongAskParts({ d, info, sessionId }: { d: AskSummary; info: RideAl
   const peer = peerSideOf(d);
   const party =
     info.party === "target" ? (
-      peer?.side === "target" ? <PeerParty text={peer.name} label={peer.label} size={16} /> : <Who id={d.target} name={d.targetName ?? nameOf(d.target)} size={16} realAvatar />
+      peer?.side === "target" ? <PeerParty text={peer.name} label={peer.label} size={16} instanceId={peer.instanceId} hostId={host} /> : <Who id={d.target} name={d.targetName ?? nameOf(d.target)} size={16} realAvatar />
     ) : peer?.side === "requester" ? (
-      <PeerParty text={peer.name} label={peer.label} size={16} />
+      <PeerParty text={peer.name} label={peer.label} size={16} instanceId={peer.instanceId} hostId={host} />
     ) : isOwnerRequest(d.requester) ? (
       <span className="shrink-0 text-foreground">{t("delegation.you")}</span>
     ) : (
@@ -422,6 +425,11 @@ export function NextStepRow({ item, running, held, order, sessionId, idleNote, s
                 // Design 040 step 9: the sender as a 16 px avatar + name (a link to the agent), when cutex says who it is.
                 <span className="flex max-w-[min(16em,50%)] shrink-0 items-center overflow-hidden font-semibold" data-testid="ride-along-from" data-from-id={view.fromId}>
                   <Who id={view.fromId} name={view.from} size={16} realAvatar />
+                </span>
+              ) : view.kind === "peer" && item.fromPeerInstanceId ? (
+                // peer-delivery-receipts-v1: the sending host by instance id (its current name here).
+                <span className="flex max-w-[min(16em,50%)] shrink-0 items-center overflow-hidden font-semibold" data-testid="ride-along-from" data-from-peer={item.fromPeerInstanceId}>
+                  <PeerParty text={view.from} label={item.fromHost?.trim() ?? ""} size={16} instanceId={item.fromPeerInstanceId} hostId={host} />
                 </span>
               ) : (
                 <span className="max-w-[min(16em,50%)] shrink-0 truncate whitespace-nowrap font-semibold text-foreground" data-testid="ride-along-from">

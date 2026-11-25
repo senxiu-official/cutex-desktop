@@ -43,7 +43,7 @@ export const ACCESS_SEARCH: Search = {
 
 export const APPEARANCE_SEARCH: Search = {
   sections: [
-    { anchor: "colors", titleKey: "appearance.colors", keywords: ["shell.theme", "shell.theme.dark", "shell.theme.light", "appearance.lightPalette", "appearance.darkPalette", "shell.contrast"] },
+    { anchor: "colors", titleKey: "appearance.colors", keywords: ["shell.theme", "shell.theme.dark", "shell.theme.light", "appearance.lightPalette", "appearance.darkPalette", "appearance.accent", "appearance.accent.pink", "shell.contrast"] },
     {
       anchor: "fonts",
       titleKey: "appearance.fonts",
@@ -84,7 +84,8 @@ export const SIDES_SEARCH: Search = {
 
 export const COMPOSER_SEARCH: Search = {
   sections: [
-    { anchor: "send", titleKey: "shell.composer.send", keywords: ["settings.sendKeys", "conversation.delegationSteerKeys"] },
+    { anchor: "send", titleKey: "shell.composer.send", keywords: ["settings.sendKeys", "settings.multilineEnter", "conversation.delegationSteerKeys"] },
+    { anchor: "promptEnhance", titleKey: "promptEnhance.title", keywords: ["promptEnhance.settings.route", "promptEnhance.settings.fallback", "promptEnhance.settings.profiles"] },
     { anchor: "queuePanel", titleKey: "queue.panelFold", keywords: ["queue.panelFold.open", "queue.panelFold.auto", "queue.sectionStrip"] },
     { anchor: "aboveInput", titleKey: "shell.status.aboveInput", keywords: ["appearance.needsYouStrip", "shell.composer.barItems"] },
     { anchor: "inputBar", titleKey: "shell.composer.inputBar", keywords: ["composer.profileAvatar"] },

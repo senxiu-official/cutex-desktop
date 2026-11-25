@@ -86,6 +86,8 @@ export interface BoardSummaryProject {
   /** Of problemCount, how many are soft (lastTurnFailed) — only when the host gives per-code counts
    *  (`problems.byCode`, proposed for P6); null: the severity of unlisted problems is unknown. */
   softCount: number | null;
+  /** `problems.byCode` when every count in it is valid: exact problems per cutex code; null otherwise. */
+  byCode: Record<string, number> | null;
   problems: BoardSummaryProblem[];
   /** The project's 主管 as the summary saw it; its plan / goal belong to this session only. */
   directorSessionId: string | null;
@@ -125,6 +127,28 @@ function softCountOf(byCode: Record<string, unknown> | null, listed: readonly Bo
     if (PROBLEM_CODES[code]?.soft) soft += count(n)!;
   }
   return Math.max(soft, listed.filter((x) => x.soft).length);
+}
+
+/** `problems.byCode` as exact counts; null when absent or any count is malformed. */
+function byCodeOf(raw: Record<string, unknown> | null): Record<string, number> | null {
+  if (!raw) return null;
+  const out: Record<string, number> = {};
+  for (const [code, n] of Object.entries(raw)) {
+    if (count(n) === null) return null;
+    out[code] = count(n)!;
+  }
+  return out;
+}
+
+/** Problem kinds about an agent whose rows group into one (「N 个智能体读不到状态」). */
+export const GROUPED_PROBLEM_KINDS: ReadonlySet<BoardProblemKind> = new Set<BoardProblemKind>(["memberUnavailable", "agentError", "lastTurnFailed"]);
+
+/** cutex code of a grouped kind (for its exact per-code count). */
+export const PROBLEM_CODE_OF: Partial<Record<BoardProblemKind, string>> = { memberUnavailable: "memberUnavailable", agentError: "memberError", lastTurnFailed: "lastTurnFailed" };
+
+/** An agent the board cannot name (not in this host's catalog): a short id, never the full `cutex.<uuid>`. */
+export function shortAgentId(id: string): string {
+  return id.replace(/^cutex./, "").slice(0, 8);
 }
 
 /** `director.goal`: cutex's native goal object `{objective,status}` (a plain string is accepted too). */
@@ -184,6 +208,7 @@ export function parseBoardSummary(raw: unknown): Map<string, BoardSummaryProject
       // Never fewer than the examples listed; null (unknown) when the host cannot read delegations.
       problemCount: delegationsOff || count(problemsObj?.count) === null ? null : Math.max(count(problemsObj?.count)!, problems.length),
       softCount: softCountOf(obj(problemsObj?.byCode), problems),
+      byCode: byCodeOf(obj(problemsObj?.byCode)),
       problems,
       directorSessionId: str(director?.sessionId, 200),
       plan: progressOf(director?.plan),
@@ -201,6 +226,6 @@ export function summaryProblem(p: BoardSummaryProblem, hostId: string, sum: Boar
     const d = sum.delegations.find((x) => x.askId === p.askId);
     return { kind: p.kind, hostId, subject: d?.title ?? "", detail: d?.target ? (nameOf(d.target) ?? null) : null, target: { kind: "delegation", hostId, askId: p.askId }, ...(p.soft ? { soft: true } : {}) };
   }
-  if (p.sessionId) return { kind: p.kind, hostId, subject: nameOf(p.sessionId) ?? p.sessionId, detail: p.kind === "other" ? p.code : null, target: { kind: "agent", hostId, sessionId: p.sessionId }, ...(p.soft ? { soft: true } : {}) };
+  if (p.sessionId) return { kind: p.kind, hostId, subject: nameOf(p.sessionId) ?? shortAgentId(p.sessionId), detail: p.kind === "other" ? p.code : null, target: { kind: "agent", hostId, sessionId: p.sessionId }, ...(p.soft ? { soft: true } : {}) };
   return { kind: p.kind, hostId, subject: "", detail: p.kind === "other" ? p.code : null, target: null, ...(p.soft ? { soft: true } : {}) };
 }

@@ -18,6 +18,8 @@ import { MessageDetails } from "./MessageDetails";
 import { bulkTargets, discardWords, KNOWN_ERRORS, minAgeKey, partyName, protectedCount, refusalText } from "./stuck";
 import { useMessageEndFollowUp } from "./useEndFollowUp";
 import type { StuckMessagesState } from "./useStuckMessages";
+import { EntityMention } from "../../components/EntityIcon";
+import { senderLabel } from "./stuck";
 
 type T = ReturnType<typeof useI18n>["t"];
 
@@ -76,7 +78,7 @@ export function StuckMessagesTable({ state, minAge }: { state: StuckMessagesStat
             cells={(m) => ({
               what: m.contentPreview.trim() || <span className="text-subtle">{t("agent-bus.stuck.noContent")}</span>,
               whatTitle: m.contentPreview || undefined,
-              who: `${stuckFrom(m, t)} → ${partyName(m.to) ?? t("agent-bus.stuck.unknownParty")}`,
+              who: <><EntityMention entity={m.from && senderLabel(m) && "name" in senderLabel(m)! ? { kind: "agent", id: m.from.id, name: stuckFrom(m, t) } : null}>{stuckFrom(m, t)}</EntityMention> → <EntityMention entity={m.to ? { kind: "agent", id: m.to.id, name: partyName(m.to) ?? m.to.id } : null}>{partyName(m.to) ?? t("agent-bus.stuck.unknownParty")}</EntityMention></>,
               whoTitle: [m.from?.id, m.to?.id].filter(Boolean).join(" → ") || undefined,
               age: cleanupAge(m.ageSecs, t),
               state:

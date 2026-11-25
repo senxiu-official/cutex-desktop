@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import { INPUT_KINDS, INPUT_REASONS_BY_STATE, INPUT_STATES, INPUT_WAITING_REASONS, type InputAction, type InputKind, type InputRecord } from "@cutex-desktop/protocol";
 import { record } from "../src/renderer/src/lib/inputLedger/testkit";
 import {
-  NEXT_UP_DELEGATION_WAITS, NEXT_UP_DELEGATION_WAITS_APPROVAL, NEXT_UP_EFFECTS, NEXT_UP_PANEL_CONTROLS, NEXT_UP_STATE_IDS, NEXT_UP_STATES, REGISTRY_VERSION, RETIRED_WORDS, STATE_LABEL_KEYS,
+  NEXT_UP_DELEGATION_ENDING, NEXT_UP_DELEGATION_ENDING_APPROVAL, NEXT_UP_DELEGATION_STEPS, NEXT_UP_DELEGATION_STEPS_APPROVAL, NEXT_UP_DELEGATION_WAITS, NEXT_UP_DELEGATION_WAITS_APPROVAL, NEXT_UP_EFFECTS, NEXT_UP_PANEL_CONTROLS, NEXT_UP_STATE_IDS, NEXT_UP_STATES, REGISTRY_VERSION, RETIRED_WORDS, STATE_LABEL_KEYS,
   buttonsFor, hasExit, isLedgerPanelControl, helpRows, localSendView, projectNextUp, rowButtons, stateLabelKey, type NextUpContext, type NextUpStateId,
 } from "../src/renderer/src/lib/inputLedger/nextUpRegistry";
 import { zhCN } from "../src/renderer/src/i18n/zh-CN";
@@ -327,9 +327,31 @@ describe("registry snapshot ↔ docs change log", () => {
       effects: Object.fromEntries(Object.entries(NEXT_UP_EFFECTS).map(([id, e]) => [id, { label: e.label, disposal: e.disposal, action: e.action }])),
       panel: NEXT_UP_PANEL_CONTROLS,
       delegationWaits: { forms: NEXT_UP_DELEGATION_WAITS, approval: NEXT_UP_DELEGATION_WAITS_APPROVAL },
+      delegationSteps: { buttons: NEXT_UP_DELEGATION_STEPS, approval: NEXT_UP_DELEGATION_STEPS_APPROVAL },
+      delegationEnding: { words: NEXT_UP_DELEGATION_ENDING, approval: NEXT_UP_DELEGATION_ENDING_APPROVAL },
     };
     // A failing snapshot means the registry changed: bump REGISTRY_VERSION with an approved change-log entry, then update.
     expect(snapshot).toMatchSnapshot(`registry ${REGISTRY_VERSION}`);
+  });
+});
+
+describe("registry 2.11 delegation endings", () => {
+  it("the words are the catalogs' words, in both languages, and in the doc", () => {
+    const doc = readFileSync(join(__dirname, "../../../docs/design/next-up-registry.md"), "utf8");
+    for (const def of Object.values(NEXT_UP_DELEGATION_ENDING)) {
+      expect(zhCN[def.label as keyof typeof zhCN]).toBe(def.text.zh);
+      expect(en[def.label as keyof typeof en]).toBe(def.text.en);
+      expect(doc).toContain(`「${def.text.zh}」`);
+    }
+  });
+});
+
+describe("registry 2.10 delegation next steps", () => {
+  it("the buttons are the catalogs' words, in both languages", () => {
+    for (const def of Object.values(NEXT_UP_DELEGATION_STEPS)) {
+      expect(zhCN[def.label as keyof typeof zhCN]).toBe(def.text.zh);
+      expect(en[def.label as keyof typeof en]).toBe(def.text.en);
+    }
   });
 });
 
@@ -339,5 +361,17 @@ describe("registry 2.0 N10 note (cross-review P2-5)", () => {
     expect(doc).toContain(`「${zhCN["queue.turn.afterStop"]}」`);
     expect(doc).toContain(`「${zhCN["queue.turn.afterStopHint"]}」`);
     expect(doc).toContain(`"${en["queue.turn.afterStop"]}"`);
+  });
+});
+
+describe("registry 2.7: 打断并发送 interrupts the current turn", () => {
+  it("the tip says 中断 / Interrupt in the registry and in the catalogs (zh-Hant via interruptSend.oneTip)", () => {
+    expect(NEXT_UP_EFFECTS.interruptSend.tip).toEqual({ zh: "中断当前回合，马上发这条", en: "Interrupt the current turn and send this now" });
+    expect(zhCN["interruptSend.oneTip"]).toBe(NEXT_UP_EFFECTS.interruptSend.tip.zh);
+    expect(en["interruptSend.oneTip"]).toBe(NEXT_UP_EFFECTS.interruptSend.tip.en);
+    expect(zhCN["interruptSend.manyTip"]).toBe("中断当前回合，马上发这 {n} 条插话");
+    expect(en["interruptSend.manyTip"]).toBe("Interrupt the current turn and send these {n} steers now");
+    const doc = readFileSync(join(__dirname, "../../../docs/design/next-up-registry.md"), "utf8");
+    expect(doc).toContain(`「${zhCN["interruptSend.oneTip"]}」`);
   });
 });

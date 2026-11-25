@@ -2,9 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   type Axis,
   type BoxStyle,
+  COVER,
   INTENT_WINDOW,
   THUMB,
+  changeMayCover,
   clippingAncestors,
+  coverReusable,
   coverSamples,
   longestUncovered,
   innermostScrollers,
@@ -177,5 +180,32 @@ describe("thumb cover clipping", () => {
     expect(longestUncovered([false, false, false, false, true, true])).toEqual([0, 3]);
     expect(longestUncovered([true, false, false, true, false])).toEqual([1, 2]);
     expect(longestUncovered([false, true, false])).toEqual([0, 0]);
+  });
+});
+
+describe("overlay scrollbars: cover checks reused", () => {
+  const part = { left: 990, top: 100, width: 11, height: 200 };
+  it("reuses a settled check of the same part until it expires", () => {
+    const check = { part, at: 1000, stable: true };
+    expect(coverReusable(check, { ...part }, 1000 + COVER.ttl - 1)).toBe(true);
+    expect(coverReusable(check, part, 1000 + COVER.ttl)).toBe(false);
+    // The thumb moved / resized: checked again.
+    expect(coverReusable(check, { ...part, top: 101 }, 1001)).toBe(false);
+    // Taken while a change was settling (a popover animating in), or none yet.
+    expect(coverReusable({ ...check, stable: false }, part, 1001)).toBe(false);
+    expect(coverReusable(null, part, 1001)).toBe(false);
+  });
+
+  it("keeps the check for changes clipped away from the bar, redoes it for changes that can reach it", () => {
+    const box = (left: number, width: number) => () => ({ left, top: 0, width, height: 900 });
+    const link = (clips: boolean, around: boolean, b = box(0, 0)) => ({ clips, around, box: b });
+    // A sidebar row changed: clipped by the sidebar's scroller, far from the conversation's bar.
+    expect(changeMayCover([link(false, false), link(true, false, box(0, 300)), link(false, true)], part)).toBe(false);
+    // Clipped by a box over the bar: it may cover it.
+    expect(changeMayCover([link(true, false, box(800, 300))], part)).toBe(true);
+    // A portal / body-level change: reaches an element around the scroller first.
+    expect(changeMayCover([link(false, true)], part)).toBe(true);
+    // Nothing clips it up to the document: anywhere.
+    expect(changeMayCover([link(false, false), link(false, false)], part)).toBe(true);
   });
 });

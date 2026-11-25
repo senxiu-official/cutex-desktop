@@ -356,3 +356,62 @@ it("after a restart shows each host's kept list once its capabilities confirm wh
   expect(ids(store.getState().sidebar?.active)).toEqual(["a1", "c3"]); expect(store.getState().sidebar?.cached).toBeUndefined();
   remote.resolve(sidebarOf([["w1", "Wave"]])()); await settle();
 });
+
+// claude-runtime-diagnostics-v1 (r295): the same status channel and fence; whole snapshots, never a list read.
+const diag = (host: string, id: string, claudeDiagnostics: unknown, runtimeGeneration = 1) => transport.host(host,
+  cutex(id, "cutex/session/claudeDiagnostics/changed", { cutexSessionId: id, runtimeGeneration, claudeDiagnostics }));
+const diagOf = (host = "local", id = "a1") => (host === mock.state.focus ? store.getState().sidebar : store.getState().byHost[host]?.sidebar)?.active.find(r => r.cutexSessionId === id)?.runtime.claudeDiagnostics;
+
+it("Claude diagnostics frames replace the row's snapshot (allowlisted), touch no other row and read no list", async () => {
+  await start();
+  const before = store.getState().sidebar!;
+  mock.calls.length = 0;
+  diag("local", "a1", { warnings: ["mcpConnectionFailed", "provider said something"], activeHooks: [{ event: "Stop", startedAtMs: 1_764_000_000_000 }] });
+  expect(diagOf()).toEqual({ warnings: ["mcpConnectionFailed"], activeHooks: [{ event: "Stop", startedAtMs: 1_764_000_000_000 }] });
+  expect(store.getState().sidebar!.active[1]).toBe(before.active[1]);
+  diag("local", "a1", { warnings: [], activeHooks: [] });
+  expect(diagOf()).toEqual({ warnings: [], activeHooks: [] });
+  diag("local", "a1", { warnings: "bad" });
+  expect(diagOf()).toEqual({ warnings: [], activeHooks: [] });
+  diag("local", "a1", null);
+  expect(diagOf()).toBeNull();
+  await vi.advanceTimersByTimeAsync(10_000);
+  expect(mock.calls.filter(c => ["sidebar", "sessions", "hostSessions"].includes(c.method))).toEqual([]);
+});
+
+it("Claude diagnostics: an old read cannot bring back cleared facts, an older runtime's frame is ignored, background work stays", async () => {
+  await start(); work("local", "a1", true);
+  const old = deferred<ReturnType<ReturnType<typeof sidebarOf>>>();
+  mock.responses.set("local:sidebar", () => old.promise);
+  const read = store.getState().refreshSidebar(); await Promise.resolve();
+  diag("local", "a1", { warnings: [], activeHooks: [] });
+  const stale = sidebarOf([["a1", "Alpha"], ["b2", "Beta"]])();
+  (stale.active[0]!.runtime as any).claudeDiagnostics = { warnings: ["configurationNotApplied"], activeHooks: [] };
+  old.resolve(stale); await read;
+  expect(diagOf()).toEqual({ warnings: [], activeHooks: [] });
+  expect(workOf()?.running).toBe(true);
+  // A replaced runtime (generation 2 read): generation 1 frames no longer apply.
+  const next = sidebarOf([["a1", "Alpha"], ["b2", "Beta"]])();
+  next.active[0]!.runtime.runtimeGeneration = 2;
+  mock.responses.set("local:sidebar", () => next);
+  await store.getState().refreshSidebar();
+  expect(diagOf()).toBeUndefined();
+  diag("local", "a1", { warnings: ["managedHooksNotLoaded"], activeHooks: [] }, 1);
+  expect(diagOf()).toBeUndefined();
+  diag("local", "a1", { warnings: ["managedHooksNotLoaded"], activeHooks: [] }, 2);
+  expect(diagOf()).toEqual({ warnings: ["managedHooksNotLoaded"], activeHooks: [] });
+  // Offline: the shown facts go at once (audit P2-1), and the reconnect read decides.
+  fire("daemonState", { hostId: "local", epoch: "local-1", state: { kind: "unreachable", baseUrl: "fake://local", message: "gone" } });
+  expect(diagOf()).toBeUndefined();
+  mock.responses.set("local:sidebar", sidebarOf([["a1", "Fresh"]]));
+  fire("daemonState", { hostId: "local", epoch: "local-1", state: connected("local") }); await settle();
+  expect(diagOf()).toBeUndefined();
+});
+
+it("Claude diagnostics on a followed host's rows go when that host disconnects", async () => {
+  await start();
+  diag(WORKSTATION, "w1", { warnings: ["managedHooksNotLoaded"], activeHooks: [] });
+  expect(diagOf(WORKSTATION, "w1")).toEqual({ warnings: ["managedHooksNotLoaded"], activeHooks: [] });
+  fire("daemonState", { hostId: WORKSTATION, epoch: `${WORKSTATION}-1`, state: { kind: "unreachable", baseUrl: `fake://${WORKSTATION}`, message: "gone" } });
+  expect(diagOf(WORKSTATION, "w1")).toBeUndefined();
+});

@@ -75,12 +75,12 @@ const mockDesktops: OnlineClient[] = [
 ];
 
 // remote: this launch connected 70 s ago; the previous launch of the same install last beat 80 s before that.
-const TETHYS_STARTED = Date.now() - 70_000;
+const HOSTB_STARTED = Date.now() - 70_000;
 const at = (ms: number) => new Date(ms).toISOString();
 mockDesktops.push(
-  { instanceId: "3f6a9b20-1c4d-4e8f-a7b5-6d2e0c9f1a33", installId: "mock-install-remote", appName: "cutex-desktop", appVersion: "0.2.1", deviceName: "remote", platform: "linux", userId: "owner", tokenId: "mct-7e6d5c4b3a291807", local: false, connectedSince: at(TETHYS_STARTED), lastSeen: ago(20_000), allowRemoteClose: true, state: "online", current: false },
+  { instanceId: "3f6a9b20-1c4d-4e8f-a7b5-6d2e0c9f1a33", installId: "mock-install-remote", appName: "cutex-desktop", appVersion: "0.2.1", deviceName: "remote", platform: "linux", userId: "owner", tokenId: "mct-7e6d5c4b3a291807", local: false, connectedSince: at(HOSTB_STARTED), lastSeen: ago(20_000), allowRemoteClose: true, state: "online", current: false },
   // The previous launch of the same install: a lifecycle host removed it when the new launch registered.
-  ...(LIFECYCLE ? [] : [{ instanceId: "c81e44d0-9a2b-4f6c-8e1d-3b7a5c0d2e91", installId: "mock-install-remote", appName: "cutex-desktop", appVersion: "0.2.0", deviceName: "remote", platform: "linux", userId: "owner", tokenId: "mct-7e6d5c4b3a291807", local: false, connectedSince: at(TETHYS_STARTED - 5 * 3_600_000), lastSeen: at(TETHYS_STARTED - 80_000), allowRemoteClose: true, state: "online", current: false } satisfies OnlineClient]),
+  ...(LIFECYCLE ? [] : [{ instanceId: "c81e44d0-9a2b-4f6c-8e1d-3b7a5c0d2e91", installId: "mock-install-remote", appName: "cutex-desktop", appVersion: "0.2.0", deviceName: "remote", platform: "linux", userId: "owner", tokenId: "mct-7e6d5c4b3a291807", local: false, connectedSince: at(HOSTB_STARTED - 5 * 3_600_000), lastSeen: at(HOSTB_STARTED - 80_000), allowRemoteClose: true, state: "online", current: false } satisfies OnlineClient]),
   { instanceId: "e2d7f051-6b3a-4c9e-b8f2-71a0c4d5e6f7", installId: "mock-install-remote-dev", appName: "cutex-desktop", appVersion: "0.2.1", deviceName: "remote", platform: "linux", userId: "owner", tokenId: "mct-7e6d5c4b3a291807", local: false, connectedSince: ago(40 * 60_000), lastSeen: ago(30_000), allowRemoteClose: true, state: "online", current: false },
 );
 /** Rows whose `lastSeen` stays as stored (the leftover stopped beating). */

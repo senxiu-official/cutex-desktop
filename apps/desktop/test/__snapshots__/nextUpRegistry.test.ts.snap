@@ -1,19 +1,72 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`registry snapshot ↔ docs change log > the table matches its snapshot and REGISTRY_VERSION is the doc's newest change-log entry > registry 2.5 1`] = `
+exports[`registry snapshot ↔ docs change log > the table matches its snapshot and REGISTRY_VERSION is the doc's newest change-log entry > registry 2.11 1`] = `
 {
+  "delegationEnding": {
+    "approval": {
+      "by": "Cutex maintainers (terminal notices)",
+      "date": "2026-11-25",
+      "why": "The requester must see when a delegation is stopped, closed or its handler fails, and by whom",
+    },
+    "words": {
+      "by": {
+        "label": "delegation.ending.by",
+        "text": {
+          "en": "by {who}",
+          "zh": "由 {who}",
+        },
+      },
+      "byUnknown": {
+        "label": "delegation.ending.byUnknown",
+        "text": {
+          "en": "not recorded by whom",
+          "zh": "未记录由谁",
+        },
+      },
+      "byYou": {
+        "label": "delegation.ending.byYou",
+        "text": {
+          "en": "by you",
+          "zh": "由你",
+        },
+      },
+    },
+  },
+  "delegationSteps": {
+    "approval": {
+      "by": "Cutex maintainers (navigation metadata)",
+      "date": "2026-11-25",
+      "why": "Show the host's next step on delegation rows; only navigation, never a decision",
+    },
+    "buttons": {
+      "approval": {
+        "label": "delegation.step.next.approval",
+        "text": {
+          "en": "View approval",
+          "zh": "查看审批",
+        },
+      },
+      "result": {
+        "label": "delegation.step.next.result",
+        "text": {
+          "en": "View result",
+          "zh": "查看结果",
+        },
+      },
+    },
+  },
   "delegationWaits": {
     "approval": {
-      "by": "Cutex maintainers",
-      "date": "2026-11-18",
-      "why": "owner saw a waiting delegation as 运行中; sub-forms of the approved 「等待中 · 约{时间}继续」",
+      "by": "owner via Cutex maintainers",
+      "date": "2026-11-25",
+      "why": "2.1 (2026-11-18): owner saw a waiting delegation as 运行中. 2.9: say when it continues; an overdue wait reads 已到时间，还未继续, never 即将继续",
     },
     "forms": {
       "children": {
         "status": "delegation.status.continuationWait",
         "text": {
-          "en": "Waiting · until its delegations finish",
-          "zh": "等待中 · 等子委托完成",
+          "en": "Waiting · waiting for its delegations to finish",
+          "zh": "等待中 · 等待子委托完成",
         },
         "trailing": [
           "delegation.cont.children",
@@ -22,18 +75,18 @@ exports[`registry snapshot ↔ docs change log > the table matches its snapshot 
       "due": {
         "status": "delegation.status.continuationWait",
         "text": {
-          "en": "Waiting · continues shortly",
-          "zh": "等待中 · 即将继续",
+          "en": "Waiting · time reached, not continued yet",
+          "zh": "等待中 · 已到时间，还未继续",
         },
         "trailing": [
-          "delegation.cont.soon",
+          "delegation.cont.overdue",
         ],
       },
       "jobs": {
         "status": "delegation.status.continuationWait",
         "text": {
-          "en": "Waiting · until its jobs finish",
-          "zh": "等待中 · 等作业完成",
+          "en": "Waiting · waiting for its jobs to finish",
+          "zh": "等待中 · 等待作业完成",
         },
         "trailing": [
           "delegation.cont.jobs",
@@ -58,11 +111,12 @@ exports[`registry snapshot ↔ docs change log > the table matches its snapshot 
       "timed": {
         "status": "delegation.status.continuationWait",
         "text": {
-          "en": "Waiting · continues ~{time}",
-          "zh": "等待中 · 约{时间}继续",
+          "en": "Waiting · continues in ~N min / h · expected to continue {time}",
+          "zh": "等待中 · 约 N 分钟/小时后继续 · 预计{时间}继续",
         },
         "trailing": [
           "delegation.cont.inMinutes",
+          "delegation.cont.inHours",
           "delegation.cont.at",
         ],
       },
@@ -210,7 +264,7 @@ exports[`registry snapshot ↔ docs change log > the table matches its snapshot 
       "disposal": false,
       "label": {
         "en": "Resend notice",
-        "zh": "重发通知",
+        "zh": "重新发送通知",
       },
     },
     "sendNow": {
@@ -300,8 +354,8 @@ exports[`registry snapshot ↔ docs change log > the table matches its snapshot 
       "Queued",
     ],
     "nextUp.state.review": [
-      "等你审核",
-      "Awaiting your review",
+      "等你审批",
+      "Awaiting your approval",
     ],
     "nextUp.state.sending": [
       "正在发送",
@@ -659,6 +713,6 @@ exports[`registry snapshot ↔ docs change log > the table matches its snapshot 
       "tone": "warn",
     },
   },
-  "version": "2.5",
+  "version": "2.11",
 }
 `;

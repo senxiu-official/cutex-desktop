@@ -414,6 +414,12 @@ export interface SidePlacement {
   order?: number;
   /** A new card's initial share of the page height (0.15–0.85); default: equal split. */
   share?: number;
+  /**
+   * One fixed page of its own (D1 「我的浏览器」, owner 2026-11-26): a host-bound open without an explicit page goes to
+   * the one shared page of this group (made on first use at the top of the default Shelf, shared + kept, this icon and
+   * name until the owner changes them). Agent-bound opens keep the ordinary rules (their conversation's own pages).
+   */
+  fixedPage?: { titleKey: import("../i18n").MessageKey; icon: import("../lib/sideLayout").PageIcon };
 }
 export type SidePageCandidate =
   | { group: string } // first page (button order) carrying this group
@@ -433,6 +439,10 @@ export interface SideTabInfo {
   favicon?: string;
   /** The tab plays sound (a web page, owner 2026-11-10): a speaker on the tab; a click calls toggleMute. */
   audio?: { muted: boolean; toggleMute(): void };
+  /** 浏览器身份: a CSS colour the tab is tinted with (a non-default identity); its favicon stays. */
+  tint?: string;
+  /** A small mark after the title (e.g. the avatar of the agent a browser tab is granted to). */
+  trailing?: import("react").ReactNode;
 }
 export interface SideInstanceInfo<S> {
   id: string;
@@ -446,6 +456,14 @@ export interface SideTabProps<S> {
   /** The binding resolved (§18.5): the bound agent / host, or the selected agent for follow. */
   hostId: string | null;
   sessionId: string | null;
+}
+/** The tab-row controls' props: the shown tab's body props, its card, and a ＋ with chosen params. */
+export interface SideTabRowProps<S> extends SideBodyProps<S> {
+  cardId: string;
+  /** The card is on its kind's fixed page (placement.fixedPage, e.g. 「我的浏览器」). */
+  fixedPage: boolean;
+  /** Like the ＋: a new instance of this kind as a tab of this card, opened with `params` (checked by parseParams). */
+  newTab(params: Json): void;
 }
 export interface SideBodyProps<S> extends SideTabProps<S> {
   /** Persisted (debounced) and kept across remounts; small JSON (≤ 4 KiB, §18.11). */
@@ -519,6 +537,13 @@ export interface SideComponentItem<S extends Json = any, P extends Json = any> e
    *  the last tab opens `launcher.newParams ?? launcher.params` as a new tab of this card (same binding).
    *  Omitted: the tab row appears only with ≥ 2 tabs (a single instance shows its title). */
   tabRow?: "always";
+  /** With tabRow "always": a small control at the start of the card's tab row (浏览器身份 switcher), rendered with the
+   *  shown tab's props; null = nothing. */
+  TabRowLead?: ComponentType<SideTabRowProps<S>>;
+  /** With tabRow "always" and a ＋: a control right after the ＋ (＋▾: open a new tab with other params). */
+  NewTabMenu?: ComponentType<SideTabRowProps<S>>;
+  /** Extra items in a tab's context menu (after the shell's own), e.g. 「用其他身份打开…」. Called on open, not a hook. */
+  tabMenu?(instance: SideInstanceInfo<S>, ctx: { hostId: string | null; newTab(params: Json): void }): import("../lib/contextMenu").MenuEntry[];
   /** Called on close (tab ×, card ×, page close). Terminal: kills the PTY here. false = keep open. */
   onClose?(instance: SideInstanceInfo<S>): boolean | Promise<boolean>;
   /** Bulk closes only (card ×, 关闭页, 关闭其他): a one-line warning shown by their in-place click-twice confirm, or null. */

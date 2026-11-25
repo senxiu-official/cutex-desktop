@@ -1,6 +1,6 @@
 export const zhCN = {
   "perf-log.moduleTitle": "性能记录",
-  "perf-log.description": "界面卡住超过 100 毫秒时记一条：什么时间、屏幕上开着什么、你刚做了什么、哪段代码最耗时。只存在这台电脑上，不会发出去",
+  "perf-log.description": "界面卡住超过 100 毫秒时记一条：什么时间、屏幕上开着什么、你刚做了什么、哪段代码最耗时。只存在这台电脑上，不会发送出去",
   "perf-log.section": "性能记录",
   "perf-log.enabled": "记录卡顿",
   "perf-log.enabled.hint": "界面卡住超过 100 毫秒时记一条，最多保留最近 500 条（约 5 MB），只存在这台电脑上。不卡的时候几乎不占资源",
@@ -28,7 +28,7 @@ export const zhCN = {
   "perf-log.hiddenWindow": "窗口在后台",
   "perf-log.desktop": "桌面",
   "perf-log.workspaces": "{n} 个工作区",
-  "perf-log.rows": "时间线 {turns} 轮 / {rows} 项",
+  "perf-log.rows": "时间线 {turns} 个回合 / {rows} 项",
   "perf-log.dom": "{n} 个元素",
 } as const;
 

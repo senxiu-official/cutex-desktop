@@ -28,6 +28,7 @@ import { withoutDeletedProfiles, type ProfileProviders } from "./provider";
 import { rawIdsTitle, withShownModels } from "./models";
 import { useModelName } from "../../lib/modelDisplay";
 import { useCached } from "./useCached";
+import { hasDivider, statColumns, stripWidth } from "./statStrip";
 import { useProfileProviders } from "./useProfileProviders";
 import { GaugeBar } from "../../components/GaugeBar";
 import { ProfileAvatar } from "../../components/ProfileAvatar";
@@ -49,6 +50,8 @@ import { buildModelMap, manualNames, mapDrafts, mapProblems, mapSuggestions, MOD
 import { turnShape } from "./shape";
 import { Tag } from "../../components/Tag";
 import { useOwnerWindow } from "../../lib/ownerContext";
+import { EntityIcon } from "../../components/EntityIcon";
+import type { EntityRef } from "../../lib/entityIcon";
 
 const ID = "usage";
 const RANGES = [7, 30, 90] as const;
@@ -253,8 +256,13 @@ function colorOf(split: Split, providers: ProfileProviders, series: readonly str
 /** Shown model name → its raw ids (modules/usage/models), for the 模型 split. */
 type ModelIds = ReadonlyMap<string, readonly string[]> | null;
 
-/** Legend / table / tooltip mark: the profile's avatar, a model's provider logo, else a colour dot. */
-function SeriesMark({ split, name, color, providers, modelIds }: { split: Split; name: string; color: string; providers: ProfileProviders; modelIds?: ModelIds }) {
+/** Series name → the agent / project it names (agent and project splits of one host): its icon is the mark. */
+type SeriesEntities = ReadonlyMap<string, EntityRef> | null;
+
+/** Legend / table / tooltip mark: the profile's avatar, the agent's / project's icon, a model's provider logo, else a colour dot. */
+function SeriesMark({ split, name, color, providers, modelIds, entities }: { split: Split; name: string; color: string; providers: ProfileProviders; modelIds?: ModelIds; entities?: SeriesEntities }) {
+  const entity = entities?.get(name);
+  if (entity) return <EntityIcon entity={entity} />;
   const profile = split === "profile" ? providers?.get(name) : undefined;
   if (profile) return <ProfileAvatar profile={profile} size={16} color={color} />;
   // The logo comes from the raw id: a display name ("DS Flash") need not name its provider.
@@ -269,15 +277,66 @@ function SeriesMark({ split, name, color, providers, modelIds }: { split: Split;
 
 // ---------------------------------------------------------------- summary
 
-function Stat({ label, value, sub, hint }: { label: ReactNode; value: string; sub?: string; hint?: string }) {
+export type StatItem = { key: string; label: string; value: string; sub?: string; hint?: string };
+
+/** Three rows (label, value, sub) in every cell, so labels, values and subs line up across a row. */
+function Stat({ item, divider }: { item: StatItem; divider: boolean }) {
   return (
-    <div className="border-l border-border pl-4">
-      <div className="flex items-center gap-1 text-xs text-subtle" title={hint}>
-        {label}
-        {hint && <Info size={11} />}
+    <div className={`min-w-0 pl-4 ${divider ? "border-l border-border" : ""}`} data-usage-stat={item.key} data-divider={divider ? "" : undefined}>
+      <div className="w-max max-w-full" data-usage-stat-body="">
+        <div className="flex items-center gap-1 text-xs whitespace-nowrap text-subtle" title={item.hint}>
+          {item.label}
+          {item.hint && <Info size={11} className="shrink-0" />}
+        </div>
+        <div className="text-lg font-semibold whitespace-nowrap tabular-nums">{item.value}</div>
+        <div className="text-caption/[inherit] whitespace-nowrap text-subtle tabular-nums">{item.sub ?? "\u00a0"}</div>
       </div>
-      <div className="text-lg font-semibold tabular-nums">{value}</div>
-      {sub && <div className="text-caption/[inherit] text-subtle tabular-nums">{sub}</div>}
+    </div>
+  );
+}
+
+const STAT_GAP = 24; // px between columns (gap-x-6)
+const HERO_GAP = 40; // px between the Token figure and the stats (gap-x-10)
+
+/**
+ * The stats as one group (owner 2026-11-24): beside the Token figure while they fit, else on the rows below it;
+ * columns chosen so no row holds a lone stat (statStrip), dividers only between stats of one row.
+ */
+export function StatStrip({ hero, items }: { hero: ReactNode; items: StatItem[] }) {
+  const win = useOwnerWindow();
+  const box = useRef<HTMLDivElement>(null);
+  const heroBox = useRef<HTMLDivElement>(null);
+  const [layout, setLayout] = useState({ cols: items.length, beside: true });
+  useLayoutEffect(() => {
+    const el = box.current, h = heroBox.current;
+    if (!el || !h || typeof win.ResizeObserver === "undefined") return;
+    const measure = () => {
+      const bodies = [...el.querySelectorAll<HTMLElement>("[data-usage-stat-body]")];
+      const widths = bodies.map((b) => b.scrollWidth + 16 + 1); // pl-4 + the divider
+      const total = el.parentElement!.clientWidth;
+      const heroW = h.offsetWidth;
+      const n = widths.length;
+      // Beside the Token figure when every stat fits on its row there; else the whole group goes below.
+      const beside = stripWidth(widths, n, STAT_GAP) <= total - heroW - HERO_GAP + 0.5;
+      const cols = beside ? n : statColumns(widths, total, STAT_GAP);
+      setLayout((old) => (old.cols === cols && old.beside === beside ? old : { cols, beside }));
+    };
+    measure();
+    // The owner window's observer (multi-window, lib/ownerContext). The Token figure too: it widens when the
+    // previous period arrives (「较前 30 天」), and the stats beside it must then move under it.
+    const ro = new win.ResizeObserver(measure);
+    ro.observe(el.parentElement!);
+    ro.observe(h);
+    for (const b of el.querySelectorAll("[data-usage-stat-body]")) ro.observe(b);
+    return () => ro.disconnect();
+  }, [win, items.map((i) => `${i.key}:${i.label}:${i.value}:${i.sub ?? ""}`).join("|")]);
+  const { cols, beside } = layout;
+  return (
+    <div className={`mb-4 flex items-start gap-y-4 pt-3 ${beside ? "flex-nowrap gap-x-10" : "flex-col"}`} data-usage-summary="" data-cols={cols} data-beside={beside ? "" : undefined}>
+      <div ref={heroBox} className="shrink-0">{hero}</div>
+      <div ref={box} className="grid min-w-0 gap-x-6 gap-y-3" style={{ gridTemplateColumns: `repeat(${cols}, max-content)` }}>
+        {items.map((item, i) => <Stat key={item.key} item={item} divider={hasDivider(i, cols, beside)} />)}
+      </div>
     </div>
   );
 }
@@ -288,26 +347,27 @@ function Summary({ report, previous, range }: { report: UsageReport; previous: U
   const delta = change(tt.total, previous?.totals.total);
   const cacheRate = tt.input > 0 ? tt.cachedInput / tt.input : null;
   const apiValue = tt.estimatedCost !== undefined ? formatMoney(tt.estimatedCost, report.currency) : tt.apiEquivalentUsd !== undefined ? formatMoney(tt.apiEquivalentUsd, "USD") : null;
-  return (
-    <div className="mb-4 flex flex-wrap items-end gap-x-10 gap-y-3 pt-3">
-      <div>
-        <div className="text-xs text-subtle">{t("usage.tokens")}</div>
-        <div className="flex items-baseline gap-2">
-          <span className="text-3xl font-semibold tracking-tight tabular-nums">{formatTokens(tt.total)}</span>
-          {delta !== null && (
-            <span className="text-xs text-muted tabular-nums">
-              {Math.abs(delta) < 0.005 ? t("usage.flat") : `${delta > 0 ? "↑" : "↓"} ${Math.abs(Math.round(delta * 100))}%`} <span className="text-subtle">{t("usage.vsPrev", { n: range })}</span>
-            </span>
-          )}
-        </div>
-        <div className="text-caption/[inherit] text-subtle tabular-nums">{t("usage.inOut", { i: formatTokens(tt.input), o: formatTokens(tt.output) })}</div>
+  const items: StatItem[] = [
+    ...(cacheRate !== null ? [{ key: "cache", label: t("usage.cacheRate"), value: `${Math.round(cacheRate * 100)}%`, sub: t("usage.cachedTokens", { n: formatTokens(tt.cachedInput) }) }] : []),
+    { key: "turns", label: t("usage.turns"), value: String(tt.turns), sub: t("usage.perDay", { n: (tt.turns / range).toFixed(1) }) },
+    ...(tt.maxRequestInput !== undefined ? [{ key: "max", label: t("usage.maxContext"), value: formatTokens(tt.maxRequestInput), hint: t("usage.maxContextHint") }] : []),
+    ...(apiValue ? [{ key: "api", label: t("usage.apiValue"), value: apiValue, sub: t("usage.apiValueSub"), hint: t("usage.apiValueHint") }] : []),
+  ];
+  const hero = (
+    <div>
+      <div className="text-xs text-subtle">{t("usage.tokens")}</div>
+      <div className="flex items-baseline gap-2">
+        <span className="text-3xl font-semibold tracking-tight whitespace-nowrap tabular-nums">{formatTokens(tt.total)}</span>
+        {delta !== null && (
+          <span className="text-xs whitespace-nowrap text-muted tabular-nums">
+            {Math.abs(delta) < 0.005 ? t("usage.flat") : `${delta > 0 ? "↑" : "↓"} ${Math.abs(Math.round(delta * 100))}%`} <span className="text-subtle">{t("usage.vsPrev", { n: range })}</span>
+          </span>
+        )}
       </div>
-      {cacheRate !== null && <Stat label={t("usage.cacheRate")} value={`${Math.round(cacheRate * 100)}%`} sub={t("usage.cachedTokens", { n: formatTokens(tt.cachedInput) })} />}
-      <Stat label={t("usage.turns")} value={String(tt.turns)} sub={t("usage.perDay", { n: (tt.turns / range).toFixed(1) })} />
-      {tt.maxRequestInput !== undefined && <Stat label={t("usage.maxContext")} value={formatTokens(tt.maxRequestInput)} hint={t("usage.maxContextHint")} />}
-      {apiValue && <Stat label={t("usage.apiValue")} value={apiValue} sub={t("usage.apiValueSub")} hint={t("usage.apiValueHint")} />}
+      <div className="text-caption/[inherit] text-subtle tabular-nums">{t("usage.inOut", { i: formatTokens(tt.input), o: formatTokens(tt.output) })}</div>
     </div>
   );
+  return <StatStrip hero={hero} items={items} />;
 }
 
 // ---------------------------------------------------------------- chart
@@ -337,10 +397,11 @@ interface ChartProps {
   onFocus(s: string | null): void;
   providers: ProfileProviders;
   modelIds: ModelIds;
+  entities?: SeriesEntities;
   controls: ReactNode;
 }
 
-function Chart({ report, split, days, metric, mode, focus, onFocus, providers, modelIds, controls }: ChartProps) {
+function Chart({ report, split, days, metric, mode, focus, onFocus, providers, modelIds, entities, controls }: ChartProps) {
   const { t } = useI18n();
   const label = useSeriesLabel(split);
   const bks = useMemo(() => buckets(days), [days]);
@@ -380,7 +441,7 @@ function Chart({ report, split, days, metric, mode, focus, onFocus, providers, m
       <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">
         {series.map((s) => (
           <button key={s} onMouseEnter={() => onFocus(s)} onMouseLeave={() => onFocus(null)} className="flex items-center gap-1.5 text-muted hover:text-foreground" style={{ opacity: dim(s) === 1 ? 1 : 0.5 }}>
-            <SeriesMark split={split} name={s} color={color(s)} providers={providers} modelIds={modelIds} />
+            <SeriesMark split={split} name={s} color={color(s)} providers={providers} modelIds={modelIds} entities={entities} />
             {label(s)}
           </button>
         ))}
@@ -446,7 +507,7 @@ function Chart({ report, split, days, metric, mode, focus, onFocus, providers, m
             {hoverRows.length === 0 && <div className="text-subtle">{t("usage.noUse")}</div>}
             {hoverRows.map((r) => (
               <div key={r.s} className="flex items-center gap-2">
-                <SeriesMark split={split} name={r.s} color={color(r.s)} providers={providers} modelIds={modelIds} />
+                <SeriesMark split={split} name={r.s} color={color(r.s)} providers={providers} modelIds={modelIds} entities={entities} />
                 <span className="text-muted">{label(r.s)}</span>
                 <span className="ml-auto pl-3 tabular-nums">{fmt(r.v)}</span>
               </div>
@@ -478,7 +539,7 @@ interface Row {
   cost?: number;
 }
 
-function Breakdown({ report, split, metric, focus, onFocus, providers, modelIds }: { report: UsageReport; split: Split; metric: Metric; focus: string | null; onFocus(s: string | null): void; providers: ProfileProviders; modelIds: ModelIds }) {
+function Breakdown({ report, split, metric, focus, onFocus, providers, modelIds, entities }: { report: UsageReport; split: Split; metric: Metric; focus: string | null; onFocus(s: string | null): void; providers: ProfileProviders; modelIds: ModelIds; entities?: SeriesEntities }) {
   const { t, locale } = useI18n();
   const label = useSeriesLabel(split);
   const rows = useMemo<Row[]>(() => {
@@ -544,7 +605,7 @@ function Breakdown({ report, split, metric, focus, onFocus, providers, modelIds 
               <tr key={r.name} onMouseEnter={() => onFocus(r.name)} onMouseLeave={() => onFocus(null)} className={`border-t border-border tabular-nums transition-opacity ${focus !== null && focus !== r.name ? "opacity-50" : ""}`}>
                 <td className="py-2">
                   <span className="flex items-center gap-2">
-                    <SeriesMark split={split} name={r.name} color={color} providers={providers} modelIds={modelIds} />
+                    <SeriesMark split={split} name={r.name} color={color} providers={providers} modelIds={modelIds} entities={entities} />
                     <span className="truncate" title={rawIdsTitle(modelIds, r.name)}>{label(r.name)}</span>
                     {pricedAs?.get(r.name) && (
                       <Tag title={t("usage.map.pricedAsHint", { to: pricedAs.get(r.name)!.join(", ") })}>
@@ -605,7 +666,7 @@ type LedgerData = { single: UsageReport | null } | { parts: HostResult[] };
 /** The edit host picker of 「全部主机」 (price table / model map / 额外目录 live on one host). */
 function EditHostPicker({ view }: { view: AllView }) {
   const { t } = useI18n();
-  return <HostPicker value={view.editHost} onChange={view.setEditHost} mode="picker" only={view.targets.map((x) => x.hostId)} title={t("usage.all.editHostTitle")} />;
+  return <HostPicker chip value={view.editHost} onChange={view.setEditHost} mode="picker" only={view.targets.map((x) => x.hostId)} title={t("usage.all.editHostTitle")} />;
 }
 
 function Ledger({ providers, sources, refresh }: { providers: ProfileProviders; sources: UsageSourcesView | null | undefined; refresh: number }) {
@@ -700,6 +761,18 @@ function Ledger({ providers, sources, refresh }: { providers: ProfileProviders; 
   // 模型: names from Settings → 通用 → 模型显示名; ids shown alike add up (display only).
   const modelName = useModelName();
   const named = useMemo(() => (report && split === "model" ? withShownModels(report, (id) => modelName(id)) : null), [report, split, modelName]);
+  const ledgerHost = useTargetHostId();
+  const seriesEntities = useMemo<SeriesEntities>(() => {
+    if (view || !report || (split !== "agent" && split !== "project")) return null;
+    const out = new Map<string, EntityRef>();
+    for (const row of report.rows) {
+      const id = split === "agent" ? row.key.agent : row.key.project;
+      if (!id) continue;
+      const name = seriesName(row.key, split);
+      if (!out.has(name)) out.set(name, split === "agent" ? { kind: "agent", id, name } : { kind: "project", id, hostId: ledgerHost });
+    }
+    return out;
+  }, [view, report, split, ledgerHost]);
   const shown = useMemo(() => {
     if (!report || split !== "profile" || view) return named?.report ?? report;
     const current = withoutDeletedProfiles(report, providers);
@@ -761,12 +834,15 @@ function Ledger({ providers, sources, refresh }: { providers: ProfileProviders; 
           <>
             <Summary report={report} previous={previous} range={range} />
             {merged && merged.unconverted.length > 0 && <UnconvertedNote notes={merged.unconverted} currency={report.currency} />}
-            <Chart report={shown ?? report} split={split} days={days} metric={shownMetric} mode={canStack ? mode : "line"} focus={focus} onFocus={setFocus} providers={seriesProviders} modelIds={named?.ids ?? null} controls={chartControls} />
-            <Breakdown report={shown ?? report} split={split} metric={shownMetric} focus={focus} onFocus={setFocus} providers={seriesProviders} modelIds={named?.ids ?? null} />
+            <Chart report={shown ?? report} split={split} days={days} metric={shownMetric} mode={canStack ? mode : "line"} focus={focus} onFocus={setFocus} providers={seriesProviders} modelIds={named?.ids ?? null} entities={seriesEntities} controls={chartControls} />
+            <Breakdown report={shown ?? report} split={split} metric={shownMetric} focus={focus} onFocus={setFocus} providers={seriesProviders} modelIds={named?.ids ?? null} entities={seriesEntities} />
             {unpriced.length > 0 && (
               <div className="mb-1.5 flex items-center gap-1.5 text-xs text-warn">
                 <AlertTriangle size={12} className="shrink-0" />
-                <span className="truncate" title={unpriced.join(listSep(locale))}>{t("usage.unpriced", { n: unpriced.length, names: unpriced.map((id) => (unpricedTo.has(id) ? `${modelName(id)} → ${modelName(unpricedTo.get(id)!)}` : modelName(id))).join(listSep(locale)) })}</span>
+                {(() => {
+                  const line = t("usage.unpriced", { n: unpriced.length, names: unpriced.map((id) => (unpricedTo.has(id) ? `${modelName(id)} → ${modelName(unpricedTo.get(id)!)}` : modelName(id))).join(listSep(locale)) });
+                  return <span className="min-w-0 truncate" title={line} data-usage-unpriced="">{line}</span>;
+                })()}
                 {view ? (
                   // Prices are set per host: one link per host that reported unpriced models.
                   [...unpricedHosts].map(([h, models]) => (
@@ -781,8 +857,8 @@ function Ledger({ providers, sources, refresh }: { providers: ProfileProviders; 
                 )}
               </div>
             )}
-            <div className="flex items-center gap-3 text-xs text-subtle">
-              <span className="min-w-0 truncate">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-subtle" data-usage-footer="">
+              <span className="min-w-0 flex-[1_1_20rem]">
                 {report.recordingSince ? t("usage.since", { date: report.recordingSince.slice(0, 10) }) : ""} {t("usage.apiValueNote")}
                 {report.pricing?.catalog && ` ${t("usage.catalog", { source: report.pricing.catalog.source, date: (report.pricing.catalog.fetchedAt ?? "—").slice(0, 10) })}`}
               </span>

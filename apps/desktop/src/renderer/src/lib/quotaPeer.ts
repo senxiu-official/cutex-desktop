@@ -5,7 +5,7 @@
 // `quotas` (auto-pick, quota wall, composer and every other decision) keep this host's data only.
 import { useEffect, useRef, useState } from "react";
 import type { ProfileItem, QuotaGauge } from "../../../shared/ipc";
-import type { ProfileQuotaDetail } from "../../../shared/claudeAccounts";
+import { loginDiagnosticOf, type ProfileQuotaDetail } from "../../../shared/claudeAccounts";
 import { apiFor } from "../bridge";
 import { useProfileAccountLinks } from "./profileAccountLinks";
 import { gaugeErrors, latestObservedAt, nextQuotaReset, quotaGaugeNow, quotaUsable } from "./quota";
@@ -34,7 +34,9 @@ export interface CardQuotaView {
 export function quotaDetailReason(detail: ProfileQuotaDetail | null): LocalQuotaReason | null {
   const meta = detail?.nativeQuota;
   if (!meta) return null;
-  if (meta.credentialsExpired === true) return { kind: "expiredLogin" };
+  // r295: the host's newest observation decides; a credential that is only about to expire still reads.
+  const login = loginDiagnosticOf(meta);
+  if (login === undefined ? meta.credentialsExpired === true : login === "loginExpired") return { kind: "expiredLogin" };
   return typeof meta.lastError === "string" && meta.lastError ? { kind: "error", text: meta.lastError } : null;
 }
 

@@ -20,7 +20,7 @@ Version 2.5. This registry defines the public state keys, labels, actions and di
 | 7 | `paused` | 暂停中，未发送 | Paused, not sent |
 | 8 | `awaitingOnline` | 上线后发送 | Sends when online |
 | 9 | `awaitingReconnect` | 重连后发送 | Sends after reconnect |
-| 10 | `review` | 等你审核 | Awaiting your review |
+| 10 | `review` | 等你审批 | Awaiting your approval |
 | 11 | `needsAction` | 需要你处理 | Needs your action |
 | 12 | `unconfirmed` | 送达未确认 | Delivery unconfirmed |
 | 13 | `failed` | 发送失败 | Send failed |
@@ -43,7 +43,7 @@ Version 2.5. This registry defines the public state keys, labels, actions and di
 | 7 | 已暂停 | Paused | 这个 agent 被暂停了 | 继续 / 查看详情 |
 | 8 | 等待上线后发送 | Send when online | 对方离线 | 启动（能启动时）/ 放弃 / 查看委托 |
 | 9 | 等待重新连接 | Waiting to reconnect | 连接断了，会自动恢复 | 查看原因 / 放弃 |
-| 10 | 等你审核 | Awaiting your review | 委托需要你批准才能开始 | 批准 / 拒绝 / 查看委托 |
+| 10 | 等你审批 | Awaiting your approval | 委托需要你批准才能开始 | 批准 / 拒绝 / 查看委托 |
 | 11 | 需要你处理 | Needs your action | 卡住了，不会自己好（积压太久、对方不支持、版本不对等） | 允许发送（能放行时）/ 查看原因 / 放弃 |
 | 12 | 送达未确认 | Delivery not confirmed | 不知道对方收到没有 | 重新发送（会提示「可能收到两次」）/ 放弃 / 查看原因 |
 | 13 | 发送失败 | Could not send | 确定没送到 | 重新发送 / 放回输入框 / 放弃 / 查看原因 |
@@ -56,7 +56,7 @@ Version 2.5. This registry defines the public state keys, labels, actions and di
 
 ## 二、以后不再出现的字
 
-对方正忙 · 主机正忙 · 等待插入时机 · 合并结果（像按钮，其实只是在等） · 已接收 · 已登记 · 积压过久等你放行（改为第 11 种，并且真有放行按钮）。
+对方正忙 · 主机正忙 · 等待插入时机 · 合并结果（像按钮，其实只是在等） · 已登记 · 积压过久等你放行（改为第 11 种，并且真有放行按钮）。（「已接收」2.9 起是委托 `starting` 状态的正式字样，主人 2026-11-25 决定。）
 
 ## 三、不是消息、但也放在面板里的固定控件（同样登记，不能随意加）
 
@@ -73,14 +73,14 @@ Version 2.5. This registry defines the public state keys, labels, actions and di
 
 处理者结束本轮、稍后自动继续的委托（主机提供 `continuationWait`），在「接下来」的委托行里只能显示下面这些字样（代码表 `NEXT_UP_DELEGATION_WAITS`）。它们都是既有的「等待中 · 约{时间}继续」的子形式，不是新状态，没有新按钮。
 
-- 等待中 · 约{时间}继续（一小时内写「约 N 分钟后继续」，更晚写本地时间，别的日子带日期）
-- 等待中 · 即将继续（到点了）
-- 等待中 · 等子委托完成
-- 等待中 · 等作业完成
+- 等待中 · 约{时间}继续（一小时内写「约 N 分钟后继续」，24 小时内写「约 N 小时后继续」，更晚写「预计 {时间} 继续」（本地时间，别的日子带日期）；准确时间在悬停里）
+- 等待中 · 已到时间，还未继续（时间已过、还没开始新回合；浅警告色；主机给了原因时悬停里写「原因：…」。2.9 起不再写「即将继续」）
+- 等待中 · 等待子委托完成
+- 等待中 · 等待作业完成
 - 等待中（没有时间）
 - 等待继续（ready）
 
-「续接已达上限」不在这里：只在委托卡片、委托列表里显示，归在「等待」一组（不算「需要你」）；「接下来」的委托行把它显示成「等待中」，悬停说明已到上限。待回答的提问、停止、关闭、已结束仍然优先于过期的等待（委托卡片、列表、接下来和处理者的输入框都一样）。等作业的委托如果还带着原来的时限，原有的「最晚 HH:MM」照旧接在后面，备注和准确时间在悬停里（不是新字样）。
+「自动继续已到期」不在这里：只在委托卡片、委托列表里显示，归在「等待」一组（不算「需要你」）；「接下来」的委托行把它显示成「等待中」，悬停说明已到上限。待回答的提问、停止、关闭、已结束仍然优先于过期的等待（委托卡片、列表、接下来和处理者的输入框都一样）。等作业的委托如果还带着原来的时限，原有的「最晚 HH:MM」照旧接在后面，备注和准确时间在悬停里（不是新字样）。
 
 ## 三之三、留言送达情况的说明字样
 
@@ -128,6 +128,23 @@ Version 2.5. This registry defines the public state keys, labels, actions and di
 - Ctrl+Shift+Enter 遇到整批停住（`owner_batch_not_submitted`）时提示「这批未发出，原因见各行」。
 - 这些说明只用后端对**当前这次尝试**、且状态对得上时给的证明（`interruptBatch.attempt` 等于记录的 attempt）。旧尝试留下的批次记录不算：手动重发后结果不明的行仍是原来的「不知道对方收到没有」和「可能收到两次」。
 - 未读插话超过上限（行上 100 条，带草稿 99 条）时整次不发、不截断（同一次打断会让剩下的丢掉），提示「未读插话太多（超过 {max} 条），没有打断」。
+
+## 三之五、接下来里委托行的下一步按钮
+
+主机通过 `activityLink` 说出委托当前卡在哪、下一步该看哪里时，「接下来」的委托行最多多一个按钮（代码表 `NEXT_UP_DELEGATION_STEPS`）。只是跳转：打开这条委托的详情并滚到对应位置，不做任何决定；提交仍走原页面的权限、状态和确认。卡点本身不另写，行上已登记的状态字样就是它。旧主机没有这个字段，行保持原样。
+
+- 查看结果 / View result：结果等你验收时，打开详情的结果区，并核对结果版本（有新版本时详情会说明）。
+- 查看审批 / View approval：委托在等审批、而这一行没有自己的「批准 / 拒绝」时，打开详情顶部的审批卡；审批已在别处处理时，详情给出「打开「审批」页」。
+
+## 三之六、接下来里委托状态通知的结束原因
+
+委托被停止、关闭（不是正常交回结果），或对方的回合失败时，支持 terminal notices 的 cutex 主机会记下是谁或什么结束了它、为什么。「接下来」里这条委托的状态通知行（kind `delegationStatus`）在标题后多一段只读字样（代码表 `NEXT_UP_DELEGATION_ENDING`），不加状态、不加按钮：
+
+- 「由你」 / "by you"：你自己。「由 {who}」 / "by {who}"：{who} 是对方 agent 的名字，或 cutex 的部分（「cutex 调度」「{name} 的运行时」等）。
+- 每行只说它自己那条通知（按 cutex 放在预览开头的稳定 ref 对上那条不变的记录）：先失败、后被停止时，失败那行说运行时，停止那行说停止的人；对不上就不写由谁。
+- 「未记录由谁」 / "not recorded by whom"：主机没有记下是谁时照实说，绝不猜成「你」。
+- 悬停列出整段经过（时间、状态、由谁、第几次尝试、原因），一次失败接着一次关闭算同一段经过，按时间排。
+- 委托方自己停止的不算警示，和别的字一样用浅色。旧主机没有这些字段，行保持原样。
 
 ## 四、审计查出、实现时一起修的 bug
 
@@ -190,3 +207,9 @@ Version 2.5. This registry defines the public state keys, labels, actions and di
 | 2.3 | 2026-11-20 | Note-delivery wording after cross-review (section 三之三): skipped keeps uncertainty (「{n} 条留言未确认带上，原因见各行」 / "{n} notes not confirmed carried; see each row"); new reportErrors, lastAttempt / lastAttemptKind and three attempt kinds; lastErrorAt removed (error on its own line); version 2.2 lines shortened with the same meaning. New error routing only on hosts with the matching capability. No new state, label or button |
 | 2.4 | 2026-11-20 | Section 三之四: on a host with `interrupt-send-many-v1` the existing 打断并发送 (row, Ctrl+Shift+Enter, cli Esc) takes every unread owner 插话 of the running turn along in send order, one interrupt, each under its own id; the row tip says 「停下当前这一轮，马上发这 {n} 条插话」 when n > 1. Older hosts keep the single-input action (cli Esc sends a lone unread 插话; several: stop only). Unsent batches (cutex 0.2.5) follow their records: busy → held{hostBusy}, the host resends the group; definitely unsent and blocked → state 11, where the owner buttons now include the existing Resend, shown only when the host's actions offer it (current attempt, original id, manual); groupIncomplete stops the rest once; unmarked refusals stay unconfirmed with Dismiss only. Short reason lines in hover / details. Over the limit (row 100, with a draft 99) the whole action is refused; batch words only for the current attempt. No new state, label or button |
 | 2.5 | 2026-11-20 | Section 三之三 2.5: on a record with `details.deliveryDiagnostics.retryBlocked: true` (explicit retry-blocked metadata) one hover / details line 「对方已收到，不能重发」 / "Already received; can't resend" (`noteDelivery.retryBlocked.timeline`). Only the explicit marker counts. No new state, label or button |
+| 2.6 | 2026-11-24 | Labels only, no new state or action: the current turn is interrupted (中断), as the composer's button and Esc say (copy audit 2026-11-24). Stop-held group 「已随停止暂停」→「已随中断暂停」 / "Held by stop" → "Held by interrupt" (hover 「已随中断暂停：…」 / "Held by your interrupt: …"); asks-paused title 「新委托已随停止暂停」→「新委托已随中断暂停」 / "New delegations held by interrupt"; the N10 row note 「中断后结果自动开新一轮」/ "Starts a new turn after the interrupt", hover 「中断不会扣住委托的结果：它到了就会开始新的一轮。提问和状态更新仍随中断暂停，继续发送时一起放行。」 / "An interrupt doesn't hold a delegation's result: when it arrives it starts a new turn. Questions and status updates stay held until you send held items."; paused-queue title 「已暂停 · 中断后不会自动发送」. Rows of 2.0 quote the words of their time |
+| 2.7 | 2026-11-25 | Labels only, no new state or action: turn = 回合 (never 轮). N10 row note 「中断后结果自动开新一轮」→「中断后，收到委托结果会开始新回合」 (en unchanged "Starts a new turn after the interrupt"), hover → 「中断不会扣住委托的结果：它到了就会开始新回合。提问和状态更新仍随中断暂停，继续发送时一起放行。」; stop-held hover 「这些不会自己开始一轮」→「这些不会自己开始回合」; 打断并发送 tip 「停下当前这一轮，马上发这条」→「中断当前回合，马上发这条」 / "Stop the current turn…" → "Interrupt the current turn and send this now" (zh-Hant from the catalog key interruptSend.oneTip; the batch tip 「中断当前回合，马上发这 {n} 条插话」); asks-paused (stop) hover → 「当前回合已中断。新委托和随中断暂停的内容会等你继续发送，已在运行的委托继续。…」 and the 继续发送 hover → 「继续发送随中断暂停的全部内容，按队列顺序处理」: they name only what the interrupt holds, since a delegation result is not held on per-item hosts (en stop → interrupt). Rows of 2.0–2.6 quote the words of their time |
+| 2.8 | 2026-11-25 | Labels only, no new state or action, following the GLOSSARY section 「动作与状态」: action retryNotice 「重发通知」→「重新发送通知」; tips and meanings use 送达 (not 送到), 读入 for an agent reading (读取 for the app loading a delegation), 未发送 / 未能 (not 没发出 / 没能). N10 hover now reads 「中断不会暂停委托的结果：它到了就会开始新回合。提问和状态更新仍随中断暂停，继续发送时一起放行。」 (扣住 → 暂停). afterWork timed ⓘ (after cross-review; behaviour unchanged: the countdown inserts at the next tool call and the turn goes on): 「当前回合结束后发送。如果倒计时先结束，消息会在对方下次调用工具时插入，当前回合会继续。」 / "Sent once the current turn ends. If the countdown ends first, the message is inserted at the agent’s next tool call and the current turn goes on." passiveNote ⓘ: 开新一回合 → 开始新回合. Other en unchanged. |
+| 2.9 | 2026-11-25 | Labels only, no new state or button. Yielded-wait words (section 三之二) say when: within 24 h 「约 N 分钟后继续」 / 「约 N 小时后继续」, later 「预计 {时间} 继续」, exact time on hover; past the time with no new turn 「已到时间，还未继续」 / "time reached, not continued yet" in a muted warning colour, with 「原因：…」 on hover when the host sends `continuationWait.blockedReason` (older hosts: no reason line); this replaces 即将继续. Event waits read 「等待子委托完成」 / 「等待作业完成」. The same owner decision makes a delegation's `starting` status 「已接收」 / "Accepted" (hover 「对方已收到，还没开始」) on every surface, so 已接收 leaves the retired-words list (section 二), and state 10 reads 「等你审批」 / "Awaiting your approval" (UI term 委托审批) |
+| 2.10 | 2026-11-25 | One new section 三之五, no new state: a delegation row may show the host's next step as one navigation button, 「查看结果」 / "View result" or 「查看审批」 / "View approval" (the latter only when the row has no 批准 / 拒绝 of its own). It opens the delegation's detail at the result (answer id checked; a newer version is said) or at its approval card (decided elsewhere: 「打开「审批」页」). The blocker words stay off the row, whose registered status word already says the state. Hosts without `activityLink` keep the row as before |
+| 2.11 | 2026-11-25 | One new section 三之六, no new state or button: a delegation status notice row shows after its title who or what ended the delegation or failed its attempt, 「由 {who}」 / "by {who}", or 「未记录由谁」 / "not recorded by whom" when the host did not record it (never guessed as the owner); the whole sequence (failure then closure, in time order) on hover. Hosts without terminal notices keep the row as before |

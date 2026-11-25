@@ -113,6 +113,9 @@ export interface BoardProblem {
   target: BoardTarget | null;
   /** Soft (cutex's lastTurnFailed): shown in amber, does not make the project 出问题. */
   soft?: true;
+  /** One row for several agents with the same cause (owner 2026-11-25: 「12 个智能体读不到状态」): how many problems it
+   *  stands for (the host's exact per-code count when it gives one) and the names it listed. Absent: one. */
+  group?: { count: number; names: string[] };
 }
 
 export type BoardActivityKind = "done" | "failed" | "stopped" | "progress" | "started";
@@ -128,6 +131,10 @@ export interface BoardProjectView {
   name: string;
   /** cutex presentation colour (cyan|blue|…|#RRGGBB). */
   color: string;
+  /** The letter badge (presentation badge_label, else the name's first letter) and the host-stored icon (cutex
+   *  `project-icon`; a device-local choice of an older host is not known here): the card's project icon. */
+  badge: string;
+  icon: { kind: "emoji" | "icon" | "text"; value: string } | null;
   /** The hosts (and per-host project ids) this project lives on. */
   places: { hostId: string; projectId: string; projectKey?: string }[];
   director: BoardMemberView | null;

@@ -1,5 +1,6 @@
 import { ImageCacheSettings } from "./ImageCacheSettings";
 import { CleanupSection } from "./CleanupSection";
+import { STOCK_TMP_STORE } from "../../../../shared/storageCleanup";
 import { useState } from "react";
 import { ChevronDown, ChevronRight, RefreshCw } from "lucide-react";
 import type { StorageItem, StorageStore } from "../../../../shared/storage";
@@ -53,7 +54,7 @@ export function StoragePage() {
       {!view && storage.loading && <Loading rows={3} />}
       {view && <div className="space-y-1 py-3"><p className="text-sm font-medium tabular-nums">{t("storage.total", { bytes: formatBytes(view.totals.bytes, locale), files: view.totals.files })}</p>{view.volume && <p className="text-xs text-muted">{t("storage.volume", { free: formatBytes(view.volume.freeBytes, locale), total: formatBytes(view.volume.totalBytes, locale) })}</p>}<p className="text-xs text-subtle">{measuredAgo(view.walk.finishedAt, now, tr)}</p>{view.walk.stale && <p className="text-xs text-warn-text">{t("storage.stale")}</p>}{running && <p role="status" className="text-xs text-accent">{t("storage.running")}{view.walk.progress?.entries != null && ` · ${t("storage.progress", { n: view.walk.progress.entries })}`}</p>}{view.walk.error && <ErrorNote>{view.walk.error}</ErrorNote>}</div>}
     </Section>
-    <CleanupSection key={storage.hostId} />
+    <CleanupSection key={storage.hostId} stockTmp={!!view?.stores.some((store) => store.id === STOCK_TMP_STORE)} />
     {/* Each group is a titled card: its name folds it (the card hides), its size and share sit in the header. */}
     {view?.groups.map((group) => { const closed = collapsed.has(group.id); const Chevron = closed ? ChevronRight : ChevronDown; const share = view.totals.bytes > 0 ? Math.min(100, 100 * group.bytes / view.totals.bytes) : 0; return <Section key={`${storage.hostId}:${group.id}`} collapsed={closed}
       title={<button type="button" aria-expanded={!closed} className="-ml-1 inline-flex items-center gap-1.5 rounded px-1 text-left focus-visible:outline-2 focus-visible:outline-accent" onClick={() => setCollapsed((before) => { const next = new Set(before); if (next.has(group.id)) next.delete(group.id); else next.add(group.id); return next; })}><Chevron size={14} className="text-subtle" />{knownLabel("group", group.id, group.label, t)}</button>}

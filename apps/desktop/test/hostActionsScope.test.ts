@@ -597,6 +597,33 @@ describe("route-scoped actual menu/store/preload/main actions", () => {
     expect(fake.calls.at(-1)).toMatchObject({ session: "same-session", method: "cutex/runtime/online", params: { openVisibleTerminal: false, expectedRuntimeGeneration: 1 } });
     expect(store.getState().sessions[viewKey("local", "same-session")]?.startError).toBeNull();
   });
+  it("pinned_model_selection_unavailable: the start keeps the typed refusal, the menu notices, and a new choice is only saved (revision-fenced), never started", async () => {
+    const agent = resource("LOCAL OLD AGENT", 7);
+    agent.runtime.status = "offline";
+    store.setState({ sessions: { [viewKey("local", "same-session")]: { startError: null, queue: [{ queueId: "q1" }], version: 0 } as never } });
+    const alert = vi.fn();
+    vi.stubGlobal("window", { cutex: fake.bridge, alert });
+    let fail!: (error: Error) => void;
+    fake.reply = new Promise((_resolve, reject) => { fail = reject; });
+    const run = overlays.runAction(menus.runtimeItem(agent, key => key)!);
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    fail(Object.assign(new Error("pinned_model_selection_unavailable: Model gpt-5.1 at D:/secret is unavailable"), { code: "pinned_model_selection_unavailable", details: { model: "gpt-5.1", reasoningEffort: "high", reason: "modelUnavailable", offeredReasoningEfforts: [] } }));
+    await run;
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    const { pinnedModelBlock } = await import("../src/shared/pinnedModel");
+    const view = store.getState().sessions[viewKey("local", "same-session")];
+    expect(pinnedModelBlock(view?.startError)).toEqual({ kind: "unavailable", model: "gpt-5.1", effort: "high", reason: "modelUnavailable", offeredEfforts: [] });
+    expect(view?.startError).not.toContain("secret");
+    expect(view?.queue).toEqual([{ queueId: "q1" }]); // queued input untouched
+    expect(alert).not.toHaveBeenCalled();
+    expect(store.getState().notice?.tone).toBe("error");
+    // 保存: defaults/update with the session revision; no start, no send.
+    fake.calls.length = 0;
+    fake.reply = Promise.resolve({});
+    await store.getState().sessionAction("same-session", "cutex/session/defaults/update", { patch: { model: "gpt-6.2", reasoningEffort: null } }, "local");
+    expect(fake.calls).toEqual([expect.objectContaining({ session: "same-session", method: "cutex/session/defaults/update", params: { expectedRevision: 7, patch: { model: "gpt-6.2", reasoningEffort: null } } })]);
+    expect(pinnedModelBlock(store.getState().sessions[viewKey("local", "same-session")]?.startError)).not.toBeNull();
+  });
   it("a runtime start answered with a non-online status counts as failed", async () => {
     const agent = resource("LOCAL OLD AGENT", 7);
     agent.runtime.status = "offline";

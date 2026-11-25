@@ -5,7 +5,8 @@
 // (vite.preview.config.ts, plugin `mock-module-packs`) builds it with scripts/module-packs/build.mjs and
 // serves its index.js, so the host object / swap / fallback run as in the app.
 // localStorage "cutex-mock-packs" = "none" (no index published yet) | "offline" (check fails) | "broken"
-// (an installed pack failed its start-up verification).
+// (an installed pack failed its start-up verification) | "mixed" (Settings → 模块 tags: the desk pet installed from a
+// file, v1.2.0, reading app internals, with v1.2.2 in the index: 本地安装 + version + 未验证 + 内部接口 + an update).
 import type { ModuleDevBridge, ModuleDevView } from "../../../shared/moduleDev";
 import type { InstalledPackView, ModulePacksBridge, ModulePacksView, PackStep } from "../../../shared/modulePacks";
 
@@ -64,7 +65,7 @@ export function mockModulePacks(): ModulePacksBridge {
   let view: ModulePacksView = {
     appModuleApi: "1.16",
     testKey: true,
-    installed: [],
+    installed: mode === "mixed" ? [{ id: "desk-pet", version: "1.2.0", moduleApi: "^1.30", compat: "ok", entry: "/__mock-pack/desk-pet/1.2.0/index.js", styles: [], host: { "@cutex-desktop/app/lib/agentLook": ["useAgentLook"] }, title: { en: "Desk pet", "zh-CN": "桌宠" }, local: true }] : [],
     broken: mode === "broken" ? [{ id: "claude-science", version: "1.0.1", error: "index.js does not match its signed hash" }] : [],
     index: null,
     checking: false,

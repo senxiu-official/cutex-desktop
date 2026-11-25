@@ -34,12 +34,12 @@ export const LIMITS = {
 export const BUILT_IN_MODULE_IDS: readonly string[] = [
   "about", "agent-bus", "agent-config", "alarms", "approvals", "archive", "artifacts", "backend-upgrade",
   "background-terminals", "baidu-pan", "bookmarks", "browser", "claude-accounts", "claude-science", "codex-config",
-  "connection", "conversation", "delegations", "diff", "goal", "home", "intro", "jobs", "kimi-accounts",
-  "nci", "notes", "notifications", "onboarding", "owner-notify", "peers", "perf-log", "plan",
+  "connection", "conversation", "delegations", "diff", "feature-profiles", "goal", "home", "intro", "jobs", "kimi-accounts",
+  "nci", "notes", "notifications", "onboarding", "owner-notify", "peers", "perf-log", "personal-assistants", "plan",
   "profile-import", "project-view", "projects", "proxy", "quick-chats", "quick-switch", "remote-access",
-  "remote-copies", "running-agents", "runtime-packages", "runtimes", "safety-grants", "services", "shell",
+  "remote-copies", "running-agents", "runtime-packages", "runtimes", "safety-grants", "service-notify", "services", "session-search", "shell",
   "side-chat", "status-capsule", "storage", "subagents", "task-service", "terminal", "thread-search",
-  "updater", "usage", "users", "workflows", "workspace", "world-clock",
+  "updater", "usage", "users", "whatsapp", "workflows", "workspace", "world-clock",
 ];
 
 /**

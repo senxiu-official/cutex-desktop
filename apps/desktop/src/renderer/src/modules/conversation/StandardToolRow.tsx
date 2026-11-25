@@ -13,6 +13,7 @@ import { TimelineRowFallback } from "../TimelineRowFallback";
 import { openDelegationDetail } from "../../lib/delegationOpen";
 import { useResolvedAskId, useResolvedSessionId } from "../../lib/delegationsView";
 import { sidebarOf, useApp } from "../../store";
+import { SelectionActions } from "../../components/SelectionActions";
 
 const statusKeys = { busy: "status.running", idle: "status.idle", offline: "status.offline", error: "status.error" } as const;
 const icons = { read: BookOpen, search: Search, tools: Wrench, agents: Users, memberRuntime: ServerCog, taskStop: CircleStop, artifactRead: FileText, actionStatus: ScanLine };
@@ -38,7 +39,7 @@ function Details({ item, model }: { item: RawItem; model: StandardToolModel }) {
       {model.resultFields.map(f => <div key={f.name} className="contents"><dt className="text-subtle">{f.name}</dt><dd className="whitespace-pre-wrap break-all">{f.value}</dd></div>)}
     </dl>}
     {model.kind === "actionStatus" && <p className="mt-2">{t("conversation.tools.actionStatus.hint")}</p>}
-    {model.body !== undefined && model.body !== null && <pre className="mt-2 font-mono whitespace-pre-wrap break-words">{model.body}</pre>}
+    {model.body !== undefined && model.body !== null && <SelectionActions as="pre" className="selectable mt-2 font-mono whitespace-pre-wrap break-words">{model.body}</SelectionActions>}
     {model.agents.length > 0 && <ul className="my-2 space-y-1" aria-label={t("conversation.tools.agents")}>
       {model.agents.map((agent, i) => <li key={`${agent.id}:${i}`} className="flex min-w-0 gap-2"><span className="min-w-0 break-all">{agent.name}</span><code className="min-w-0 break-all text-subtle">{agent.id}</code>{agent.status && <span className="ml-auto shrink-0 text-subtle">{agent.status in statusKeys ? t(statusKeys[agent.status as keyof typeof statusKeys]) : agent.status}</span>}</li>)}
     </ul>}
@@ -48,8 +49,8 @@ function Details({ item, model }: { item: RawItem; model: StandardToolModel }) {
     </ul>}
     {(model.kind === "agents" && model.agentCount !== null || model.kind === "artifactRead") ? <details className="mt-2">
       <summary className="cursor-pointer text-subtle">{t("conversation.tools.rawResult")}</summary>
-      <pre className="mt-1 font-mono whitespace-pre-wrap break-words">{output}</pre>
-    </details> : <pre className="mt-2 font-mono whitespace-pre-wrap break-words">{output}</pre>}
+      <SelectionActions as="pre" className="selectable mt-1 font-mono whitespace-pre-wrap break-words">{output}</SelectionActions>
+    </details> : <SelectionActions as="pre" className="selectable mt-2 font-mono whitespace-pre-wrap break-words">{output}</SelectionActions>}
   </div>;
 }
 export function StandardToolRow({ item }: { item: RawItem; sessionId: string }) {

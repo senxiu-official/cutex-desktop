@@ -8,10 +8,12 @@
 // Quiet pass (owner 2026-10-14, lib/ownerNotify notePresentation): only a note that asks for a
 // decision (unread 紧急, or waiting for a reply) is a tinted card; the rest is one row with a left
 // rule, muted text and its actions shown on hover / keyboard focus.
+// A 定期任务 that needs re-confirming (cutex r296 `systemKind: assistantTemplateNeedsReview` with `templateReview`)
+// offers 打开定期任务: the assistant's 定期任务 tab on that task with 重新确认 ready. Older notices / hosts: text only.
 // Long text (owner 2026-10-15): wraps everywhere (code blocks and paths too, never a sideways
 // scrollbar) and is cut at a few lines with 「展开」 (components/ClampBox).
 import { memo, useState } from "react";
-import { Bell, BellRing, Check, CornerDownRight, MessageSquareReply, Trash2, X } from "lucide-react";
+import { Bell, BellRing, CalendarClock, Check, CornerDownRight, MessageSquareReply, Trash2, X } from "lucide-react";
 import type { OwnerNotification } from "@cutex-desktop/protocol";
 import { useI18n, type MessageKey } from "../i18n";
 import { contextMenu } from "../lib/contextMenu";
@@ -35,6 +37,11 @@ import { OwnerReplyBox } from "./OwnerReplyBox";
 import { useUserLayoutToggle } from "../lib/userLayoutToggle";
 import { SystemAvatar } from "./SystemAvatar";
 import { Tag, type TagTone } from "./Tag";
+import { EntityMention } from "./EntityIcon";
+import { tNodes } from "../lib/textNodes";
+import { services } from "../modules/app";
+import { PA_RECURRING_FEATURE } from "../../../shared/personalAssistants";
+import { TEMPLATE_REVIEW_KIND } from "../../../shared/ownerNotify";
 
 const TONE: Record<OwnerNotification["level"], { frame: string; icon: string; tag: TagTone; dot: string }> = {
   info: { frame: "border-accent/30 bg-accent/5", icon: "text-accent", tag: "accent" as TagTone, dot: "bg-accent" },
@@ -48,7 +55,7 @@ const ROW_BUTTON = "press flex items-center gap-1 rounded-md px-1.5 py-0.5 text-
 /**
  * `hostId`: the agent's host. Its notices are read from that host (the focus host's `byId`, another
  * connected host's `others` entry) and every action goes to it: an agent on another host than the focus
- * one (e.g. host-a's desktop showing a hachimi agent) otherwise drew no card and its buttons asked the
+ * one (e.g. host-a's desktop showing a hostc agent) otherwise drew no card and its buttons asked the
  * focus host.
  */
 // memo (perf §9): the timeline body re-renders on every streamed delta; the card only follows its record.
@@ -70,6 +77,11 @@ function Card({ record: r, sessionId, hostId }: { record: OwnerNotification; ses
   const jobs = useApp((s) => convFeaturesOf(conv, s).has(JOB_SERVICE_FEATURE));
   const notify = (text: string, tone?: "info" | "error") => convNotify(conv, text, tone);
   const deletable = useApp((s) => convFeaturesOf(conv, s).has(OWNER_NOTIFY_DELETE_FEATURE));
+  const review = r.systemKind === TEMPLATE_REVIEW_KIND ? r.templateReview : undefined;
+  const recurring = useApp((s) => convFeaturesOf(conv, s).has(PA_RECURRING_FEATURE));
+  const openTemplate = review && recurring
+    ? () => services.ui.openPage("personal-assistants.page", { host: hostId, id: review.assistantId, tab: "templates", template: review.scheduleId, review: review.reason, reviewRevision: String(review.templateRevision) })
+    : null;
   const system = isSystemNotice(r);
   const agentName = useApp((s) =>
     system ? (rowsOf(s.sidebar, convSidebarOf(conv, s)).find((x) => x.cutexSessionId === r.agentId)?.displayName ?? r.agentName ?? r.agentId) : null,
@@ -119,7 +131,7 @@ function Card({ record: r, sessionId, hostId }: { record: OwnerNotification; ses
       <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs">
         {system ? <SystemAvatar kind="cutex" size={card ? 16 : 14} /> : <Icon size={card ? 14 : 13} className={`shrink-0 ${card ? tone.icon : "text-subtle"}`} />}
         <span className={card ? "font-medium text-foreground" : "text-muted"}>{t(system ? "system.cutex" : "ownerNotify.toYou")}</span>
-        {system && <span className="min-w-0 truncate text-muted">{t("ownerNotify.aboutAgent", { name: agentName ?? r.agentId })}</span>}
+        {system && <span className="min-w-0 truncate text-muted">{tNodes(t, "ownerNotify.aboutAgent", { name: <EntityMention entity={{ kind: "agent", id: r.agentId, name: agentName ?? r.agentId }}>{agentName ?? r.agentId}</EntityMention> })}</span>}
         {card ? (
           <Tag tone={tone.tag}>{t(`ownerNotify.level.${r.level}` as MessageKey)}</Tag>
         ) : (
@@ -159,6 +171,14 @@ function Card({ record: r, sessionId, hostId }: { record: OwnerNotification; ses
               )}
             </span>
           )}
+        </div>
+      )}
+      {openTemplate && (
+        <div className="mt-1.5">
+          <button type="button" onClick={openTemplate} className={CARD_BUTTON} data-note-open-template={review!.scheduleId}>
+            <CalendarClock size={13} />
+            {t("personal-assistants.notice.openTemplate")}
+          </button>
         </div>
       )}
       {note && <div className="mt-1.5 text-meta/[inherit] text-subtle">{note}</div>}

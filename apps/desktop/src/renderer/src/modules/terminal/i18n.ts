@@ -16,7 +16,7 @@ export const zhCN = {
   "terminal.willEndN": "终端 {n} 将被结束",
   "terminal.runTip": "在终端里运行",
   "terminal.runArmed": "再左键点击一次，在终端里运行这 {n} 行",
-  "terminal.runFailed": "没能在终端里运行：{error}",
+  "terminal.runFailed": "未能在终端里运行：{error}",
 } as const;
 
 // Adds these keys to MessageKey (modules/i18nCatalog.ts collects the dictionary itself).

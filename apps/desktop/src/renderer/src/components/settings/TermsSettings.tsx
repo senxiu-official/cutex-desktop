@@ -8,7 +8,9 @@ import { useState, type ReactNode } from "react";
 import { loadedCatalog, useEnglishCatalog, useI18n, type MessageKey } from "../../i18n";
 import { zhCN } from "../../i18n/zh-CN";
 import { PreviewMarkContext } from "../../lib/previewMark";
-import { DEFAULT_TERMS, resetTerm, resolveTerms, resolveSidebarRoleLabel, sidebarRoleDefault, setSidebarRoleLabel, setTerm, splitTerms, subagentDefault, TERM_IDS, TERM_MAX, useTermOverrides, type TermId, type TermLocale } from "../../lib/terms";
+import { DEFAULT_TERMS, resetTerm, resolveTerms, resolveSidebarRoleLabel, sidebarRoleDefault, setSidebarRoleLabel, setTerm, splitTerms, subagentDefault, SIDEBAR_ROLES, TERM_IDS, TERM_MAX, useTermOverrides, type SidebarRole, type TermId, type TermLocale } from "../../lib/terms";
+
+const isSidebarRole = (id: TermId): id is SidebarRole => (SIDEBAR_ROLES as readonly string[]).includes(id);
 import { settingsAnchorId } from "../../lib/settingsNav";
 import { Avatar } from "../Avatar";
 import { ResetButton, Section, SettingRow, TextField, Toggle, SettingsGroup } from "./Form";
@@ -82,7 +84,7 @@ function Piece({ locale, k }: { locale: TermLocale; k: MessageKey }) {
 function TermsSample({ locale }: { locale: TermLocale }) {
   const overrides = useTermOverrides();
   const terms = resolveTerms(overrides, locale);
-  const director = resolveSidebarRoleLabel(overrides, locale, "director"), operator = resolveSidebarRoleLabel(overrides, locale, "operator");
+  const director = resolveSidebarRoleLabel(overrides, locale, "director"), operator = resolveSidebarRoleLabel(overrides, locale, "operator"), assistant = resolveSidebarRoleLabel(overrides, locale, "assistant");
   const muted = (children: ReactNode) => <span className="text-xs text-muted">{children}</span>;
   return (
     <div className="flex flex-wrap items-center gap-x-6 gap-y-2.5 text-ui/[inherit]">
@@ -100,6 +102,13 @@ function TermsSample({ locale }: { locale: TermLocale }) {
       {muted(<Piece locale={locale} k="terms.sample.working" />)}
       {muted(<Piece locale={locale} k="terms.sample.reportsTo" />)}
       {operator && <Tag title={terms.operator.one}><PreviewTerm id="operator">{operator}</PreviewTerm></Tag>}
+      {assistant && (
+        <span className="inline-flex items-center gap-1.5">
+          <Avatar name="Iris" seed="Iris" size={20} />
+          <span className="font-medium">Iris</span>
+          <Tag title={terms.assistant.one}><PreviewTerm id="assistant">{assistant}</PreviewTerm></Tag>
+        </span>
+      )}
       <Tag tone="attention">
         <span><Piece locale={locale} k="terms.sample.waiting" /></span>
       </Tag>
@@ -116,23 +125,30 @@ function TermRow({ locale, id }: { locale: TermLocale; id: TermId }) {
   // The sub-agent default follows the current agent word (「子」 + agent).
   const defaults = id === "subagent" ? subagentDefault(resolved.agent, locale) : DEFAULT_TERMS[locale][id];
   const plural = !locale.startsWith("zh") && !locale.startsWith("ja") && !locale.startsWith("ko");
+  const sidebar = isSidebarRole(id);
+  const width = plural ? "w-32" : "w-36";
   return (
+    // Owner 2026-11-24: one column of inputs with one right edge (every field one width: w-36, w-32 beside a plural). Every row's word field(s) on the first line; the
+    // Director / Operator 「侧栏显示」 field stacked under them, its label to its left (「留空隐藏」 is its placeholder
+    // and tooltip). Counters float on the field's top edge (focus / near the limit) and never add a line. One
+    // 「恢复默认」 per row (SettingRow, after the label): the whole term, its sidebar label included. The defaults are
+    // the placeholders, so no 「默认：…」 hint line.
     <SettingRow agents="none" source="local"
       label={termLabel(locale, id)}
-      // The default as a hint only where it says more than the placeholder: the plural forms (always shown, so
-      // the row never changes height). The derived sub word (子 + a renamed agent word) is the placeholder
-      // itself; a hint appearing only then made the rows below jump (owner 2026-10-18).
-      hint={plural ? t("terms.default", { value: `${defaults.one} / ${defaults.many}` }) : undefined}
       reset={<ResetButton disabled={!saved.one && !saved.many && saved.sidebar === undefined} onClick={() => resetTerm(locale, id)} title={t("terms.reset")} />}
     >
-      <TextField value={saved.one ?? ""} placeholder={defaults.one} maxLength={TERM_MAX} width="w-32" label={plural ? t("terms.singular") : undefined} onCommit={(v) => setTerm(locale, id, "one", v)} />
-      {plural && <TextField value={saved.many ?? ""} placeholder={resolved[id].many} maxLength={TERM_MAX} width="w-32" label={t("terms.plural")} onCommit={(v) => setTerm(locale, id, "many", v)} />}
-      {(id === "director" || id === "operator") && <div className="flex flex-col gap-1">
-        <span className="text-caption text-subtle">{t("terms.sidebarLabel")}</span>
-        <div className="flex items-start gap-1"><TextField value={saved.sidebar ?? sidebarRoleDefault(resolved, id)} placeholder={t("terms.sidebarHidden")} maxLength={TERM_MAX} width="w-32" label={t("terms.sidebarLabel")} onCommit={v => setSidebarRoleLabel(locale, id, v)} />
-        <ResetButton disabled={saved.sidebar === undefined} onClick={() => setSidebarRoleLabel(locale, id, null)} title={t("terms.reset")} /></div>
-        <span className="text-caption text-subtle">{t("terms.sidebarHidden")}</span>
-      </div>}
+      <div className="flex flex-col items-end gap-2" data-term-fields={id}>
+        <div className="flex items-center gap-2">
+          <TextField value={saved.one ?? ""} placeholder={defaults.one} maxLength={TERM_MAX} width={width} floatingCounter label={plural ? `${termLabel(locale, id)} · ${t("terms.singular")}` : undefined} onCommit={(v) => setTerm(locale, id, "one", v)} />
+          {plural && <TextField value={saved.many ?? ""} placeholder={resolved[id].many} maxLength={TERM_MAX} width={width} floatingCounter label={`${termLabel(locale, id)} · ${t("terms.plural")}`} onCommit={(v) => setTerm(locale, id, "many", v)} />}
+        </div>
+        {sidebar && (
+          <div className="flex items-center gap-2" data-term-sidebar={id}>
+            <span className="text-caption/[inherit] whitespace-nowrap text-subtle" title={t("terms.sidebarHidden")}>{t("terms.sidebarLabel")}</span>
+            <TextField value={saved.sidebar ?? sidebarRoleDefault(resolved, id as SidebarRole)} placeholder={t("terms.sidebarHidden")} maxLength={TERM_MAX} width={width} floatingCounter label={`${termLabel(locale, id)} · ${t("terms.sidebarLabel")}`} onCommit={v => setSidebarRoleLabel(locale, id as SidebarRole, v)} />
+          </div>
+        )}
+      </div>
     </SettingRow>
   );
 }

@@ -3,6 +3,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { STATIC_SCAN } from "./staticScan";
 
 const ROOT = resolve(__dirname, "../src/renderer/src");
 
@@ -21,7 +22,7 @@ const WHITE_CLASS = /(?<![\w-])text-(white|on-accent)(?![\w/-])/;
 const SOLID_STYLE = /background(-color)?\s*:\s*["']?var\(--danger\)/;
 const WHITE_STYLE = /color\s*:\s*["']?(#fff\b|#ffffff\b|white\b|var\(--on-accent\))/i;
 
-describe("white text on a solid red fill", () => {
+describe("white text on a solid red fill", STATIC_SCAN, () => {
   it("the solid fill stays opaque under white text (a translucent hover let the page through: 4.42:1, measured 2026-10-26)", () => {
     const hits: string[] = [];
     for (const f of files(ROOT, /\.tsx?$/)) {

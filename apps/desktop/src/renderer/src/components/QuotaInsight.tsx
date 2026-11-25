@@ -5,7 +5,7 @@ import { useState } from "react";
 import { ChevronDown, Loader2 } from "lucide-react";
 import type { QuotaAttribution } from "../../../shared/quotaAttribution";
 import { useI18n } from "../i18n";
-import { shareText, summarizeAttribution, type AttributionLine } from "../lib/quotaAttribution";
+import { shareText, summarizeAttribution, TOP_AGENTS, type AttributionLine } from "../lib/quotaAttribution";
 import { forecastText, forecastTone, type QuotaForecast } from "../lib/quotaForecast";
 
 const TONE = { danger: "text-danger", warn: "text-warn", muted: "text-subtle" } as const;
@@ -34,10 +34,19 @@ export function WhoUses({ attribution, onOpenAgent }: { attribution: QuotaAttrib
   const { t } = useI18n();
   const [all, setAll] = useState(false);
   if (attribution === undefined) {
+    // The answer's shape while it is read (title, share bar, the top rows), so its arrival fills the place instead of
+    // pushing the card down (owner 2026-11-24). A reopened card starts from the last answer (useQuotaAttribution).
     return (
-      <div className="col-span-4 space-y-1" data-quota-who="loading" aria-busy>
+      <div className="col-span-4 space-y-1.5" data-quota-who="loading" aria-busy>
         <span className="block text-caption/[inherit] text-subtle">{t("quota.who.title")}</span>
         <span className="block h-1 animate-skeleton rounded-full bg-surface-2" />
+        <ul className="space-y-0.5" aria-hidden>
+          {Array.from({ length: TOP_AGENTS }, (_, i) => (
+            <li key={i} className="flex h-5 items-center py-0.5 text-xs" data-quota-who-placeholder="">
+              <span className="block h-2 animate-skeleton rounded-full bg-surface-2" style={{ width: `${70 - i * 15}%` }} />
+            </li>
+          ))}
+        </ul>
       </div>
     );
   }

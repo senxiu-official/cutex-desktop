@@ -11,17 +11,20 @@ import { isBrowserKind } from "./browserState";
 
 export const MEDIA_GRACE_MS = 10 * 60_000;
 
-type HoldReason = "lease" | "media" | "cache";
+// `watch`: the owner tab main's WhatsApp watcher reads (BrowserTabView.whatsAppWatch, module whatsapp): unread alerts
+// must keep arriving while the tab is out of view, so it is never unmounted by the LRU while the watcher is on.
+// `bgplay`: an owner tab ticked 后台播放 (bgplay.ts), held until unticked.
+type HoldReason = "lease" | "media" | "cache" | "watch" | "bgplay";
 
 /** The Body's one shell hold for three reasons: the agent lease (counted), media and the service view cache (uncapped;
  * viewCache.ts keeps its own limit). Returns held-after. */
 export function createHoldReasons(keepMounted: (hold: boolean) => boolean, markUncapped: (on: boolean) => void) {
-  const on: Record<HoldReason, boolean> = { lease: false, media: false, cache: false };
+  const on: Record<HoldReason, boolean> = { lease: false, media: false, cache: false, watch: false, bgplay: false };
   return {
     set(reason: HoldReason, hold: boolean): boolean {
       on[reason] = hold;
-      markUncapped(on.media || on.cache);
-      return keepMounted(on.lease || on.media || on.cache);
+      markUncapped(on.media || on.cache || on.watch || on.bgplay);
+      return keepMounted(on.lease || on.media || on.cache || on.watch || on.bgplay);
     },
   };
 }
@@ -47,12 +50,12 @@ export function createMediaHold(hold: (on: boolean) => void) {
   };
 }
 
-export type PlayingTab = Pick<BrowserTabView, "hostId" | "tabKey" | "title" | "url"> & { media: NonNullable<BrowserTabView["media"]> };
+export type PlayingTab = Pick<BrowserTabView, "hostId" | "tabKey" | "title" | "url" | "browserIdentityId"> & { media: NonNullable<BrowserTabView["media"]> };
 
 /** The tabs whose pages play or sound now (main's state), in the given order. */
 export function playingTabs(views: Iterable<Readonly<BrowserTabView>>): PlayingTab[] {
   const out: PlayingTab[] = [];
-  for (const v of views) if (v.media && (v.media.playing || v.media.audible)) out.push({ hostId: v.hostId, tabKey: v.tabKey, title: v.title, url: v.url, media: v.media });
+  for (const v of views) if (v.media && (v.media.playing || v.media.audible)) out.push({ hostId: v.hostId, tabKey: v.tabKey, title: v.title, url: v.url, media: v.media, ...(v.browserIdentityId ? { browserIdentityId: v.browserIdentityId } : {}) });
   return out;
 }
 

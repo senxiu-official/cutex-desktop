@@ -110,6 +110,12 @@ const mockOwnerNotes: OwnerNotification[] = [
   record({ notificationId: "ntf-m0", agentId: "mika", agentName: "Mika", createdAt: iso(5000), state: "answered", needsReply: true, closedAt: iso(4000), acknowledgedAt: iso(4500), reply: { text: "用 shadcn 的那个。", repliedAt: iso(4000), clientUserMessageId: "owner-notify-reply-ntf-m0" }, text: "按钮用 shadcn 的还是 ZCode 的样式？" }),
 ];
 
+// `?notesslow` (owner 2026-11-24, Director with many notes): Eva also has 15 old, acknowledged notes, one a day from 20 days
+// ago, older than every turn of her first history page (her bootstrap is slow in this scene, dev/mockBridge). With
+// `&perf&perfturns=60` she has older history too: the notes belong there and stay out of the first page.
+if (typeof location !== "undefined" && new URLSearchParams(location.search).has("notesslow")) {
+  for (let d = 20; d > 5; d--) mockOwnerNotes.push(record({ notificationId: `ntf-old-${d}`, agentId: "eva", agentName: "Eva", turnId: `turn-old-${d}`, createdAt: iso(d * 86_400), state: "acknowledged", acknowledgedAt: iso(d * 86_400 - 600), level: "attention", text: `${d} 天前的进展：第 ${21 - d} 批测试跑完，结果已写进 PROGRESS。` }));
+}
 
 const mockOwnerSettings: OwnerNotifySettings = {
   delivery: { info: ["desktop"], attention: ["desktop", "phone"], urgent: ["desktop", "phone", "bigAlert"] },

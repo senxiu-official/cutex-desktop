@@ -68,7 +68,7 @@ describe("card quota choice", () => {
 
   it("an unusable local reading shows the newest usable peer, with the local reason kept", () => {
     const local = [win("claude-0", "5h", 78, S - 60, { stale: true, observedAt: S - 7200 })];
-    const older = { hostId: "hachimi", hostName: "hachimi", gauges: peerOk.gauges.map((g) => ({ ...g, observedAt: S - 3600 })) };
+    const older = { hostId: "hostc", hostName: "hostc", gauges: peerOk.gauges.map((g) => ({ ...g, observedAt: S - 3600 })) };
     const view = cardQuota(local, [older, peerOk], NOW, { kind: "expiredLogin" });
     expect(view.peer).toMatchObject({ hostId: "remote", hostName: "remote", observedAt: S - 180 });
     expect(view.gauges?.map((g) => g.remainingPercent)).toEqual([93, 16]);

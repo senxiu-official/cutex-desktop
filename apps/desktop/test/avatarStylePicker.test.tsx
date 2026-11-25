@@ -109,6 +109,20 @@ describe("AvatarStylePicker", () => {
     }
   });
 
+  it("compact rows (owner 2026-11-24): a text-height face, at most two per row (one when narrow), full name on hover", () => {
+    controlled({ kind: "portrait", portraitThemes: ["p/beach"] });
+    for (const card of host.querySelectorAll<HTMLElement>("[data-portrait-theme]")) {
+      const face = card.querySelector<HTMLElement>("[data-portrait-face]")!;
+      expect([face.style.width, face.style.height]).toEqual(["24px", "24px"]);
+      expect(card.className.split(" ")).toEqual(expect.arrayContaining(["px-2", "py-1"]));
+      const name = card.querySelector<HTMLElement>(".truncate")!;
+      expect(name.title).toBe(name.textContent);
+    }
+    const grid = q("[data-portrait-grid]")!;
+    expect(grid.style.gridTemplateColumns).toContain("calc((100% - 0.375rem) / 2)");
+    expect(grid.style.gridTemplateColumns).toContain("min(100%,");
+  });
+
   it("the sr-only checkbox sits in a positioned label (else focusing it scrolls the Settings card away)", () => {
     controlled({ kind: "portrait", portraitThemes: ["p/beach"] });
     for (const input of host.querySelectorAll<HTMLInputElement>("[data-portrait-theme] input[type=checkbox]")) {

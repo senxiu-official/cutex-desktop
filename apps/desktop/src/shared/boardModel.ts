@@ -11,7 +11,7 @@ import type { OwnerNotification, ProjectSummary, SessionResource } from "@cutex-
 import { agentPauseOf } from "./agentPause";
 import type { ApprovalRecord, AskSummary, ServiceView, SidebarSnapshot } from "./ipc";
 import type { BoardActivity, BoardBackendParts, BoardHostState, BoardMemberState, BoardMemberView, BoardPrefs, BoardProblem, BoardProjectView } from "./board";
-import { backendParts, goalOf, planOf, stalledOf, stepsOf, summaryProblem, type BoardSummaryProject } from "./boardBackend";
+import { backendParts, goalOf, GROUPED_PROBLEM_KINDS, planOf, PROBLEM_CODE_OF, stalledOf, stepsOf, summaryProblem, type BoardSummaryProject } from "./boardBackend";
 
 export interface BoardHostInput {
   hostId: string;
@@ -137,6 +137,8 @@ interface Acc {
   key: string;
   name: string;
   color: string;
+  badge: string;
+  icon: BoardProjectView["icon"];
   places: { hostId: string; projectId: string }[];
   director: (BoardMemberView & { activityAt: number }) | null;
   members: (BoardMemberView & { error: string | null; lastTurnFailed: string | null; profile: string | null; activityAt: number })[];
@@ -167,6 +169,7 @@ export function buildBoard(hosts: readonly BoardHostInput[], now: number): Board
     const connected = h.state === "connected";
     const parts = backendParts(h.features);
     const sessions = (h.sidebar?.active ?? []).filter((s) => !archived(s));
+    const known: SessionResource[] = [...(h.sidebar?.active ?? []), ...(h.sidebar?.retired ?? [])];
     const rows = h.sidebar?.hostRows ?? {};
     for (const p of projects) {
       if (p.lifecycle && p.lifecycle !== "active") continue;
@@ -174,7 +177,8 @@ export function buildBoard(hosts: readonly BoardHostInput[], now: number): Board
       let acc = byKey.get(key);
       if (!acc) {
         acc = {
-          key, name: p.presentation?.display_name || p.project_id, color: p.presentation?.color || "blue", places: [], director: null, members: [],
+          key, name: p.presentation?.display_name || p.project_id, color: p.presentation?.color || "blue",
+          badge: p.presentation?.badge_label || (p.presentation?.display_name || p.project_id).slice(0, 1), icon: p.presentation?.icon ?? null, places: [], director: null, members: [],
           openDelegations: 0, today: null, needsYou: 0, problems: [], hardUnlisted: 0, softUnlisted: 0, unsized: 0, unknown: { delegations: false, today: false, needsYou: false, problems: false }, recent: [], plan: null, goal: null, goalUnknown: false,
         };
         byKey.set(key, acc);
@@ -204,8 +208,10 @@ export function buildBoard(hosts: readonly BoardHostInput[], now: number): Board
       }
 
       const inProject = (a: AskSummary) => a.projectId === p.project_id || (!a.projectId && ids.has(a.target));
+      // Names from every agent the host lists, archived and retired ones too: a problem row names the agent, never
+      // its raw id (owner 2026-11-25).
       const nameOf = (id: string) => {
-        const s = sessions.find((x) => x.cutexSessionId === id);
+        const s = sessions.find((x) => x.cutexSessionId === id) ?? known.find((x) => x.cutexSessionId === id);
         return s ? s.displayName || s.formalAgentName || null : null;
       };
       if (sum) {
@@ -267,7 +273,22 @@ function addSummary(acc: Acc, sum: BoardSummaryProject, hostId: string, parts: B
   } else acc.unknown.today = true;
   if (sum.needsYou !== null) acc.needsYou += sum.needsYou;
   else acc.unknown.needsYou = true;
-  for (const p of sum.problems) acc.problems.push(summaryProblem(p, hostId, sum, nameOf));
+  const rows = sum.problems.map((p) => summaryProblem(p, hostId, sum, nameOf));
+  // Unlisted problems of a grouped kind join its row (exact per-code counts only): 「239 个智能体读不到状态」, not one
+  // agent and 「还有 238 处」.
+  let absorbedHard = 0, absorbedSoft = 0;
+  if (sum.byCode) {
+    for (const kind of GROUPED_PROBLEM_KINDS) {
+      const listed = rows.filter((r) => r.kind === kind);
+      const extra = (sum.byCode[PROBLEM_CODE_OF[kind]!] ?? 0) - listed.length;
+      if (!listed.length || extra <= 0) continue;
+      const last = listed[listed.length - 1]!;
+      last.group = { count: 1 + extra, names: [] };
+      if (last.soft) absorbedSoft += extra;
+      else absorbedHard += extra;
+    }
+  }
+  acc.problems.push(...rows);
   if (sum.problemCount === null) acc.unknown.problems = true;
   else {
     const unlisted = sum.problemCount - sum.problems.length;
@@ -275,8 +296,8 @@ function addSummary(acc: Acc, sum: BoardSummaryProject, hostId: string, parts: B
     else {
       // Per-code counts: the unlisted split is exact.
       const hard = Math.min(unlisted, Math.max(0, sum.problemCount - sum.softCount - sum.problems.filter((x) => !x.soft).length));
-      acc.hardUnlisted += hard;
-      acc.softUnlisted += unlisted - hard;
+      acc.hardUnlisted += Math.max(0, hard - absorbedHard);
+      acc.softUnlisted += Math.max(0, unlisted - hard - absorbedSoft);
     }
   }
   for (const d of sum.delegations) {
@@ -289,6 +310,37 @@ function addSummary(acc: Acc, sum: BoardSummaryProject, hostId: string, parts: B
   }
 }
 
+/** How many problems a row stands for. */
+const weight = (p: BoardProblem): number => p.group?.count ?? 1;
+const sumOf = (rows: readonly BoardProblem[]): number => rows.reduce((n, p) => n + weight(p), 0);
+
+/**
+ * Rows of the same agent cause on one host become one (owner 2026-11-25: 「12 个智能体读不到状态」, not a row per agent
+ * and 「还有 11 处」): its count is theirs together, its names the agents named, its target the first one's.
+ */
+export function groupProblems(problems: readonly BoardProblem[]): BoardProblem[] {
+  const out: BoardProblem[] = [];
+  const at = new Map<string, number>();
+  for (const p of problems) {
+    if (!GROUPED_PROBLEM_KINDS.has(p.kind)) {
+      out.push(p);
+      continue;
+    }
+    const key = `${p.hostId}\u0000${p.kind}`;
+    const names = p.subject ? [p.subject] : [];
+    const i = at.get(key);
+    if (i === undefined) {
+      at.set(key, out.length);
+      out.push(p.group ? { ...p, group: { count: p.group.count, names } } : p);
+      continue;
+    }
+    const first = out[i]!;
+    const was = first.group ?? { count: 1, names: first.subject ? [first.subject] : [] };
+    out[i] = { ...first, group: { count: was.count + weight(p), names: [...was.names, ...names.filter((n) => !was.names.includes(n))] } };
+  }
+  return out;
+}
+
 function finish(acc: Acc): BoardProjectView {
   const all = [...(acc.director ? [acc.director] : []), ...acc.members];
   const n = (s: BoardMemberState) => all.filter((m) => m.state === s).length;
@@ -296,15 +348,15 @@ function finish(acc: Acc): BoardProjectView {
   const lastActivityAt = Math.max(0, ...all.map((m) => m.activityAt), ...recent.map((r) => ms(r.at))) || null;
   const strip = <T extends BoardMemberView>(m: T): BoardMemberView => ({ hostId: m.hostId, sessionId: m.sessionId, name: m.name, initials: m.initials, director: m.director, state: m.state, doing: m.doing, since: m.since });
   return {
-    key: acc.key, name: acc.name, color: acc.color, places: acc.places,
+    key: acc.key, name: acc.name, color: acc.color, badge: acc.badge, icon: acc.icon, places: acc.places,
     director: acc.director ? strip(acc.director) : null,
     members: orderMembers(acc.members.map(strip)),
     counts: { busy: n("busy"), idle: n("idle"), paused: n("paused"), error: n("error"), offline: n("offline"), openDelegations: acc.unknown.delegations ? null : acc.openDelegations },
     today: acc.unknown.today ? null : acc.today, needsYou: acc.unknown.needsYou ? null : acc.needsYou,
     // Hard problems first; soft ones (lastTurnFailed) after them.
-    problems: [...acc.problems.filter((x) => !x.soft), ...acc.problems.filter((x) => x.soft)],
-    problemCount: acc.problems.length + acc.hardUnlisted + acc.softUnlisted + acc.unsized,
-    hardProblems: acc.problems.filter((x) => !x.soft).length + acc.hardUnlisted, unsizedProblems: acc.unsized,
+    problems: groupProblems([...acc.problems.filter((x) => !x.soft), ...acc.problems.filter((x) => x.soft)]),
+    problemCount: sumOf(acc.problems) + acc.hardUnlisted + acc.softUnlisted + acc.unsized,
+    hardProblems: sumOf(acc.problems.filter((x) => !x.soft)) + acc.hardUnlisted, unsizedProblems: acc.unsized,
     problemsUnknown: acc.unknown.problems, recent, lastActivityAt,
     plan: acc.plan, goal: acc.goal, goalUnknown: acc.goalUnknown,
   };

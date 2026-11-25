@@ -16,7 +16,7 @@ vi.mock("../src/renderer/src/store", () => ({
   hostApi: () => ({}),
 }));
 vi.mock("../src/renderer/src/lib/prefs", () => ({ useUiPrefs: () => ({ projectOrder: [] }) }));
-vi.mock("../src/renderer/src/lib/hostSwitch", () => ({ captureHostAction: () => () => true, onHostReset: () => () => {} }));
+vi.mock("../src/renderer/src/lib/hostSwitch", () => ({ captureHostAction: () => () => true, onHostReset: () => () => {}, onHostSwitch: () => () => {} }));
 vi.mock("../src/renderer/src/lib/contextMenu", () => ({ closeDialog: () => {} }));
 vi.mock("../src/renderer/src/lib/quickChatPromote", async (importOriginal) => {
   const real = await importOriginal<typeof import("../src/renderer/src/lib/quickChatPromote")>();

@@ -1,5 +1,5 @@
 // LEGACY(input-ledger-v1): frozen delivery inference for older hosts.
-// Delete only when EVERY host advertises input-ledger-v1 (including hachimi).
+// Delete only when EVERY host advertises input-ledger-v1 (including hostc).
 // A queue-tray 插话 whose outcome cutex does not know (`request_outcome_unknown`, details.resyncRequired:
 // the request went far enough that it may have reached the native). Nothing is ever resent by itself:
 // the store resyncs the session (recorded history + cutex's queue list) and decides from cutex's state.

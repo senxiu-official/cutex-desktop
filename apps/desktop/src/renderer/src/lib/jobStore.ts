@@ -5,10 +5,10 @@
 // Multi-host (RFC §9.2): the 作业 page also lists the jobs of the scope's other hosts — their first page,
 // polled while the page is open (`useHostJobs`, `refreshHostJobs`); actions on them go to that host.
 import { create } from "zustand";
-import type { JobOutputPage, JobResult, JobRow, JobServiceCapabilities, JobStream } from "../../../shared/ipc";
+import type { JobListPage, JobOutputPage, JobResult, JobRow, JobServiceCapabilities, JobStream } from "../../../shared/ipc";
 import type { MarkExternalInput } from "../../../shared/remoteJobs";
 import { api, apiFor, bridge } from "../bridge";
-import { JOB_SERVICE_FEATURE, mergeJobs } from "./jobs";
+import { JOB_SERVICE_FEATURE, jobOperations, mergeJobs } from "./jobs";
 import { focusHostId } from "./hostKeys";
 import { onHostReset } from "./hostSwitch";
 import { JOB_SERVICE_COMPONENT } from "./componentCard";
@@ -26,10 +26,18 @@ export interface JobsState {
   allIds: string[] | null;
   nextCursor: string | null;
   allLoading: boolean;
+  /** r296 (`activeList`): every running / queued job however old (its own pages), the host's totals, and whether the
+   *  waiting delegations could be read (null: not asked / an older host). */
+  activeIds: string[] | null;
+  activeCursor: string | null;
+  activeCounts: JobListPage["activeCounts"] | null;
+  waitersAvailable: boolean | null;
+  /** r296: records kept and the cap (null: an older host). */
+  retention: JobListPage["retention"] | null;
   reset(): void;
 }
 
-const EMPTY = { byId: {}, caps: null, error: null, agentLoadedAt: {}, allIds: null, nextCursor: null, allLoading: false };
+const EMPTY = { byId: {}, caps: null, error: null, agentLoadedAt: {}, allIds: null, nextCursor: null, allLoading: false, activeIds: null, activeCursor: null, activeCounts: null, waitersAvailable: null, retention: null };
 
 export const useJobs = create<JobsState>((set) => ({
   ...EMPTY,
@@ -74,6 +82,15 @@ export async function loadJobCaps(): Promise<void> {
   }
 }
 
+/** r296 list parameters for a host whose capabilities list `activeList` (waiters on every read there). */
+const waitersFor = (caps: JobServiceCapabilities | null) => (jobOperations(caps).activeList ? { includeWaiters: true } : {});
+/** What a page says about the host as a whole (only fields it sent). */
+const hostFacts = (p: JobListPage) => ({
+  ...(p.activeCounts ? { activeCounts: p.activeCounts } : {}),
+  ...(typeof p.waitersAvailable === "boolean" ? { waitersAvailable: p.waitersAvailable } : {}),
+  ...(p.retention ? { retention: p.retention } : {}),
+});
+
 /** One agent's jobs (the newest page whose search matches its session id). */
 export async function refreshAgentJobs(sessionId: string): Promise<void> {
   // The capsule and the status row may both poll the same agent.
@@ -81,10 +98,10 @@ export async function refreshAgentJobs(sessionId: string): Promise<void> {
   agentInFlight.add(sessionId);
   void loadJobCaps();
   try {
-    const r = await api.jobs({ query: sessionId, limit: PAGE });
+    const r = await api.jobs({ query: sessionId, limit: PAGE, ...waitersFor(useJobs.getState().caps) });
     if (noteError(r)) return;
     const rows = r.value.data.filter((j) => j.sessionId === sessionId);
-    useJobs.setState((s) => ({ byId: mergeJobs(s.byId, rows), error: null, agentLoadedAt: { ...s.agentLoadedAt, [sessionId]: Date.now() } }));
+    useJobs.setState((s) => ({ byId: mergeJobs(s.byId, rows), error: null, agentLoadedAt: { ...s.agentLoadedAt, [sessionId]: Date.now() }, ...hostFacts(r.value) }));
   } catch {
     // transient; the next poll retries
   } finally {
@@ -96,10 +113,12 @@ export async function refreshAgentJobs(sessionId: string): Promise<void> {
 export async function refreshAllJobs(more = false): Promise<void> {
   const s = useJobs.getState();
   if (!supported() || s.allLoading || (more && !s.nextCursor)) return;
-  void loadJobCaps();
   useJobs.setState({ allLoading: true });
   try {
-    const r = await api.jobs({ query: "", cursor: more ? s.nextCursor : null, limit: PAGE });
+    // The capabilities first: r296 parameters go only to a Job Service that lists `activeList`.
+    await loadJobCaps();
+    const caps = useJobs.getState().caps;
+    const r = await api.jobs({ query: "", cursor: more ? s.nextCursor : null, limit: PAGE, ...waitersFor(caps) });
     if (noteError(r)) return;
     const ids = r.value.data.map((j) => j.jobId);
     useJobs.setState((st) => ({
@@ -107,11 +126,39 @@ export async function refreshAllJobs(more = false): Promise<void> {
       error: null,
       allIds: more ? [...new Set([...(st.allIds ?? []), ...ids])] : ids,
       nextCursor: r.value.nextCursor,
+      ...hostFacts(r.value),
     }));
+    if (!more && jobOperations(caps).activeList) await refreshActiveJobs();
   } catch {
     // transient
   } finally {
     useJobs.setState({ allLoading: false });
+  }
+}
+
+let activeLoading = false;
+/**
+ * r296 `activeOnly`: the running / queued jobs however old (a job submitted long ago that still runs is past the newest
+ * pages), their waiting delegations and the host's totals. `more`: its next page.
+ */
+export async function refreshActiveJobs(more = false): Promise<void> {
+  const s = useJobs.getState();
+  if (!supported() || activeLoading || !jobOperations(s.caps).activeList || (more && !s.activeCursor)) return;
+  activeLoading = true;
+  try {
+    const r = await api.jobs({ query: "", cursor: more ? s.activeCursor : null, limit: PAGE, activeOnly: true, includeWaiters: true });
+    if (!r.ok) return; // the main list's error is the page's; a failed active read keeps the last one
+    const ids = r.value.data.map((j) => j.jobId);
+    useJobs.setState((st) => ({
+      byId: mergeJobs(st.byId, r.value.data),
+      activeIds: more ? [...new Set([...(st.activeIds ?? []), ...ids])] : ids,
+      activeCursor: r.value.nextCursor,
+      ...hostFacts(r.value),
+    }));
+  } catch {
+    // transient
+  } finally {
+    activeLoading = false;
   }
 }
 
@@ -122,6 +169,11 @@ export interface HostJobs {
   rows: JobRow[];
   caps: JobServiceCapabilities | null;
   error: { code: string; message: string } | null;
+  /** r296 (`activeList`): that host's running / queued jobs (first page), totals and waiters state; absent on older hosts. */
+  activeRows?: JobRow[];
+  activeCounts?: JobListPage["activeCounts"] | null;
+  waitersAvailable?: boolean | null;
+  retention?: JobListPage["retention"] | null;
 }
 
 export const useHostJobs = create<{ byHost: Record<string, HostJobs> }>(() => ({ byHost: {} }));
@@ -145,10 +197,16 @@ export async function refreshHostJobs(hostId: string): Promise<void> {
       const caps = await daemon.jobServiceCapabilities().catch(() => null);
       if (caps?.ok) patch({ caps: caps.value ?? {} });
     }
-    const r = await daemon.jobs({ query: "", limit: PAGE });
+    const caps = useHostJobs.getState().byHost[hostId]?.caps ?? null;
+    const r = await daemon.jobs({ query: "", limit: PAGE, ...waitersFor(caps) });
     if (!hostInFlight.has(hostId)) return; // reset meanwhile
     if (!r.ok) patch({ error: { code: r.code, message: r.message } });
-    else patch({ rows: r.value.data, error: null });
+    else patch({ rows: r.value.data, error: null, ...hostFacts(r.value) });
+    if (r.ok && jobOperations(caps).activeList) {
+      const a = await daemon.jobs({ query: "", limit: PAGE, activeOnly: true, includeWaiters: true });
+      if (!hostInFlight.has(hostId)) return;
+      if (a.ok) patch({ activeRows: a.value.data, ...hostFacts(a.value) });
+    }
   } catch {
     // transient; the next poll retries
   } finally {
@@ -189,7 +247,7 @@ export async function markExternalJob(job: Pick<JobRow, "sessionId">, input: Mar
   }
 }
 
-export function readJobOutput(jobId: string, stream: JobStream, offset: number, hostId?: string | null): Promise<JobResult<JobOutputPage>> {
+export function readJobOutput(jobId: string, stream: JobStream, offset: number | "tail", hostId?: string | null): Promise<JobResult<JobOutputPage>> {
   return (isFocus(hostId) ? api : apiFor(hostId!)).jobOutput(jobId, stream, offset);
 }
 

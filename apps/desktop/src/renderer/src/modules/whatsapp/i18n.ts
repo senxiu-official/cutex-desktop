@@ -1,0 +1,42 @@
+export const zhCN = {
+  "whatsapp.description": "在这台电脑的 Cutex 浏览器里打开 WhatsApp 网页版，有新消息时发服务通知。不用 WhatsApp 可以一直关着",
+  "whatsapp.pageHint": "WhatsApp 新消息提醒：只在这台电脑上读取未读数，提醒走「服务通知」。",
+  "whatsapp.title": "WhatsApp",
+  "whatsapp.hint": "在这台电脑的 Cutex 浏览器里打开官方 WhatsApp 网页版，cutex 只读取未读提醒。",
+  "whatsapp.open": "打开 WhatsApp",
+  "whatsapp.opening": "正在打开…",
+  "whatsapp.status": "状态",
+  "whatsapp.state.link": "待关联",
+  "whatsapp.state.relink": "需重新关联",
+  "whatsapp.state.ready": "正常",
+  "whatsapp.state.offline": "连接中断",
+  "whatsapp.state.unknown": "页面待兼容",
+  "whatsapp.state.disabled": "未启用",
+  "whatsapp.state.waiting": "连接中",
+  "whatsapp.state.credential": "需要服务凭证",
+  "whatsapp.detail.link": "在手机 WhatsApp →「已关联设备」→「关联设备」，扫描网页里的二维码。",
+  "whatsapp.detail.relink": "网页已退出登录。用同一个标签重新关联：手机 WhatsApp →「已关联设备」→「关联设备」。",
+  "whatsapp.detail.ready": "正在读取未读提醒。",
+  "whatsapp.detail.offline": "网页暂时连不上 WhatsApp。检查网络和手机，或打开网页看看。",
+  "whatsapp.detail.unknown": "WhatsApp 网页可能改版了，暂时只能发通用提醒。",
+  "whatsapp.detail.disabled": "打开 WhatsApp 后开始读取未读提醒。",
+  "whatsapp.detail.waiting": "等待网页加载。关闭专用标签后，从这里重新打开即可恢复。",
+  "whatsapp.detail.credential": "主机还没有给 WhatsApp 签发通知凭证。",
+  "whatsapp.reading": "读取未读提醒",
+  "whatsapp.readingHint": "关闭后不再读取，WhatsApp 网页和登录保留",
+  "whatsapp.preview": "在系统通知里显示消息预览",
+  "whatsapp.previewHint": "只在这台电脑上短暂显示，不写进记录；锁屏也可能看到",
+  "whatsapp.unbind": "换一个标签",
+  "whatsapp.unbindHint": "解除和当前标签的绑定，之后「打开 WhatsApp」会用新标签；不会关闭网页、退出登录或删除记录，关掉这个标签也会自动解除",
+  "whatsapp.unbindAction": "解除绑定",
+  "whatsapp.keepAwake": "需要这台电脑保持唤醒，并在「通用」→「关闭窗口时」选「最小化到系统托盘」；彻底退出应用会停止读取。",
+  "whatsapp.notHere": "WhatsApp 在运行 Cutex 桌面的那台电脑上读取，切换到「本机」后可在这里查看状态。",
+  "whatsapp.openFailed": "没能打开 WhatsApp 标签：浏览器模块可能已关闭。",
+  "whatsapp.bindTimeout": "网页还没加载好，稍后再左键点击一次「打开 WhatsApp」。",
+  "whatsapp.noAgents": "这个标签只给你用，不会交给{{agent}}。",
+};
+
+declare module "../i18nCatalog" {
+  interface ModuleMessages extends Messages {}
+}
+type Messages = typeof zhCN;

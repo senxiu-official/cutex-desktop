@@ -1,7 +1,8 @@
 import { DELEGATION_CAPABILITIES, type DelegationControlRequest, type DelegationTreePage, type DelegationTreeNode, type DelegationApproval, type DelegationActorAudit, type DelegationGrant, type DelegationOperationResult, type SessionResource } from "@cutex-desktop/protocol";
-import { type CutexClient, delegationId, userAccessOf } from "@cutex-desktop/cutex-client";
+import { type CutexClient, CutexApiError, delegationId, userAccessOf } from "@cutex-desktop/cutex-client";
+import { CONTINUATION_DECISION_REFUSALS } from "./continuationRefusals";
 import { projectOperatorMembers } from "./projectOperatorMembers";
-import type { UpgradeAction, UpgradeActor, UpgradeApprovalRead, UpgradeNode, UpgradeSnapshot, UpgradeResult } from "./delegationUpgradePreview";
+import type { ContinuationApprovalRead, ContinuationApprovalRef, ContinuationDecisionRequest, ContinuationResumeRead, UpgradeAction, UpgradeActor, UpgradeApprovalRead, UpgradeNode, UpgradeSnapshot, UpgradeResult } from "./delegationUpgradePreview";
 
 function need(condition: unknown, message: string): asserts condition { if (!condition) throw new Error(message); }
 function flags(value: unknown, keys: readonly string[]): void {
@@ -107,7 +108,7 @@ export function delegationUpgradeRequest(projectId: string, action: UpgradeActio
     default: throw new Error("not_delegation_control");
   }
 }
-const CONTROL_OPERATIONS = {policy:"policy.update",grant:"grant.create",revoke:"grant.revoke",decision:"approval.decide",stop:"delegation.stop",pause:"project.pause",resume:"project.resume",resumeContinuation:"continuation.resume"} as const;
+const CONTROL_OPERATIONS = {policy:"policy.update",grant:"grant.create",revoke:"grant.revoke",decision:"approval.decide",stop:"delegation.stop",pause:"project.pause",resume:"project.resume",resumeContinuation:"continuation.resume",continuationDecision:"continuation.resume"} as const;
 /** Invalid/contradictory receipts retain uncertainty; HTTP completion is not business success. */
 export function delegationEffect(result: DelegationOperationResult, actionId?: string, operation?: string): Pick<UpgradeResult,"effectState"|"receipt"> {
   const r=result?.receipt;
@@ -208,4 +209,102 @@ export async function executeDelegationUpgrade(client: CutexClient, projectId: s
   // A read failure after a successful write must not become a mutation refusal or trigger a replay.
   try {return {...result,snapshot:await readDelegationUpgrade(client,projectId)};}
   catch {return {...result,readError:"snapshot_refresh_failed"};}
+}
+
+/** One delegation's continuation permission, from the owner tree read rooted at it; null = this host cannot say (older
+ *  host, not the owner, the delegation is not in that project's tree). Read only: the action goes through
+ *  executeDelegationUpgrade, which checks the same node again. */
+export async function readContinuationResume(client: CutexClient, projectId: string | null, askId: string): Promise<ContinuationResumeRead | null> {
+  if (projectId !== null) delegationId(projectId);
+  delegationId(askId);
+  const caps = await client.capabilities<{ hostId: string; featureList: string[]; user?: unknown }>();
+  const enabled = new Set(caps?.featureList ?? []);
+  // r296 ddd0f067: a project-less delegation has no tree; its owner detail carries the same decision card.
+  if (projectId === null) {
+    if (!caps || !userAccessOf(caps).isOwner || !enabled.has(DELEGATION_CAPABILITIES.continuationApproval)) return null;
+    const ask = await client.ask<Record<string, unknown>>(askId);
+    if (!ask || ask.askId !== askId || (ask.projectId !== null && ask.projectId !== undefined)) return null;
+    const approval = approvalRef(ask.continuationApproval);
+    return { nodeHostId: caps.hostId, allowed: false, expectedRevision: null, projectPaused: false, blockedReason: null, approval, limit: null };
+  }
+  if (!caps || !userAccessOf(caps).isOwner || !enabled.has(DELEGATION_CAPABILITIES.tree) || !enabled.has(DELEGATION_CAPABILITIES.continuation)) return null;
+  const [tree, runControl] = await Promise.all([
+    client.delegationTree(projectId, { rootId: askId, rootHostId: caps.hostId }),
+    enabled.has(DELEGATION_CAPABILITIES.runControl) ? client.projectRunControl(projectId) : undefined,
+  ]);
+  const node = tree.nodes.find((n): n is DelegationTreeNode => n.kind === "delegation" && n.ref.id === askId && n.ref.hostId === caps.hostId);
+  if (!node) return null;
+  const projected = projectDelegationNode(node);
+  const allowed = !projected.closed && projected.allowedActions.resumeContinuation;
+  const reason = projected.allowedActions.resumeContinuationBlockedReason;
+  const c = projected.continuation;
+  return { nodeHostId: caps.hostId, allowed, expectedRevision: c?.revision ?? null, projectPaused: !!runControl && runControl.phase !== "running",
+    // Tolerant: any short code a newer host sends (the renderer falls back for unknown ones).
+    blockedReason: !allowed && typeof reason === "string" && /^[A-Za-z][A-Za-z0-9]{0,63}$/.test(reason) ? reason : null,
+    // r296 (review v2): present whenever this view may decide, even when resumeContinuation is false (busy / offline /
+    // paused): the decision commits and the continuation starts when the handler can run.
+    approval: enabled.has(DELEGATION_CAPABILITIES.continuationApproval) && !projected.closed ? approvalRef(c?.approval) : null,
+    limit: c && (c.limitReason === "rounds" || c.limitReason === "elapsed") && safe(c.maxRounds, 1) && safe(c.maxElapsedSeconds, 1)
+      ? { reason: c.limitReason, maxRounds: c.maxRounds, maxElapsedSeconds: c.maxElapsedSeconds } : null };
+}
+
+const DIGEST = /^[0-9a-f]{64}$/;
+const idOk = (value: unknown): value is string => { try { delegationId(value); return true; } catch { return false; } };
+function approvalRef(value: unknown): ContinuationApprovalRef | null {
+  if (!object(value) || !idOk(value.id) || !safe(value.revision, 1) || typeof value.digest !== "string" || !DIGEST.test(value.digest) || !safe(value.authorityEpoch)) return null;
+  // ddd0f067 cards carry allowedActions; an earlier card (2add91fd) did not and allowed both. Malformed: not decidable.
+  const actions = value.allowedActions;
+  if (actions !== undefined && (!object(actions) || typeof actions.approve !== "boolean" || typeof actions.deny !== "boolean")) return null;
+  return { id: value.id, revision: value.revision as number, digest: value.digest, authorityEpoch: value.authorityEpoch as number,
+    allowedActions: actions ? { approve: actions.approve as boolean, deny: actions.deny as boolean } : { approve: true, deny: true } };
+}
+/** One validated pending approval; anything malformed is left out (never decided from a partial record). */
+function continuationApproval(value: unknown, projectId: string | null): ContinuationApprovalRead | null {
+  const ref = approvalRef(value);
+  if (!ref || !object(value) || !idOk(value.delegationId) || (value.reason !== "elapsed" && value.reason !== "rounds") || typeof value.requestedAt !== "string"
+    || typeof value.briefPreview !== "string" || (value.progressPreview !== null && typeof value.progressPreview !== "string")
+    || (value.decision !== null && value.decision !== undefined) || !object(value.allowedActions)
+    || typeof value.allowedActions.approve !== "boolean" || typeof value.allowedActions.deny !== "boolean") return null;
+  return { ...ref, delegationId: value.delegationId, projectId, reason: value.reason, requestedAt: value.requestedAt,
+    briefPreview: value.briefPreview.slice(0, 280), progressPreview: typeof value.progressPreview === "string" ? value.progressPreview.slice(0, 480) : null,
+    allowedActions: { approve: value.allowedActions.approve, deny: value.allowedActions.deny } };
+}
+async function approvalCaps(client: CutexClient): Promise<boolean> {
+  const caps = await client.capabilities<{ featureList: string[]; user?: unknown }>();
+  return !!caps && userAccessOf(caps).isOwner && (caps.featureList ?? []).includes(DELEGATION_CAPABILITIES.continuationApproval);
+}
+/** r296 pending continuation approvals of a project (null: the project-less ones); [] on hosts without the feature. */
+export async function readContinuationApprovals(client: CutexClient, projectId: string | null): Promise<ContinuationApprovalRead[]> {
+  if (projectId !== null) delegationId(projectId);
+  if (!(await approvalCaps(client))) return [];
+  const list = await client.continuationApprovals(projectId);
+  return list.flatMap((value) => continuationApproval(value, projectId) ?? []);
+}
+/** Backend refusals that precede any write (the renderer lifts its unknown-outcome fence on these). */
+const DECISION_PRECONDITIONS = CONTINUATION_DECISION_REFUSALS;
+/** r296 owner decision: re-reads the approval (same project scope) and writes only on an exact revision / digest / epoch match. */
+export async function decideContinuation(client: CutexClient, projectId: string | null, request: ContinuationDecisionRequest): Promise<Pick<UpgradeResult, "effectState" | "receipt">> {
+  if (projectId !== null) delegationId(projectId);
+  delegationId(request.delegationId); delegationId(request.approvalId); delegationId(request.actionId);
+  need(request.decision === "approve" || request.decision === "deny", "invalid_arguments");
+  const note = typeof request.decisionNote === "string" ? request.decisionNote.trim() : null;
+  need(!note || note.length <= 200, "invalid_arguments");
+  need(request.decision === "approve" || !!note, "invalid_arguments");
+  need(await approvalCaps(client), "approval_not_allowed");
+  const current = (await client.continuationApprovals(projectId)).flatMap((value) => continuationApproval(value, projectId) ?? [])
+    .find((a) => a.id === request.approvalId && a.delegationId === request.delegationId);
+  need(current, "approval_changed");
+  need(current.revision === request.expectedRevision && current.digest === request.expectedDigest && current.authorityEpoch === request.expectedEpoch, "approval_changed");
+  need(current.allowedActions[request.decision], "approval_not_allowed");
+  let raw: DelegationOperationResult;
+  try {
+    raw = await client.delegationControl({ kind: "continuationDecision", delegationId: request.delegationId, body: {
+      actionId: request.actionId, expectedRevision: request.expectedRevision, expectedDigest: request.expectedDigest,
+      expectedEpoch: request.expectedEpoch, decision: request.decision, decisionNote: note || null } });
+  } catch (error) {
+    // A bare code for the renderer (HTTP errors arrive as "<code>: <message>"); other failures keep their outcome unknown.
+    if (error instanceof CutexApiError && DECISION_PRECONDITIONS.has(error.code)) throw new Error(error.code);
+    throw error;
+  }
+  return delegationEffect(raw, request.actionId, "continuation.resume");
 }

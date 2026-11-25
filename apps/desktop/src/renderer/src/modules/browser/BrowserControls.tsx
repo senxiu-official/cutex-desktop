@@ -26,6 +26,8 @@ import { BrowserOwnerController, type BrowserOwnerScope } from "./browserOwnerUi
 import { useBrowserControlSettings } from "./controlSettings";
 import { afterBrowserHostsDelivered, browserHostCurrent, useBrowserHostEpoch } from "./hosts";
 import { useBrowserEnabled, useBrowserView } from "./tabs";
+import { GrantIdentityNote } from "./IdentityNotes";
+import { useIdentity } from "./identities";
 
 interface ControlProps { hostId: string | null; tabKey: string }
 const controller = new BrowserOwnerController({
@@ -105,16 +107,20 @@ function Row({ hostId, tabKey, link }: ControlProps & { link?: ReactNode }) {
   }
   const state = !lease ? null : lease.state === "pending" ? "pending" : view?.control?.state === "paused" ? "paused" : view?.control?.operating ? "operating" : "granted";
   const live = state === "granted" || state === "operating";
+  // 浏览器身份: an owner tab hands over the logins of its identity (named when it is not the default one).
+  const identity = useIdentity(view?.pool !== "agent" ? view?.browserIdentityId : undefined);
   return <div ref={ref} {...dataFlags(flags)} data-browser-maid-row="" data-browser-control={view?.control?.state ?? lease?.state ?? "none"}
     className="flex h-9 shrink-0 items-center gap-1.5 overflow-hidden border-b border-border px-2 text-meta">
     {link && <>{link}<span aria-hidden className="h-4 w-px shrink-0 bg-border" /></>}
     {!lease || !state ? <>
-      {view?.desktopLoopback ? <span role="status" className="min-w-0 truncate text-subtle" title={t("browser.desktopLoopback.noAgent")}>{t("browser.desktopLoopback.noAgent")}</span> : <>
+      {/* The WhatsApp owner tab (module whatsapp, while on) is never handed to an agent; main refuses it anyway. */}
+      {view?.whatsAppWatch ? <span role="status" data-browser-owner-only="whatsapp" className="min-w-0 truncate text-subtle" title={t("whatsapp.noAgents")}>{t("whatsapp.noAgents")}</span>
+      : view?.desktopLoopback ? <span role="status" className="min-w-0 truncate text-subtle" title={t("browser.desktopLoopback.noAgent")}>{t("browser.desktopLoopback.noAgent")}</span> : <>
         {!flags.compact && <span className="shrink-0 text-subtle" data-browser-by-you="">{t("browser.maid.byYou")}</span>}
         <BrowserAgentPicker hostId={hostId ?? ""} agents={agents} selected="" onSelect={id => { const agent = agents.find(a => a.sessionId === id); if (agent) void grant(agent); }}
           onOpen={() => void loadAgents()} loading={loading} error={loadFailed ? t(loadFailed) : undefined} look="grant" title={t("browser.maid.handOverTip")}
           disabled={!canGrant || !!view?.control || !hostId} placeholder={t(loading ? "browser.owner.loadingAgents" : loaded && !agents.length ? "browser.owner.noAgents" : "browser.owner.select")}
-          label={t("browser.maid.handOver")} />
+          label={t("browser.maid.handOver")} note={view?.pool !== "agent" && hostId ? <GrantIdentityNote identityId={view?.browserIdentityId} hostId={hostId} /> : undefined} />
       </>}
     </> : <>
       <span role="status" data-browser-control-state={state} title={t(`browser.owner.${state}`, { name: lease.agentName })}
@@ -135,7 +141,7 @@ function Row({ hostId, tabKey, link }: ControlProps & { link?: ReactNode }) {
     </>}
     <span className="min-w-0 flex-1" />
     {failed && <span role="alert" className="min-w-0 max-w-48 truncate text-danger" title={t(failed)}>{t(failed)}</span>}
-    {lease && state && <Details label={view?.pool !== "agent" && !flags.tight ? t("browser.maid.ownerLogins") : null} hint={t(view?.pool === "agent" ? "browser.owner.loginAgent" : "browser.owner.loginOwner")}>
+    {lease && state && <Details label={view?.pool !== "agent" && !flags.tight ? (identity && !identity.isDefault ? t("browser.identity.ownerLoginsOf", { name: identity.name }) : t("browser.maid.ownerLogins")) : null} hint={t(view?.pool === "agent" ? "browser.owner.loginAgent" : "browser.owner.loginOwner")}>
       <p className="mb-2 font-medium text-foreground">{t(`browser.owner.${state}`, { name: lease.agentName })}
         {lease.auto && <span className="ml-1.5 font-normal text-subtle">{t("browser.claim.auto", { reason: t(`browser.claim.reason.${lease.auto}`) })}</span>}</p>
       <p data-browser-login-note={view?.pool === "agent" ? "agent" : "owner"} className="leading-relaxed">{t(view?.pool === "agent" ? "browser.owner.loginAgent" : "browser.owner.loginOwner")}</p>

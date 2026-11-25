@@ -16,6 +16,10 @@ import { agentState, useApp } from "../store";
 import { useConvFeatures, useConvHost, useConvScope, useConvSession, useConvSidebar } from "../lib/conversationScope";
 import { creatorPathsBlock, REAPPROVE_PATHS_FEATURE } from "../../../shared/creatorPaths";
 import { CreatorPathsNote } from "./CreatorPathsNote";
+import { PinnedModelNote } from "./PinnedModelNote";
+import { ClaudeDiagnosticsNote } from "./ClaudeDiagnosticsNote";
+import { isRuntimeUnreachable } from "../../../shared/runtimeUnreachable";
+import { pinnedModelBlock } from "../../../shared/pinnedModel";
 import { Composer } from "./Composer";
 import { InteractionDock } from "./InteractionDock";
 import { StatusBar } from "./StatusBar";
@@ -52,6 +56,7 @@ import { composerInputMax, createShortPaneStore, measureComposerInput, measureSh
 import { UserLayoutToggleContext, type UserLayoutToggle } from "../lib/userLayoutToggle";
 import { isHTMLElement } from "../lib/ownerWindow";
 import { useOwnerWindow } from "../lib/ownerContext";
+import { ceilToDevicePixel, roundToDevicePixel, useDevicePixelRatio } from "../lib/pixelRatio";
 
 // The parts around the rows re-render with their own props / stores, not with every streamed frame of
 // the conversation (perf baseline 2026-10-20, fix order 4). The composer reads the timeline (updated in
@@ -123,10 +128,13 @@ export function Conversation({ scope }: { scope: WorkspaceScope | null }) {
   const spacer = useRef<HTMLDivElement>(null);
   const slack = useRef(0);
   const anchor = useRef<RowsAnchor | null>(null);
-  const setRoom = useCallback((px: number) => {
+  // On the device pixel grid (lib/pixelRatio): a part-pixel room left the rows a part of a pixel off, and at 1.875 some
+  // lines jumped a pixel while others stayed (owner 2026-11-26). Read at write time: the room is set from the observer.
+  const setRoom = useCallback((raw: number) => {
+    const px = raw > 0 ? roundToDevicePixel(raw, win.devicePixelRatio || 1) : 0;
     slack.current = px;
     if (spacer.current) spacer.current.style.height = px ? `${px}px` : "";
-  }, []);
+  }, [win]);
   const keepRowsUp = useCallback((el: HTMLDivElement) => {
     const col = content.current;
     if (col) anchor.current = keepRows(el, col, anchor.current, slack.current, setRoom);
@@ -402,9 +410,13 @@ export function Conversation({ scope }: { scope: WorkspaceScope | null }) {
   const frame = useRef<HTMLDivElement>(null);
   const [dock, setDock] = useState<HTMLDivElement | null>(null);
   const bands = useReservedBands(frame, scroller, content, reserved, selectedId);
-  const pad = bandPadding(bands);
+  // The column's padding and the lead on the device pixel grid too: the reading position kept when they change
+  // (`scrollTop += delta` below) then lands on whole device pixels instead of rounding a part of one.
+  const dpr = useDevicePixelRatio();
+  const rawPad = bandPadding(bands);
+  const pad = { top: ceilToDevicePixel(rawPad.top, dpr), bottom: ceilToDevicePixel(rawPad.bottom, dpr) };
   // The gutter's top entries over the column (no gutter beside it): the timeline starts below them, in flow.
-  const lead = bands.lead ? bands.lead + 6 : 0;
+  const lead = bands.lead ? ceilToDevicePixel(bands.lead + 6, dpr) : 0;
   // Keep the reading position when the top band changes while the user is up in the history.
   const shownTop = useRef(pad.top + lead);
   useLayoutEffect(() => {
@@ -451,10 +463,12 @@ export function Conversation({ scope }: { scope: WorkspaceScope | null }) {
   const composerShown = !archived && !readOnly && !(view && view.timeline.pending.size > 0);
   // A child agent refused for moved folders gets its own line with 重新批准文件夹 (components/CreatorPathsNote).
   const pathsChanged = !archived && runtimeStatus !== "online" && !!view?.startError && creatorPathsBlock(view.startError) !== null;
+  // An old agent whose saved model / effort is no longer offered: its own line with 更换模型 (components/PinnedModelNote).
+  const pinnedModel = !archived && !pathsChanged && runtimeStatus !== "online" && view?.startError ? pinnedModelBlock(view.startError) : null;
   const runtimeNote = archived
     ? null
     : view?.startError
-      ? { tone: "text-danger", text: t(view.startErrorQueueIds?.length || view.queue.length ? "conversation.startFailed" : "conversation.runtimeStartFailed", { error: view.startError }) }
+      ? { tone: "text-danger", text: t(view.startErrorQueueIds?.length || view.queue.length ? "conversation.startFailed" : "conversation.runtimeStartFailed", { error: isRuntimeUnreachable(view.startError) ? t("runtime.unreachable") : view.startError }) }
       : startSince !== null && runtimeStatus !== "online"
         ? { tone: "text-accent", text: startSlow ? t("conversation.startingSlow") : t(view?.queue.length ? "conversation.startingQueued" : "conversation.starting") }
       : runtimeStatus === "starting"
@@ -552,6 +566,9 @@ export function Conversation({ scope }: { scope: WorkspaceScope | null }) {
       <div data-composer-block className={!composerShown ? "hidden" : "flex min-h-0 flex-col"}>
         {pathsChanged ? (
           <CreatorPathsNote key={`${hostId}/${selectedId}`} sessionId={selectedId} hostId={hostId} canReapprove={access.isOwner && features.has(REAPPROVE_PATHS_FEATURE)} />
+        ) : pinnedModel ? (
+          // Keyed by the refusal too: a new refusal (after a start) starts the note afresh.
+          <PinnedModelNote key={`${hostId}/${selectedId}/${view?.startError}`} sessionId={selectedId} hostId={hostId} session={session ?? null} block={pinnedModel} />
         ) : runtimeNote && (
           <p className={`side-col px-6 pb-1 text-xs ${runtimeNote.tone}`}>
             {runtimeNote.text}
@@ -562,6 +579,8 @@ export function Conversation({ scope }: { scope: WorkspaceScope | null }) {
             )}
           </p>
         )}
+        {/* A connected Claude runtime's startup warnings / a long-running hook (claude-runtime-diagnostics-v1). */}
+        {!archived && <ClaudeDiagnosticsNote runtime={session?.runtime} features={features} hostId={hostId} profile={session?.profile ?? null} />}
         {/* Status row: the items placed above the input (Settings → 通用); also where goal editing happens. */}
         <MemoStatusBar key={selectedId} sessionId={selectedId} />
         <MemoComposer

@@ -2,15 +2,15 @@ export const zhCN = {
   "diff.title": "差异",
   "diff.description": "在{{shelf}}中查看工作区的 Git 改动和单个回合的文件改动",
   "diff.view": "差异",
-  "diff.turnTab": "本轮 · {name}",
-  "diff.turnBadge": "本轮变更",
+  "diff.turnTab": "本回合 · {name}",
+  "diff.turnBadge": "本回合变更",
   "diff.staged": "已暂存",
   "diff.noDiff": "没有差异",
   "diff.retrying": "差异暂时读不出，正在重试…",
   "diff.failed": "差异读不出",
   "diff.noScope": "这个{{agent}}没有工作目录，看不了 git 差异。",
   "diff.noWorkspaceFs": "这台主机的 cutex 不提供工作区接口（需要 workspace-fs），请升级 cutex",
-  "diff.turnGone": "这一轮的变更文本只在打开它的那次运行里保留。回到那一轮，左键点击「查看变更」再打开。",
+  "diff.turnGone": "这个回合的变更文本只在打开它的那次运行里保留。回到那个回合，左键点击「查看变更」再打开。",
   "diff.textGone": "这份对比只在打开它的那次运行里保留，请从原处再打开一次。",
 } as const;
 

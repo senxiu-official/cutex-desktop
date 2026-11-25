@@ -38,6 +38,11 @@ export interface MenuAction {
    */
   armed?: string;
   /**
+   * The armed row's tone: `danger` (default, red: removing / stopping) or `accent` (the app's primary colour) for a
+   * confirmation that is not destructive (e.g. 允许 iPad 访问, a medium-risk opening).
+   */
+  armedTone?: "danger" | "accent";
+  /**
    * Confirm in place after looking something up (a count): the first select shows `preparing` (else the label)
    * in the row while this runs; `{ armed }` then arms the row with that text (as `armed`), `{ empty }` shows
    * that text in the row for a moment instead (nothing to do). The second select runs `onSelect`.
@@ -97,8 +102,8 @@ export interface DialogCheck {
 }
 
 type Dialog =
-  | { kind: "confirm"; message: string; danger: boolean; /** Only an OK button (refusal reasons). */ notice?: boolean; /** Button texts instead of 确定 / 取消 (a choice between two actions). */ labels?: ConfirmLabels; check?: DialogCheck; resolve(ok: boolean): void }
-  | { kind: "prompt"; title: string; initial: string; placeholder?: string; multiline?: boolean; maxLength?: number; hint?: string; check?: DialogCheck; expect?: string; mismatch?: string; resolve(value: string | null): void }
+  | { kind: "confirm"; message: string; danger: boolean; /** Only an OK button (refusal reasons). */ notice?: boolean; /** Permanent delete (high risk): 取消 has the focus and Enter alone does not confirm. */ safe?: boolean; /** Button texts instead of 确定 / 取消 (a choice between two actions). */ labels?: ConfirmLabels; check?: DialogCheck; resolve(ok: boolean): void }
+  | { kind: "prompt"; title: string; initial: string; placeholder?: string; multiline?: boolean; maxLength?: number; hint?: string; check?: DialogCheck; expect?: string; mismatch?: string; danger?: boolean; okLabel?: string; resolve(value: string | null): void }
   /** In-app folder browser over a host's daemon (`fs-dir-browse`; remote hosts; null host = the focus host). */
   | { kind: "folder"; start: string | null; hostId: string | null; resolve(value: string | null): void }
   | { kind: "forkProfile"; sessionId: string; hostId: string; afterTurnId: string | null; resolve(value: null): void }
@@ -295,6 +300,15 @@ export function confirmDialog(message: string, danger = false, labels?: ConfirmL
   return new Promise((resolve) => showDialog({ kind: "confirm", message, danger, labels, check, resolve }));
 }
 
+/**
+ * High-risk confirmation of a permanent delete (owner rule: high risk = a dialog that states the consequences): the
+ * same dialog wherever the same thing is deleted (agent menu, 设置 → 归档, Profile references, batch delete). 取消
+ * has the focus and Enter alone does not confirm — the keyboard has to reach the delete button on purpose.
+ */
+export function confirmPermanentDelete(message: string, labels: ConfirmLabels): Promise<boolean> {
+  return new Promise((resolve) => showDialog({ kind: "confirm", message, danger: true, safe: true, labels, resolve }));
+}
+
 /** A message with a single OK button (e.g. why cutex refused a delete). */
 export function noticeDialog(message: string): Promise<void> {
   return new Promise((resolve) => showDialog({ kind: "confirm", message, danger: false, notice: true, resolve: () => resolve() }));
@@ -304,7 +318,7 @@ export function noticeDialog(message: string): Promise<void> {
  * Electron has no window.prompt — this is the replacement. Resolves null on cancel. `expect`: a typed confirmation —
  * OK with any other text keeps the dialog open and shows `mismatch` (exact equality, spaces included).
  */
-export function promptDialog(title: string, initial = "", options: { placeholder?: string; multiline?: boolean; maxLength?: number; hint?: string; check?: DialogCheck; expect?: string; mismatch?: string } = {}): Promise<string | null> {
+export function promptDialog(title: string, initial = "", options: { placeholder?: string; multiline?: boolean; maxLength?: number; hint?: string; check?: DialogCheck; expect?: string; mismatch?: string; /** Opt-in destructive confirmation: a red OK button saying what it does (`okLabel`). */ danger?: boolean; okLabel?: string } = {}): Promise<string | null> {
   return new Promise((resolve) => showDialog({ kind: "prompt", title, initial, ...options, resolve }));
 }
 

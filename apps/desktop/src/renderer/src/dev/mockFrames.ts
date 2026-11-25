@@ -59,7 +59,7 @@ function standInConfirm(text: ReturnType<typeof pageSubmitPromptText>, doc: Docu
     const send = Object.assign(doc.createElement("button"), { textContent: text.send, onclick: () => done(true) });
     const cancel = Object.assign(doc.createElement("button"), { textContent: text.cancel, onclick: () => done(false) });
     for (const b of [send, cancel]) b.style.cssText = "padding:4px 16px;border:1px solid #999;border-radius:4px;background:#fff";
-    cancel.style.borderColor = "#3b82f6";
+    cancel.style.borderColor = "var(--accent)";
     body.append(message, detail);
     buttons.append(send, cancel);
     box.append(bar, body, buttons);

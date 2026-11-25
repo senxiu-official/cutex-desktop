@@ -1,6 +1,6 @@
 // Streaming prose keeps every block's vertical sizes on the device grid (`--prose-pixel`, components/Markdown): a
 // block that sets its own line height, margin or padding off the grid makes the followed bottom cycle at fractional
-// ratios (hachimi 2026-11-06: headings, code, tables). The browser regression is scripts/qa-fractional-prose.mjs.
+// ratios (hostc 2026-11-06: headings, code, tables). The browser regression is scripts/qa-fractional-prose.mjs.
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";

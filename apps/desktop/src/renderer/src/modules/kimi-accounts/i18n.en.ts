@@ -59,7 +59,7 @@ export const en: Record<keyof typeof zhCN, string> = {
   "kimi-accounts.login.cancelled": "Sign-in cancelled.",
   "kimi-accounts.login.lost": "This sign-in has ended on the host (cutex may have restarted); sign in again.",
   "kimi-accounts.login.cancel": "Cancel sign-in",
-  "kimi-accounts.login.retry": "Try again",
+  "kimi-accounts.login.retry": "Retry",
   "kimi-accounts.login.close": "Close",
   "kimi-accounts.login.hostNote": "The sign-in runs on the host “{host}”; the token stays in this account's own folder there.",
   "kimi-accounts.loginError.kimi_login_failed": "The Kimi sign-in failed",

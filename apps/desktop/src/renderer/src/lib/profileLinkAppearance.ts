@@ -9,19 +9,22 @@ import { patchProfileLook } from "./profileLooks";
 import { updateCachedProfile } from "./profileSnapshot";
 import { ProfilePortraitThemeError } from "../../../shared/profilePortraitThemes";
 import { isPortraitThemeKey } from "../../../shared/portraitDefaults";
+import { MAX_PLAN_LABEL_CHARS } from "./profileKind";
 
-export const LOOK_FIELDS = ["color", "avatarThemes", "introGreeting", "avatar", "introPortrait", "avatarStyle"] as const;
+export const LOOK_FIELDS = ["color", "avatarThemes", "introGreeting", "avatar", "introPortrait", "avatarStyle", "planLabel"] as const;
 export type LookField = typeof LOOK_FIELDS[number];
 export type LookValue = string | string[] | AvatarStyle | null;
 export type AppearanceChanges = Partial<Record<LookField, LookValue>>;
 /** design 047: the full style syncs only between hosts that both advertise this. */
 export const PROFILE_AVATAR_STYLE_FEATURE = "profile-avatar-style";
+const PROFILE_PLAN_LABEL_SYNC_FEATURE = "profile-plan-label-sync";
+const OPTIONAL_LOOK_FIELDS = ["avatarStyle", "planLabel"] as const;
 type Mark = { value: string; token: string; time: string | null };
 type Marks = Record<LookField, Mark>;
-// avatarStyle of a host without the capability, or of a baseline persisted before this field: never
-// compared, never a source or target; adopted from the first capable observation.
-const UNKNOWN_STYLE: Mark = { value: "?", token: "?", time: null };
-const knownStyle = (mark: Mark) => mark.token !== UNKNOWN_STYLE.token;
+// An older host or stored baseline cannot act as a source or target for a field
+// it has not observed. First capable observation establishes the baseline.
+const UNKNOWN_MARK: Mark = { value: "?", token: "?", time: null };
+const knownMark = (mark: Mark) => mark.token !== UNKNOWN_MARK.token;
 type Member = { hostId: string; profileId: string; hostName: string; marks: Marks };
 type Group = { members: Record<string, Member>; conflict: boolean; paused?: boolean };
 type Target = { key: string; expected: Partial<Record<LookField, string>>; before?: AppearanceChanges };
@@ -37,6 +40,7 @@ export interface AppearanceTransport {
   allowed(hostId: string): boolean;
   /** The host advertises profile-avatar-style (absent: no host does). */
   styled?(hostId: string): boolean;
+  labelled?(hostId: string): boolean;
   fresh(ref: LinkedProfileRef): Promise<ProfileItem>;
   image(ref: LinkedProfileRef, field: "avatar" | "introPortrait"): Promise<{ dataUrl: string; etag: string | null } | null>;
   write(ref: LinkedProfileRef, field: LookField, value: LookValue, isCurrent?: () => boolean): Promise<ProfileItem>;
@@ -60,6 +64,7 @@ export function cleanAppearanceChanges(value: unknown): AppearanceChanges {
     else if (field === "avatarThemes" && Array.isArray(v) && v.length && v.length <= 64 && v.every((x) => typeof x === "string" && /^[a-z][a-z0-9_-]{0,31}$/.test(x)) && new Set(v).size === v.length) out[field] = [...v].sort();
     else if (field === "introGreeting" && typeof v === "string" && [...v.trim()].length <= 300 && !/[\u0000-\u0009\u000b-\u001f\u007f]/.test(v.replaceAll("\r\n", "\n"))) out[field] = v.trim().replaceAll("\r\n", "\n") || null;
     else if ((field === "avatar" || field === "introPortrait") && typeof v === "string" && v.length <= (field === "avatar" ? 70_000 : 2_800_000) && /^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/]+=*$/.test(v)) out[field] = v;
+    else if (field === "planLabel" && typeof v === "string" && [...v.trim()].length <= MAX_PLAN_LABEL_CHARS && !/[\u0000-\u001f\u007f-\u009f]/.test(v.trim())) out[field] = v.trim() || null;
     else if (field === "avatarStyle") { const style = cleanAvatarStyle(v); if (style) out[field] = style; }
   }
   return out;
@@ -79,15 +84,16 @@ function cleanAvatarStyle(v: unknown): AvatarStyle | undefined {
 
 export function appearanceMarks(profile: ProfileItem): Marks {
   return Object.fromEntries(LOOK_FIELDS.map((field) => {
-    const raw = field === "avatar" ? profile.avatarEtag ?? null : field === "introPortrait" ? profile.introPortraitEtag ?? null : profile.appearance[field] ?? null;
+    if (field === "planLabel" && profile.planLabelManual === undefined) return [field, { ...UNKNOWN_MARK }];
+    const raw = field === "planLabel" ? profile.planLabelManual ?? null : field === "avatar" ? profile.avatarEtag ?? null : field === "introPortrait" ? profile.introPortraitEtag ?? null : profile.appearance[field] ?? null;
     const value = field === "color" && typeof raw === "string" ? raw.toUpperCase() : field === "avatarThemes" && Array.isArray(raw) ? [...raw].sort() : field === "avatarStyle" && raw ? cleanAvatarStyle(raw) ?? raw : raw;
     const revision = profile.appearanceRevisions?.[field];
     return [field, { value: JSON.stringify(value), token: JSON.stringify([revision?.etag ?? null, revision?.updatedAt ?? null, value]), time: revision?.updatedAt ?? null }];
   })) as Marks;
 }
-const sameLooks = (a: Marks, b: Marks) => LOOK_FIELDS.every((field) => field === "avatarStyle" && (!knownStyle(a[field]) || !knownStyle(b[field])) || a[field].value === b[field].value);
+const sameLooks = (a: Marks, b: Marks) => LOOK_FIELDS.every((field) => !knownMark(a[field]) || !knownMark(b[field]) || a[field].value === b[field].value);
 
-/** One serialized worker; durable pending values contain only the five appearance fields. */
+/** One serialized worker; durable pending values contain only the supported display fields. */
 export class ProfileLinkAppearanceSync {
   private state: Saved = { version: 1, groups: {}, jobs: [] };
   private listeners = new Set<() => void>();
@@ -110,8 +116,9 @@ export class ProfileLinkAppearanceSync {
       for (const [identity, group] of Object.entries(parsed.groups)) {
         if (!validIdentity(identity) || !group || typeof group.conflict !== "boolean" || !group.members || Object.keys(group.members).length > 64) throw Error("invalid appearance baseline");
         for (const [key, member] of Object.entries(group.members)) {
-          // Baselines saved before avatarStyle joined have no mark for it: unknown, not corrupt.
-          if (member?.marks && typeof member.marks === "object" && !own(member.marks, "avatarStyle")) member.marks.avatarStyle = { ...UNKNOWN_STYLE };
+          if (member?.marks && typeof member.marks === "object") {
+            for (const field of OPTIONAL_LOOK_FIELDS) if (!own(member.marks, field)) member.marks[field] = { ...UNKNOWN_MARK };
+          }
           if (typeof member.hostId !== "string" || typeof member.profileId !== "string" || typeof member.hostName !== "string" || key !== JSON.stringify([member.hostId, member.profileId]) || !LOOK_FIELDS.every((f) => typeof member.marks?.[f]?.value === "string" && typeof member.marks[f].token === "string" && (member.marks[f].time === null || typeof member.marks[f].time === "string"))) throw Error("invalid appearance member");
         }
       }
@@ -125,12 +132,18 @@ export class ProfileLinkAppearanceSync {
       this.state = parsed;
     } catch { this.brokenStorage = true; this.unreadableStorage = true; }
   }
-  private styled(hostId: string) { try { return this.transport.styled?.(hostId) === true; } catch { return false; } }
-  /** Whether a field may be read from / written to this host (avatarStyle: only with the capability). */
-  private carries(field: LookField, hostId: string) { return field !== "avatarStyle" || this.styled(hostId); }
+  /** Whether this host supports reading and writing the field. */
+  private carries(field: LookField, hostId: string) {
+    try {
+      if (field === "avatarStyle") return this.transport.styled?.(hostId) === true;
+      if (field === "planLabel") return this.transport.labelled?.(hostId) === true;
+      return true;
+    } catch { return false; }
+  }
   private marksOf(ref: LinkedProfileRef): Marks {
     const marks = appearanceMarks(ref.profile);
-    return this.styled(ref.hostId) ? marks : { ...marks, avatarStyle: { ...UNKNOWN_STYLE } };
+    for (const field of OPTIONAL_LOOK_FIELDS) if (!this.carries(field, ref.hostId)) marks[field] = { ...UNKNOWN_MARK };
+    return marks;
   }
   private memberOf(ref: LinkedProfileRef): Member { return { hostId: ref.hostId, profileId: ref.profile.id, hostName: ref.hostName, marks: this.marksOf(ref) }; }
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
@@ -209,6 +222,12 @@ export class ProfileLinkAppearanceSync {
       if (raw !== null && !style) throw Error("unsupported avatar style");
       return style ?? null;
     }
+    if (field === "planLabel") {
+      if (ref.profile.planLabelManual === undefined) throw Error("manual plan label unavailable");
+      const label = cleanAppearanceChanges({ planLabel: ref.profile.planLabelManual }).planLabel;
+      if (label === undefined) throw Error("unsupported manual plan label");
+      return label;
+    }
     if (field !== "avatar" && field !== "introPortrait") return cleanAppearanceChanges({ [field]: ref.profile.appearance[field] ?? null })[field] ?? null;
     const expected = field === "avatar" ? ref.profile.avatarEtag : ref.profile.introPortraitEtag;
     if (!expected) return null;
@@ -226,7 +245,7 @@ export class ProfileLinkAppearanceSync {
     this.state.jobs = this.state.jobs.filter((j) => Object.keys(j.values).length);
     if (this.state.jobs.length >= 64) throw Error("appearance pending queue full");
     const excludedHost = exclude ? group.members[exclude]?.hostId : undefined;
-    const targets = Object.entries(group.members).filter(([key, member]) => key !== exclude && member.hostId !== excludedHost).map(([key, m]) => ({ key, expected: Object.fromEntries(fields.filter((f) => origins?.[f] !== m.hostId && this.carries(f, m.hostId) && (f !== "avatarStyle" || knownStyle(m.marks[f]))).map((f) => [f, m.marks[f].token])) })).filter((target) => Object.keys(target.expected).length);
+    const targets = Object.entries(group.members).filter(([key, member]) => key !== exclude && member.hostId !== excludedHost).map(([key, m]) => ({ key, expected: Object.fromEntries(fields.filter((f) => origins?.[f] !== m.hostId && this.carries(f, m.hostId) && knownMark(m.marks[f])).map((f) => [f, m.marks[f].token])) })).filter((target) => Object.keys(target.expected).length);
     if (targets.length) this.state.jobs.push({ id: crypto.randomUUID(), group: identity, values: cleanAppearanceChanges(values), targets });
     this.undoRecords.set(identity, []);
     // Nothing to send (e.g. only avatarStyle, and no other capable host): not "pending".
@@ -236,7 +255,7 @@ export class ProfileLinkAppearanceSync {
   async saved(ref: LinkedProfileRef, changes: AppearanceChanges, also: boolean) {
     const identity = accountLinkIdentity(ref.profile);
     changes = cleanAppearanceChanges(changes);
-    if (!this.carries("avatarStyle", ref.hostId)) delete changes.avatarStyle;
+    for (const field of OPTIONAL_LOOK_FIELDS) if (!this.carries(field, ref.hostId)) delete changes[field];
     if (!identity || !this.transport.allowed(ref.hostId) || !Object.keys(changes).length) return;
     const refs = this.transport.refs().filter((r) => accountLinkIdentity(r.profile) === identity);
     const group = this.ensureGroup(identity, refs);
@@ -291,7 +310,7 @@ export class ProfileLinkAppearanceSync {
       if (accountLinkIdentity(fresh.profile) !== identity) throw Error("profile account changed");
       const group = this.ensureGroup(identity, this.transport.refs().filter((r) => accountLinkIdentity(r.profile) === identity));
       const values: AppearanceChanges = {};
-      await Promise.all(LOOK_FIELDS.filter((field) => this.carries(field, fresh.hostId)).map(async (field) => { values[field] = await this.read(fresh, field); }));
+      await Promise.all(LOOK_FIELDS.filter((field) => this.carries(field, fresh.hostId) && knownMark(appearanceMarks(fresh.profile)[field])).map(async (field) => { values[field] = await this.read(fresh, field); }));
       if (!isCurrent()) return;
       // Explicit source choice authorizes overwriting the currently observed target versions,
       // not the stale versions that originally produced this conflict. Offline targets stay fenced.
@@ -348,7 +367,7 @@ export class ProfileLinkAppearanceSync {
     if (!marks.every((a) => marks.every((b) => sameLooks(a, b)))) return;
     for (const key of keys) for (const field of LOOK_FIELDS) {
       const mark = observed.get(key)![field];
-      if (field !== "avatarStyle" || knownStyle(mark)) group.members[key]!.marks[field] = mark;
+      if (knownMark(mark)) group.members[key]!.marks[field] = mark;
     }
     group.conflict = false;
     if (this.notices.get(identity)?.kind === "newerChange") this.notices.delete(identity);
@@ -403,12 +422,16 @@ export class ProfileLinkAppearanceSync {
           const group = this.ensureGroup(identity, current);
           if (group.conflict && !this.state.jobs.some((j) => j.group === identity)) this.settleConflict(identity, group, current, observed);
           if (group.conflict || group.paused || this.state.jobs.some((j) => j.group === identity)) continue;
-          // A style baseline unknown (older host, or saved before this field) is adopted from the first
-          // capable observation; members that then disagree need the owner's choice, as on first association.
-          const adopt = current.filter((r) => r.connected && this.transport.allowed(r.hostId) && !knownStyle(group.members[memberKey(r)]!.marks.avatarStyle) && knownStyle(observed.get(memberKey(r))!.avatarStyle));
-          if (adopt.length) {
-            for (const r of adopt) group.members[memberKey(r)]!.marks.avatarStyle = observed.get(memberKey(r))!.avatarStyle;
-            if (new Set(Object.values(group.members).filter((m) => knownStyle(m.marks.avatarStyle)).map((m) => m.marks.avatarStyle.value)).size > 1) { group.conflict = true; this.changed(); continue; }
+          // Adopt missing optional baselines before considering outgoing edits.
+          for (const field of OPTIONAL_LOOK_FIELDS) {
+            const adopt = current.filter((r) => r.connected && this.transport.allowed(r.hostId) && !knownMark(group.members[memberKey(r)]!.marks[field]) && knownMark(observed.get(memberKey(r))![field]));
+            if (!adopt.length) continue;
+            for (const ref of adopt) group.members[memberKey(ref)]!.marks[field] = observed.get(memberKey(ref))![field];
+            if (new Set(Object.values(group.members).map((m) => m.marks[field]).filter(knownMark).map((mark) => mark.value)).size > 1) {
+              group.conflict = true;
+              this.changed();
+              continue groups;
+            }
             this.changed();
           }
           const generation = this.generation(identity);
@@ -417,7 +440,7 @@ export class ProfileLinkAppearanceSync {
           const origins: Partial<Record<LookField, string>> = {};
           const winnerMarks: Partial<Record<LookField, { key: string; mark: Marks[LookField] }>> = {};
           for (const field of LOOK_FIELDS) {
-            const changed = current.filter((r) => r.connected && this.transport.allowed(r.hostId) && this.carries(field, r.hostId) && (field !== "avatarStyle" || knownStyle(observed.get(memberKey(r))![field]) && knownStyle(group.members[memberKey(r)]!.marks[field])) && observed.get(memberKey(r))![field].value !== group.members[memberKey(r)]!.marks[field].value);
+            const changed = current.filter((r) => r.connected && this.transport.allowed(r.hostId) && this.carries(field, r.hostId) && knownMark(observed.get(memberKey(r))![field]) && knownMark(group.members[memberKey(r)]!.marks[field]) && observed.get(memberKey(r))![field].value !== group.members[memberKey(r)]!.marks[field].value);
             if (!changed.length) continue;
             // Replication itself gives the receiver a newer local clock. Only new changes since
             // the established baseline compete; an unchanged receiver must not undo a later edit.
@@ -438,7 +461,7 @@ export class ProfileLinkAppearanceSync {
           }
           if (isCurrent() && Object.keys(values).length) {
             for (const field of LOOK_FIELDS.filter((f) => own(values, f))) {
-              for (const [key, marks] of observed) if (group.members[key] && (field !== "avatarStyle" || knownStyle(marks[field]))) group.members[key]!.marks[field] = marks[field];
+              for (const [key, marks] of observed) if (group.members[key] && knownMark(marks[field])) group.members[key]!.marks[field] = marks[field];
               const winner = winnerMarks[field];
               if (winner) group.members[winner.key]!.marks[field] = winner.mark;
             }
@@ -529,6 +552,10 @@ export const profileAppearanceTransport: AppearanceTransport = {
     const data = hostData(useApp.getState(), hostId);
     return !!data?.featuresKnown && data.features.has(PROFILE_AVATAR_STYLE_FEATURE);
   },
+  labelled(hostId) {
+    const data = hostData(useApp.getState(), hostId);
+    return !!data?.featuresKnown && data.features.has(PROFILE_PLAN_LABEL_SYNC_FEATURE);
+  },
   async fresh(ref) {
     const isCurrent = captureAccountLinkAction(ref.hostId);
     const id = ref.profile.id;
@@ -557,6 +584,11 @@ export const profileAppearanceTransport: AppearanceTransport = {
     const current = await api.getProfile(id);
     if (!canSend()) throw Error("host connection or operation changed");
     if (current.id !== id || accountLinkIdentity(current) !== identity || appearanceMarks(current)[field].token !== expected) throw new ProfileAppearanceSyncError("newerChange");
+    // Clearing an already empty manual label would also clear the target's legacy plan.
+    if (field === "planLabel" && current.planLabelManual === value) {
+      connectionFences.set(current, isCurrent);
+      return current;
+    }
     // The check is intentionally immediately before mutation. There is no backend If-Match yet;
     // once sent, a request may commit and must return a receipt even if the owner cancels it.
     if (!canSend()) throw Error("host connection or operation changed");

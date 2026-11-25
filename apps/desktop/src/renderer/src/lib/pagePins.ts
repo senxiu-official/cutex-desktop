@@ -5,6 +5,7 @@
 // names no feature.
 import type { ReactNode } from "react";
 import { create } from "zustand";
+import type { EntityRef } from "./entityIcon";
 
 /** What a pinned page shows now. */
 export interface PagePinView {
@@ -39,6 +40,8 @@ export interface PagePinCandidate {
   /** The key after `<id>:`. */
   arg: string;
   title: string;
+  /** What the candidate names (a project), shown with its icon in the 「＋ 固定」 picker. */
+  entity?: EntityRef;
 }
 
 const usePagePinKinds = create<{ kinds: Readonly<Record<string, PagePinKind>> }>(() => ({ kinds: {} }));

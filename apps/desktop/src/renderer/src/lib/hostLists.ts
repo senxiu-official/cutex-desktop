@@ -113,8 +113,8 @@ export function usePerHost<T>(hostIds: readonly string[], load: (hostId: string)
  * Open an agent of `hostId` from a cross-host list (requester, owner, job agent): opened from its own
  * host while the scope stays (store `openAgent`; a host outside the scope shows 所有设备 first, ★ Q14).
  */
-export function openHostAgent(hostId: string, sessionId: string): void {
-  void useApp.getState().openAgent(sessionId, hostId);
+export function openHostAgent(hostId: string, sessionId: string): Promise<void> {
+  return useApp.getState().openAgent(sessionId, hostId);
 }
 
 /** 需要你 「其他主机 N 项」 (RFC §10, ★ Q15): what waits for the owner on connected hosts outside the scope. */

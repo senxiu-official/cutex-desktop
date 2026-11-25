@@ -19,6 +19,9 @@ import { cancelRotation, continueRotation, loadProjectRotation, pollRotation, st
 import { HANDOFF_MINUTE_CHOICES, useHandoffMinutes } from "./rotationPrefs";
 import { minutesLabel, refusalText } from "./rotationView";
 import { useOwnerWindow } from "../../lib/ownerContext";
+import { EntityMention } from "../../components/EntityIcon";
+import { projectEntity } from "../../lib/entityIcon";
+import { focusHostId } from "../../lib/hostKeys";
 
 const POLL_MS = 1500;
 
@@ -218,7 +221,7 @@ function StartForm({ project, director, onStarted, onClose }: { project: Project
   const profileOptions = useMemo(() => {
     const names = new Set((profiles ?? []).map((p) => p.name));
     if (directorProfile) names.add(directorProfile);
-    return [...names].sort((a, b) => a.localeCompare(b)).map((n) => ({ value: n, label: n === directorProfile ? `${n} · ${t("sidebar.director")}` : n }));
+    return [...names].sort((a, b) => a.localeCompare(b)).map((n) => ({ value: n, label: n === directorProfile ? `${n} · ${t("sidebar.director")}` : n, entity: { kind: "profile" as const, ref: n, profile: profiles?.find((p) => p.name === n) } }));
   }, [profiles, directorProfile, t]);
   const minuteOptions = (HANDOFF_MINUTE_CHOICES as readonly number[]).map((n) => ({ value: String(n), label: minutesLabel(n, t) }));
   const handoffBase = project.workspace_root || director.cwd || "…";
@@ -347,7 +350,7 @@ export function DirectorRotationDialog({ project, director, onClose }: { project
       <div role="dialog" aria-modal aria-label={t("projects.rotation.title", { name })} className="flex max-h-[84vh] w-[38rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-2xl">
         <header className="flex items-center gap-2 border-b border-border px-5 py-3">
           <h2 className="min-w-0 flex-1 truncate text-sm font-semibold">{t("projects.rotation.title", { name })}</h2>
-          <span className="text-xs text-subtle">{project.presentation.display_name}</span>
+          <span className="text-xs text-subtle"><EntityMention entity={projectEntity(focusHostId(), project)}>{project.presentation.display_name}</EntityMention></span>
           <button onClick={onClose} title={t("projects.rotation.close")} className="rounded p-1 text-subtle hover:bg-surface-2 hover:text-foreground">
             <X size={15} />
           </button>

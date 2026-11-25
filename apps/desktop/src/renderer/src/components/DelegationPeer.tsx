@@ -1,7 +1,8 @@
 // The cross-host part of a delegation card (cutex peers-v2): for an outgoing mirror the remote sync
 // state in words (+ the sanitized diagnostic) and the destination's last reported state; a late
 // answer (arrived after the mirror closed here: never delivered, opened from its local artifact);
-// for an incoming one the requester's claimed caps (display only) and an undeliverable result.
+// for an incoming one the requester's claimed caps (display only) and an undeliverable result. With
+// peer-delivery-receipts-v1 (and a record that carries one) the receipt replaces the sync-state words.
 import { useState } from "react";
 import type { AskSummary } from "../../../shared/ipc";
 import { parseArtifactRef } from "../../../shared/artifactStore";
@@ -12,6 +13,8 @@ import { singleLine } from "../lib/peerText";
 import { services } from "../modules/app";
 import { Markdown } from "./Markdown";
 import { ClaimedCaps } from "./PeerParty";
+import { CrossHostReceipt } from "./CrossHostReceipt";
+import { useCrossHost } from "../lib/useCrossHost";
 
 function LateAnswer({ d, label, hostId }: { d: AskSummary; label: string; hostId: string }) {
   const { t } = useI18n();
@@ -54,13 +57,15 @@ function LateAnswer({ d, label, hostId }: { d: AskSummary; label: string; hostId
 }
 
 /** `hostId`: the host whose record `d` is (the late answer's artifact lives there). */
-export function DelegationPeerSection({ d, hostId }: { d: AskSummary; hostId: string }) {
+export function DelegationPeerSection({ d, hostId, detail = false }: { d: AskSummary; hostId: string; detail?: boolean }) {
   const { t } = useI18n();
   const peer = requesterPeer(d.requester);
   const remote = d.remote ?? null;
-  const label = remote?.label ?? peer?.label ?? "";
-  if (!remote && !peer) return null;
-  const sync = remoteSyncKey(remote);
+  const ch = useCrossHost(d, hostId);
+  const label = remote?.label ?? peer?.label ?? ch?.peer.label ?? "";
+  if (!remote && !peer && !ch) return null;
+  // The receipt says how far delivery got; the older sync words are not read as a receipt.
+  const sync = ch ? null : remoteSyncKey(remote);
   const err = singleLine(remote?.lastError);
   const remoteExec = remote?.remoteState?.execution ?? null;
   const remoteHold = remote?.remoteState?.hold?.raw ?? remote?.remoteState?.hold?.reason ?? null;
@@ -73,6 +78,7 @@ export function DelegationPeerSection({ d, hostId }: { d: AskSummary; hostId: st
   return (
     <div className="mt-2 first:mt-0" data-testid="delegation-peer">
       <div className="mb-0.5 text-caption/[inherit] text-subtle">{t("delegation.peer.remoteTitle")}</div>
+      {ch && <CrossHostReceipt ch={ch} hostId={hostId} askId={d.askId} detail={detail} />}
       {sync && (
         <div className={`text-xs ${sync === "queued" ? "text-muted" : "text-warn"}`}>
           {t(`delegation.peer.sync.${sync}` as MessageKey, { label, state: remote?.syncState ?? "" })}

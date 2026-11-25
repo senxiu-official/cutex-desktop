@@ -77,7 +77,7 @@ function ThemeCard({ theme, on, onToggle }: { theme: PortraitThemeInfo; on: bool
         <span className="line-clamp-2 text-xs leading-tight font-semibold">{theme.name}</span>
         {theme.subtitle && <span className="block truncate text-caption text-subtle">{theme.subtitle}</span>}
       </span>
-      <span aria-hidden className={`flex size-3.5 shrink-0 items-center justify-center self-start rounded border text-caption leading-none ${on ? "border-accent bg-accent text-white" : "border-border"}`}>{on ? "✓" : ""}</span>
+      <span aria-hidden className={`flex size-3.5 shrink-0 items-center justify-center self-start rounded border text-caption leading-none ${on ? "border-accent bg-accent text-on-accent" : "border-border"}`}>{on ? "✓" : ""}</span>
     </button>
   );
 }

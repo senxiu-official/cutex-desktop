@@ -60,7 +60,7 @@ export interface FastModeControl {
  * chip shows "—" instead of a loading "…" and the panel says to start the runtime first.
  * `effort` null: no reliable level — 「—」 with 未上报 / 不支持 on hover (`none`), never 「默认」 (owner 2026-11-20).
  */
-export function EffortPicker({ effort, efforts, onChange, fast, offline, empty, onOpen, claude = false, none = null, skipped = [] }: { effort: string | null; efforts: string[]; onChange(e: string): void; fast?: FastModeControl; offline?: string; /** Why `efforts` is empty (shown instead of the track). */ empty?: string; onOpen?(): void; /** Claude runtime: its "none" means Claude Code's own default, not a level it names (shown as 「—」). */ claude?: boolean; /** Why `effort` is null: 未上报 (default) / 不支持. */ none?: EffortNone | null; /** Saved choices the host skipped as unsupported by the model. */ skipped?: readonly SkippedChoice[] }) {
+export function EffortPicker({ effort, efforts, onChange, fast, offline, empty, onOpen, claude = false, none = null, skipped = [], nextTurn }: { effort: string | null; efforts: string[]; onChange(e: string): void; fast?: FastModeControl; offline?: string; /** 「强度下一轮生效」: a Claude agent's running turn keeps its effort (lib/effortNextTurn). */ nextTurn?: string; /** Why `efforts` is empty (shown instead of the track). */ empty?: string; onOpen?(): void; /** Claude runtime: its "none" means Claude Code's own default, not a level it names (shown as 「—」). */ claude?: boolean; /** Why `effort` is null: 未上报 (default) / 不支持. */ none?: EffortNone | null; /** Saved choices the host skipped as unsupported by the model. */ skipped?: readonly SkippedChoice[] }) {
   const { t } = useI18n();
   // An explicit level only: Claude's "none" is no level.
   const level = effort && !(claude && effort === "none") ? effort : null;
@@ -79,7 +79,7 @@ export function EffortPicker({ effort, efforts, onChange, fast, offline, empty, 
       width="w-80"
       onOpen={onOpen}
       trigger={
-        <span className="trim-cap inline-flex items-center gap-0.5" title={[fast?.on ? t("composer.fast.on") : null, tip].filter(Boolean).join("\n") || undefined} data-effort-none={level ? undefined : (offline ? "offline" : (none ?? "unreported"))}>
+        <span className="trim-cap inline-flex items-center gap-0.5" title={[fast?.on ? t("composer.fast.on") : null, tip, nextTurn].filter(Boolean).join("\n") || undefined} data-effort-none={level ? undefined : (offline ? "offline" : (none ?? "unreported"))}>
           {fast?.on && <Zap size={12} className="shrink-0 fill-current text-warn" aria-label={t("composer.fast.on")} />}
           {level ? label(level) : "—"}
         </span>
@@ -98,6 +98,7 @@ export function EffortPicker({ effort, efforts, onChange, fast, offline, empty, 
             {level && label(level) !== level && <span className="ml-1.5 font-mono text-xs text-subtle">{level}</span>}
           </div>
           {tip && <p className="whitespace-pre-line text-xs text-subtle" data-effort-tip="">{tip}</p>}
+          {nextTurn && !offline && <p className="text-xs text-warn-text" data-effort-next-turn="">{nextTurn}</p>}
           {efforts.length > 0 ? (
             <>
               <div className="flex justify-between text-xs text-subtle">

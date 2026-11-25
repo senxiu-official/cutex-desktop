@@ -5,11 +5,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useArchivedAgents } from "../../lib/useArchivedAgents";
 import { displayWidth, isBadgeLabelError, projectBadgeWidth } from "../../lib/badgeWidth";
 import { BadgeTextInput } from "../../components/BadgeTextInput";
-import { Archive, ArrowRightLeft, Crown, FolderOpen, Pencil, Plus, Shield, StickyNote, UserMinus, Users, UserX } from "lucide-react";
+import { Archive, ArrowRightLeft, ChevronDown, Crown, FolderOpen, Pencil, Plus, Shield, StickyNote, UserMinus, Users, UserX } from "lucide-react";
 import type { ProjectSummary } from "@cutex-desktop/protocol";
 import type { ProjectMemoryView } from "../../../../shared/ipc";
 import { useI18n, type MessageKey } from "../../i18n";
-import { confirmDialog, type MenuEntry } from "../../lib/contextMenu";
+import { confirmDialog, openMenuFrom, type MenuEntry } from "../../lib/contextMenu";
 import { shortenHome } from "../../lib/workspace";
 import { onlineCount } from "../../lib/sidebar";
 import { useSidebarModel } from "../../lib/sidebarView";
@@ -27,10 +27,9 @@ import { DelegationList } from "../../components/DelegationList";
 import { ProjectMemoryList } from "../../components/ProjectMemory";
 import { PROJECT_MEMORY_FEATURE } from "../../../../shared/projectMemory";
 import { ServiceLine } from "../../components/ServiceLine";
-import { PageBody, SubNav, SUBNAV_ITEM, SUBNAV_OFF, SUBNAV_ON } from "../../components/Page";
-import { Button, FormFields, SettingRow, SettingsGroup, Section, Select, TextInput } from "../../components/settings/Form";
+import { PageBody } from "../../components/Page";
+import { Button, FormFields, ScopeBaseline, SettingRow, SettingsGroup, Section, Select, TextInput } from "../../components/settings/Form";
 import { ProjectColorPicker } from "../../components/ProjectColorPicker";
-import { ProjectBadge } from "../../components/ProjectBadge";
 import { ProjectIconPicker } from "../../components/ProjectIconPicker";
 import { projectIcon } from "../../lib/projectIcons";
 import { autoBadge, CREATE_ROOT_FEATURE, createProject, independentAgents, OPTIONAL_DIRECTOR_FEATURE, ProjectDirectoryError, slugifyProjectId } from "../../lib/projectCreate";
@@ -47,9 +46,7 @@ import { HostPicker } from "../../components/HostPicker";
 import { TargetHostContext, useTargetApi, useTargetFeatures, useTargetHostId, useTargetIsFocus, useTargetIsRemote, useTargetSidebar } from "../../lib/targetHost";
 import { rememberCreateHost, useCreateHost, type CreateHost } from "../../lib/useCreateHost";
 import { hostKey } from "../../lib/hostKeys";
-import type { HostLook } from "../../lib/hostScope";
 import { useHostData, useHostScope } from "../../lib/useHostScope";
-import { HostMark } from "../../components/HostMark";
 import { loadProjectRotation, useProjectRotation } from "./rotationStore";
 import { useUiPrefs } from "../../lib/prefs";
 import { editProjectRemark } from "../../lib/projectMenus";
@@ -58,46 +55,19 @@ import { isOwnerFeatures } from "../../../../shared/users";
 import type { AgentRow } from "../../lib/sidebar";
 import { operatorIds, operatorSupported, setProjectOperator } from "../../lib/projectOperators";
 import { captureHostAction } from "../../lib/hostSwitch";
+import { EntityMention } from "../../components/EntityIcon";
+import { tNodes } from "../../lib/textNodes";
+import { AllProjects } from "./AllProjects";
+import { ProjectRail } from "./ProjectRail";
+import { splitProjectTabs } from "./projectTable";
+import { noteProjectOpened } from "./recentProjects";
+import { useProjectFacts, type HostProjectRef } from "./useProjectFacts";
 
 /** Pseudo project id for the "new project" form. */
 const NEW = "__new__";
 
 function errorText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
-}
-
-/** A project of one host of the scope (the list merges every host's; multi-host P1). */
-interface HostProject {
-  hostId: string;
-  project: ProjectSummary;
-}
-
-/** `selected`: hostKey(host, id) of the shown project, or NEW. `mark`: a host's mark (null: none, scope.showHostMarks). */
-function ProjectList({ projects, selected, onSelect, mark }: { projects: HostProject[]; selected: string | null; onSelect(id: string, hostId: string): void; mark(hostId: string): HostLook | null }) {
-  const { t } = useI18n();
-  const icons = useProjectIcons();
-  return (
-    <SubNav>
-      <button onClick={() => onSelect(NEW, "")} className={`press mb-1 ${SUBNAV_ITEM} ${selected === NEW ? SUBNAV_ON : SUBNAV_OFF}`}>
-        <Plus size={15} className="mx-0.5 text-subtle" />
-        {t("projects.new")}
-      </button>
-      {projects.map(({ hostId, project: p }) => (
-        <button
-          key={hostKey(hostId, p.project_id)}
-          onClick={() => onSelect(p.project_id, hostId)}
-          className={`press ${SUBNAV_ITEM} ${selected === hostKey(hostId, p.project_id) ? SUBNAV_ON : SUBNAV_OFF}`}
-        >
-          <ProjectBadge icon={projectIcon(icons, hostId, p.project_id)} badge={p.presentation.badge_label || p.presentation.display_name.slice(0, 1)} color={p.presentation.color} size="lg" />
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-ui/[inherit] font-medium">{p.presentation.display_name}</span>
-            <span className="block truncate text-caption/[inherit] text-subtle">{t("projects.members", { n: p.active_member_count })}</span>
-          </span>
-          {mark(hostId) && <HostMark host={mark(hostId)!} dotOnly className="shrink-0" />}
-        </button>
-      ))}
-    </SubNav>
-  );
 }
 
 /** Director choice in the 新建 form: none, a new agent (opens 新建智能体 next), or an existing agent id. */
@@ -141,7 +111,7 @@ function NewProjectForm({ target }: { target: CreateHost }) {
   const [partial, setPartial] = useState<string | null>(null);
   const pickBlocked = useFolderPickBlocked();
   // Only agents outside every project can direct one (cutex: director_already_has_active_project).
-  const agents = independentAgents(sidebar);
+  const agents = independentAgents(sidebar).map((a) => ({ ...a, entity: { kind: "agent" as const, id: a.value, name: a.label } }));
   const badgeText = badge.trim() || autoBadge(name, projectBadgeWidth(features));
   const newDirector = optional && director === DIRECTOR_NEW;
   const ready = online && !!name.trim() && !busy && !badgeComposing && displayWidth(badge.trim()) <= projectBadgeWidth(features) && (optional || !!director);
@@ -580,7 +550,7 @@ function ProjectDetail({ project, tab, rotate, pick }: { project: ProjectSummary
       {rotationRunning && rotation && !rotating && (
         <div className="mb-3 flex items-center gap-2 rounded-lg border border-accent/30 bg-accent/5 px-3 py-2 text-xs">
           <ArrowRightLeft size={13} className="shrink-0 text-accent" />
-          <span className="min-w-0 flex-1 truncate">{t("projects.rotation.banner", { from: rotation.predecessor.name, to: rotation.successorSpec.name, state: t(`projects.rotation.state.${rotation.state}` as MessageKey) })}</span>
+          <span className="min-w-0 flex-1 truncate">{tNodes(t, "projects.rotation.banner", { from: <EntityMention entity={{ kind: "agent", id: rotation.predecessor.cutexSessionId, name: rotation.predecessor.name }}>{rotation.predecessor.name}</EntityMention>, to: rotation.successorSpec.name, state: t(`projects.rotation.state.${rotation.state}` as MessageKey) })}</span>
           <button onClick={() => setRotating(true)} className="press shrink-0 rounded-sm text-accent hover:underline">
             {t("projects.rotation.view")}
           </button>
@@ -588,13 +558,7 @@ function ProjectDetail({ project, tab, rotate, pick }: { project: ProjectSummary
       )}
       {rotating && <DirectorRotationDialog project={project} director={directorSession} onClose={closeRotation} />}
 
-      <nav className="mb-5 flex gap-1 overflow-x-auto border-b border-border text-sm">
-        {tabs.map(({ tab: key, titleKey }) => (
-          <button key={key} onClick={() => setTab(key)} className={`press -mb-px shrink-0 border-b-2 px-3 py-1.5 whitespace-nowrap ${active === key ? "border-accent text-foreground" : "border-transparent text-muted hover:text-foreground"}`}>
-            {t(titleKey)}
-          </button>
-        ))}
-      </nav>
+      <ProjectTabRow tabs={tabs} active={active} onTab={setTab} />
       {active === "overview" && (
         <>
       {/* 本机备注 (device-local prefs; edited here or from the sidebar project menu). */}
@@ -745,7 +709,7 @@ function ProjectDetail({ project, tab, rotate, pick }: { project: ProjectSummary
         </>
       )}
       {active === "settings" && (
-        <>
+        <ScopeBaseline source="host">
       <Section
         title={t("projects.basics")}
         actions={
@@ -827,13 +791,70 @@ function ProjectDetail({ project, tab, rotate, pick }: { project: ProjectSummary
           </button>
         </div>
       </section>
-        </>
+        </ScopeBaseline>
       )}
     </PageBody>
   );
 }
 
-/** The 项目 page (`projects.page`); params: `project` (an id, or "__new__" for the 新建 form), `tab`. */
+/**
+ * The tab row: the main tabs (projectTable MAIN_PROJECT_TABS) in a row that wraps rather than scrolls, every other tab
+ * (modules) under 「更多」, which names the tab shown when it is one of them (owner 2026-11-25: 「委扌」 cut mid-word).
+ */
+function ProjectTabRow({ tabs, active, onTab }: { tabs: ReturnType<typeof useProjectTabs>; active: string; onTab(tab: string): void }) {
+  const { t } = useI18n();
+  const { main, more } = splitProjectTabs(tabs);
+  const extra = more.find((x) => x.tab === active);
+  const tabClass = (on: boolean) => `press -mb-px shrink-0 border-b-2 px-3 py-1.5 whitespace-nowrap ${on ? "border-accent text-foreground" : "border-transparent text-muted hover:text-foreground"}`;
+  return (
+    <nav className="mb-5 flex flex-wrap gap-x-1 border-b border-border text-sm" data-project-tabs="">
+      {main.map(({ tab: key, titleKey }) => (
+        <button key={key} onClick={() => onTab(key)} className={tabClass(active === key)} data-project-tab={key}>
+          {t(titleKey)}
+        </button>
+      ))}
+      {more.length > 0 && (
+        <button
+          type="button"
+          aria-haspopup="menu"
+          data-project-tab-more=""
+          className={`${tabClass(!!extra)} inline-flex items-center gap-0.5`}
+          onClick={(e) => openMenuFrom(e.currentTarget, more.map(({ tab: key, titleKey }) => ({ label: t(titleKey), hint: key === active ? "✓" : undefined, onSelect: () => onTab(key) })), { toggle: true })}
+        >
+          {extra ? t(extra.titleKey) : t("projects.tab.more")}
+          <ChevronDown size={13} className="text-subtle" />
+        </button>
+      )}
+    </nav>
+  );
+}
+
+/** Every project of the scope's hosts (switcher order), then the param's host when it is outside the scope; archived too. */
+function useScopeProjects(hostId: string): { projects: HostProjectRef[]; known: boolean; loading: boolean } {
+  const scope = useHostScope();
+  const hostsState = useApp((s) => s.hosts);
+  const sidebar = useApp((s) => s.sidebar);
+  const byHost = useApp((s) => s.byHost);
+  const features = useApp((s) => s.features);
+  return useMemo(() => {
+    const source = { hosts: hostsState, sidebar, byHost, features };
+    const ids = scope.hostsInScope.map((h) => h.id);
+    if (!ids.includes(hostId)) ids.push(hostId);
+    const snapshots = ids.map((id) => [id, sidebarOf(source, id)] as const);
+    const projects = snapshots.flatMap(([id, snap]) => [
+      ...(snap?.projects?.projects ?? []).map((project) => ({ hostId: id, project, archived: false })),
+      ...(snap?.projects?.archived_projects ?? []).map((project) => ({ hostId: id, project, archived: true })),
+    ]);
+    // Loading: a connected host of the view has no snapshot yet (not 「不提供」 while it is still on its way).
+    const loading = snapshots.some(([id, snap]) => !snap && (scope.host(id)?.connected ?? id === hostId));
+    return { projects, known: snapshots.some(([, snap]) => !!snap?.projects), loading };
+  }, [scope.hostsInScope, scope.host, hostId, hostsState, sidebar, byHost, features]);
+}
+
+/**
+ * The 项目 page (`projects.page`). No `project` (and no `tab`): 「全部项目」, the table of every project of the view
+ * (owner 2026-11-25, option B). `project`: an id, or "__new__" for the 新建 form; `tab`; `host`: the project's host.
+ */
 export function ProjectsPage({ params }: { params: PageParams }) {
   const projectId = params.project ?? null;
   const tab = params.tab ?? "overview";
@@ -841,30 +862,26 @@ export function ProjectsPage({ params }: { params: PageParams }) {
   const scope = useHostScope();
   const hostId = params.host ?? scope.focus;
   useArchivedAgents(hostId);
-  const hostsState = useApp((s) => s.hosts);
-  const sidebar = useApp((s) => s.sidebar);
-  const byHost = useApp((s) => s.byHost);
-  const features = useApp((s) => s.features);
-  // Every host of the scope (switcher order), then the param's host when it is outside the scope.
-  const { projects, known } = useMemo(() => {
-    const source = { hosts: hostsState, sidebar, byHost, features };
-    const ids = scope.hostsInScope.map((h) => h.id);
-    if (!ids.includes(hostId)) ids.push(hostId);
-    const snapshots = ids.map((id) => [id, sidebarOf(source, id)] as const);
-    return {
-      projects: snapshots.flatMap(([id, snap]) => (snap?.projects?.projects ?? []).map((project) => ({ hostId: id, project }))),
-      known: snapshots.some(([, snap]) => !!snap?.projects),
-    };
-  }, [scope.hostsInScope, hostId, hostsState, sidebar, byHost, features]);
+  const { projects, known, loading } = useScopeProjects(hostId);
+  const facts = useProjectFacts(projects);
   const creating = projectId === NEW;
-  // A host page (`params.host`) shows that host's projects only: no first project of another host.
+  const live = projects.filter((p) => !p.archived);
+  // `project` names one; an older link with only a `tab` (组合框 「项目记忆」) opens the first project of the host.
   const selected = creating
     ? null
-    : (projects.find((p) => p.hostId === hostId && p.project.project_id === projectId) ?? projects.find((p) => p.hostId === hostId) ?? (params.host ? null : projects[0]) ?? null);
-  const mark = (id: string) => (scope.showHostMarks ? scope.host(id) : null);
+    : projectId
+      ? (live.find((p) => p.hostId === hostId && p.project.project_id === projectId) ?? null)
+      : params.tab
+        ? (live.find((p) => p.hostId === hostId) ?? null)
+        : null;
+  const selectedKey = selected ? hostKey(selected.hostId, selected.project.project_id) : null;
+  useEffect(() => {
+    if (selectedKey) noteProjectOpened(selectedKey);
+  }, [selectedKey]);
+  const newProject = () => openProject(NEW);
   return (
     <main className="flex min-w-0 flex-1">
-      <ProjectList projects={projects} selected={creating ? NEW : selected ? hostKey(selected.hostId, selected.project.project_id) : null} onSelect={(id, host) => openProject(id, undefined, host || undefined)} mark={mark} />
+      <ProjectRail facts={facts} selected={creating ? "new" : (selectedKey ?? "all")} onAll={() => openProject(null)} onNew={newProject} onOpen={(p) => openProject(p.id, undefined, p.hostId)} />
       {creating ? (
         <NewProject />
       ) : selected ? (
@@ -877,8 +894,12 @@ export function ProjectsPage({ params }: { params: PageParams }) {
             pick={params.pick === "add" || params.pick === "director" ? params.pick : null}
           />
         </TargetHostContext.Provider>
+      ) : !known && loading ? (
+        <div className="flex flex-1 items-center justify-center text-sm text-subtle" role="status" data-projects-loading="">{t("projects.loading")}</div>
+      ) : !known ? (
+        <div className="flex flex-1 items-center justify-center text-sm text-subtle">{t("projects.unavailable")}</div>
       ) : (
-        <div className="flex flex-1 items-center justify-center text-sm text-subtle">{t(known ? "projects.none" : "projects.unavailable")}</div>
+        <AllProjects facts={facts} newProject={newProject} />
       )}
     </main>
   );

@@ -5,8 +5,10 @@
 // kept by lib/delegationStore. Wire names (askId, AskSummary, …) are kept as cutex sends them.
 import type { AskAttemptView, AskClosed, AskDetail, AskExecution, AskHold, AskLateAnswer, AskQuestion, AskRemote, AskRequester, AskReview, AskSummary, ContinuationWait } from "../../../shared/ipc";
 import { askReviewFields } from "../../../shared/delegationReviews";
+import { asCrossHost } from "../../../shared/crossHost";
 import { isSessionRef, parseIdRef, sameId } from "./shortIds";
 import { resultDelegationId, toolArgs, toolResult } from "./taskRows";
+import { isNormalAnswer, parseTerminalNotice, type TerminalNotice } from "./delegationTerminal";
 import type { ExternalMessage, RawItem, TimelineEntry, TimelineState, TurnView } from "./timeline";
 
 export type { AskSummary } from "../../../shared/ipc";
@@ -43,11 +45,16 @@ export function peerPartyText(name: string | null | undefined, remoteId: string 
   return `${who} @ ${label}`;
 }
 
-/** The far end of a delegation when it lives on another host: the requester (incoming) or the target (outgoing mirror). */
-export function peerSideOf(d: Pick<AskSummary, "requester" | "remote" | "target" | "targetName">): { side: "requester" | "target"; peerId: string; label: string; name: string } | null {
+/**
+ * The far end of a delegation when it lives on another host: the requester (incoming) or the target (outgoing mirror).
+ * `instanceId`: the peer's cutex instance id from the record's receipt (peer-delivery-receipts-v1), null on older
+ * records — PeerParty then keeps the record's label, as before.
+ */
+export function peerSideOf(d: Pick<AskSummary, "requester" | "remote" | "target" | "targetName"> & { crossHost?: unknown }): { side: "requester" | "target"; peerId: string; label: string; name: string; instanceId: string | null } | null {
+  const instanceId = asCrossHost(d.crossHost)?.peer.instanceId ?? null;
   const r = requesterPeer(d.requester);
-  if (r) return { side: "requester", peerId: r.peerId, label: r.label, name: peerPartyText(r.name ?? null, r.cutexSessionId, r.label) };
-  if (d.remote) return { side: "target", peerId: d.remote.peerId, label: d.remote.label, name: peerPartyText(d.remote.targetName || d.targetName || null, d.target, d.remote.label) };
+  if (r) return { side: "requester", peerId: r.peerId, label: r.label, name: peerPartyText(r.name ?? null, r.cutexSessionId, r.label), instanceId };
+  if (d.remote) return { side: "target", peerId: d.remote.peerId, label: d.remote.label, name: peerPartyText(d.remote.targetName || d.targetName || null, d.target, d.remote.label), instanceId };
   return null;
 }
 
@@ -404,7 +411,7 @@ export function delegationStatus(d: StatusInput, ctx: DelegationContext = {}): D
     case "queued":
       return holdStatus(d.hold, d.queuePosition);
     case "admitted":
-      return d.hold ? holdStatus(d.hold, d.queuePosition) : { key: "starting", tone: "muted", glyph: "hollow" };
+      return d.hold ? holdStatus(d.hold, d.queuePosition) : { key: "starting", tone: "muted", glyph: "hollow", hint: { key: "delegation.statusHint.starting" } };
     case "running":
       if (d.hold?.reason === "waitingForInput") return { key: "question", tone: "warn", glyph: "pulse" };
       // delegation_await: the handler ended its turn and waits for its jobs or the timeout. Nothing runs, online or
@@ -466,6 +473,13 @@ export type AttemptStateKey = (typeof ATTEMPT_STATES)[number] | "unknown" | "unc
 export function attemptStateKey(state: string | null | undefined, delegationClosed = false): AttemptStateKey {
   const key = (ATTEMPT_STATES as readonly string[]).includes(state ?? "") ? (state as AttemptStateKey) : "unknown";
   return delegationClosed && (key === "running" || key === "admitted" || key === "submitting") ? "unconfirmed" : key;
+}
+
+/** An attempt row word. The newest ended turn of a delegation whose auto-continue expired reads 「本回合已结束，自动继续已到期」,
+ *  not 「等待继续」: it will not continue by itself (owner 2026-11-25, Hostb #47c47e). */
+export function attemptRowKey(state: string | null | undefined, delegationClosed: boolean, newest: boolean, limited: boolean): AttemptStateKey | "limited" {
+  const key = attemptStateKey(state, delegationClosed);
+  return newest && limited && key === "yielded" ? "limited" : key;
 }
 
 // ---------- buckets ----------
@@ -673,7 +687,8 @@ export function continuationWaitOf(raw: unknown): ContinuationWait | null {
   const w = obj(raw);
   const state = str(w?.state), kind = str(w?.kind);
   if (!w || !state || !kind) return null;
-  return { state, kind, since: str(w.since), nextWakeAt: str(w.nextWakeAt) };
+  const blockedReason = str(w.blockedReason);
+  return { state, kind, since: str(w.since), nextWakeAt: str(w.nextWakeAt), ...(blockedReason ? { blockedReason } : {}) };
 }
 
 /** A stored ask record (`cutex/ask/created`, `GET /v2/asks/{id}`) as a list row. */
@@ -712,6 +727,8 @@ export function summaryFromRecord(raw: unknown): AskSummary | null {
     followUpOf: str(r.followUpOf),
     ...(num(r.hops) !== null ? { hops: num(r.hops)! } : {}),
     ...(obj(r.remote) ? { remote: obj(r.remote) as unknown as AskRemote } : {}),
+    // peer-delivery-receipts-v1 (read defensively; shown only on hosts with the capability).
+    ...(asCrossHost(r.crossHost) ? { crossHost: asCrossHost(r.crossHost) } : {}),
     ...(obj(r.lateAnswer) ? { lateAnswer: obj(r.lateAnswer) as AskLateAnswer } : {}),
     ...(r.resultUndeliverable === true ? { resultUndeliverable: true } : {}),
   };
@@ -730,6 +747,9 @@ export function applyAskEvent(records: DelegationRecords, method: string, rawPar
   const askId = str(p.askId);
   const current = askId ? records.byId[askId] : undefined;
   const put = (next: AskSummary): Partial<DelegationRecords> => ({ byId: { ...records.byId, [next.askId]: next } });
+  // r295 Z3: `activityLink` describes the row's revision; events never carry it, so a change drops it and the surfaces
+  // keep their old words until the refresh that follows every event brings the current one.
+  const unlinked = (row: AskSummary): AskSummary => (row.activityLink === undefined ? row : withoutLink(row));
   switch (method) {
     case "cutex/ask/created": {
       const s = summaryFromRecord(p.ask);
@@ -738,19 +758,23 @@ export function applyAskEvent(records: DelegationRecords, method: string, rawPar
       return known && known.revision >= s.revision ? null : put(known ? { ...known, ...s } : s);
     }
     case "cutex/ask/stateChanged": {
-      // The `targetReverted` variant only says the target's history moved: the refresh tells.
-      if (!current || !("execution" in p)) return null;
+      if (!current) return null;
       const revision = num(p.revision);
+      // The `targetReverted` variant only says the target's history moved: the refresh tells. Its link is already stale
+      // (review 2026-11-25 P3): dropped now, the revision left to the refresh.
+      if (!("execution" in p)) return current.activityLink !== undefined && (revision === null || revision > current.revision) ? put(unlinked(current)) : null;
       if (revision !== null && revision <= current.revision) return null;
       const attempt = obj(p.attempt) as Partial<AskAttemptView> | null;
       return put({
-        ...current,
+        ...unlinked(current),
         execution: (str(p.execution) as AskExecution | null) ?? current.execution,
         hold: (obj(p.hold) as AskHold | null) ?? null,
         review: (str(p.review) as AskReview | null) ?? null,
         ...askReviewFields(p),
         // r290 P14: stateChanged carries the same wait projection (absent on older hosts: unchanged).
         ...("continuationWait" in p ? { continuationWait: continuationWaitOf(p.continuationWait) } : {}),
+        // A newer revision's receipt (peer-delivery-receipts-v1), when the event carries one.
+        ...(asCrossHost(p.crossHost) ? { crossHost: asCrossHost(p.crossHost) } : {}),
         revision: revision ?? current.revision,
         ...(attempt ? { attempt: { ...(current.attempt ?? { n: attempt.n ?? current.attempts }), ...attempt } as AskAttemptView } : {}),
       });
@@ -760,7 +784,7 @@ export function applyAskEvent(records: DelegationRecords, method: string, rawPar
       const preview = str(p.preview);
       const answerId = str(p.answerId);
       if (answerId === current.answerId && (!preview || preview === current.answerPreview)) return null;
-      return put({ ...current, answerId: answerId ?? current.answerId, answerPreview: preview ?? current.answerPreview ?? null });
+      return put({ ...unlinked(current), answerId: answerId ?? current.answerId, answerPreview: preview ?? current.answerPreview ?? null });
     }
     case "cutex/ask/closed": {
       if (!current) return null;
@@ -768,7 +792,7 @@ export function applyAskEvent(records: DelegationRecords, method: string, rawPar
       // cutex publishes `stateChanged` and `closed` for one mutation with the same revision
       // (asks/store.rs update_ask): the second still closes a row the first left open.
       if (revision !== null && (revision < current.revision || (revision === current.revision && current.closed))) return null;
-      return put({ ...current, closed: (str(p.outcome) as AskClosed | null) ?? current.closed ?? "completed", closedAt: current.closedAt ?? new Date().toISOString(), revision: revision ?? current.revision });
+      return put({ ...unlinked(current), closed: (str(p.outcome) as AskClosed | null) ?? current.closed ?? "completed", closedAt: current.closedAt ?? new Date().toISOString(), revision: revision ?? current.revision });
     }
     case "cutex/ask/progress": {
       const text = str(p.text);
@@ -791,6 +815,12 @@ export function applyAskEvent(records: DelegationRecords, method: string, rawPar
     default:
       return null;
   }
+}
+
+/** The row without its `activityLink` (r295 Z3): what a newer state than the link's makes of it. */
+export function withoutLink(row: AskSummary): AskSummary {
+  const { activityLink: _stale, ...rest } = row;
+  return rest;
 }
 
 /** Merge a fresh list (open refresh, per-agent fetch) into the records: newer revisions win. */
@@ -925,6 +955,12 @@ export function inferDelegations(entries: Iterable<TimelineEntry>): Map<string, 
       for (const x of Array.isArray(r.results) ? r.results : []) {
         const item = obj(x);
         const id = resultDelegationId(item);
+        if (item && id && item.kind === "state") {
+          // r295: a State item with its terminal notice (a closure / failure; no answer).
+          const notice = parseTerminalNotice(item.notice);
+          if (notice) merge(id, endedFrom(notice));
+          continue;
+        }
         if (!item || !id || item.kind !== "answer") continue;
         const answer = str(item.answer);
         merge(id, {
@@ -936,6 +972,13 @@ export function inferDelegations(entries: Iterable<TimelineEntry>): Map<string, 
     } else if (tool === "delegation_read" && r && "waiting" in r) {
       const id = resultDelegationId(r);
       if (id) merge(id, { canResume: obj(r.waiting)?.can_resume === true });
+    } else if (tool === "delegation_read" && r && (r.kind === "state" || obj(r.delegation_state))) {
+      // r295: a state record with no answer (closed / failed), or an answer read that names the delegation's state.
+      const id = resultDelegationId(r);
+      const state = r.kind === "state" ? r : obj(r.delegation_state)!;
+      const execution = str(state.execution);
+      const closed = str(state.closed);
+      if (id && (execution || closed)) merge(id, { ...(execution ? { execution: execution as AskExecution } : {}), ...(closed ? { closed: closed as AskClosed } : {}) });
     } else if (CLOSE_TOOLS.has(tool) && r && r.ok !== false && obj(e.item.result)?.isError !== true) {
       const a = toolArgs(e.item);
       const id = str(a.delegation) ?? str(a.delegation_id) ?? str(a.ask) ?? str(a.ask_id) ?? resultDelegationId(r);
@@ -1004,6 +1047,8 @@ export function delegationAskRow(message: ExternalMessage): DelegationAskRow | n
 
 /** One item of an ANSWER / QUESTION batch (`cutex.delegation-results.v1`). */
 export interface DelegationResultItem {
+  /** r295: a State item's own terminal notice (authoritative for this item); null on older hosts / other items. */
+  notice: TerminalNotice | null;
   kind: "answer" | "question" | "state";
   askId: string;
   title: string;
@@ -1018,13 +1063,23 @@ export interface DelegationResultItem {
 export function delegationResultItems(message: ExternalMessage): DelegationResultItem[] {
   if (message.schema !== "cutex.delegation-results.v1") return [];
   const items = Array.isArray(message.data.items) ? message.data.items : [];
+  // r295: one notice (askId, ref) once per batch; a failure and the closure after it are distinct refs and both stay.
+  const seen = new Set<string>();
   return items.flatMap((x): DelegationResultItem[] => {
     const i = obj(x);
     const askId = i ? str(i.askId) : null;
     if (!i || !askId) return [];
     const kind = i.kind === "question" || i.kind === "state" ? i.kind : "answer";
     const target = obj(i.target);
-    return [{ kind, askId, title: str(i.title) ?? "", targetId: str(target?.id), targetName: str(target?.name), status: str(i.status), state: str(i.state), questionId: str(i.questionId), preview: str(i.preview) }];
+    // A normal answer's closure snapshot (cutex also sends one for an accepted answer) is not an ending.
+    const parsed = kind === "state" ? parseTerminalNotice(i.notice) : null;
+    const notice = parsed && !isNormalAnswer(parsed) ? parsed : null;
+    if (notice) {
+      const once = `${askId}\u0000${notice.ref}`;
+      if (seen.has(once)) return [];
+      seen.add(once);
+    }
+    return [{ kind, askId, title: str(i.title) ?? "", targetId: str(target?.id), targetName: str(target?.name), status: str(i.status), state: str(i.state), questionId: str(i.questionId), preview: str(i.preview), notice }];
   });
 }
 
@@ -1097,4 +1152,9 @@ export function awaitingDelegation(byId: Record<string, AskSummary>, sessionId: 
     if (!best || Date.parse(d.updatedAt) > Date.parse(best.updatedAt)) best = d;
   }
   return best;
+}
+
+/** r295: what a terminal notice says about the record (its execution and closure), for a transcript-only row. */
+function endedFrom(n: TerminalNotice): Partial<AskSummary> {
+  return { ...(n.execution ? { execution: n.execution as AskExecution } : {}), ...(n.closed ? { closed: n.closed as AskClosed } : {}) };
 }

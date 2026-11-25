@@ -1,4 +1,5 @@
 import { isImeComposing } from "../lib/ime";
+import { EntitySelect } from "./EntitySelect";
 // 下线空闲的智能体 (design 031, refined owner 2026-10-25): one dialog for any scope — the entry decides the first
 // (所有项目 / a project / 独立), the dropdown changes it. cutex lists every online agent of the scope; the idle time
 // only pre-ticks, and the owner can tick any agent that is not blocked. Rows grouped by project (all projects),
@@ -17,12 +18,14 @@ import { sidebarOf, useApp } from "../store";
 import { Checkbox } from "./settings/Form";
 import { btn } from "./Button";
 import { useOwnerWindow } from "../lib/ownerContext";
+import { EntityIcon, EntityMention } from "./EntityIcon";
+import { useStaggeredCount } from "../lib/useStagger";
 
 const reasonKey = (reason: IdleReason) => `stopIdle.reason.${reason}` as MessageKey;
 /** Notes: shown as icons, not as reasons. */
 const NOTES: ReadonlySet<IdleReason> = new Set<IdleReason>(["ownerStartOnly", "ownsServices"]);
 
-function Row({ row, checked, under }: { row: IdleRow; checked: boolean; under: boolean }) {
+function Row({ row, checked, under, icon }: { row: IdleRow; checked: boolean; under: boolean; icon: boolean }) {
   const { t } = useI18n();
   const idle = row.idleSecs === null ? t("stopIdle.idleUnknown") : t("stopIdle.idleFor", { t: formatSpan(row.idleSecs) });
   const cautions = row.reasons.filter((reason) => !NOTES.has(reason));
@@ -31,6 +34,7 @@ function Row({ row, checked, under }: { row: IdleRow; checked: boolean; under: b
     <li data-testid="stop-idle-row" data-verdict={row.verdict} data-under={under ? "" : undefined}>
       <label className="flex cursor-pointer items-center gap-2 rounded-md py-1 pr-1 pl-6 hover:bg-surface-2">
         <Checkbox checked={checked} onChange={() => toggleIdleRow(row.cutexSessionId)} label={name} />
+        {icon ? <EntityIcon entity={{ kind: "agent", id: row.cutexSessionId, name }} /> : <span className="h-4 w-4 shrink-0" aria-hidden />}
         <span className={`min-w-0 truncate text-sm ${under ? "text-muted" : ""}`}>{name}</span>
         {row.reasons.includes("ownerStartOnly") && (
           <span data-stop-idle-lock="" title={t("stopIdle.reason.ownerStartOnly")} className="shrink-0 text-subtle">
@@ -60,7 +64,7 @@ function GroupBox({ rows, selected, label }: { rows: IdleRow[]; selected: Readon
       aria-checked={all ? true : n > 0 ? "mixed" : false}
       aria-label={label}
       onClick={() => setIdleTicks(rows.map((row) => row.cutexSessionId), !all)}
-      className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${n > 0 ? "border-accent bg-accent text-white" : "border-border bg-background hover:border-accent/70"}`}
+      className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${n > 0 ? "border-accent bg-accent text-on-accent" : "border-border bg-background hover:border-accent/70"}`}
     >
       {all ? <Check size={11} strokeWidth={3} /> : n > 0 ? <Minus size={11} strokeWidth={3} /> : null}
     </button>
@@ -145,23 +149,18 @@ function ScopePicker({ disabled }: { disabled: boolean }) {
   return (
     <div className="mt-3 flex items-center gap-1.5">
       <span className="w-14 shrink-0 text-xs text-muted">{t("stopIdle.scopeLabel")}</span>
-      <select
+      <EntitySelect
         value={scopeKey(scope)}
         disabled={disabled}
-        aria-label={t("stopIdle.scopeLabel")}
-        data-testid="stop-idle-scope"
-        onChange={(e) => {
-          const next = scopes.find((s) => scopeKey(s) === e.target.value);
+        label={t("stopIdle.scopeLabel")}
+        testId="stop-idle-scope"
+        onChange={(value) => {
+          const next = scopes.find((s) => scopeKey(s) === value);
           if (next) setStopIdleScope(next);
         }}
-        className="max-w-[16rem] rounded-md border border-border bg-surface px-1.5 py-0.5 text-xs"
-      >
-        {scopes.map((s) => (
-          <option key={scopeKey(s)} value={scopeKey(s)}>
-            {s.label}
-          </option>
-        ))}
-      </select>
+        className="flex w-56 max-w-[16rem] items-center justify-between gap-2 rounded-md border border-border bg-surface px-1.5 py-0.5 text-xs"
+        options={scopes.map((s) => ({ value: scopeKey(s), label: s.label, entity: s.projectId ? { kind: "project" as const, id: s.projectId, hostId: s.hostId } : null }))}
+      />
     </div>
   );
 }
@@ -183,6 +182,8 @@ function OpenStopIdleDialog() {
     win.addEventListener("keydown", onKey);
     return () => win.removeEventListener("keydown", onKey);
   }, [s.open, s.phase]);
+  // Hundreds of idle agents: avatars past the first rows mount in steps (lib/useStagger).
+  const icons = useStaggeredCount(s.rows.length);
   if (!s.open || !s.scope) return null;
   const projectName = (id: string | null) => (id ? (projects?.find((p) => p.project_id === id)?.presentation.display_name || id) : t("stopIdle.scope.independent"));
   const listed = s.rows.filter((row) => row.selectable);
@@ -193,6 +194,7 @@ function OpenStopIdleDialog() {
   const groups = byProject
     ? [...new Set(listed.map((row) => row.projectId))].sort((a, b) => order(a) - order(b)).map((id) => ({ id, rows: listed.filter((row) => row.projectId === id) }))
     : [{ id: null as string | null, rows: listed }];
+  const rowOrder = new Map(groups.flatMap((group) => group.rows).map((row, i) => [row.cutexSessionId, i]));
   const chosen = listed.filter((row) => s.selected.has(row.cutexSessionId));
   const count = chosen.length;
   const startOnly = chosen.filter((row) => row.reasons.includes("ownerStartOnly")).length;
@@ -250,6 +252,7 @@ function OpenStopIdleDialog() {
                   {byProject && (
                     <h3 className="sticky top-7 z-[1] flex items-center gap-2 bg-surface-2 px-1 py-1 text-xs font-semibold">
                       <GroupBox rows={group.rows} selected={s.selected} label={projectName(group.id)} />
+                      {group.id && s.scope && <EntityIcon entity={{ kind: "project", id: group.id, hostId: s.scope.hostId }} />}
                       <span className="min-w-0 truncate">{projectName(group.id)}</span>
                       <span className="ml-auto font-normal text-muted tabular-nums">
                         {group.rows.filter((row) => s.selected.has(row.cutexSessionId)).length} / {group.rows.length}
@@ -258,7 +261,7 @@ function OpenStopIdleDialog() {
                   )}
                   <ul>
                     {group.rows.map((row) => (
-                      <Row key={row.cutexSessionId} row={row} checked={s.selected.has(row.cutexSessionId)} under={under(row)} />
+                      <Row key={row.cutexSessionId} row={row} checked={s.selected.has(row.cutexSessionId)} under={under(row)} icon={(rowOrder.get(row.cutexSessionId) ?? 0) < icons} />
                     ))}
                   </ul>
                 </section>
@@ -272,7 +275,7 @@ function OpenStopIdleDialog() {
                   <ul className="mt-1 space-y-0.5 pl-4">
                     {blocked.map((row) => (
                       <li key={row.cutexSessionId}>
-                        {row.name ?? row.cutexSessionId}
+                        <EntityMention entity={{ kind: "agent", id: row.cutexSessionId, name: row.name ?? row.cutexSessionId }}>{row.name ?? row.cutexSessionId}</EntityMention>
                         <span className="text-subtle">
                           {byProject ? ` · ${projectName(row.projectId)}` : ""} · {blockingReasons(row).map((x) => t(reasonKey(x))).join("、")}
                         </span>
@@ -342,7 +345,7 @@ function OpenStopIdleDialog() {
                 <button
                   onClick={() => void confirmStopIdle()}
                   disabled={count === 0 || busy}
-                  className="flex items-center gap-1.5 rounded-md bg-accent px-3 py-1 text-sm text-white disabled:opacity-40"
+                  className="flex items-center gap-1.5 rounded-md bg-accent px-3 py-1 text-sm text-on-accent disabled:opacity-40"
                   data-testid="stop-idle-confirm"
                 >
                   {busy && <Loader2 size={13} className="animate-spin" />}

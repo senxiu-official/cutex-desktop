@@ -12,6 +12,7 @@ import { useFocusRequest } from "./focusRequest";
 import { returnReduce, type ReturnEvent, type ReturnPoint, type ReturnState } from "./returnPoint";
 import { LOOKUP_PAGES } from "./turnFetch";
 import { cachedReader } from "./turnRefs";
+import { inViewScope } from "./scopedAgentOpen";
 
 export interface ViewportProbe {
   sessionId: string;
@@ -167,11 +168,17 @@ function focusNow(sessionId: string, turnId: string, land?: (el: Element) => voi
   });
 }
 
-/** services.timeline.focusTurn. `back: false` = no 「回到」 point. */
+/** Another host of the view scope can be opened in place (multi-host: its agent becomes the open one). */
+const reachable = (hostId: string) => hostId === activeHost() || hostId === viewHost() || inViewScope(hostId);
+
+/**
+ * services.timeline.focusTurn. `back: false` = no 「回到」 point. A turn of another host of the view scope opens its agent
+ * there; the return point is noted before that switch, so 「回到」 leads back across hosts.
+ */
 export async function jumpToTurn(hostId: string, sessionId: string, turnId: string, opts: { back?: boolean } = {}): Promise<FocusTurnResult> {
   watch();
   const host = activeHost();
-  if (hostId !== host && hostId !== viewHost()) return { status: "host-offline" };
+  if (!reachable(hostId)) return { status: "host-offline" };
   const stale = () => activeHost() !== host;
   const point = opts.back === false ? null : capturePoint();
   const target = { sessionId, turnId };
@@ -208,7 +215,7 @@ export async function goBack(): Promise<void> {
   dispatchReturn({ type: "used" });
   useJump.setState({ miss: null });
   const p = state.point;
-  if (activeHost() !== p.hostId && viewHost() !== p.hostId) return;
+  if (!reachable(p.hostId)) return;
   settleUntil = Number.POSITIVE_INFINITY;
   try {
     const app = useApp.getState();

@@ -7,6 +7,9 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PanConnection, PanDownload, PanFile, PanResult } from "../src/shared/baiduPan";
 
+// The store double is too thin for the avatar stack (agent looks, Profile pictures): icons are stubbed.
+vi.mock("../src/renderer/src/components/EntityIcon", () => import("./helpers/entityIconStub"));
+
 const f = vi.hoisted(() => ({ pick: vi.fn(async () => "D:\\Picked"), openExternal: vi.fn(), reveal: vi.fn(), hosts: ["local"] as string[] }));
 vi.mock("../src/renderer/src/bridge", () => ({ api: { openExternal: f.openExternal, revealPath: f.reveal }, apiFor: () => ({}), bridge: { on: () => () => {} }, cleanIpcMessage: (m: string) => m }));
 vi.mock("../src/renderer/src/lib/remoteMode", () => ({ pickDirectory: f.pick }));

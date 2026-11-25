@@ -57,3 +57,11 @@ it("forgets a host on access change or removal, and writes a busy host at most e
   await flush();
   expect((await cachedSidebar("remote", owner("REMOTE")))?.active.map((r) => r.cutexSessionId)).toEqual(["3"]);
 });
+
+it("never keeps Claude diagnostics (r295: facts of a live connection, not across a restart)", async () => {
+  await cachedSidebar("remote", owner("REMOTE"));
+  const withDiag = { ...row("a"), runtime: { status: "online", runtimeGeneration: 1, claudeDiagnostics: { warnings: ["mcpConnectionFailed"], activeHooks: [] } } } as unknown as SidebarSnapshot["active"][number];
+  saveSidebar("remote", { ...list([]), active: [withDiag] }); await flush();
+  const kept = await cachedSidebar("remote", owner("REMOTE"));
+  expect(kept?.active[0]!.runtime).toEqual({ status: "online", runtimeGeneration: 1 });
+});

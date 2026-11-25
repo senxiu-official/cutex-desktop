@@ -7,7 +7,7 @@ import type { ApprovalsPage, OwnerNotificationList, SafetyChecksPage } from "@cu
 export type { PageQuery, OwnerNotificationsPageQuery, SafetyChecksPageQuery } from "./pagination";
 export type { ApprovalsPage, OwnerNotificationList, SafetyChecksPage } from "@cutex-desktop/protocol";
 import { delegationControlRoute, delegationId, requireDelegationCapability } from "./delegation";
-import { DELEGATION_CAPABILITIES, type DelegationTreeQuery, type DelegationTreePage, type DelegationAttempts, type DelegationPolicy, type DelegationGrants, type DelegationApproval, type ProjectRunControl, type DelegationControlRequest, type DelegationOperationResult, type DelegationOperationLookup, type PermanentRetirementReviewRequest, type PermanentRetirementReview, type PermanentRetirementRequest, type AgentArchiveReceipt } from "@cutex-desktop/protocol";
+import { DELEGATION_CAPABILITIES, type DelegationTreeQuery, type DelegationTreePage, type DelegationAttempts, type DelegationPolicy, type DelegationGrants, type DelegationApproval, type DelegationContinuationApproval, type ProjectRunControl, type DelegationControlRequest, type DelegationOperationResult, type DelegationOperationLookup, type PermanentRetirementReviewRequest, type PermanentRetirementReview, type PermanentRetirementRequest, type AgentArchiveReceipt } from "@cutex-desktop/protocol";
 import { INPUT_HOLD, INPUT_DISMISS, INPUT_DISPOSE, INPUT_GET, INPUT_GET_MAX_IDS, INPUT_LEASE_RELEASE, INPUT_LIST, INPUT_RETRY, INPUT_INTERRUPT_SEND } from "@cutex-desktop/protocol";
 import type {
   InputHoldParams,
@@ -49,6 +49,7 @@ import type {
   SessionBootstrap,
   BusMessagesDirection,
   BusMessagesPage,
+  InteractionHistoryPage,
   SessionHistory,
   SessionLifecycle,
   SessionList,
@@ -84,6 +85,9 @@ function isMissingRoute(error: unknown, statuses: readonly number[] = [404, 405]
 }
 
 /** `GET /v2/asks` filter. Values over 200 chars are dropped; `limit` is clamped to 1..1000. */
+/** r296 short-id lookup input: hex 6–32 (optionally …/... for the end only) or a full canonical ask id. */
+const SHORT_ASK_ID = /^(?:(?:…|\.\.\.)?[0-9a-fA-F]{6,32}|ask-[0-9a-fA-F]{32})$/;
+
 export interface AskQuery {
   project?: string;
   /** A cutex session id or "owner". */
@@ -517,6 +521,18 @@ export class CutexClient {
     return this.request("GET", `/v2/sessions/${encodeURIComponent(id)}/bus-messages`, { query });
   }
 
+  /**
+   * session-interaction-history-v1: one page of the session's saved answered questions / approvals, newest first.
+   * `turnIds` (1-50) limits it to those native turns (sent as a JSON array); omit it for the whole session.
+   */
+  sessionInteractionHistory(id: string, opts: { limit?: number; cursor?: string | null; turnIds?: readonly string[] } = {}): Promise<InteractionHistoryPage> {
+    const query: Record<string, string> = {};
+    if (opts.limit) query.limit = String(opts.limit);
+    if (opts.cursor) query.cursor = opts.cursor;
+    if (opts.turnIds?.length) query.turnIds = JSON.stringify(opts.turnIds);
+    return this.request("GET", `/v2/sessions/${encodeURIComponent(id)}/history/interactions`, { query });
+  }
+
   events(query: EventQuery = {}, options: ReadOptions = {}): Promise<EventPage> {
     return this.request("GET", "/v2/events", { query: { ...query }, ...options });
   }
@@ -586,11 +602,12 @@ export class CutexClient {
    * A cutex method on a session. `options.requestId`: reuse it when retrying the same call (cutex
    * dedupes on method + session + requestId); default: a new UUID.
    */
-  async cutex<R = unknown>(sessionId: string, method: string, params: object = {}, options: { requestId?: string } = {}): Promise<R> {
+  /** `retryable: false`: one attempt even on 429 / 503 (the requestId would otherwise allow the transport retries). */
+  async cutex<R = unknown>(sessionId: string, method: string, params: object = {}, options: { requestId?: string; retryable?: boolean } = {}): Promise<R> {
     const response = await this.request<CutexRequestResult<R>>(
       "POST",
       `/v2/sessions/${encodeURIComponent(sessionId)}/cutex/requests`,
-      { body: { requestId: options.requestId ?? randomUUID(), method, params } },
+      { body: { requestId: options.requestId ?? randomUUID(), method, params }, ...(options.retryable === false ? { retryable: false } : {}) },
     );
     return response.cutex.result;
   }
@@ -2019,6 +2036,14 @@ export class CutexClient {
     delegationId(projectId); await this.delegationFeature(DELEGATION_CAPABILITIES.routing);
     return this.request("GET", `/v2/projects/${projectId}/delegation-approvals`);
   }
+  /** r296 pending continuation approvals: a project's (shared with routing approvals) or the project-less ones. */
+  async continuationApprovals(projectId: string | null): Promise<DelegationContinuationApproval[]> {
+    if (projectId !== null) delegationId(projectId);
+    await this.delegationFeature(DELEGATION_CAPABILITIES.continuationApproval);
+    const path = projectId === null ? "/v2/delegations/continuation-approvals" : `/v2/projects/${projectId}/delegation-approvals`;
+    const result = await this.request<{ continuationApprovals?: DelegationContinuationApproval[] }>("GET", path, { query: { state: "pending" } });
+    return Array.isArray(result?.continuationApprovals) ? result.continuationApprovals : [];
+  }
   async delegationApproval(id: string): Promise<DelegationApproval> {
     delegationId(id); await this.delegationFeature(DELEGATION_CAPABILITIES.routing);
     return this.request("GET", `/v2/delegation-approvals/${id}`);
@@ -2069,6 +2094,23 @@ export class CutexClient {
     try {
       const r = await this.request<{ asks?: T[] }>("GET", "/v2/asks", { query, ...options });
       return r.asks ?? [];
+    } catch (error) {
+      if (isMissingRoute(error)) return null;
+      throw error;
+    }
+  }
+
+  /**
+   * cutex r296 `asks-short-id-lookup-v1`: `GET /v2/asks?idPrefix=…&limit=N`. `idPrefix`: 6–32 hex digits (either end of the
+   * id), `…` / `...` + hex (the end only), or a full `ask-<32 hex>`. Hits carry the full `askId`; `hasMore`: the candidate
+   * window was cut (type a longer id). Null when the daemon has no such route.
+   */
+  async askShortIdLookup<T = JsonObject>(idPrefix: string, limit = 20, options: ReadOptions = {}): Promise<{ hostId: string | null; asks: T[]; hasMore: boolean } | null> {
+    if (!SHORT_ASK_ID.test(idPrefix)) throw new Error("bad ask id prefix");
+    const query = { idPrefix, limit: String(Math.max(1, Math.min(20, Math.floor(limit)))) };
+    try {
+      const r = await this.request<{ hostId?: string; asks?: T[]; hasMore?: boolean }>("GET", "/v2/asks", { query, ...options });
+      return { hostId: typeof r.hostId === "string" ? r.hostId : null, asks: Array.isArray(r.asks) ? r.asks : [], hasMore: r.hasMore === true };
     } catch (error) {
       if (isMissingRoute(error)) return null;
       throw error;

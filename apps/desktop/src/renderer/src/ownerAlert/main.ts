@@ -9,6 +9,7 @@ import type { OwnerAlertBridge, OwnerAlertItem, OwnerAlertLocale, OwnerAlertStat
 import { initialStem, twoLetterInitials } from "../lib/agentInitials";
 import { letterTileRadius, letterTileSize, letterTileText } from "../lib/avatarDefault";
 import { loadTheme } from "../lib/theme";
+import { followStoredAccent } from "../lib/accent";
 import { followStoredFonts } from "../lib/storedFonts";
 import { alertStrings, chimeNotes, pickFirst, refsLine, timeLabel } from "./model";
 
@@ -36,6 +37,8 @@ const theme = loadTheme();
 if (theme !== "system") document.documentElement.dataset.theme = theme;
 // The owner's 外观 fonts, like the main window (the stylesheet falls back to its own stacks meanwhile).
 followStoredFonts();
+// …and its 强调色.
+followStoredAccent();
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);

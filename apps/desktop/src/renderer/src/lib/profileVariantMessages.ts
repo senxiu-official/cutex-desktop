@@ -1,7 +1,7 @@
 // r265: DSH next-turn hint, Profile runtime variants, write-only credentials (docs/design/042).
 export const zhCN = {
-  "composer.noSteerHint": "这个运行时不能在回合中途插话：现在发送会排队，本回合结束后作为下一回合发出",
-  "composer.placeholderBusyNoSteer": "继续输入：消息会在本回合结束后作为下一回合发出",
+  "composer.noSteerHint": "这个运行时不能在回合中途插话：现在发送会排队，本回合结束后作为下一回合发送",
+  "composer.placeholderBusyNoSteer": "继续输入：消息会在本回合结束后作为下一回合发送",
   "variants.new.hint": "一个 Profile = 一个服务商 + 一份凭证，可以带几个运行时变体；新建{{agent}}时再选用哪个变体。",
   "variants.step.provider": "1 · 服务商",
   "variants.step.credential": "2 · 凭证",
@@ -121,9 +121,9 @@ export const zhCN = {
   "conversation.offlineAutoStartRuntime": "离线 · 发送消息会自动启动 {runtime}",
   "dsh.approvalSource": "DSH 沙箱",
   "dsh.approvalSource.hint": "DSH 自己的审批：这一步要越出 DSH 的沙箱（工作区之外的写入、联网等），由你决定",
-  "dsh.revertHint": "回退到这里：删除之后的 {n} 轮。DSH 只回退对话，文件不会恢复。",
-  "dsh.revertConfirm": "回退到这里：之后的 {n} 轮会从对话中移除。DSH 只回退对话，文件不会恢复。继续？",
-  "dsh.editResendHint": "编辑并重发：回退到这条消息之前，把它放回输入框。DSH 只回退对话，文件不会恢复。",
+  "dsh.revertHint": "回退到这里：删除之后的 {n} 个回合。DSH 只回退对话，文件不会恢复。",
+  "dsh.revertConfirm": "回退到这里：之后的 {n} 个回合会从对话中移除。DSH 只回退对话，文件不会恢复。继续？",
+  "dsh.editResendHint": "回退并编辑：回退到这条消息之前，把它放回输入框。DSH 只回退对话，文件不会恢复。",
   "dsh.editResendConfirm": "回退到这条消息之前：之后的所有回合都会从对话中移除（DSH 只回退对话，文件不会恢复；历史会先备份），然后把这条消息放回输入框。继续？",
 };
 
@@ -251,14 +251,14 @@ export const en: Record<keyof typeof zhCN, string> = {
   "dsh.approvalSource.hint": "DSH's own approval: this step leaves DSH's sandbox (writes outside the workspace, network and the like); you decide",
   "dsh.revertHint": "Revert to here: removes the {n} later turns. DSH reverts the conversation only; files are not restored.",
   "dsh.revertConfirm": "Revert to here: the {n} later turns are removed from the conversation. DSH reverts the conversation only; files are not restored. Continue?",
-  "dsh.editResendHint": "Edit & resend: revert to before this message and put it back in the composer. DSH reverts the conversation only; files are not restored.",
+  "dsh.editResendHint": "Revert and edit: revert to before this message and put it back in the composer. DSH reverts the conversation only; files are not restored.",
   "dsh.editResendConfirm": "Revert to before this message: every later turn is removed from the conversation (DSH reverts the conversation only, files are not restored; history is backed up first), and the message goes back into the composer. Continue?",
 };
 
 // zh-Hant-CN: OpenCC s2t of zhCN (mainland terms kept); regenerate, do not hand-edit.
 export const zhHant: Record<keyof typeof zhCN, string> = {
-  "composer.noSteerHint": "這個運行時不能在回合中途插話：現在發送會排隊，本回合結束後作爲下一回合發出",
-  "composer.placeholderBusyNoSteer": "繼續輸入：消息會在本回合結束後作爲下一回合發出",
+  "composer.noSteerHint": "這個運行時不能在回合中途插話：現在發送會排隊，本回合結束後作爲下一回合發送",
+  "composer.placeholderBusyNoSteer": "繼續輸入：消息會在本回合結束後作爲下一回合發送",
   "variants.new.hint": "一個 Profile = 一個服務商 + 一份憑證，可以帶幾個運行時變體；新建{{agent}}時再選用哪個變體。",
   "variants.step.provider": "1 · 服務商",
   "variants.step.credential": "2 · 憑證",
@@ -378,8 +378,8 @@ export const zhHant: Record<keyof typeof zhCN, string> = {
   "conversation.offlineAutoStartRuntime": "離線 · 發送消息會自動啓動 {runtime}",
   "dsh.approvalSource": "DSH 沙箱",
   "dsh.approvalSource.hint": "DSH 自己的審批：這一步要越出 DSH 的沙箱（工作區之外的寫入、聯網等），由你決定",
-  "dsh.revertHint": "回退到這裏：刪除之後的 {n} 輪。DSH 只回退對話，文件不會恢復。",
-  "dsh.revertConfirm": "回退到這裏：之後的 {n} 輪會從對話中移除。DSH 只回退對話，文件不會恢復。繼續？",
-  "dsh.editResendHint": "編輯並重發：回退到這條消息之前，把它放回輸入框。DSH 只回退對話，文件不會恢復。",
+  "dsh.revertHint": "回退到這裏：刪除之後的 {n} 個回合。DSH 只回退對話，文件不會恢復。",
+  "dsh.revertConfirm": "回退到這裏：之後的 {n} 個回合會從對話中移除。DSH 只回退對話，文件不會恢復。繼續？",
+  "dsh.editResendHint": "回退並編輯：回退到這條消息之前，把它放回輸入框。DSH 只回退對話，文件不會恢復。",
   "dsh.editResendConfirm": "回退到這條消息之前：之後的所有回合都會從對話中移除（DSH 只回退對話，文件不會恢復；歷史會先備份），然後把這條消息放回輸入框。繼續？",
 };

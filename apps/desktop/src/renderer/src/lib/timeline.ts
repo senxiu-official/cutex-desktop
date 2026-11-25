@@ -243,18 +243,36 @@ export function seedPlan(state: TimelineState, plan: PlanSnapshot | null | undef
 /**
  * Put one handled-interaction record (lib/interactionLog) into its turn, after the entries already
  * there (records are created when the reply lands, so at that moment they are chronologically last;
- * later items append behind them). An update of an existing row keeps its position. The record's
- * turn gone (revert, history window) or unknown → not shown. Returns true if anything changed.
+ * later items append behind them). An update of an existing row (same identity, `record.key`) keeps its
+ * entry id and position, so an open row stays open. The record's turn gone (revert, history window) or
+ * unknown → not shown. A saved record (cutex history) goes only into its own loaded 回合 — never the
+ * active one, never without a turn — right after its request's item when the 回合 has it, else at the
+ * end. Returns true if anything changed.
  */
 export function insertInteraction(state: TimelineState, record: InteractionRecord): boolean {
-  const id = `interaction:${record.requestId}`;
-  // A record of a turn this view no longer has (reverted, outside the loaded history window) stays
-  // out — never moved into whatever turn runs now. Only a record without a turn falls back to it.
-  const turnId = !record.turnId ? state.activeTurnId : state.turns.some((t) => t.id === record.turnId) || record.turnId === state.activeTurnId ? record.turnId : null;
-  if (!turnId) return false;
+  const id = `interaction:${record.key}`;
   const known = state.entries.get(id);
-  if (known?.kind === "interaction" && known.record === record) return false;
-  if (!state.entries.has(id)) ensureTurn(state, turnId).entryIds.push(id);
+  if (known?.kind === "interaction") {
+    // Upgraded in place: same id, same turn, same position.
+    if (known.record === record) return false;
+    state.entries.set(id, { kind: "interaction", id, turnId: known.turnId, record });
+    return true;
+  }
+  const loaded = (turnId: string) => state.turns.some((t) => t.id === turnId);
+  // A record of a turn this view no longer has (reverted, outside the loaded history window) stays
+  // out — never moved into whatever turn runs now. Only a live record without a turn falls back to it.
+  const turnId = record.saved
+    ? record.turnId && loaded(record.turnId) ? record.turnId : null
+    : !record.turnId ? state.activeTurnId : loaded(record.turnId) || record.turnId === state.activeTurnId ? record.turnId : null;
+  if (!turnId) return false;
+  const entryIds = ensureTurn(state, turnId).entryIds;
+  const anchor = record.saved && record.itemId ? entryIds.indexOf(record.itemId) : -1;
+  if (anchor >= 0) {
+    // After the item and any rows already anchored behind it (a batch is applied oldest first).
+    let at = anchor + 1;
+    while (at < entryIds.length && state.entries.get(entryIds[at]!)?.kind === "interaction") at++;
+    entryIds.splice(at, 0, id);
+  } else entryIds.push(id);
   state.entries.set(id, { kind: "interaction", id, turnId, record });
   return true;
 }
@@ -433,9 +451,30 @@ export function turnErrorCode(error: RawTurn["error"]): string | null {
   return error && typeof error === "object" && typeof error.cutexCode === "string" && error.cutexCode ? error.cutexCode : null;
 }
 
+/**
+ * cutex r295 (Claude): `additionalDetails` may be a JSON string whose `diagnosticCode` classifies the failure;
+ * "unreachable" = the model provider could not be reached (an identified network error, this request only).
+ * Parsed defensively: anything else is not a diagnostic.
+ */
+export function turnDiagnosticCode(error: RawTurn["error"]): string | null {
+  const details = error && typeof error === "object" ? error.additionalDetails : null;
+  if (typeof details !== "string" || details.length > 8192 || !details.trimStart().startsWith("{")) return null;
+  try {
+    const value = JSON.parse(details) as { diagnosticCode?: unknown } | null;
+    return value && typeof value === "object" && typeof value.diagnosticCode === "string" && value.diagnosticCode ? value.diagnosticCode : null;
+  } catch {
+    return null;
+  }
+}
+
 /** The text of a native `turn.error` (`TurnError`: message + optional additionalDetails); null when absent. */
 export function turnErrorText(error: RawTurn["error"]): string | null {
   if (!error || typeof error !== "object") return null;
+  // A classified Claude failure: plain words first, then the provider's own message (the JSON details are not text).
+  if (turnDiagnosticCode(error) === "unreachable") {
+    const message = typeof error.message === "string" ? error.message.trim() : "";
+    return [translate("turn.error.unreachable"), message].filter(Boolean).join("\n");
+  }
   const parts = [error.message, error.additionalDetails]
     .filter((part): part is string => typeof part === "string")
     .map((part) => part.trim())

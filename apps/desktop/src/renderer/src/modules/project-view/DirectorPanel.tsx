@@ -21,6 +21,8 @@ import {
   directorNoticeDismissed,
   dismissDirectorNotice,
 } from "./directorModel";
+import { EntityMention } from "../../components/EntityIcon";
+import { tNodes } from "../../lib/textNodes";
 
 type Snapshot = {
   director: ProjectDirector;
@@ -239,6 +241,8 @@ export function DirectorPanel({
   if (!active) return null;
   const name = (id: string | null) =>
     id ? nameOf(id) ?? id : t("project-view.directorUi.none");
+  // The agent named in a notice, with its avatar.
+  const who = (id: string | null) => id ? <EntityMention entity={{ kind: "agent", id, name: name(id) }}>{name(id)}</EntityMention> : name(id);
   const label = (state: string) =>
     t(`project-view.directorUi.state.${state}` as MessageKey);
   function actions(
@@ -323,7 +327,7 @@ export function DirectorPanel({
   return (
     <>
       {visibleNotices.map(c => <div role="note" key={c.changeId} className="mx-3 my-2 flex items-start gap-2 rounded bg-surface-2 px-2 py-1.5 text-meta text-muted" data-testid="director-change-notice">
-        <span className="min-w-0 flex-1">{c.cleared || c.newDirector === null ? t("project-view.directorUi.cleared") : t("project-view.directorUi.changed", { from: name(c.oldDirector), to: name(c.newDirector) })}</span>
+        <span className="min-w-0 flex-1">{c.cleared || c.newDirector === null ? t("project-view.directorUi.cleared") : tNodes(t, "project-view.directorUi.changed", { from: who(c.oldDirector), to: who(c.newDirector) })}</span>
         <button className={btn({ size: "sm", variant: "ghost" })} onClick={() => {
           dismissDirectorNotice(hostId, projectId, c.changeId);
           setDismissed(old => new Set([...old, c.changeId]));
@@ -420,9 +424,9 @@ export function DirectorPanel({
                   <span>
                     {c.cleared || c.newDirector === null
                       ? t("project-view.directorUi.cleared")
-                      : t("project-view.directorUi.changed", {
-                          from: name(c.oldDirector),
-                          to: name(c.newDirector),
+                      : tNodes(t, "project-view.directorUi.changed", {
+                          from: who(c.oldDirector),
+                          to: who(c.newDirector),
                         })}
                   </span>
                   <details>
@@ -626,7 +630,7 @@ export function DirectorPanel({
                   className="my-2 rounded-lg border border-border p-2"
                 >
                   <div className="flex justify-between gap-2">
-                    <b>{name(s.targetSession)}</b>
+                    <b>{who(s.targetSession)}</b>
                     <span>{label(s.state)}</span>
                   </div>
                   <p>

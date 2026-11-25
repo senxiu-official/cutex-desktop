@@ -3,7 +3,7 @@
 // unless it would end something), LRU within the limits, minSize (a tab instead of a column that does not
 // fit; the tool area gives way as the drawer), maximise (never stored), moving conversation columns, the
 // pane keys and the Esc chain, and the chips stored with the layout (both areas) and restored.
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SideBinding } from "../src/renderer/src/modules/slots";
 import type { ItemId } from "../src/renderer/src/modules/types";
 import {
@@ -63,6 +63,10 @@ import {
 import { sideFrame } from "../src/renderer/src/lib/sideFrame";
 import { escChainStep, type EscChainInput } from "../src/renderer/src/lib/escChain";
 import { passThroughKey } from "../src/renderer/src/modules/terminal/terminalState";
+import { useApp } from "../src/renderer/src/store";
+import { usePanes } from "../src/renderer/src/lib/paneStore";
+import { flushSideSave, resetConvShelves, sideLayersActive, useSide } from "../src/renderer/src/lib/sideLayoutStore";
+import * as actions from "../src/renderer/src/lib/paneActions";
 
 vi.mock("../src/renderer/src/bridge", () => ({ api: {}, apiFor: () => ({}), bridge: {}, onEvent: () => () => {}, cleanIpcMessage: (m: string) => m }));
 
@@ -507,99 +511,94 @@ describe("chips are stored with the layout (both areas); maximise is not", () =>
 
 // ── the coordinator (lib/paneActions: both stores) ─────────────────────────────────────────────────
 
-// The first test imports the stores afresh (vi.resetModules): slow under a full parallel run.
-describe("pane actions across both areas (显示桌面, the tray cap, maximise)", { timeout: 20_000 }, () => {
+describe("pane actions across both areas (显示桌面, the tray cap, maximise)", () => {
+  let opened: string[];
   beforeEach(() => {
-    vi.resetModules();
     const storage = new Map<string, string>();
     vi.stubGlobal("localStorage", { getItem: (k: string) => storage.get(k) ?? null, setItem: (k: string, v: string) => void storage.set(k, v), removeItem: (k: string) => void storage.delete(k) });
+    resetConvShelves();
+    actions.useDesktop.setState(actions.useDesktop.getInitialState(), true);
+    // Selecting a pane's agent opens it in the store: recorded here (no daemon in this test).
+    opened = [];
+    useApp.setState({ ...useApp.getInitialState(), openAgent: async (id: string) => void opened.push(id), selectedId: "b2", selectedHost: "local" }, true);
+    usePanes.setState({ layout: openBeside(base(), B, 10), scope: "host:local", restore: null }, true);
+    useSide.setState({ ...useSide.getInitialState(), layout: { ...tools().layout, open: true } }, true);
+  });
+  afterEach(() => {
+    flushSideSave();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
-  async function stores() {
-    const app = await import("../src/renderer/src/store");
-    const panes = await import("../src/renderer/src/lib/paneStore");
-    const side = await import("../src/renderer/src/lib/sideLayoutStore");
-    const actions = await import("../src/renderer/src/lib/paneActions");
-    // Selecting a pane's agent opens it in the store: recorded here (no daemon in this test).
-    const opened: string[] = [];
-    app.useApp.setState({ openAgent: async (id: string) => void opened.push(id), selectedId: "b2", selectedHost: "local" } as never);
-    panes.usePanes.setState({ layout: openBeside(base(), B, 10), scope: "host:local", restore: null });
-    side.useSide.setState({ layout: { ...tools().layout, open: true } });
-    return { app, panes, side, actions, opened };
-  }
-
-  it("collapse / restore a tool pane; × on a (stored) conversation chip; maximise is one pane at a time and Esc-able", async () => {
-    const { panes, side, actions } = await stores();
-    const t = side.useSide.getState().layout;
+  it("collapse / restore a tool pane; × on a (stored) conversation chip; maximise is one pane at a time and Esc-able", () => {
+    const t = useSide.getState().layout;
     const files = t.pages[0]!.cards[0]!.id;
     let now = 5000;
     const clockSpy = vi.spyOn(Date, "now").mockImplementation(() => (now += 10));
     // #7: a tool pane's 「—」 no longer makes a chip (collapsePane does nothing for it); a stored one still restores.
     actions.collapsePane({ area: "tools", id: files });
-    expect(side.useSide.getState().layout.chips).toBeUndefined();
-    side.useSide.setState({ layout: collapseCard(side.useSide.getState().layout, files, (now += 10)) });
-    expect(side.useSide.getState().layout.chips!.map((c) => c.card.id)).toEqual([files]);
+    expect(useSide.getState().layout.chips).toBeUndefined();
+    useSide.setState({ layout: collapseCard(useSide.getState().layout, files, (now += 10)) });
+    expect(useSide.getState().layout.chips!.map((c) => c.card.id)).toEqual([files]);
     // §24.13: a conversation's 「—」 closes its pane (lib/workspaces closeWorkspace) — no conversation chips are
     // made any more; one still in a layout (lib level, e.g. before the v5 migration ran) shows and closes.
-    panes.usePanes.setState({ layout: collapseConversation(panes.usePanes.getState().layout, MAIN_PANE, (now += 10)) });
-    expect(panes.usePanes.getState().layout.chips).toEqual([MAIN_PANE]);
-    const entries = actions.trayEntries(panes.usePanes.getState().layout, side.useSide.getState().layout);
+    usePanes.setState({ layout: collapseConversation(usePanes.getState().layout, MAIN_PANE, (now += 10)) });
+    expect(usePanes.getState().layout.chips).toEqual([MAIN_PANE]);
+    const entries = actions.trayEntries(usePanes.getState().layout, useSide.getState().layout);
     expect(entries.map((e) => e.key)).toEqual([`t:${files}`, `w:${MAIN_PANE}`]);
     clockSpy.mockRestore();
     actions.restoreChip({ area: "tools", id: files });
-    expect(side.useSide.getState().layout.chips).toBeUndefined();
-    expect(side.useSide.getState().layout.pages[0]!.cards[0]!.id).toBe(files);
+    expect(useSide.getState().layout.chips).toBeUndefined();
+    expect(useSide.getState().layout.pages[0]!.cards[0]!.id).toBe(files);
     actions.closeChipPane({ area: "work", id: MAIN_PANE });
-    expect(panes.usePanes.getState().layout.chips).toEqual([]);
+    expect(usePanes.getState().layout.chips).toEqual([]);
     // Maximise: a conversation pane, then a tool pane (the first one ends), then Esc's restore.
-    const conv = panes.usePanes.getState().layout.focus!;
+    const conv = usePanes.getState().layout.focus!;
     actions.toggleExclusive({ area: "work", id: conv });
-    expect(panes.usePanes.getState().layout.max).toBe(conv);
+    expect(usePanes.getState().layout.max).toBe(conv);
     expect(actions.anyMaximized()).toBe(true);
-    expect(side.sideLayersActive()).toBe(true);
+    expect(sideLayersActive()).toBe(true);
     actions.toggleExclusive({ area: "tools", id: files });
-    expect(panes.usePanes.getState().layout.max).toBeNull();
-    expect(side.useSide.getState().mode).toEqual({ kind: "maximised", card: files });
+    expect(usePanes.getState().layout.max).toBeNull();
+    expect(useSide.getState().mode).toEqual({ kind: "maximised", card: files });
     expect(actions.restoreMaximized()).toBe(true);
     expect(actions.anyMaximized()).toBe(false);
     expect(actions.restoreMaximized()).toBe(false);
   });
 
-  it("显示桌面: the tool panes to the tray, the conversations off screen (no conversation chips, §24.13); again: the layout before, the same focus", async () => {
-    const { app, panes, side, actions, opened } = await stores();
-    const before = panes.usePanes.getState().layout;
-    const toolCards = side.useSide.getState().layout.pages[0]!.cards.map((c) => c.id);
+  it("显示桌面: the tool panes to the tray, the conversations off screen (no conversation chips, §24.13); again: the layout before, the same focus", () => {
+    const before = usePanes.getState().layout;
+    const toolCards = useSide.getState().layout.pages[0]!.cards.map((c) => c.id);
     const shown = actions.panesOnScreen();
     expect(shown.filter((r) => r.area === "work").map((r) => r.id)).toEqual(conversationPanes(before));
     actions.showDesktop();
-    const desk = panes.usePanes.getState().layout;
+    const desk = usePanes.getState().layout;
     expect(agents(desk)).toEqual([null]);
     // §24.13: the conversations are not chips any more; the work area before is kept to put back.
     expect(desk.chips).toEqual([]);
     expect(actions.useDesktop.getState().work).toBe(before);
-    expect(app.useApp.getState().selectedId).toBeNull();
+    expect(useApp.getState().selectedId).toBeNull();
     expect(actions.useDesktop.getState().snapshot).toHaveLength(shown.length);
     expect(actions.panesOnScreen().filter((r) => r.area === "work")).toEqual([]);
     actions.showDesktop();
-    const back = panes.usePanes.getState().layout;
+    const back = usePanes.getState().layout;
     expect(agents(back)).toEqual(["a1", "b2"]);
     expect(back.focus).toBe(before.focus);
     expect(back.chips).toEqual([]);
     expect(opened.at(-1)).toBe("b2");
     // The tool panes too (when they were on screen: here no agent sees its follow panes without a registry — at least none was lost).
-    const after = side.useSide.getState().layout;
+    const after = useSide.getState().layout;
     expect([...after.pages.flatMap((p) => p.cards.map((c) => c.id)), ...(after.chips ?? []).map((c) => c.card.id)].sort()).toEqual([...toolCards].sort());
     expect(actions.useDesktop.getState().snapshot).toBeNull();
   });
 
-  it(`the tray keeps ≤ ${MAX_CHIPS}: beyond, the oldest chip closes`, async () => {
-    const { panes, actions } = await stores();
-    let l = panes.usePanes.getState().layout;
+  it(`the tray keeps ≤ ${MAX_CHIPS}: beyond, the oldest chip closes`, () => {
+    let l = usePanes.getState().layout;
     for (let i = 0; i < MAX_CHIPS + 2; i++) l = replaceToChip(l, MAIN_PANE, { hostId: "local", sessionId: `x${i}` }, 100 + i);
-    panes.usePanes.setState({ layout: l });
+    usePanes.setState({ layout: l });
     expect(l.chips).toHaveLength(MAX_CHIPS + 2);
     actions.trimChips();
-    const trimmed = panes.usePanes.getState().layout;
+    const trimmed = usePanes.getState().layout;
     expect(trimmed.chips).toHaveLength(MAX_CHIPS);
     // The two oldest went: a1 and x0.
     expect(chipAgents(trimmed)).not.toContain("a1");

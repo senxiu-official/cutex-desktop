@@ -1,5 +1,5 @@
 // LEGACY(input-ledger-v1): frozen delivery inference for older hosts.
-// Delete only when EVERY host advertises input-ledger-v1 (including hachimi).
+// Delete only when EVERY host advertises input-ledger-v1 (including hostc).
 // Device-local display preferences only. Acceptance is not delivery; these
 // operations never acknowledge, cancel or resend a server message.
 import { useMemo, useSyncExternalStore } from "react";

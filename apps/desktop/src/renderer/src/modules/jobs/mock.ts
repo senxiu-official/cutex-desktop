@@ -5,6 +5,7 @@ import type { JobListPage, JobOutputPage, JobResult, JobRow, JobServiceCapabilit
 import type { DesktopApi } from "../../../../shared/ipc";
 import { COMPONENT_INDEX_FEATURE, COMPONENTS_FEATURE, EXTERNAL_RUNTIME_ROOT_FEATURE, readComponentOperation, readComponentsList, type ComponentStatus } from "../../../../shared/components";
 import type { ModuleMock } from "../../dev/mockTypes";
+import { jobActiveGroup } from "../../../../shared/jobList";
 
 const now = () => Math.floor(Date.now() / 1000);
 const T0 = now();
@@ -66,6 +67,18 @@ if (typeof location !== "undefined" && new URLSearchParams(location.search).has(
     job("pv-perf", "sidebar-perf", "running", 12 * 60 + 4, { actionId: "vitest", command: "pnpm vitest --watch" }),
     job("pv-rh", "remote-hosts", "running", 4 * 60 + 2, { actionId: "build", command: "cargo build --release -p cutex-server" }),
   );
+// r296 phase 1 scenes. `?jobhistory`: 60 finished jobs newer than Eva's long build, so only the active list finds it.
+// Waiting delegations (ids of the delegations mock): Eva's two running builds; `?jobwaiters=fail` = the host could not read
+// them. `?jobv1`: a Job Service before r296 (no activeList / readOutputTail: totals, waiters and the tail are absent).
+const JOB_Q = typeof location !== "undefined" ? new URLSearchParams(location.search) : new URLSearchParams();
+const JOB_V1 = JOB_Q.has("jobv1") || JOB_Q.has("jobold");
+const WAITERS_FAIL = JOB_Q.get("jobwaiters") === "fail";
+if (JOB_Q.has("jobhistory")) {
+  jobs[0]!.createdAt = T0 - 30 * 3600;
+  for (let i = 0; i < 60; i++) jobs.push(job(i % 2 ? "mika" : "lead", i % 2 ? "Mika" : "Lead", "exited", 3600 + i * 60, { actionId: `batch-${i}`, command: `python batch.py --shard ${i}`, exitCode: 0, tookSeconds: 40, revision: 3 }));
+}
+const WAITING: Record<number, string[]> = { 0: ["ask-run", "ask-question"], 1: ["ask-yielded"] };
+const waitingOf = new Map(Object.entries(WAITING).map(([i, ids]) => [jobs[Number(i)]!.jobId, ids]));
 const byId = new Map(jobs.map((j) => [j.jobId, j]));
 /** Multi-host P1: workstation (another host) has its own jobs, so the merged 作业 page shows two hosts. */
 const remoteJobs = new Map<string, Map<string, JobRow>>();
@@ -105,25 +118,36 @@ const delay = () => new Promise((r) => setTimeout(r, 120));
 
 function mockJobApi(byId: Map<string, JobRow>) {
   return {
-    async jobs(params: { query?: string; cursor?: string | null; limit?: number }): Promise<JobResult<JobListPage>> {
+    async jobs(params: { query?: string; cursor?: string | null; limit?: number; activeOnly?: boolean; includeWaiters?: boolean }): Promise<JobResult<JobListPage>> {
       await delay();
+      if (JOB_V1 && (params.activeOnly || params.includeWaiters)) return { ok: false, code: "invalid_request", message: "Expected query, cursor and limit for Jobs" };
       const q = (params.query ?? "").toLowerCase();
       const limit = params.limit ?? 50;
-      const rows = [...byId.values()]
+      const all = [...byId.values()];
+      const rows = all
+        .filter((j) => !params.activeOnly || jobActiveGroup(j) !== null)
         .filter((j) => !q || [j.jobId, j.actionId, j.sessionId].some((s) => s.toLowerCase().includes(q)))
         .sort((a, b) => b.createdAt - a.createdAt || (a.jobId < b.jobId ? 1 : -1));
       const start = params.cursor ? Number(params.cursor.split(":")[1] ?? 0) : 0;
       const page = rows.slice(start, start + limit).map((j) => {
         const out = outputOf(j, "stdout").length;
         const err = outputOf(j, "stderr").length;
-        return { ...j, stdout: { retainedBytes: out, observedBytes: out, truncated: false }, stderr: { retainedBytes: err, observedBytes: err, truncated: false } };
+        const big = j === jobs[0];
+        const row: JobRow = { ...j, stdout: { retainedBytes: big ? 65536 : out, observedBytes: out, truncated: big && out > 65536 }, stderr: { retainedBytes: err, observedBytes: err, truncated: false } };
+        if (params.includeWaiters && !WAITERS_FAIL) row.waitingDelegationIds = jobActiveGroup(j) ? (waitingOf.get(j.jobId) ?? []) : [];
+        return row;
       });
-      return ok({ data: page, nextCursor: start + limit < rows.length ? `${rows[start + limit - 1]?.createdAt ?? 0}:${start + limit}` : null });
+      const extra = JOB_V1 ? {} : {
+        activeCounts: { running: all.filter((j) => jobActiveGroup(j) === "running").length, queued: all.filter((j) => jobActiveGroup(j) === "queued").length },
+        retention: { records: JOB_Q.get("jobfull") === "1" ? 4096 : all.length, limit: 4096 },
+        ...(params.includeWaiters ? { waitersAvailable: !WAITERS_FAIL } : {}),
+      };
+      return ok({ data: page, nextCursor: start + limit < rows.length ? `${rows[start + limit - 1]?.createdAt ?? 0}:${start + limit}` : null, ...extra });
     },
     async jobServiceCapabilities(): Promise<JobResult<JobServiceCapabilities>> {
       // `?jobold`: a Job Service before r289 (no closeFollowUp: 结束跟进 is a local mark on this device).
       const old = typeof location !== "undefined" && new URLSearchParams(location.search).has("jobold");
-      return ok({ schema: "cutex/job-service-capabilities/v1", humanOperations: ["list", "cancel", "readOutput", "markExternal", ...(old ? [] : ["closeFollowUp"])], sources: ["nci"], externalNotifyFile: true });
+      return ok({ schema: "cutex/job-service-capabilities/v1", humanOperations: ["list", "cancel", "readOutput", "markExternal", ...(old ? [] : ["closeFollowUp"]), ...(JOB_V1 ? [] : ["activeList", "readOutputTail"])], sources: ["nci"], externalNotifyFile: true });
     },
     async cancelJob(jobId: string, expectedRevision: number): Promise<JobResult<unknown>> {
       await delay();
@@ -139,7 +163,7 @@ function mockJobApi(byId: Map<string, JobRow>) {
       const j = byId.get(jobId);
       if (!j) return { ok: false, code: "job_not_found", message: "unknown job" };
       if (j.revision !== expectedRevision) return { ok: false, code: "job_conflict", message: "job revision mismatch" };
-      if (!["exited", "cancelled", "failed", "interrupted", "launch_unknown", "unconfirmed"].includes(j.state)) Object.assign(j, { state: "unconfirmed", terminalReason: "followUpEnded", updatedAt: now(), revision: j.revision + 1 });
+      if (!["exited", "cancelled", "failed", "interrupted", "launch_unknown", "unconfirmed"].includes(j.state)) Object.assign(j, { state: "unconfirmed", terminalReason: "followUpEnded", processAlive: j.state === "running", updatedAt: now(), revision: j.revision + 1 });
       return ok(j);
     },
     async markExternalJob(input: { jobId: string; expectedRevision: number; state: string; exitCode?: number }): Promise<JobResult<unknown>> {
@@ -150,11 +174,14 @@ function mockJobApi(byId: Map<string, JobRow>) {
       Object.assign(j, { state: input.state, exitCode: input.exitCode ?? null, updatedAt: now(), revision: j.revision + 1, stale: false });
       return ok(j);
     },
-    async jobOutput(jobId: string, stream: JobStream, offset: number): Promise<JobResult<JobOutputPage>> {
+    async jobOutput(jobId: string, stream: JobStream, at: number | "tail"): Promise<JobResult<JobOutputPage>> {
       await delay();
       const j = byId.get(jobId);
       if (!j) return { ok: false, code: "job_not_found", message: "unknown job" };
       const text = outputOf(j, stream);
+      // r296 readOutputTail: the newest page, with its real offset.
+      const offset = at === "tail" ? (JOB_V1 ? -1 : Math.max(0, text.length - 8192)) : at;
+      if (offset < 0) return { ok: false, code: "invalid_request", message: "tail is not supported" };
       const page = text.slice(offset, offset + 8192);
       const running = j.state === "running" || j.state === "launch_pending";
       return ok({ jobId, stream, fromOffset: offset, nextOffset: offset + page.length, text: page, eof: !running && offset + page.length >= text.length, truncated: false, gap: false, omittedBytes: 0 });
@@ -215,6 +242,7 @@ function mockComponent(name: string, mode: string, windowsHost = false) {
       selected: QUERY.get("claudeCli") === "system" ? "system" : "bundled",
       bundled: { version: "2.1.301" }, system: QUERY.get("claudeCli") === "bundled" ? null : { version: "2.1.299" },
     } } : {}),
+    ...(name === "job-service" && selected ? { detail: { maintenance: { state: QUERY.get("jobmaint") ?? "verified", selectedVersion: QUERY.get("jobmaint") ? v.next : selected, runningVersion: selected } } } : {}),
     ...mockExternal(name, mode, windowsHost, selected),
     ...mockIndex(name, selected),
     // `?runtimeEva` (modules/runtimes/mock.ts): host-a's installed Claude runtimes on 2026-11-15, no CLI report.

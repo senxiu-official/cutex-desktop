@@ -7,6 +7,7 @@ import type { JobRow } from "../../../shared/ipc";
 import { jobCanCloseFollowUp } from "../../../shared/ownerDispositions";
 import type { StatusGlyph, StatusTone } from "./delegations";
 import { isJobLocallyEnded } from "./jobLocalMarks";
+import { jobActiveGroup } from "../../../shared/jobList";
 
 export const JOB_SERVICE_FEATURE = "job-service";
 
@@ -47,6 +48,8 @@ export const JOB_STATES: Record<string, StateRow> = {
   waiting_for_resources: { group: "queued", key: "queued", glyph: "hollow", tone: "muted" },
   // External (NCI PBS) job submitted and registered, not yet seen running by a trusted source.
   registered: { group: "queued", key: "registered", glyph: "hollow", tone: "muted" },
+  // Legacy external state (migrated on load); the Job Service counts it as queued.
+  stale: { group: "queued", key: "registered", glyph: "hollow", tone: "muted" },
   exited: { group: "done", key: "succeeded", glyph: "check", tone: "green" },
   failed: { group: "done", key: "failed", glyph: "cross", tone: "danger" },
   cancelled: { group: "done", key: "cancelled", glyph: "cross", tone: "muted" },
@@ -66,7 +69,7 @@ export interface JobStatus extends StateRow {
   unrecognized?: boolean;
 }
 
-type StatusInput = Pick<JobRow, "state" | "exitCode"> & Partial<Pick<JobRow, "observedProcessState" | "jobId">> & { terminalReason?: unknown; followUpEnded?: unknown };
+type StatusInput = Pick<JobRow, "state" | "exitCode"> & Partial<Pick<JobRow, "observedProcessState" | "jobId" | "launchPending" | "processAlive">> & { terminalReason?: unknown; followUpEnded?: unknown };
 
 /** The owner's 结束跟进 recorded by the Job Service (`terminalReason: followUpEnded` or `followUpEnded: true`). */
 const followUpEnded = (job: StatusInput) => job.terminalReason === "followUpEnded" || job.followUpEnded === true;
@@ -77,6 +80,13 @@ const followUpEnded = (job: StatusInput) => job.terminalReason === "followUpEnde
  * reports a final state.
  */
 export function jobStatus(job: StatusInput): JobStatus {
+  const s = baseStatus(job);
+  // The Job Service's grouping wins (a launch being set up, or a process still alive after 结束跟进 / a terminal state, is
+  // running), so the tabs agree with its totals; the word and `open` stay the state's. A local mark stays 已结束.
+  return s.group !== "active" && s.key !== "localEnded" && jobActiveGroup(job) === "running" ? { ...s, group: "active" } : s;
+}
+
+function baseStatus(job: StatusInput): JobStatus {
   const raw = String(job.state ?? "");
   const exitCode = typeof job.exitCode === "number" ? job.exitCode : null;
   const row = JOB_STATES[raw];
@@ -159,15 +169,19 @@ export function mergeJobs(byId: Record<string, JobRow>, rows: readonly JobRow[])
   for (const r of rows) {
     if (!r || typeof r.jobId !== "string") continue;
     const old = next[r.jobId];
-    if (!old || (r.revision ?? 0) >= (old.revision ?? 0)) next[r.jobId] = r;
+    // A read without waiters (an agent's capsule) keeps the waiting delegations the last waiters read gave.
+    if (!old || (r.revision ?? 0) >= (old.revision ?? 0)) next[r.jobId] = r.waitingDelegationIds === undefined && old?.waitingDelegationIds !== undefined && old.revision === r.revision ? { ...r, waitingDelegationIds: old.waitingDelegationIds } : r;
   }
   return next;
 }
 
 /** Which human operations the running Job Service offers (an older one: list only). */
-export function jobOperations(caps: { humanOperations?: unknown } | null | undefined): { cancel: boolean; output: boolean; markExternal: boolean; closeFollowUp: boolean } {
+export function jobOperations(caps: { humanOperations?: unknown } | null | undefined): { cancel: boolean; output: boolean; markExternal: boolean; closeFollowUp: boolean; activeList: boolean; outputTail: boolean } {
   const ops = Array.isArray(caps?.humanOperations) ? (caps.humanOperations as unknown[]) : [];
   return {
+    // r296: the active list (+ host totals and waiting delegations) and the output tail.
+    activeList: ops.includes("activeList"),
+    outputTail: ops.includes("readOutputTail"),
     cancel: ops.includes("cancel"),
     output: ops.includes("readOutput"),
     markExternal: ops.includes("markExternal"),

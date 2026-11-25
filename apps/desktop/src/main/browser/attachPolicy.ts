@@ -1,3 +1,5 @@
+import { browserIdentityPartition } from "../../shared/browserIdentity";
+
 // Admission is capability-based: Electron's will-attach-webview event has no senderFrame.
 // Main issues a one-use ticket ONLY through app-main-frame IPC. The initial src transports
 // that ticket, is never loaded, and is replaced by exact about:blank before guest creation.
@@ -6,17 +8,25 @@ const HOST_ID = /^(?:local|(?:ssh|dev)-[a-zA-Z0-9][a-zA-Z0-9_-]{0,127})$/;
 const ATTACH_ID = /^[a-f0-9]{64}$/;
 const ATTACH_PREFIX = "about:blank#cutex-browser-attach=";
 
-export function browserPartition(hostId: string, pool: BrowserPool = "owner"): string {
+export function browserPartition(hostId: string, pool: BrowserPool = "owner", identityId?: string): string {
   if (!HOST_ID.test(hostId) || (pool !== "owner" && pool !== "agent")) throw new Error("Invalid browser host or pool");
+  if (identityId !== undefined) {
+    if (pool !== "owner") throw Error("An agent partition cannot have a browser identity");
+    return browserIdentityPartition(identityId, hostId);
+  }
   return `persist:browser-${pool === "agent" ? "agent-" : ""}${hostId}`;
 }
 
-export function matchBrowserPartition(partition: unknown, registeredHostIds: Iterable<string>): { hostId: string; pool: BrowserPool } | undefined {
+export type BrowserIdentityPartitionLookup = (partition: string) => { hostId: string; identityId: string } | undefined;
+export function matchBrowserPartition(partition: unknown, registeredHostIds: Iterable<string>, identityOfPartition?: BrowserIdentityPartitionLookup):
+  { hostId: string; pool: BrowserPool; identityId?: string } | undefined {
   if (typeof partition !== "string") return;
+  const identity = identityOfPartition?.(partition);
   for (const hostId of registeredHostIds) {
     if (!HOST_ID.test(hostId)) continue;
-    for (const pool of ["owner", "agent"] as const)
-      if (partition === browserPartition(hostId, pool)) return { hostId, pool };
+    if (identity?.hostId === hostId && partition === browserPartition(hostId, "owner", identity.identityId)) return { ...identity, pool: "owner" };
+    if (partition === browserPartition(hostId, "agent")) return { hostId, pool: "agent" };
+    if (!identityOfPartition && partition === browserPartition(hostId)) return { hostId, pool: "owner" };
   }
 }
 
@@ -42,6 +52,7 @@ export interface BrowserAttachInput {
   /** Main-owned proof that the early guest deny handler gate is installed; never renderer input. */
   popupGuardInstalled: boolean;
   registeredHostIds: Iterable<string>;
+  identityOfPartition?: BrowserIdentityPartitionLookup;
   appWebContentsId: number;
   senderWebContentsId: number;
   /** Already atomically consumed by main. Never look this up by untrusted host/instance fields. */
@@ -80,7 +91,7 @@ export function evaluateBrowserAttach(input: BrowserAttachInput): BrowserAttachR
   if (!input.moduleEnabled) return { allowed: false, reason: "module_disabled" };
   if (!Number.isSafeInteger(input.appWebContentsId) || input.appWebContentsId <= 0 || input.senderWebContentsId !== input.appWebContentsId)
     return { allowed: false, reason: "untrusted_sender" };
-  const match = matchBrowserPartition(partition, input.registeredHostIds);
+  const match = matchBrowserPartition(partition, input.registeredHostIds, input.identityOfPartition);
   if (!match) return { allowed: false, reason: "unregistered_partition" };
   if (!reservation || browserAttachId(params.src) !== reservation.attachId || !ATTACH_ID.test(reservation.attachId))
     return { allowed: false, reason: "invalid_ticket" };

@@ -352,7 +352,7 @@ export function guideContext(request: PanelGuideRequest, app = useApp.getState()
     stopHold: features.has(STOP_HOLD_FEATURE),
     agentPause: agentPauseSupported(app, hostId),
     runtime: session ? runtimeOf(session) : null,
-    mod: newInstanceKey().replace(/\+$/, ""),
+    mod: newInstanceKey(),
   };
 }
 

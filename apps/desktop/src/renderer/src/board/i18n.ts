@@ -50,6 +50,8 @@ export interface BoardText {
   moreProblems: (n: number) => string;
   last: (text: string, ago: string) => string;
   problem: (kind: BoardProblemKind, subject: string, detail: string | null) => string;
+  /** One row for `n` agents with the same cause; `names`: the ones the host listed (a few are shown). */
+  problemGroup: (kind: BoardProblemKind, n: number, names: string[]) => string;
   tier: { error: string; busy: string; idle: string; offline: string };
   noProjects: string;
   noHosts: string;
@@ -116,10 +118,18 @@ const ZH: BoardText = {
       case "handlerOffline": return `接手的成员离线：${zhAsk(subject, detail)}`;
       case "handlerUnavailable": return `找不到接手的成员：${zhAsk(subject, detail)}`;
       case "memberUnavailable": return `${subject} 读不到状态`;
-      case "lastTurnFailed": return `${subject} 上一轮出错`;
+      case "lastTurnFailed": return `${subject} 上一回合出错`;
       case "service": return `服务 ${subject}：${detail === "crashLooped" ? "反复崩溃" : "不可访问"}`;
       case "quotaOut": return `Profile ${subject} 额度用完${detail ? `（${detail}）` : ""}`;
       default: return subject && detail ? `${subject}：${detail}` : subject || detail || "其他问题";
+    }
+  },
+  problemGroup: (kind, n, names) => {
+    const who = names.length ? `：${names.slice(0, 3).join("、")}${n > Math.min(3, names.length) ? " 等" : ""}` : "";
+    switch (kind) {
+      case "agentError": return `${n} 个智能体出错${who}`;
+      case "lastTurnFailed": return `${n} 个智能体上一回合出错${who}`;
+      default: return `${n} 个智能体读不到状态${who}`;
     }
   },
   tier: { error: "出错", busy: "工作中", idle: "空闲", offline: "离线" },
@@ -188,6 +198,14 @@ const EN: BoardText = {
       case "service": return `Service ${subject}: ${detail === "crashLooped" ? "keeps crashing" : "unreachable"}`;
       case "quotaOut": return `Profile ${subject} is out of quota${detail ? ` (${detail})` : ""}`;
       default: return subject && detail ? `${subject}: ${detail}` : subject || detail || "Other problem";
+    }
+  },
+  problemGroup: (kind, n, names) => {
+    const who = names.length ? ` (${names.slice(0, 3).join(", ")}${n > Math.min(3, names.length) ? ", …" : ""})` : "";
+    switch (kind) {
+      case "agentError": return `${n} agents failed${who}`;
+      case "lastTurnFailed": return `${n} agents: last turn failed${who}`;
+      default: return `${n} agents: state not readable${who}`;
     }
   },
   tier: { error: "Error", busy: "Working", idle: "Idle", offline: "Offline" },

@@ -2,23 +2,26 @@
 // with agent_delegate calls, ASK / ANSWER events with their views, the cutex asks API and a timed
 // replay (progress → answered → closed, the next queued delegation starting). Between them the
 // delegations cover every status row of the card table (DESIGN §4.21). Collected by dev/mockModules.ts (dev/mockTypes.ts).
-import type { AskAnswerPage, AskCommandMethod, AskDetail, AskFilter, AskHold, AskSummary, DaemonApi, MutationResult } from "../../../../shared/ipc";
+import type { AskAnswerPage, AskCommandMethod, AskDetail, AskFilter, AskHold, AskSummary, DaemonApi, MutationResult, AskIdLookup, AskIdLookupHit } from "../../../../shared/ipc";
 import type { MockAdmissionEntry, MockCore, ModuleMock } from "../../dev/mockTypes";
-import type { UpgradeApprovalRead } from "../../../../shared/delegationUpgradePreview";
+import type { ContinuationApprovalRead, UpgradeApprovalRead } from "../../../../shared/delegationUpgradePreview";
 import type { AskDisposeOutcome, AskDisposeResult } from "../../../../shared/ownerDispositions";
 
 
+const CONT_LEGACY = typeof location !== "undefined" && new URLSearchParams(location.search).get("contallow") === "legacy";
 const ROUTING_SCENE = typeof location !== "undefined" && new URLSearchParams(location.search).has("routingReviews");
+/** `?receipts=off`: a host without peer-delivery-receipts-v1 (records without `crossHost`, today's display). */
+const RECEIPTS = typeof location === "undefined" || new URLSearchParams(location.search).get("receipts") !== "off";
 const digest = `sha256:${"a".repeat(64)}`;
 const records = new Map<string, UpgradeApprovalRead>();
 function routingRows(seed: AskSummary): AskSummary[] {
   const rows = [
-    { id: "route-pending", title: "请 Kai 复核项目内委托的路由", state: "pending" as const },
+    { id: "route-pending", title: "请 Kai 审批项目内的委托", state: "pending" as const },
     { id: "route-denied", title: "已拒绝：本次任务超出项目安排", state: "denied" as const },
-    { id: "route-grant", title: "路由已批准，等待一次性审核授权", state: "approved" as const },
+    { id: "route-grant", title: "委托审批已批准，等待一次性投递授权", state: "approved" as const },
     // W3: a review that can no longer be decided (the request changed / it was cancelled).
-    { id: "route-stale", title: "复核路由：请求在审核前已变化", state: "stale" as const },
-    { id: "route-cancelled", title: "复核路由：发起方已撤回", state: "cancelled" as const },
+    { id: "route-stale", title: "委托审批：请求在审批前已变化", state: "stale" as const },
+    { id: "route-cancelled", title: "委托审批：发起方已撤回", state: "cancelled" as const },
   ];
   return rows.map(row => {
     const approvalId = `routing-approval-${row.id}`, askId = `ask-${row.id}`;
@@ -32,6 +35,76 @@ function routingRows(seed: AskSummary): AskSummary[] {
     return { ...seed, askId, title: row.title, target: "kai", targetName: "Kai", execution: "pendingReview", closed: row.state === "denied" ? "cancelled" : null,
       reviewRef: ref, reviewRefs: [ref], reviewDenialReason: row.state === "denied" ? "本次委托范围不符合当前项目安排。" : null };
   });
+}
+/** 允许继续 on the card (`?askcont`) and the approvals page: an updated host (delegation-continuation-approval-v1) by default.
+ *  `?contallow=`: busy / paused / generation (cutex's blocked reason), unknown (the first answer is lost; 核对结果 finds
+ *  the receipt), changed (the first decision meets approval_changed), legacy (an older host: no reasons, no approvals). */
+function continuationAllowApi(base: Partial<DaemonApi>, asks: AskSummary[], core: MockCore): Partial<DaemonApi> {
+  const mode = typeof location !== "undefined" ? new URLSearchParams(location.search).get("contallow") : null;
+  const legacy = mode === "legacy";
+  const limited = (id: string) => asks.find((a) => a.askId === id && !a.closed && a.continuationWait?.state === "limited") ?? null;
+  const receipts = new Map<string, NonNullable<UpgradeResult["receipt"]>>();
+  const approvalRevision = new Map<string, number>();
+  let changedOnce = mode === "changed";
+  const approvalOf = (a: AskSummary): ContinuationApprovalRead => {
+    const revision = approvalRevision.get(a.askId) ?? 1;
+    return { id: `cap-${a.askId}`, delegationId: a.askId, projectId: a.projectId ?? null, revision, digest: (revision.toString(16) + a.askId.length.toString(16)).padStart(64, "a"),
+      authorityEpoch: 1, reason: a.target === "d-akari" ? "elapsed" : "rounds", requestedAt: a.updatedAt,
+      briefPreview: `${a.title}。完成后简短汇报。`, progressPreview: a.target === "d-akari" ? null : "第 32 轮：上游 CI 仍有 2 个任务排队，已记录最新的失败日志。",
+      allowedActions: { approve: true, deny: true } };
+  };
+  const blockedOf = (a: AskSummary): string | null => mode === "busy" ? "handlerBusy" : mode === "paused" ? "projectPaused"
+    : mode === "generation" ? "generationMismatch" : a.target === "d-akari" ? "handlerOffline" : null;
+  const receipt = (actionId: string, revision: number) => ({ schema: "cutex.delegation-operation.v1", actionId, operation: "continuation.resume", operationId: `op-${actionId}`,
+    status: "completed", effectState: "committed", outcomeUnknown: false, requestDigest: "0".repeat(64), revision }) as NonNullable<UpgradeResult["receipt"]>;
+  const commit = (a: AskSummary, actionId: string, decision: "approve" | "deny") => {
+    if (decision === "approve") {
+      // ddd0f067: the scheduler's hold after an approval (continuationWait.blockedReason) while the handler cannot run.
+      const held = mode === "busy" ? "targetBusy" : mode === "paused" ? "paused" : a.target === "d-akari" ? "runtimeOffline" : null;
+      a.continuationWait = { ...a.continuationWait!, state: "ready", ...(held ? { blockedReason: held } : {}) };
+    }
+    else { a.continuationWait = null; a.execution = "interrupted"; a.closed = "stopped" as AskSummary["closed"]; a.closedAt = new Date().toISOString(); }
+    a.revision++; a.updatedAt = new Date().toISOString();
+    const r = receipt(actionId, a.revision); receipts.set(actionId, r);
+    core.emitHost("cutex/delegation/routingApprovalChanged", { projectId: a.projectId ?? null, resourceId: `cap-${a.askId}`, revision: a.revision });
+    if (mode === "unknown") throw Error("mock: connection lost after submit");
+    return { effectState: "committed" as const, receipt: r };
+  };
+  return {
+    ...base,
+    async delegationContinuationResume(_project, askId) {
+      const a = limited(askId);
+      if (!a) return null;
+      if (legacy) return { nodeHostId: "HOST-A", allowed: a.target !== "d-akari", expectedRevision: a.revision, projectPaused: false, blockedReason: null, approval: null, limit: null };
+      const blocked = blockedOf(a), approval = approvalOf(a);
+      return { nodeHostId: "HOST-A", allowed: !blocked, expectedRevision: a.revision, projectPaused: mode === "paused", blockedReason: blocked,
+        approval: { id: approval.id, revision: approval.revision, digest: approval.digest, authorityEpoch: approval.authorityEpoch, allowedActions: approval.allowedActions },
+        limit: { reason: approval.reason, maxRounds: 32, maxElapsedSeconds: 86_400 } };
+    },
+    async delegationContinuationApprovals(projectId) {
+      if (legacy) return [];
+      return asks.filter((a) => !a.closed && a.continuationWait?.state === "limited" && (a.projectId ?? null) === projectId).map(approvalOf);
+    },
+    async delegationContinuationDecision(_projectId, request) {
+      const a = limited(request.delegationId);
+      if (!a) throw Error("approval_not_pending");
+      const current = approvalOf(a);
+      if (changedOnce) { changedOnce = false; approvalRevision.set(a.askId, current.revision + 1); throw Error("approval_changed"); }
+      if (current.id !== request.approvalId || current.revision !== request.expectedRevision || current.digest !== request.expectedDigest || current.authorityEpoch !== request.expectedEpoch) throw Error("approval_changed");
+      if (request.decision === "deny" && !request.decisionNote?.trim()) throw Error("invalid_arguments");
+      return commit(a, request.actionId, request.decision);
+    },
+    async delegationUpgradeOperation(id) {
+      const r = receipts.get(id);
+      return r ? { schema: "cutex.delegation-operation.v1", actionId: id, status: "found", outcomeUnknown: false, result: { receipt: structuredClone(r) } } : base.delegationUpgradeOperation!(id);
+    },
+    async delegationUpgradeAction(project, action) {
+      if (action.kind !== "resumeContinuation" || !limited(action.nodeId)) return base.delegationUpgradeAction!(project, action);
+      const a = limited(action.nodeId)!;
+      if (a.revision !== action.expectedRevision) throw Error("continuation_changed");
+      return commit(a, action.actionId, "approve");
+    },
+  };
 }
 function routingMockApi(base: Partial<DaemonApi>, asks: AskSummary[], core: MockCore): Partial<DaemonApi> {
   const receipts = new Map<string, { input: string; result: UpgradeResult }>();
@@ -67,6 +140,59 @@ function routingMockApi(base: Partial<DaemonApi>, asks: AskSummary[], core: Mock
 
 const iso = (secondsAgo: number) => new Date(Date.now() - secondsAgo * 1000).toISOString();
 const now = () => Date.now() / 1000;
+
+// r295 terminal notices — preview mock of cutex r295 terminal notices (docs/r295-terminal-notices.md): who or what ended a delegation and why,
+// on the ask detail (`terminalNotices`, `terminalCause`) and on delivered State items (`notice`). On by default (the
+// current host); `?terminalnotices=off` = an older host without these fields (every surface as before).
+// Scenes (Lead's delegations): ask-hf-stop — attempt 2 refused by the provider (hf@2), then you stopped it
+// (terminal@9); ask-hf-retry — attempt 1 failed, attempt 2 queued and not started; ask-cancelled — cancelled by the
+// cutex scheduler with a reason; ask-rejected — closed before r295 (actor not recorded); ask-abandoned — Lead itself
+// abandoned it (self-caused, passive); ask-failed — failed attempt then the closure; ask-done — a normal answer's
+// closure snapshot (never shown as an ending).
+const TERMINAL_MODE = typeof location !== "undefined" ? new URLSearchParams(location.search).get("terminalnotices") : null;
+const terminalNoticesOn = (): boolean => TERMINAL_MODE !== "off";
+
+type Actor = { kind: "owner" } | { kind: "agent"; sessionId: string } | { kind: "system"; component: string } | { kind: "unknown" };
+const notice = (refId: string, ago: number, revision: number, attempt: number | null, execution: string, closed: string | null, actor: Actor, reason: string) =>
+  ({ refId, at: iso(ago), revision, attempt, execution, closed, reason, actor });
+
+const RUNTIME = (name = "handlerRuntime") => ({ kind: "system" as const, component: name });
+
+/** Notices by delegation (the detail's history, oldest first). */
+function noticesOf(askId: string): Record<string, unknown>[] | null {
+  switch (askId) {
+    case "ask-hf-stop": return [
+      notice("handlerTurnFailed@2", 1500, 8, 2, "interrupted", null, RUNTIME(), "misalignmentPolicyViolation"),
+      notice("terminal@9", 1380, 9, 2, "interrupted", "stopped", { kind: "owner" }, "ownerStopped"),
+    ];
+    case "ask-hf-retry": return [notice("handlerTurnFailed@1", 700, 4, 1, "failed", null, RUNTIME(), "runtime exited: model quota exhausted (429 Too Many Requests)")];
+    case "ask-cancelled": return [notice("terminal@5", 6900, 5, null, "cancelled", "cancelled", RUNTIME("scheduler"), "Mika was archived before this delegation started")];
+    case "ask-rejected": return [notice("terminal@4", 5900, 4, null, "rejected", "cancelled", { kind: "unknown" }, "Historical terminal state; its initiating actor/reason was not recorded")];
+    case "ask-abandoned": return [notice("terminal@7", 11700, 7, 1, "interrupted", "abandoned", { kind: "agent", sessionId: "lead" }, "abandoned")];
+    case "ask-failed": return [
+      notice("handlerTurnFailed@1", 3700, 5, 1, "failed", null, RUNTIME(), "runtime exited: electron-builder: ENOSPC (no space left on device)"),
+      notice("terminal@6", 3690, 6, 1, "failed", "completed", RUNTIME("cutex"), "failed"),
+    ];
+    case "ask-done": return [notice("terminal@4", 2090, 4, 1, "answered", "completed", RUNTIME("cutex"), "answered")];
+    case "ask-followup": return [notice("terminal@6", 7900, 6, 1, "interrupted", "stopped", { kind: "owner" }, "followUpEnded")];
+    default: return null;
+  }
+}
+
+/** The detail's additive fields (none on an older host; an empty history on a record that has none). */
+function mockTerminalDetail(askId: string): Record<string, unknown> {
+  if (!terminalNoticesOn()) return {};
+  const notices = noticesOf(askId) ?? [];
+  const last = notices.at(-1) as { actor?: unknown; reason?: string } | undefined;
+  return { terminalNotices: notices, ...(last ? { terminalCause: { actor: last.actor, reason: last.reason } } : {}) };
+}
+
+/** A delivered State item's own notice (by ref), or nothing on an older host. */
+function mockItemNotice(askId: string, ref: string): Record<string, unknown> | null {
+  if (!terminalNoticesOn()) return null;
+  return (noticesOf(askId) ?? []).find((n) => n.refId === ref) ?? null;
+}
+
 const LEAD = { kind: "agent" as const, cutexSessionId: "lead", cutex_session_id: "lead", name: "Lead" };
 
 type Party = [id: string, name: string];
@@ -105,6 +231,35 @@ function ask(askId: string, title: string, target: Party, execution: AskSummary[
   };
 }
 
+/**
+ * cutex r295 Z3 `activityLink` on list rows, as cutex src/asks/view.rs activity_link derives it (current blocker, next
+ * step, destination references). `?noactivitylink` = an older host without it.
+ */
+const ACTIVITY_LINKS = typeof location === "undefined" || !new URLSearchParams(location.search).has("noactivitylink");
+export function mockActivityLink(d: AskSummary): Record<string, unknown> {
+  const hold = d.hold as { reason: string; by?: string } | null | undefined;
+  const refs = d.reviewRefs ?? (d.reviewRef ? [d.reviewRef] : []);
+  let blocker: string | null = null;
+  let next = "none";
+  if (d.closed) [blocker, next] = [null, "none"];
+  else if (d.execution === "pendingReview" || hold?.reason === "waitingForApproval") [blocker, next] = ["approval", "openApproval"];
+  else if ((d.ownerQuestions ?? 0) > 0) [blocker, next] = ["question", "openDelegation"];
+  else if (d.execution === "interrupted" && d.attempt?.interruptReason === "outcomeUnknown") [blocker, next] = ["outcomeUnknown", "openDelegation"];
+  else if (d.review === "awaitingAcceptance") [blocker, next] = ["acceptance", "openResult"];
+  else if (d.execution === "failed") [blocker, next] = ["failed", "openDelegation"];
+  else if (hold?.reason === "blocked" && hold.by === "quota") [blocker, next] = ["quota", "openDelegation"];
+  else if (hold?.reason === "blocked" && hold.by === "login") [blocker, next] = ["login", "openDelegation"];
+  else if (hold?.reason === "paused") [blocker, next] = ["paused", "openDelegation"];
+  else if (hold?.reason === "waitingForEvent") [blocker, next] = ["waitingForEvent", "openDelegation"];
+  else if (hold?.reason === "targetBusy") [blocker, next] = ["targetBusy", "wait"];
+  else if (hold) [blocker, next] = ["held", "openDelegation"];
+  const approval = blocker === "approval" ? (refs.find((r) => r.kind === "routing") ?? refs.find((r) => r.kind === "capability") ?? null) : null;
+  const result = d.answerId ? { kind: "delegationResult", askId: d.askId, answerId: d.answerId } : null;
+  if (next === "openApproval" && !approval) next = "openDelegation";
+  if (next === "openResult" && !result) next = "openDelegation";
+  return { delegation: { kind: "delegation", askId: d.askId }, approval, result, blocker, next };
+}
+
 const ended = (startedAgo: number, endedAgo: number, extra: Partial<NonNullable<AskSummary["attempt"]>> = {}) => ({ n: 1, state: "answered", startedAt: iso(startedAgo), endedAt: iso(endedAgo), model: "deepseek-v4-flash", activity: { toolCalls: 12 }, ...extra });
 const held = (hold: AskHold): Partial<AskSummary> => ({ hold });
 
@@ -120,7 +275,10 @@ function peerAsks(): AskSummary[] {
   const worker: Party = ["cutex.4be81f2a9c", "proj-worker"];
   const mirror = (peer: typeof WORKSTATION_LAB, target: Party, syncState: string, extra: Partial<AskSummary["remote"] & object> = {}) => ({ remote: { peerId: peer.peerId, label: peer.label, targetName: target[1], syncState, lastError: null, interruptReason: null, remoteState: null, ...extra } });
   const fromPeer = (peer: typeof WORKSTATION_LAB, name: string, caps = { sandbox: "workspace-write", networkAccess: true, unrestrictedServices: false }) => ({ requester: { kind: "peer" as const, peerId: peer.peerId, cutexSessionId: "cutex.9b2e4f1d77", name, label: peer.label, claimedCaps: caps } });
-  return [
+  // peer-delivery-receipts-v1: the receipt as the issuing daemon (this host) records it.
+  const rc = (peer: typeof WORKSTATION_LAB, direction: "inbound" | "outbound", state: string, reason: string | null = null, confirmedAgo: number | null = 60) =>
+    RECEIPTS ? { crossHost: { direction, peer: { instanceId: peer.peerId, label: peer.label }, receipt: { state, reason, confirmedAt: confirmedAgo === null ? null : iso(confirmedAgo) } } } : {};
+  const rows = [
     ask("ask-px-run", "在 Workstation 上跑 DEMO 回归", worker, "running", { ago: 600, ran: 540, hops: 1, projectId: "desktop", ...mirror(WORKSTATION_LAB, worker, "synced", { remoteState: { execution: "running" } }) }),
     ask("ask-px-held", "在 gpu-box 上重跑 proj-r12 的评估", ["cutex.77aa01bc3d", "trainer"], "queued", { ago: 1900, hops: 1, hold: { reason: "peerUnreachable" }, ...mirror(GPU_BOX, ["cutex.77aa01bc3d", "trainer"], "peer_unreachable", { lastError: "connect to http://100.64.0.97:24270 timed out after 5 s" }) }),
     ask("ask-px-unknown", "核对 Workstation 的 asks 存储", worker, "queued", { ago: 2600, hops: 1, hold: { reason: "peerUnknown", raw: "execution=pausedByDirector" }, ...mirror(WORKSTATION_LAB, worker, "remoteStateUnknown", { lastError: "对端状态：execution=pausedByDirector（本机版本不认识）" }) }),
@@ -133,6 +291,26 @@ function peerAsks(): AskSummary[] {
     ask("ask-pin-queued", "给 r225 的回滚脚本做一次 dry-run", HELPER, "queued", { ago: 400, hops: 2, queuePosition: 3, hold: { reason: "targetBusy", position: 3 }, ...fromPeer(WORKSTATION_LAB, "proj-director", { sandbox: "read-only", networkAccess: false, unrestrictedServices: false }) }),
     ask("ask-pin-done", "导出 Waveline 的测试截图", MIKA, "answered", { ago: 7000, hops: 1, attempt: ended(6900, 6500), answerId: "ans-pin", answerPreview: "截图在 docs/shots/waveline-20261011/。", closed: "completed", closedAt: iso(6400), resultUndeliverable: true, ...fromPeer(ALPHA, "phone-qa") }),
   ];
+  const receipts: Record<string, Partial<AskSummary>> = {
+    "ask-px-run": rc(WORKSTATION_LAB, "outbound", "accepted", null, 30),
+    "ask-px-held": rc(GPU_BOX, "outbound", "queuedAtSource", "peerUnreachable", null),
+    "ask-px-unknown": rc(WORKSTATION_LAB, "outbound", "deliveredToPeer", null, 2500),
+    "ask-px-removed": rc(ALPHA, "outbound", "failed", "peerRemoved", 8000),
+    "ask-px-review": rc(WORKSTATION_LAB, "outbound", "deliveredToPeer", null, 200),
+    "ask-px-late": rc(WORKSTATION_LAB, "outbound", "outcomeUnknown", "outcomeUnknown", 110000),
+    "ask-pin-review": rc(WORKSTATION_LAB, "inbound", "deliveredToPeer", null, 90),
+    "ask-pin-queued": rc(WORKSTATION_LAB, "inbound", "deliveredToPeer", null, 400),
+    "ask-pin-done": rc(ALPHA, "inbound", "accepted", null, 6400),
+  };
+  if (!RECEIPTS) return rows;
+  const routed = [
+    // The project here does not let this delegation leave the host (the peer itself is fine).
+    ask("ask-px-srcref", "在 Workstation 上清理旧镜像", worker, "queued", { ago: 150, hops: 1, ...mirror(WORKSTATION_LAB, worker, "queued"), ...rc(WORKSTATION_LAB, "outbound", "queuedAtSource", "sourceRoutingRefused", 150) }),
+    ask("ask-px-dstref", "在 Workstation 的 lab 项目里改调度", worker, "failed", { ago: 3000, hops: 1, closed: "stopped", closedAt: iso(2950), ...mirror(WORKSTATION_LAB, worker, "recipient_outside_boundary"), ...rc(WORKSTATION_LAB, "outbound", "failed", "destinationRoutingRefused", 2950) }),
+    ask("ask-px-vague", "在 gpu-box 上打包数据集", ["cutex.77aa01bc3d", "trainer"], "failed", { ago: 5000, hops: 1, closed: "stopped", closedAt: iso(4990), ...mirror(GPU_BOX, ["cutex.77aa01bc3d", "trainer"], "peer_request_incompatible"), ...rc(GPU_BOX, "outbound", "failed", "peerRefusedUnspecified", 4990) }),
+    ask("ask-px-cred", "在 Alpha 上整理相册", ["cutex.a1b2c3d4e5", "photo-indexer"], "queued", { ago: 700, hops: 1, ...mirror(ALPHA, ["cutex.a1b2c3d4e5", "photo-indexer"], "remote_credential_refused"), ...rc(ALPHA, "outbound", "queuedAtSource", "peerCredentialRefused", null) }),
+  ];
+  return [...rows.map((d) => ({ ...d, ...(receipts[d.askId] ?? {}) })), ...routed];
 }
 
 /** Every row of the status table, plus an owner-made one awaiting the owner's acceptance. */
@@ -176,10 +354,26 @@ const asks: AskSummary[] = [
   ask("ask-needsaction", "用浏览器截 Waveline 的登录页", SORA, "queued", { ago: 2700, ...held({ reason: "runtimeUnsupported", missing: "browser" }) }),
   ask("ask-yielded", "等 CI 跑完再合并 feat/board-window", MIKA, "running", { ago: 3100, attempts: 2, attempt: { n: 2, state: "yielded", turnId: "mika-t2", startedAt: iso(1900), endedAt: iso(1700), model: null, activity: { toolCalls: 6 }, stageNote: "CI 的 Windows 任务跑完后再看结果" } as never }),
   ask("ask-admitted", "把 r289 的发布说明翻成英文", EVA, "admitted", { ago: 260 }),
+  // A real-shaped id (cutex ask-<32 hex>): the sidebar search finds it by #47c47e, 47c47e or a suffix (lib/delegationIdSearch).
+  ask("ask-47c47e1b9d204f3e8a65c0d2f7b1e9a4", "复核 r295 会话搜索的边界", ALDEN, "running", { ago: 1500, ran: 1400, attempt: { n: 1, state: "running", turnId: "alden-t47", startedAt: iso(1400), model: null, activity: { toolCalls: 18, line: "读 session_search.rs" } } }),
+  // r295 Z3: a capability approval the delegation waits for while queued (its card is on the 审批 page, not inline).
+  // r295 terminal notices (the terminal-notices block above): attempt 2 refused by the provider, then stopped by you; a failed attempt
+  // whose retry has not started.
+  ask("ask-hf-stop", "跑一遍 provider 回归测试", HELPER, "interrupted", { ago: 1700, attempts: 2, attempt: { n: 2, state: "interrupted", turnId: "helper-t7", startedAt: iso(1600), endedAt: iso(1500), model: "deepseek-v4-flash", activity: { toolCalls: 5 } }, closed: "stopped", closedAt: iso(1380), revision: 9 }),
+  ask("ask-hf-retry", "重新生成 API 文档", MIKA, "queued", { ago: 800, attempts: 2, queuePosition: 1, ...held({ reason: "targetBusy", position: 1 }), attempt: { n: 2, state: "queued", turnId: null, startedAt: null, endedAt: null, model: null, activity: { toolCalls: 0 } } as never }),
+  ask("ask-capwait", "用完整权限跑 Linux 打包", HELPER, "queued", { ago: 520, ...held({ reason: "waitingForApproval" }), reviewRefs: [{ kind: "capability", approvalId: "apr-7c2e9d10", projectId: "desktop" }] }),
   ...peerAsks(),
 ];
 /** The detail's 每次运行 table (`GET /v2/asks/{id}` attempts) where a row had more than one run. */
 const ATTEMPT_HISTORY: Record<string, NonNullable<AskDetail["attempts"]>> = {
+  "ask-hf-stop": [
+    { n: 1, state: "failed", startedAt: iso(1690), endedAt: iso(1650) },
+    { n: 2, state: "interrupted", startedAt: iso(1600), endedAt: iso(1500) },
+  ] as never,
+  "ask-hf-retry": [
+    { n: 1, state: "failed", startedAt: iso(760), endedAt: iso(700) },
+    { n: 2, state: "queued" },
+  ] as never,
   "ask-stopunconf": [
     { n: 1, state: "refused", startedAt: iso(5100), endedAt: iso(5100) },
     { n: 2, state: "yielded", startedAt: iso(5000), endedAt: iso(4500), stageNote: "等签名证书" },
@@ -202,6 +396,10 @@ if (typeof location !== "undefined" && new URLSearchParams(location.search).has(
     ask("ask-pv-8", "整理 desktop-modules.md §24", ["pv-doc", "文档整理"], "answered", { ...pv, ...DIR, ago: 14000, attempt: ended(13900, 10900), answerId: "ans-pv-8", answerPreview: "§24 按 Shelf 改写完了。", closed: "completed", closedAt: iso(10800) }),
     ask("ask-pv-9", "检查更新通道", ["pv-upd", "updater"], "answered", { ...pv, ...DIR, ago: 5400, attempt: ended(5300, 3700), answerId: "ans-pv-9", answerPreview: "beta / stable 两个通道都正常。", review: "accepted", closed: "accepted", closedAt: iso(3600) }),
     // The Director's result waiting for its own acceptance (owner 2026-10-28: 放弃 from the detail must drop it from the card).
+    // r295 Z3: stuck without needing the owner (quota, sign-in), and a result nobody can confirm.
+    ask("ask-pv-11", "重跑 shelf 的视觉对比", ["pv-shm", "shelf-model"], "queued", { ...pv, ...DIR, ago: 980, holdSince: iso(300), ...held({ reason: "blocked", by: "quota" }) }),
+    ask("ask-pv-12", "导出 Waveline 的崩溃日志", ["pv-mob", "mobile-work"], "queued", { ...pv, ...DIR, ago: 1600, holdSince: iso(500), ...held({ reason: "blocked", by: "login" }) }),
+    ask("ask-pv-13", "把 r250 升到 r251", ["pv-upd", "updater"], "interrupted", { ...pv, ...DIR, ago: 2500, attempt: ended(2400, 400, { state: "interrupted", interruptReason: "outcomeUnknown", lastError: "native exited while the turn was running" }) }),
     ask("ask-pv-10", "复核 sidebar 的虚拟列表", ["pv-perf", "sidebar-perf"], "answered", { ...pv, ...DIR, ago: 4200, attempt: ended(4100, 2900), answerId: "ans-pv-10", answerPreview: "虚拟列表在 2000 行下保持 60 fps。", review: "awaitingAcceptance" }),
   );
 }
@@ -237,6 +435,14 @@ if (typeof location !== "undefined" && new URLSearchParams(location.search).has(
     ask("ask-cont-jobs", "等编译作业结束再打包", ALDEN, "running", { ago: 4000, attempts: 2, attempt: yielded(2, 900), continuationWait: cw("waiting", "jobs", 900, null) }),
     ask("ask-cont-ready", "继续整理迁移日志", REI, "running", { ago: 6000, attempts: 4, attempt: yielded(4, 60), continuationWait: cw("ready", "after", 1500, null) }),
     ask("ask-cont-limited", "轮询上游 CI 直到变绿", ["kai", "Kai"], "running", { ago: 86000, attempts: 12, attempt: yielded(12, 3000), continuationWait: cw("limited", "after", 3000, null) }),
+    // Owner 2026-11-25 (remote #47c47e): auto-continue expired and the handler is offline: 先让 Akari 上线.
+    ask("ask-cont-limited-off", "每小时复查一次发布队列", ["d-akari", "Akari"], "running", { ago: 90000, attempts: 24, attempt: yielded(24, 4000), continuationWait: cw("limited", "after", 4000, null) }),
+    // updated: a project-less delegation (the approvals page reads the host's project-less list).
+    ask("ask-cont-noproj", "整理本周的会议纪要", ["kai", "Kai"], "running", { projectId: null, owner: true, ago: 87000, attempts: 32, attempt: yielded(32, 3500), continuationWait: cw("limited", "after", 3500, null) }),
+    // Owner 2026-11-25: past its time and not continued (with / without the host's reason), and a wait beyond 24 h.
+    ask("ask-cont-overdue", "额度恢复后继续整理评测", SORA, "running", { ago: 7000, attempts: 2, attempt: yielded(2, 2400), continuationWait: { ...cw("waiting", "after", 2400, -6 * 60), blockedReason: "quota" } }),
+    ask("ask-cont-overdue-bare", "定时复查部署状态", ALDEN, "running", { ago: 8000, attempts: 3, attempt: yielded(3, 3600), continuationWait: cw("waiting", "after", 3600, -2 * 60) }),
+    ask("ask-cont-tomorrow", "明早再看夜间构建", MIKA, "running", { ago: 9500, attempts: 1, attempt: yielded(1, 600), continuationWait: cw("waiting", "after", 600, 30 * 3600) }),
   );
 }
 const byId = new Map(asks.map((a) => [a.askId, a]));
@@ -293,7 +499,7 @@ const askEvent = (id: string, a: AskSummary, attempt: number) => ({
   externalInputView: { schema: "cutex.delegation-ask.v1", data: { askId: a.askId, attempt, requester: { kind: "agent", cutexSessionId: "lead", name: "Lead" }, title: a.title, gated: false } },
 });
 
-type ResultItem = { kind: "answer" | "question" | "state"; askId: string; status?: string; state?: string; questionId?: string; preview: string };
+type ResultItem = { kind: "answer" | "question" | "state"; askId: string; status?: string; state?: string; questionId?: string; preview: string; notice?: Record<string, unknown> | null };
 const resultsEvent = (id: string, items: ResultItem[]) => ({
   type: "functionCallOutput",
   id,
@@ -338,8 +544,10 @@ function leadThread() {
             { type: "agentMessage", id: "la1", text: "好，我先让 Helper 只读找调用点，Alden 准备构建和发布说明。" },
             delegateCall("ld1", a("ask-done")),
             delegateCall("ld2", a("ask-review")),
-            ...(ROUTING_SCENE ? [delegateCall("ld-route", a("ask-route-pending")), delegateCall("ld-denied", a("ask-route-denied")), delegateCall("ld-grant", a("ask-route-grant"))] : []),
+            ...(ROUTING_SCENE ? [delegateCall("ld-route", a("ask-route-pending")), delegateCall("ld-denied", a("ask-route-denied")), delegateCall("ld-grant", a("ask-route-grant")), delegateCall("ld-stale", a("ask-route-stale"))] : []),
             delegateCall("ld3", a("ask-accept")),
+            // `?askcont`: auto-continue expired (允许继续 on the card), the handler online / offline.
+            ...(byId.has("ask-cont-limited") ? [delegateCall("ld-cont-limited", a("ask-cont-limited")), delegateCall("ld-cont-off", a("ask-cont-limited-off")), ...(byId.has("ask-cont-noproj") ? [delegateCall("ld-cont-noproj", a("ask-cont-noproj"))] : [])] : []),
             { type: "mcpToolCall", id: "lw1", server: "cutex", tool: "delegation_wait", status: "completed", durationMs: 3300, arguments: { delegations: ["ask-done"] }, result: { content: [], structuredContent: { ok: true, reason: "result", results: [{ kind: "answer", delegation: "ask-done", title: a("ask-done").title, answer: a("ask-done").answerPreview, awaiting_acceptance: false }], delegations: [] } } },
             // `?askawait`: a wait whose requester result offers resuming, and a newer agent_list with pending notices.
             ...(byId.has("ask-await") ? [
@@ -375,6 +583,8 @@ function leadThread() {
             delegateCall("ld15", a("ask-rejected")),
             delegateCall("ld16", a("ask-cancelled")),
             delegateCall("ld17", a("ask-ownerstop")),
+            delegateCall("ld17b", a("ask-hf-stop")),
+            delegateCall("ld17c", a("ask-hf-retry")),
             { type: "agentMessage", id: "la3", text: "都排上了。Rei 离线，那两个会等它上线。" },
           ],
         },
@@ -388,6 +598,9 @@ function leadThread() {
               { kind: "answer", askId: "ask-failed", status: "failed", preview: "runtime exited: electron-builder: ENOSPC" },
               { kind: "question", askId: "ask-question", questionId: "q-1", preview: "队列面板要支持拖拽排序吗？cutex 目前还没有 reorder 接口。" },
               { kind: "state", askId: "ask-stopped", state: "interrupted", preview: "" },
+              // r295: the failed attempt and the closure that followed, each with its own notice.
+              { kind: "state", askId: "ask-hf-stop", state: "interrupted", preview: "", notice: mockItemNotice("ask-hf-stop", "handlerTurnFailed@2") },
+              { kind: "state", askId: "ask-hf-stop", state: "stopped", preview: "", notice: mockItemNotice("ask-hf-stop", "terminal@9") },
             ]),
             systemEvent("lx1s", "cutex-asks", "委托 ask-review 已经 2 小时没有进展（状态 running）。需要的话追问或关闭它。"),
             systemEvent("lx1a", "Cutex Alarm", "Alarm fired: check the nightly build."),
@@ -508,8 +721,29 @@ function update(askId: string, patch: Partial<AskSummary>, missed = false) {
   if (!before.closed && d.closed) emitAsk(parties(d), "cutex/ask/closed", { askId, outcome: d.closed, revision: d.revision });
 }
 
+// cutex updated short-id lookup (`asks-short-id-lookup-v1`; `?shortidlookup=off` = an older host: the list read). Besides the
+// loaded rows it finds archived delegations the list never returns: one at #9e17c0, and 24 sharing #a1b2c3 (more than
+// a page: `hasMore`, 「结果太多，输入更长的编号」).
+const SHORT_ID_OFF = typeof location !== "undefined" && new URLSearchParams(location.search).get("shortidlookup") === "off";
+const ARCHIVED_HITS: AskIdLookupHit[] = [
+  { askId: "ask-9e17c0d4a5b6c7d8e9f0a1b2c3d4e5f6", title: "整理 r280 的发布清单", target: "alden", targetName: "Alden", projectId: "desktop", execution: "answered", closed: "accepted", updatedAt: iso(40 * 86400) },
+  ...Array.from({ length: 24 }, (_, i): AskIdLookupHit => ({ askId: `ask-a1b2c3${i.toString(16).padStart(2, "0")}${"0".repeat(24)}`, title: `批量重跑第 ${i + 1} 组`, target: "helper", targetName: "Helper", projectId: "desktop", execution: "answered", closed: "completed", updatedAt: iso((30 + i) * 86400) })),
+];
+function mockShortIdLookup(idPrefix: string, limit = 20): AskIdLookup {
+  const suffix = /^(?:…|\.\.\.)/.test(idPrefix);
+  const hex = idPrefix.replace(/^(?:…|\.\.\.|ask-)/, "").toLowerCase();
+  const full = /^ask-/.test(idPrefix);
+  const match = (id: string) => { const h = id.replace(/^ask-/, ""); return /^[0-9a-f]{32}$/.test(h) && (full ? h === hex : suffix ? h.endsWith(hex) : h.startsWith(hex) || h.endsWith(hex)); };
+  const all: AskIdLookupHit[] = [...[...byId.values()].map((d) => ({ askId: d.askId, title: d.title, target: d.target, targetName: d.targetName ?? null, projectId: d.projectId ?? null, execution: d.execution, closed: d.closed ?? null, updatedAt: d.updatedAt })), ...ARCHIVED_HITS].filter((h) => match(h.askId));
+  return { hostId: "local", asks: all.slice(0, limit), hasMore: all.length > limit };
+}
+
 function mockDelegationApi() {
   return {
+    async askIdLookup(idPrefix: string, limit?: number): Promise<AskIdLookup | null> {
+      await new Promise((r) => setTimeout(r, 120));
+      return SHORT_ID_OFF ? null : mockShortIdLookup(idPrefix, limit);
+    },
     async asks(filter: AskFilter): Promise<AskSummary[] | null> {
       const rows = [...byId.values()]
         .filter((d) => (filter.state === "open" ? isOpen(d) : filter.state === "closed" ? !isOpen(d) && !missedCloses.has(d.askId) : !filter.state || d.execution === filter.state))
@@ -519,7 +753,8 @@ function mockDelegationApi() {
         .filter((d) => !filter.project || d.projectId === filter.project)
         .sort((x, y) => Date.parse(y.createdAt) - Date.parse(x.createdAt));
       await new Promise((r) => setTimeout(r, 120));
-      return clone(filter.limit ? rows.slice(0, filter.limit) : rows);
+      const page = filter.limit ? rows.slice(0, filter.limit) : rows;
+      return clone(ACTIVITY_LINKS ? page.map((d) => ({ ...d, activityLink: mockActivityLink(d) })) : page);
     },
     async ask(askId: string): Promise<AskDetail | null> {
       const d = byId.get(askId);
@@ -530,6 +765,7 @@ function mockDelegationApi() {
         body: { text: BRIEFS[askId] ?? d.title, textArtifact: askId === "ask-run" ? "art-brief-run" : null },
         attempts: ATTEMPT_HISTORY[askId] && d.attempt ? [...ATTEMPT_HISTORY[askId]!.slice(0, -1), { ...d.attempt, attemptId: `${askId}#${d.attempt.n}` }] : d.attempt ? [{ ...d.attempt, attemptId: `${askId}#${d.attempt.n}` }] : [],
         answer: d.answerId ? { answerId: d.answerId, status: d.execution === "failed" ? "failed" : "completed", bytes: (ANSWERS[askId] ?? d.answerPreview ?? "").length * 3, metadata: OWNER_STEERED.has(askId) ? { ownerSteered: true } : null } : null,
+        ...mockTerminalDetail(askId),
         questions: askId === "ask-question" ? [{ questionId: "q-1", askId, attempt: 1, questions: [{ question: "队列面板要支持拖拽排序吗？cutex 目前还没有 reorder 接口。" }], route: "owner", routedToOwnerAt: iso(500), state: "open" }] : [],
       } as AskDetail);
     },
@@ -658,13 +894,30 @@ function currentTurnOf(sessionId: string) {
   return d ? { kind: "ask" as const, askId: d.askId } : null;
 }
 
+/** 项目 table batch (shared/projectBatchOutcome): the run control alone, and pause / resume answered with an outcome. */
+function withRunControl(api: UpgradePreviewApi) {
+  return {
+    ...api,
+    async projectBatchRunControl(projectId: string) { return { projectId, requestedBy: null, requestedAt: null, interruptUnknown: false, ...(await api.delegationUpgradeSnapshot(projectId)).runControl! } as unknown as import("@cutex-desktop/protocol").ProjectRunControl; },
+    async projectBatchControl(projectId: string, action: import("../../../../shared/projectBatchOutcome").RunControlWrite): Promise<import("../../../../shared/projectBatchOutcome").WriteOutcome> {
+      try {
+        const r = await api.delegationUpgradeAction(projectId, action);
+        return r.effectState === "committed" ? { outcome: "done" } : r.effectState === "partial" ? { outcome: "settling" } : r.effectState === "unknown" ? { outcome: "unknown" } : { outcome: "refused", code: "not_effective" };
+      } catch (e) {
+        return { outcome: "refused", code: e instanceof Error ? e.message : String(e) };
+      }
+    },
+  };
+}
+
 export const mock: ModuleMock = {
-  features: { new: ["owner-ask-disposition-v1", "ask-stop-settlement-v1", "stop-answer-admission-v1", "delegation-tree-stop-v1", "delegation-routing-v1", "project-run-control-v1", "delegation-continuation-v1", "agent-activity-v1", "agent-archive-kind-v1", ...(ROUTING_SCENE ? ["delegation-review-refs"] : [])] },
+  features: { new: [...(RECEIPTS ? ["peer-delivery-receipts-v1"] : []), "owner-ask-disposition-v1", "ask-stop-settlement-v1", "stop-answer-admission-v1", "delegation-tree-stop-v1", "delegation-routing-v1", "project-run-control-v1", "delegation-continuation-v1", ...(CONT_LEGACY ? [] : ["delegation-continuation-approval-v1"]), "agent-activity-v1", "agent-archive-kind-v1", ...(SHORT_ID_OFF ? [] : ["asks-short-id-lookup-v1"]), ...(ROUTING_SCENE ? ["delegation-review-refs"] : [])] },
   api: (core) => {
-    const base = { ...mockDelegationApi(), ...(!core.legacy ? createUpgradeMock("local") : {}) };
-    return ROUTING_SCENE ? routingMockApi(base, asks, core) : base;
+    const base = { ...mockDelegationApi(), ...(!core.legacy ? withRunControl(createUpgradeMock("local")) : {}) };
+    const withAllow = continuationAllowApi(base, asks, core);
+    return ROUTING_SCENE ? routingMockApi(withAllow, asks, core) : withAllow;
   },
-  remote: (hostId) => ({ ...mockDelegationApi(), ...createUpgradeMock(hostId) }),
+  remote: (hostId) => ({ ...mockDelegationApi(), ...withRunControl(createUpgradeMock(hostId)) }),
   admission: (sessionId) => admissionOf(sessionId),
   currentTurn: (sessionId) => currentTurnOf(sessionId),
   thread: (sessionId) => (sessionId === "lead" ? leadThread() : sessionId === "helper" ? helperThread() : null),

@@ -20,6 +20,10 @@ export const GIT_STATUS_MIN_INTERVAL_MS = 2000;
 /** A possibly stale result is read again this long after it arrived. */
 export const GIT_STATUS_STALE_RECHECK_MS = 1500;
 
+/** The error of a read that answered no status object. */
+export const GIT_STATUS_NO_ANSWER = "git status: the host answered no status";
+const isGitStatus = (value: unknown): value is GitStatus => typeof value === "object" && value !== null;
+
 export class GitStatusFlight {
   private inFlight = false;
   private dirty = false;
@@ -130,7 +134,12 @@ export class GitStatusFlight {
     } catch (error) {
       reading = Promise.reject(error);
     }
-    reading.then((status) => done({ ok: true, status }), (error: unknown) => done({ ok: false, error, retrying: isTransientError(error) }));
+    // A read that resolves without a status object (null / undefined from a broken bridge or mock) is a failed read:
+    // reading `possiblyStale` of it threw inside this callback, an unhandled rejection (TODO 2026-11-16).
+    reading.then(
+      (status) => done(isGitStatus(status) ? { ok: true, status } : { ok: false, error: new Error(GIT_STATUS_NO_ANSWER), retrying: false }),
+      (error: unknown) => done({ ok: false, error, retrying: isTransientError(error) }),
+    );
   }
 
   private idle(): void {

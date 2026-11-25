@@ -76,7 +76,7 @@ export function OwnerReplyBox({
         <button onClick={() => onClose(false)} className="rounded-lg px-3 py-1 text-sm text-muted hover:bg-surface-2 hover:text-foreground">
           {t("ownerNotify.cancel")}
         </button>
-        <button onClick={() => void send()} disabled={!draft.trim() || sending} className="rounded-lg bg-accent px-3 py-1 text-sm text-white disabled:opacity-40">
+        <button onClick={() => void send()} disabled={!draft.trim() || sending} className="rounded-lg bg-accent px-3 py-1 text-sm text-on-accent disabled:opacity-40">
           {sending ? t("ownerNotify.sending") : t("ownerNotify.send")}
         </button>
       </div>

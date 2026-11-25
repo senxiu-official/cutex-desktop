@@ -11,6 +11,7 @@ import { useAgentAudio } from "../lib/agentAudio";
 import { memo, useContext, useMemo, useSyncExternalStore, type FocusEvent as ReactFocusEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { useI18n } from "../i18n";
 import { resolveSidebarRoleLabel, useTermOverrides } from "../lib/terms";
+import { isAssistantSession, usePa } from "../lib/personalAssistantStore";
 import { formatAutoRetryWait } from "../lib/modelOverloadRetry";
 import { useModelOverloadRetry } from "../lib/modelOverloadRetryView";
 import { AllRowsCompact } from "../lib/allRowsCompact";
@@ -225,11 +226,13 @@ function useRowMark(row: AgentRow, host: string, own: boolean) {
 export const AgentRowButton = memo(function AgentRowButton({ row, compact: compactRow = false }: { row: AgentRow; compact?: boolean }) {
   const { t, locale } = useI18n();
   const terms = useTermOverrides();
-  const director = resolveSidebarRoleLabel(terms, locale, "director"), operator = resolveSidebarRoleLabel(terms, locale, "operator");
+  const director = resolveSidebarRoleLabel(terms, locale, "director"), operator = resolveSidebarRoleLabel(terms, locale, "operator"), assistantLabel = resolveSidebarRoleLabel(terms, locale, "assistant");
   // Layout B 「全部」 (lib/allRowsCompact): every row compact, 20 px avatar.
   const allCompact = useContext(AllRowsCompact);
   const compact = compactRow || allCompact;
   const { selected, host, own, preview, look, unavailable, open, menu, offlineTitle, foretell } = useRowHost(row);
+  // A 个人助理's agent carries its role chip like a Director (the 术语 setting's word).
+  const assistant = usePa((s) => isAssistantSession(s, host, row.session.cutexSessionId));
   const pause = useAgentPause(host, row.session.cutexSessionId);
   const { rowPreview, statusChips } = useUiPrefs();
   const { signal, needs } = useRowSignal(row);
@@ -242,13 +245,14 @@ export const AgentRowButton = memo(function AgentRowButton({ row, compact: compa
   // Created recently and not opened yet (lib/freshAgents): a small 「新」 marker.
   const fresh = useIsFreshAgent(rowKey(row));
   // 状态标签 自动: re-measured when the line resizes or its content changes (lib/useChipFit).
-  const chipFit = useChipFit(statusChips, [shownName(row), signal, needs?.count, needs?.reasons.join(), row.isDirector, row.isOperator, row.operatorRestartRequired, row.pinned, !!look, fresh, twoLines]);
+  const chipFit = useChipFit(statusChips, [shownName(row), signal, needs?.count, needs?.reasons.join(), row.isDirector, row.isOperator, assistant, row.operatorRestartRequired, row.pinned, !!look, fresh, twoLines]);
   // Compact rows under IM-style rows (消息预览 on): a 20 px avatar (sidebar density), else 16 px.
   const avatar = twoLines ? IM_AVATAR : compact ? (rowPreview === "off" && !allCompact ? 16 : COMPACT_IM_AVATAR) : AVATAR_COL;
   const nameTags = (
     <>
       {row.isDirector && director && <Tag fit className="flex-1 max-w-max" data-tip={t("sidebar.director")} data-director-tag="">{director}</Tag>}
       {row.isOperator && operator && <Tag fit className="flex-1 max-w-max" data-tip={t("sidebar.operator")} data-operator-tag="">{operator}</Tag>}
+      {assistant && assistantLabel && <Tag fit className="flex-1 max-w-max" data-tip={t("sidebar.assistant")} data-assistant-tag="">{assistantLabel}</Tag>}
       <AgentPauseTag hostId={host} sessionId={row.session.cutexSessionId} />
       {!twoLines && row.operatorRestartRequired && <Tag fit className="flex-1 max-w-max" data-operator-restart-required="" tone="attention" data-tip={t("sidebar.operatorRestartRequired")}>{t("sidebar.operatorRestartRequired")}</Tag>}
       {row.pinned && <PinMark />}
@@ -387,8 +391,9 @@ function RowBadge({ row, signal, needs, mark, compact, fit, openHost }: { row: A
 export const OfflineRow = memo(function OfflineRow({ row }: { row: AgentRow }) {
   const { t, locale } = useI18n();
   const terms = useTermOverrides();
-  const director = resolveSidebarRoleLabel(terms, locale, "director"), operator = resolveSidebarRoleLabel(terms, locale, "operator");
+  const director = resolveSidebarRoleLabel(terms, locale, "director"), operator = resolveSidebarRoleLabel(terms, locale, "operator"), assistantLabel = resolveSidebarRoleLabel(terms, locale, "assistant");
   const { selected, host, preview, look, unavailable, open, menu, offlineTitle, foretell } = useRowHost(row);
+  const assistant = usePa((s) => isAssistantSession(s, host, row.session.cutexSessionId));
   const previewAt = preview?.at;
   return (
     <div
@@ -424,6 +429,7 @@ export const OfflineRow = memo(function OfflineRow({ row }: { row: AgentRow }) {
         <AudioMark hostId={row.hostId} sessionId={row.session.cutexSessionId} />
         {row.isDirector && director && <Tag fit className="flex-1 max-w-max" data-tip={t("sidebar.director")} data-director-tag="">{director}</Tag>}
         {row.isOperator && operator && <Tag fit className="flex-1 max-w-max" data-tip={t("sidebar.operator")} data-operator-tag="">{operator}</Tag>}
+        {assistant && assistantLabel && <Tag fit className="flex-1 max-w-max" data-tip={t("sidebar.assistant")} data-assistant-tag="">{assistantLabel}</Tag>}
         <AgentPauseTag hostId={host} sessionId={row.session.cutexSessionId} />
         {row.operatorRestartRequired && <Tag fit className="flex-1 max-w-max" data-operator-restart-required="" tone="attention" data-tip={t("sidebar.operatorRestartRequired")}>{t("sidebar.operatorRestartRequired")}</Tag>}
         {row.pinned && <PinMark />}

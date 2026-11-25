@@ -119,7 +119,10 @@ export function attributionWindow(windowLabel: string | null | undefined): "5h" 
  */
 export function useQuotaAttribution(hostId: string, profile: string | null, window: string | null, active: boolean, refreshKey: number | null): QuotaAttribution | null | undefined {
   const offered = useApp((s) => featuresOf(s, hostId).has(QUOTA_ATTRIBUTION_FEATURE));
-  const [value, setValue] = useState<QuotaAttribution | null | undefined>(undefined);
+  // The last answer for this window (an earlier open) shows at once and is replaced in place: reopening the card
+  // does not start from the loading shape again (owner 2026-11-24: nothing in the card jumps).
+  const remembered = () => (profile && window ? latest.get(cacheKey(hostId, profile, window))?.answer : undefined);
+  const [value, setValue] = useState<QuotaAttribution | null | undefined>(remembered);
   useEffect(() => {
     if (!offered || !profile || !window || !active) return;
     let live = true;
@@ -137,7 +140,8 @@ export function useQuotaAttribution(hostId: string, profile: string | null, wind
       live = false;
     };
   }, [offered, hostId, profile, window, active, refreshKey]);
-  useEffect(() => setValue(undefined), [hostId, profile, window]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => setValue(remembered()), [hostId, profile, window]);
   return offered ? value : undefined;
 }
 

@@ -214,6 +214,9 @@ export function insertMention(text: string, token: { start: number; end: number 
   return { text: next, caret: token.start + inserted.length + 1 };
 }
 
+/** The draft text a skill pick inserts: `$name ` (what `boundSkills` looks for at send). */
+export const skillToken = (name: string) => `$${name} `;
+
 /** Skills picked from the palette whose `$name` is still in the text (cute-codex skill inputs). */
 export function boundSkills<T extends { name: string }>(text: string, picked: readonly T[]): T[] {
   const seen = new Set<string>();

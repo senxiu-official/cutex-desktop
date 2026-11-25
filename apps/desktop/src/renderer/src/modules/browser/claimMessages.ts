@@ -1,7 +1,7 @@
 // browser_claim policy (Profile setting, browser settings, toasts, banner). New keys only.
 export const browserClaimZhCN = {
   "browser.claim.mode": "浏览器控制",
-  "browser.claim.modeHint": "此 Profile 的{{agent}}请求控制你的标签页（browser_claim）时怎么处理。保存在这台电脑上，按主机和 Profile 区分",
+  "browser.claim.modeHint": "此 Profile 的{{agent}}请求控制你的标签页（browser_claim）时怎么处理。保存在桌面应用里，按主机和 Profile 区分",
   "browser.claim.mode.ask": "每次询问",
   "browser.claim.mode.local": "本机页面免问",
   "browser.claim.mode.always": "总是允许",
@@ -26,7 +26,7 @@ export const browserClaimZhCN = {
 } as const;
 export const browserClaimEn: Record<keyof typeof browserClaimZhCN, string> = {
   "browser.claim.mode": "Browser control",
-  "browser.claim.modeHint": "What happens when an {{agent}} on this profile asks to control one of your tabs (browser_claim). Stored on this computer, per host and profile.",
+  "browser.claim.modeHint": "What happens when an {{agent}} on this profile asks to control one of your tabs (browser_claim). Stored in the desktop app, per host and profile.",
   "browser.claim.mode.ask": "Ask every time",
   "browser.claim.mode.local": "Local pages without asking",
   "browser.claim.mode.always": "Always allow",

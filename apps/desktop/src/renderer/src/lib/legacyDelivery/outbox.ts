@@ -1,5 +1,5 @@
 // LEGACY(input-ledger-v1): frozen delivery inference for older hosts.
-// Delete only when EVERY host advertises input-ledger-v1 (including hachimi).
+// Delete only when EVERY host advertises input-ledger-v1 (including hostc).
 // Optimistic sends ("outbox"). A message the user sends shows up at once where it will end up —
 // the queue panel (queued follow-up), the steers section (steered into the running turn) or the
 // end of the timeline, above the running turn's live line (a new turn; timelineTail) — marked

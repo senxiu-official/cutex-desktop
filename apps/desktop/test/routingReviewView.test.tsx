@@ -12,6 +12,7 @@ vi.mock("../src/renderer/src/store", () => ({ useApp: (select: (s: unknown) => u
 vi.mock("../src/renderer/src/lib/hostAccess", () => ({ useHostAccess: () => fx.access }));
 vi.mock("../src/renderer/src/lib/approvalDecision", () => ({ decideRoutingReviewOn: vi.fn(), useAskReview: () => ({ record: null, canDecide: true, loaded: true, routingSupported: false }) }));
 vi.mock("../src/renderer/src/lib/delegationMenu", () => ({ runDelegationCommand: vi.fn() }));
+vi.mock("../src/renderer/src/lib/delegationStore", () => ({ refreshDelegation: vi.fn() }));
 vi.mock("../src/renderer/src/lib/routingReviews", () => ({ ROUTING_REVIEW_FEATURE: "delegation-review-refs", useRoutingOperation: () => fx.operation, useRoutingReview: () => ({ record: fx.record, error: false }), refreshRoutingReviews: vi.fn(), checkRoutingOutcome: vi.fn() }));
 // The stateful grant interaction has its own real-component flow suite.
 vi.mock("../src/renderer/src/components/DelegationReviewerGrant", () => ({ DelegationReviewerGrant: () => null }));

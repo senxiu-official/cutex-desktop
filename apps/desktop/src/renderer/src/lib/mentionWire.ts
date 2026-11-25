@@ -8,17 +8,23 @@
 import { useSyncExternalStore } from "react";
 import { useApp } from "../store";
 import { agentIndex } from "./agentLook";
-import { agentMentionMarkdown, agentMentionTokens } from "./agentMentions";
+import { agentMentionMarkdown, type AgentMentionToken } from "./agentMentions";
+import { composerMentionTokens } from "./composerMentionTokens";
 import { realAgentName } from "./agentAlias";
 
 type App = ReturnType<typeof useApp.getState>;
+
+/** The agent mentions as the editor sees them: top-level atoms only. A link written inside another atom (a profile
+ *  reference's `name` JSON string) is that atom's text and is never rewritten — rewriting it could break the JSON
+ *  (e.g. an agent named `Other [v2]` would add `\[` escapes) and the reference would no longer parse. */
+const topAgentMentions = (text: string): AgentMentionToken[] => composerMentionTokens(text).filter((t): t is AgentMentionToken & { kind: "agent" } => t.kind === "agent");
 
 /** 「cutex.…d6a0e6」: the id's last 6 characters. */
 export const shortAgentId = (id: string): string => (id.length > 12 ? `cutex.…${id.slice(-6)}` : id);
 
 /** The draft text for the wire, as described above (`hostId`: the conversation's host). */
 export function mentionWireText(text: string, hostId: string, _sessionId: string, app: App = useApp.getState()): string {
-  const tokens = agentMentionTokens(text);
+  const tokens = topAgentMentions(text);
   if (!tokens.length) return text;
   const index = agentIndex(app);
   const hostLabel = (id: string) => app.hosts?.hosts.find((h) => h.id === id)?.label ?? id;
@@ -37,7 +43,7 @@ export function mentionWireText(text: string, hostId: string, _sessionId: string
 /** Copy: the names as read (no markup, no qualifiers). */
 export function mentionPlainText(text: string): string {
   let out = "", cursor = 0;
-  for (const token of agentMentionTokens(text)) {
+  for (const token of topAgentMentions(text)) {
     out += `${text.slice(cursor, token.start)}@${agentIndex(useApp.getState()).get(token.id)?.session.displayName || token.name}`;
     cursor = token.end;
   }

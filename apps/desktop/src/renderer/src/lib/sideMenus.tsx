@@ -81,6 +81,7 @@ import { sidePageRef } from "./refs";
 import { instanceRef } from "./refServices";
 import { appModules } from "../modules/app";
 import { pageKind } from "./paneLayout";
+import { EntityIcon } from "../components/EntityIcon";
 
 const activeHost = () => useApp.getState().hosts?.active ?? "local";
 
@@ -170,14 +171,14 @@ export function cardNewTabParams(item: SideComponentItem): Json | null {
 /** A `tabRow: "always"` card's ＋: a new instance of its kind as a tab of THIS card (same page, same binding as the
  * tab it shows), shown and focused. The shown tab is touched first so placement's "most recently used card of the
  * kind" is this one even when the page holds two cards of the kind. */
-export function newTabInCard(cardId: string): void {
+export function newTabInCard(cardId: string, chosen?: Json): void {
   const layout = useSide.getState().layout;
   const at = findCard(layout, cardId);
   const shown = at?.card.active ?? at?.card.tabs[0];
   const inst = shown ? layout.instances[shown] : undefined;
   const entry = inst ? sideRegistry().get(inst.kind) : undefined;
   if (!at || !shown || !inst || !entry) return;
-  const params = cardNewTabParams(entry.item);
+  const params = cardNewTabParams(entry.item) === null ? null : (chosen ?? cardNewTabParams(entry.item));
   if (params === null) return;
   updateLayout((l) => activateTab(l, shown, Date.now()));
   openSide(inst.kind, params, { page: at.page.id, binding: inst.binding, focus: true, reveal: true });
@@ -305,7 +306,7 @@ export function agentsSubmenu(): MenuEntry[] {
   const hostId = hosts?.active ?? "local";
   if (!sidebar) return [title(translate("side.agentsNone"))];
   const { groups } = buildSidebar(sidebar, { hostId });
-  const row = (r: AgentRow): MenuAction => ({ label: r.name, onSelect: () => void openAgentSide(r.id, hostId) });
+  const row = (r: AgentRow): MenuAction => ({ label: r.name, icon: <EntityIcon entity={{ kind: "agent", id: r.id, name: r.name }} />, onSelect: () => void openAgentSide(r.id, hostId) });
   const shown = (rows: AgentRow[]) => rows.filter((r) => r.id !== selectedId);
   const online: MenuEntry[] = [];
   for (const g of groups) {
@@ -424,6 +425,7 @@ export function tabMenu(instanceId: string): MenuEntry[] {
     },
     // The modules' `ref.action` items for a referable component (§19.8).
     ...refActionEntries(instanceRef("hostId" in inst.binding ? inst.binding.hostId : activeHost(), inst.kind, inst.state), true),
+    ...(entry?.item.tabMenu?.({ id: instanceId, kind: inst.kind, binding: inst.binding, state: inst.state, pinned: inst.pinned }, { hostId: "hostId" in inst.binding ? inst.binding.hostId : activeHost(), newTab: (params) => newTabInCard(at.card.id, params) }) ?? []),
     "separator",
     visible.length > 1 && { label: translate("side.closeOthers"), icon: <X size={ICON} />, armed: armedClose(otherTabsCloseWarnings(instanceId)), onSelect: () => closeOtherTabs(instanceId) },
     // A component's close warning (closeConfirm) names what closing ends, e.g. its process; then the

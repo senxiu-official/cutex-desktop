@@ -23,6 +23,8 @@ import { keyVar } from "../lib/keybindings";
 import { isWorker, serviceHealthKey } from "../lib/serviceWorker";
 import { pageOf, POP_W, ROW_H_COMPACT, serviceStatusLine, serviceWhere, servicesPopoverLayout, type ServicesPopoverLayout } from "../lib/servicesPopover";
 import { useOwnerWindow } from "../lib/ownerContext";
+import { EntityMention } from "./EntityIcon";
+import { tNodes } from "../lib/textNodes";
 
 const TACT = "flex h-6 shrink-0 items-center gap-1 rounded-md px-1.5 text-meta/[inherit] text-muted hover:bg-hover hover:text-foreground";
 
@@ -207,7 +209,7 @@ export function AgentServicesView({ paneId, hostId, sessionId, agentName, compac
           >
             <div className="flex shrink-0 items-center gap-1.5 px-1.5 pt-0.5 text-ui/[inherit] font-semibold text-foreground">
               <Server size={13} />
-              <span className="min-w-0 truncate">{t("svcLink.title", { name: agentName })}</span>
+              <span className="min-w-0 truncate">{tNodes(t, "svcLink.title", { name: <EntityMention entity={{ kind: "agent", id: sessionId, name: agentName }}>{agentName}</EntityMention> })}</span>
             </div>
             <p className="shrink-0 px-1.5 pt-0.5 pb-1.5 text-caption/[inherit] leading-snug text-subtle">{t("svcLink.sub")}</p>
             <div data-agent-services-list="" style={shown.pages > 1 ? { minHeight: (pageSize / 2) * ROW_H_COMPACT } : undefined} className={`min-h-0 flex-1 overflow-y-auto overscroll-contain ${two ? "grid grid-cols-2 content-start gap-x-1" : ""}`}>
@@ -246,7 +248,7 @@ export function AgentServicesView({ paneId, hostId, sessionId, agentName, compac
                       aria-label={t(there ? "svcLink.locate" : "svcLink.open")}
                       title={t(there ? "svcLink.locate" : "svcLink.open")}
                       onClick={openIt}
-                      className={`flex size-6 shrink-0 items-center justify-center rounded-md ${there ? "border border-border text-muted hover:bg-hover hover:text-foreground" : "bg-accent text-white hover:opacity-90"}`}
+                      className={`flex size-6 shrink-0 items-center justify-center rounded-md ${there ? "border border-border text-muted hover:bg-hover hover:text-foreground" : "bg-accent text-on-accent hover:opacity-90"}`}
                     >
                       {there ? <LocateFixed size={13} /> : <PanelRightOpen size={13} />}
                     </button>
@@ -266,7 +268,7 @@ export function AgentServicesView({ paneId, hostId, sessionId, agentName, compac
                     {worker ? <button type="button" data-agent-service-manage={s.slug} onClick={openIt} title={t("services.worker.manageHint")} className="flex h-6 shrink-0 items-center rounded-md border border-border px-2 text-meta/[inherit] text-muted hover:bg-hover hover:text-foreground">{t("services.worker.manage")}</button> : <button
                       data-agent-service-open={there ? "locate" : "open"}
                       onClick={openIt}
-                      className={`flex h-6 shrink-0 items-center gap-1 rounded-md px-2 text-meta/[inherit] ${there ? "border border-border text-muted hover:bg-hover hover:text-foreground" : "bg-accent text-white hover:opacity-90"}`}
+                      className={`flex h-6 shrink-0 items-center gap-1 rounded-md px-2 text-meta/[inherit] ${there ? "border border-border text-muted hover:bg-hover hover:text-foreground" : "bg-accent text-on-accent hover:opacity-90"}`}
                     >
                       {there && <Check size={12} />}
                       {t(there ? "svcLink.locate" : "svcLink.open")}

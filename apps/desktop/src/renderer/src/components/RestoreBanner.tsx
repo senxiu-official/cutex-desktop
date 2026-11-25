@@ -15,6 +15,8 @@ import { chosenCandidates, restoreSequentially, type RestoreOutcome } from "../l
 import { useTrackOverlay } from "../lib/openOverlays";
 import { useApp } from "../store";
 import { useOwnerWindow } from "../lib/ownerContext";
+import { EntityIcon } from "./EntityIcon";
+import { useStaggeredCount } from "../lib/useStagger";
 
 const COMPACT_BUTTON = "shrink-0 rounded px-1.5 py-0.5 text-muted hover:bg-hover hover:text-foreground disabled:opacity-50";
 
@@ -103,6 +105,8 @@ function useRestoreState() {
 /** The notice's body: message, the agent ticks while choosing, failures, then the actions. */
 function RestoreCard({ state: s, className }: { state: RestoreState; className: string }) {
   const { t } = useI18n();
+  // Every agent that was online can be listed: avatars past the first rows mount in steps (lib/useStagger).
+  const icons = useStaggeredCount(s.items.length);
   return (
     <div className={`text-xs ${className}`} role="status" data-testid="restore-banner">
       <div className="flex items-start gap-1.5">
@@ -111,9 +115,10 @@ function RestoreCard({ state: s, className }: { state: RestoreState; className: 
       </div>
       {s.choosing && !s.busy && (
         <div className="mt-1.5 flex flex-col gap-0.5 pl-5">
-          {s.items.map((item) => (
+          {s.items.map((item, i) => (
             <label key={item.cutexSessionId} className="flex min-w-0 cursor-pointer items-center gap-1.5" data-tip={t("restore.lastOnline", { at: new Date(item.lastOnlineAt).toLocaleString() })}>
               <input type="checkbox" checked={s.chosen.has(item.cutexSessionId)} onChange={() => s.toggle(item.cutexSessionId)} />
+              {i < icons ? <EntityIcon entity={{ kind: "agent", id: item.cutexSessionId, name: item.displayName }} /> : <span className="h-4 w-4 shrink-0" aria-hidden />}
               <span className="truncate">{item.displayName}</span>
             </label>
           ))}

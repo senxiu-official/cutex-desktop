@@ -6,13 +6,16 @@ const fx = vi.hoisted(() => ({ state: {} as any }));
 vi.mock("../src/renderer/src/lib/batchModel", () => ({
   useBatchModel: (select?: (s: any) => unknown) => select ? select(fx.state) : fx.state,
   scopeAgents: () => [], batchSources: () => [{ key: "source", model: "sonnet", profile: "p", count: 1 }],
-  batchRows: () => [], tickedRows: () => [],
+  batchRows: () => [], tickedRows: () => [], runningOn: () => false,
   applyBatch: () => {}, chooseEffort: () => {}, chooseSource: () => {}, chooseTarget: () => {}, closeBatchModel: () => {}, setBatchScope: () => {}, toggleBatchRow: () => {},
 }));
-vi.mock("../src/renderer/src/store", () => ({ useApp: (select: (s: object) => unknown) => select({}), sidebarOf: () => null }));
+vi.mock("../src/renderer/src/store", () => ({ useApp: (select: (s: object) => unknown) => select({}), sidebarOf: () => null, featuresOf: () => new Set(), agentState: () => undefined }));
 vi.mock("../src/renderer/src/i18n", () => ({ useI18n: () => ({ t: (key: string, v?: Record<string, string | number>) => key === "claudeModels.latestTag" ? "Follow latest" : key === "claudeModels.oneMName" ? `${v?.model} · 1M` : key }) }));
 vi.mock("../src/renderer/src/lib/ownerContext", () => ({ useOwnerWindow: () => window }));
 import { BatchModelDialog } from "../src/renderer/src/components/BatchModelDialog";
+
+// The store double is too thin for the avatar stack (agent looks, Profile pictures): icons are stubbed.
+vi.mock("../src/renderer/src/components/EntityIcon", () => import("./helpers/entityIconStub"));
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 it("batch model raw target list must name its folded-out 1M alias from the handshake", () => {
   const alias = { id: "opus", displayName: "Opus (alias)", resolvedModel: "claude-opus-5-5", resolvedModelSource: "sdkHandshake", resolvedDisplayVersion: "5.5", supportedReasoningEfforts: ["medium"] };

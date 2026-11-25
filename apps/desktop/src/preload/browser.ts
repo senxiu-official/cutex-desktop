@@ -2,8 +2,13 @@ import type { BrowserCursorPreferences } from "../shared/browserCursor";
 import type { BrowserCarrierPreferences } from "../shared/browserCarrier";
 import { BROWSER_CHANNEL, type BrowserBridge, type BrowserEvent, type BrowserRequest, type BrowserTabMount, type BrowserTabView, type BrowserTurnShot, type BrowserImage, type BrowserToolItem, type BrowserAgentView, type BrowserHostSettings, type BrowserIdempotencyClearResult, type BrowserClaimPolicyView, type BrowserClaimAllowView, type BrowserClaimAuditView, type BrowserExternalPagesView, type BrowserSitePermissionView, type BrowserProfileTools, type BrowserViewMemory } from "../shared/browser";
 import type { HostBinding } from "../shared/hosts";
+import type { WhatsAppWatchView } from "../shared/browser";
+
+import { BROWSER_IDENTITY_CHANNEL, type BrowserIdentityBridge, type BrowserIdentityEvent, type BrowserIdentityRequest } from "../shared/browserIdentity";
 
 export interface BrowserPreloadOptions {
+  /** 浏览器身份 events (DesktopEvents.browserIdentityEvent). */
+  subscribeIdentities?(listener: (event: BrowserIdentityEvent) => void): () => void;
   invoke(channel: string, request: BrowserRequest, binding: HostBinding | null): Promise<unknown>;
   binding(hostId: string): HostBinding | null;
   /** Existing EVENT_CHANNEL delivery, after the shared HostTag filter. */
@@ -13,6 +18,7 @@ export function browserBridge(options: BrowserPreloadOptions): BrowserBridge {
   return {
     setEnabled: enabled => options.invoke(BROWSER_CHANNEL, { op: "setEnabled", enabled }, null) as Promise<void>,
     resetOrigins: () => options.invoke(BROWSER_CHANNEL, { op: "resetOrigins" }, null) as Promise<void>,
+    whatsAppModule: enabled => options.invoke(BROWSER_CHANNEL, enabled === undefined ? { op: "whatsAppModule" } : { op: "whatsAppModule", enabled }, null) as Promise<{ enabled: boolean }>,
     externalPages: enabled => options.invoke(BROWSER_CHANNEL, enabled === undefined ? { op: "externalPages" } : { op: "externalPages", enabled }, null) as Promise<BrowserExternalPagesView>,
     systemProxy: enabled => options.invoke(BROWSER_CHANNEL, enabled === undefined ? { op: "systemProxy" } : { op: "systemProxy", enabled }, null) as Promise<{ enabled: boolean }>,
     cursorColor: color => options.invoke(BROWSER_CHANNEL, color === undefined ? { op: "cursorColor" } : { op: "cursorColor", color }, null) as Promise<BrowserCursorPreferences>,
@@ -27,11 +33,14 @@ export function browserBridge(options: BrowserPreloadOptions): BrowserBridge {
         return options.invoke(BROWSER_CHANNEL, request, binding);
       };
       return {
+        whatsAppWatch: () => call({ op: "whatsAppWatch" }) as Promise<WhatsAppWatchView>,
+        setWhatsAppWatch: (tabKey, enabled, preview) => call({ op: "setWhatsAppWatch", tabKey, enabled, preview }) as Promise<WhatsAppWatchView>,
+        unbindWhatsAppWatch: tabKey => call({ op: "unbindWhatsAppWatch", tabKey }) as Promise<WhatsAppWatchView>,
         openBlockedNavigation: (tabKey, id) => call({ op: "openBlockedNavigation", tabKey, id }) as Promise<void>,
         openOwnerNotice: (tabKey, id) => call({ op: "openOwnerNotice", tabKey, id }) as Promise<void>,
         dismissLoginWarning: (tabKey, origin) => call({ op: "dismissLoginWarning", tabKey, origin }) as Promise<void>,
         openOwnerCopy: tabKey => call({ op: "openOwnerCopy", tabKey }) as Promise<{ tabKey: string; url: string }>,
-        reserveOwnerTab: () => call({ op: "reserveOwnerTab" }) as Promise<{ tabKey: string }>,
+        reserveOwnerTab: browserIdentityId => call({ op: "reserveOwnerTab", ...(browserIdentityId !== undefined ? { browserIdentityId } : {}) }) as Promise<{ tabKey: string }>,
         list: () => call({ op: "list" }) as Promise<BrowserTabView[]>,
         turnShots: (sessionId, turnId) => call({ op: "turnShots", sessionId, turnId }) as Promise<BrowserTurnShot[]>,
         turnShot: id => call({ op: "turnShot", id }) as Promise<BrowserImage>,
@@ -71,5 +80,37 @@ export function browserBridge(options: BrowserPreloadOptions): BrowserBridge {
       };
     },
     subscribe: options.subscribe,
+    identities: identityBridge(options),
+  };
+}
+
+/** 浏览器身份: one host-independent channel; main validates every request again (shared parseBrowserIdentityRequest). */
+function identityBridge(options: BrowserPreloadOptions): BrowserIdentityBridge {
+  const call = <T>(request: BrowserIdentityRequest) => options.invoke(BROWSER_IDENTITY_CHANNEL, request as never, null) as Promise<T>;
+  return {
+    state: () => call({ op: "state" }),
+    create: (name, color, initial) => call({ op: "create", name, color, ...(initial !== undefined ? { initial } : {}) }),
+    update: (id, expectedRevision, change) => call({ op: "update", id, expectedRevision, ...change }),
+    setCurrent: (id) => call({ op: "setCurrent", id }),
+    signOut: (id) => call({ op: "signOut", id }),
+    remove: (id) => call({ op: "remove", id }),
+    storage: (id) => call({ op: "storage", id }),
+    signedInSites: (id, hostId) => call({ op: "signedInSites", id, hostId }),
+    clearData: (request) => call({ op: "clearData", request }),
+    prefs: (patch) => call(patch === undefined ? { op: "prefs" } : { op: "prefs", patch }),
+    history: (query) => call({ op: "history", query }),
+    topSites: (identityId, hostId, limit) => call({ op: "topSites", identityId, hostId, ...(limit !== undefined ? { limit } : {}) }),
+    historyDelete: (target) => call({ op: "historyDelete", target }),
+    passwords: (identityId) => call({ op: "passwords", identityId }),
+    passwordUpdate: (id, username) => call({ op: "passwordUpdate", id, username }),
+    passwordRemove: (id) => call({ op: "passwordRemove", id }),
+    passwordReveal: (id) => call({ op: "passwordReveal", id }),
+    passwordStatus: () => call({ op: "passwordStatus" }),
+    passwordCopy: (id) => call({ op: "passwordCopy", id }),
+    neverSave: (identityId, remove) => call({ op: "neverSave", identityId, ...(remove !== undefined ? { remove } : {}) }),
+    promptAnswer: (promptId, choice) => call({ op: "promptAnswer", promptId, choice }),
+    fill: (offerId, loginId) => call({ op: "fill", offerId, loginId }),
+    dismissOffer: (offerId) => call({ op: "dismissOffer", offerId }),
+    subscribe: (listener) => options.subscribeIdentities?.(listener) ?? (() => {}),
   };
 }

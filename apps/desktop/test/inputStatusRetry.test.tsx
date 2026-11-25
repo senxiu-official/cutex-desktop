@@ -120,7 +120,7 @@ it("a resend refused because the runtime is away says nothing was sent, not a ra
   await act(async () => { button.click(); });
   expect(notify).toHaveBeenCalledWith(translate("inputLedger.retryNothingSentOffline"), "error", { hostId: "local", sessionId: SESSION });
   expect(notify.mock.calls[0]?.[0]).not.toContain("app_server_unavailable");
-  expect(zhCN["inputLedger.retryNothingSentOffline"]).toContain("没有发出去");
+  expect(zhCN["inputLedger.retryNothingSentOffline"]).toContain("未发送");
 });
 
 it("a refusal no later resend can change says the owner can only dismiss, not to try later", async () => {

@@ -55,16 +55,14 @@ describe("remote byte transport", () => {
     });
     const dir = await fs.mkdtemp(path.join(tmpdir(), "artifact-zip-download-"));
     const artifactSource: CopySource = { ...source, path: "/scp/figures-r5.3.zip", artifact: { id, version: 3 } };
-    const manager = new RemoteCopyManager({ root: path.join(dir, "copies"), transport: async s => remoteCopyTransport(client, s, () => {}) });
+    const manager = new RemoteCopyManager({ root: dir, transport: async s => remoteCopyTransport(client, s, () => {}) });
     try {
       const inspected = await manager.inspect(artifactSource);
       expect(inspected.name).toBe("fresh-run-figures-r5.3.zip");
       const copy = await manager.start(artifactSource, { revision: sha, size: bytes.length });
-      for (let n = 0; n < 1000; n++) {
-        const row = (await manager.list()).copies.find(r => r.id === copy)!;
-        if (row.status !== "downloading") { expect(row.status).toBe("complete"); break; }
-        await new Promise(resolve => setTimeout(resolve, 5));
-      }
+      // start() registers the transfer before returning its id.
+      await manager["active"].get(copy)?.done;
+      expect((await manager.list()).copies.find(row => row.id === copy)).toMatchObject({ status: "complete" });
       const saved = await manager.file(copy);
       expect(path.basename(saved)).toBe("fresh-run-figures-r5.3.zip");
       expect(await fs.readFile(saved)).toEqual(bytes);
@@ -72,7 +70,7 @@ describe("remote byte transport", () => {
     } finally {
       await manager.dispose();
       // This is the exact fresh mkdtemp directory owned by this test.
-      await fs.rm(dir, { recursive: true, force: true });
+      await fs.rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
   });
   it("preserves binary bytes, bound scopes and cancellation signal without credentials reaching the renderer", async () => {

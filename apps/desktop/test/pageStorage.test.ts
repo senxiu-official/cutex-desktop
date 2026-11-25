@@ -85,15 +85,27 @@ describe("page storage", () => {
     expect(await createPageStorage({ root: dir }).get(A, "k")).toBe("v49");
   });
   it("writes on its own after flushMs; a cleared page is never written back", async () => {
-    const dir = root();
-    const s = createPageStorage({ root: dir, flushMs: 20 });
-    await s.set(A, "k", "v");
-    await s.set(B, "k", "v");
-    await s.clear(B);
-    // The flush timer fires on its own; under full-suite load it can run well after 20 ms, so wait for it (no flush call).
-    await vi.waitFor(() => expect(s.pending()).toBe(false), { timeout: 4_000, interval: 10 });
-    expect(readdirSync(dir)).toHaveLength(1);
-    expect(await createPageStorage({ root: dir }).get(B, "k")).toBeNull();
+    // Fake timers for the flush timer only (file I/O stays real): no wall-clock wait, so full-suite load cannot matter.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const dir = root();
+      const s = createPageStorage({ root: dir, flushMs: 20 });
+      await s.set(A, "k", "v");
+      await s.set(B, "k", "v");
+      await s.clear(B);
+      // Before flushMs: nothing on disk yet.
+      vi.advanceTimersByTime(19);
+      expect(s.pending()).toBe(true);
+      expect(readdirSync(dir)).toEqual([]);
+      // flushMs: the timer queues its own write (no flush() call); usage() runs after it on the one-at-a-time queue.
+      vi.advanceTimersByTime(1);
+      await s.usage();
+      expect(s.pending()).toBe(false);
+      expect(readdirSync(dir)).toHaveLength(1);
+      expect(await createPageStorage({ root: dir }).get(B, "k")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
   it("rejects a malformed page key (no path tricks through the artifact id)", async () => {
     const s = createPageStorage({ root: root() });

@@ -21,6 +21,8 @@ import { getAppAvatarStyle, getProfileAvatarStyle, pendingLocalProfileAvatarStyl
 import { AvatarStyleLabel, AvatarStylePicker, PortraitThemeNote } from "./AvatarStylePicker";
 import { ProfilePortraitThemeError, type ProfilePortraitThemeProblem } from "../../../../shared/profilePortraitThemes";
 import { useProfileLooksSynced } from "../../lib/profileLooks";
+import { EntityMention } from "../EntityIcon";
+import { tNodes } from "../../lib/textNodes";
 
 const CATEGORIES: (Provider | "other")[] = ["kimi", "glm", "zai", "claude", "deepseek", "codex", "other"];
 
@@ -126,7 +128,7 @@ export function ProfileAppearance({ detail, patch, set, host, picture, setPictur
             <div className="mt-2 flex flex-wrap gap-2">
               {linked.state.choices.map((source) => (
                 <Button key={`${source.hostId}:${source.profile.id}`} disabled={linked.state.busy} onClick={() => void linked.state.choose(source)}>
-                  {t("settings.profile.link.appearance.useSource", { host: `${source.hostName} · ${source.profile.name}` })}
+                  {tNodes(t, "settings.profile.link.appearance.useSource", { host: <>{source.hostName} · <EntityMention entity={{ kind: "profile", profile: source.profile, hostId: source.hostId }}>{source.profile.name}</EntityMention></> })}
                 </Button>
               ))}
               <Button disabled={linked.state.busy} onClick={linked.state.keepSeparate}>{t("settings.profile.link.appearance.keepSeparate")}</Button>

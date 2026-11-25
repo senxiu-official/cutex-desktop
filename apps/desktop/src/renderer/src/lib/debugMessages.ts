@@ -1,7 +1,7 @@
 export const zhCN = {
   "debug.title": "调试模式",
   "debug.saved": "调试片段已保存",
-  "debug.hint": "用于排查短暂闪烁和错误。开启后会暂存界面画面和原始错误；保存的文件只留在这台设备。",
+  "debug.hint": "用于排查短暂闪烁和错误。开启后会暂存界面画面和原始错误；保存的文件只留在桌面应用里。",
   "debug.offHint": "默认关闭；关闭后停止录制并清空内存中的画面",
   "debug.recording": "闪烁录制",
   "debug.recordingHint": "保留最近 30 秒，上限 48 MiB；内存上限或静止画面可能缩短片段。按 {shortcut} 保存（应用内所有窗口）",
@@ -20,7 +20,7 @@ export const zhCN = {
 export const en: Record<keyof typeof zhCN, string> = {
   "debug.title": "Debug mode",
   "debug.saved": "Debug recording saved",
-  "debug.hint": "Diagnose brief flickers and errors. Records screen content and raw errors while enabled; saved files stay on this device.",
+  "debug.hint": "Diagnose brief flickers and errors. Records screen content and raw errors while enabled; saved files stay in the desktop app.",
   "debug.offHint": "Off by default; turning it off stops capture and clears the in-memory filmstrip",
   "debug.recording": "Flicker recorder",
   "debug.recordingHint": "Last 30 seconds, up to 48 MiB; the memory cap or a quiet window can shorten the clip. Press {shortcut} to save (all app windows)",
@@ -40,7 +40,7 @@ export const en: Record<keyof typeof zhCN, string> = {
 export const zhHant: Record<keyof typeof zhCN, string> = {
   "debug.title": "調試模式",
   "debug.saved": "調試片段已保存",
-  "debug.hint": "用於排查短暫閃爍和錯誤。開啓後會暫存界面畫面和原始錯誤；保存的文件只留在這臺設備。",
+  "debug.hint": "用於排查短暫閃爍和錯誤。開啓後會暫存界面畫面和原始錯誤；保存的文件只留在桌面應用裏。",
   "debug.offHint": "默認關閉；關閉後停止錄製並清空內存中的畫面",
   "debug.recording": "閃爍錄製",
   "debug.recordingHint": "保留最近 30 秒，上限 48 MiB；內存上限或靜止畫面可能縮短片段。按 {shortcut} 保存（應用內所有窗口）",

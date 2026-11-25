@@ -37,3 +37,27 @@ export function sideError(chat: SideChat): string | null {
   const params = event.params as { message?: string; error?: { message?: string } } | undefined;
   return params?.error?.message ?? params?.message ?? null;
 }
+
+/** A passage quoted into the side chat (批注追问): its text and the main-timeline turn it came from (null: none known,
+ *  e.g. selected in a side chat or a note). Composer state like the draft: it lives until sent or removed. */
+export interface SideQuote { text: string; turnId: string | null }
+
+/** Markdown quote lines of a passage (an empty line stays inside the quote). */
+export function quoteLines(text: string): string {
+  return text.split("\n").map(line => (line.trim() ? `> ${line}` : ">")).join("\n");
+}
+
+/** The message sent for a quote and the owner's note: the quoted passage, a blank line, then the note. */
+export function quotedMessage(quote: SideQuote | null | undefined, note: string): string {
+  if (!quote) return note;
+  return note.trim() ? `${quoteLines(quote.text)}\n\n${note}` : quoteLines(quote.text);
+}
+
+/** A sent user message → its leading quote (`> ` lines) and the rest, for the bubble; null when it starts otherwise. */
+export function splitQuoted(text: string): { quote: string; note: string } | null {
+  const lines = text.split("\n");
+  let end = 0;
+  while (end < lines.length && /^>( |$)/.test(lines[end]!)) end++;
+  if (!end) return null;
+  return { quote: lines.slice(0, end).map(line => line.replace(/^> ?/, "")).join("\n"), note: lines.slice(end).join("\n").replace(/^\n+/, "") };
+}

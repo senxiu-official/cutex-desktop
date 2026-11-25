@@ -34,7 +34,7 @@ uses Maid / Chief Maid / Maidling, so screens may read 「44 个 Maid」 where t
 |---|---|---|---|
 | 窗口顶栏 | title bar | The row at the very top of the window. | `components/TitleBar.tsx` |
 | 主机选择（所有主机 / 本机） | host switcher | Picks which hosts the window shows. | `TitleBar.tsx` `HostSwitcher` |
-| 入口图标（钉住的导航） | nav entries | Pinned page icons: 新建, 快速启动, 委托, 审批… The rest are under ⋯. | `components/SidebarNav.tsx`, `lib/navPins.ts` |
+| 入口图标（钉住的导航） | nav entries | Pinned page icons: 新建, 快速启动 (starts a 快速会话), 委托, 审批… The rest are under ⋯. | `components/SidebarNav.tsx`, `lib/navPins.ts` |
 | ⌘K 搜索（快速切换） | quick switcher | Search box to jump to agents, services, 成果 and pages. | `modules/quick-switch` |
 | 窗口布局（恢复默认布局） | layout reset | 「恢复默认布局」, the last item of the ＋ menu; there is no title-bar layout button any more (removed 2026-11-05). | `lib/sideMenus.tsx` `launcherMenu`, `lib/layoutReset.ts` |
 | 启动器 | launchers | Pinned tool icons on the right of the 窗口顶栏 (侧边对话, 浏览器, 终端…) and ＋ (every component, 新的一列, and 恢复默认布局 last). | `components/side/TitleBarLaunchers.tsx` |
@@ -65,6 +65,7 @@ uses Maid / Chief Maid / Maidling, so screens may read 「44 个 Maid」 where t
 | 吸附标题 | sticky headers | 花名册 only (not 现在·全部, off while searching). Every 文件夹 and 系统行 (未分组, 独立智能体, 快速会话, top-level 更早的项目) header stays on screen (owner 2026-11-18 「我始终能看见所有分区标题」): the headers of groups above the view stack at the list's top edge in list order, those below stack at the bottom edge, and the rows of the group you are in scroll between them. A nested header (更早的项目 in a folder, 项目分组) sticks just under the top stack. A click on a header in either stack brings its group into view (opening it if folded) instead of folding it. It is the same element in place and stacked — nothing is drawn twice: same icon and colour, look, counts, right-click menu, drop target, hover and focus; only its position changes. Both stacks together take at most 60% of the list; only on a small window does that leave 文件夹 out (系统行 kept first): those scroll with the list (under the stacks) and, while they cannot be seen, are listed in one 「还有 N 个分组」 row in the bottom stack, whose menu brings each into view. Owner 2026-11-17 / 11-18; replaces the title dock. | `components/RosterStick.tsx`, `lib/rosterStick.ts`, `styles.css` sticky headers |
 | 连不上的主机 | unreachable hosts | A host that is switched off or not online leaves the 花名册: its groups, its last (cached) rows and its host row; they come back when it is online again. 现在·全部 still shows its last rows, greyed. If every host of the view is unreachable, the empty 花名册 says so. The footer's host / account switcher (⌃⌄ next to the owner's name) gets a small dot: red if a host that should be connected is not, grey if only switched-off ones. Its menu lists each such host as 「连不上 · 重连」 (「未连接 · 连接」 when switched off), then 主机设置. Owner 2026-11-17. | `lib/hostReach.ts`, `components/IdentityMenu.tsx` |
 | 行间距表 | roster spacing table | The one rule for vertical gaps between sidebar rows, by the kinds of the two neighbours (folder, system row, project, one-row project; inside a block 0). Design 060 §5.6. | `styles.css` Roster spacing, `scripts/roster-gaps.mjs` |
+| 查找旧任务 · 在页面中查找 | old-task search · search in a page | The sidebar search's 查找旧任务 (cutex session-search-v1): matching turns of the hosts in view, newest first, each with its time when the host sends one; Filters 发送方 · 类型 · 时间: on hosts with cutex session-search-v2 the host applies them, results carry their turn time, kind (委托 / 结果) and sender, and the host visits agents newest first (by last update, not strict turn order); a set filter leaves older hosts out and names them. Without a v2 host 发送方 stays greyed with why. 在页面中查找 opens the same text as a page (a Shelf tab by default): host / project (the host applies it on v2) / agent filters, time (presets or 自定义 dates) · type · sender (greyed with why without v2), results by time or by agent, the selected turn previewed with 打开对话 at that turn; ↑↓ Enter Esc. Owner 2026-11-26. | `components/SidebarSessionSearch.tsx`, `modules/session-search`, `lib/sessionSearchStore.ts` |
 | 恢复横幅 | restore banner | 「上次异常关机前有 N 个智能体在线」 with 全部恢复 / 选择 / 忽略. | `components/RestoreBanner.tsx` |
 
 ## 会话 Conversation
@@ -73,6 +74,7 @@ uses Maid / Chief Maid / Maidling, so screens may read 「44 个 Maid」 where t
 |---|---|---|---|
 | 会话（旧称 对话列） | conversation | One agent's panel: header, timeline and 输入框. | `components/Conversation.tsx` |
 | 会话顶栏 | conversation header | Two lines. Line 1: name, role, state, 🔔, pane buttons. Line 2: 项目 · 主机 · 路径 · 分支 · 服务. | `components/ConversationHeader.tsx` |
+| 回合 | turn | One pass of the agent working in a 会话: from a message (yours, a delegation result, a wake) until it ends or is interrupted. Always 回合, never 轮 / 轮次 / 本轮: 一个回合, 本回合, 当前回合, 下一回合, 新回合, 第 {n} 个回合; a turn 开始 (not 开 / 触发); the current-turn control is 中断 (owner 2026-11-25). | `components/Timeline.tsx` |
 | 时间线 | timeline | The messages and tool steps. | `components/Timeline.tsx` |
 | 工具条（搜索 · 书签 · 批注） | tool strip | Search, bookmark and note tools at the top of the timeline. Code: *gutter*. | `components/gutter/GutterHost.tsx`, `modules/thread-search`, `bookmarks`, `notes` |
 | 状态胶囊 | status capsule | **Legacy, frozen:** a floating card over the timeline listing running items. No new work goes here. | `modules/status-capsule/StatusCapsule.tsx` |
@@ -89,6 +91,9 @@ uses Maid / Chief Maid / Maidling, so screens may read 「44 个 Maid」 where t
 | 交互卡 | interaction card | A pending approval or question, docked above the 输入框. | `components/InteractionDock.tsx` |
 | 输入框底栏 | composer footer | ＋ tools, 权限模式 (完全访问…), 规则, Profile + 配额圈, 模型 · 推理强度, 上下文圈. | `components/ComposerToolbarRow.tsx` |
 | 提及（@ 面板） | mention panel | `@` lists agents (the current agent's project first, then recent mentions; matches names and project names; quick chats only when typed) and the host's Profiles (two groups, 5 rows each) and files; `p@` / `m@` list only Profiles / models. A pick shows as a chip: @name, or the Profile's name · model · effort. | `components/Composer.tsx`, `lib/useProfileMentions.ts`, `components/ProfileMentionChip.tsx` |
+| 功能 Profile | Feature Profile | A host's model endpoint that only app features use (提示词增强 first): name, API type (OpenAI Responses / Anthropic Messages), base URL, model, 额度类型 (订阅窗口 · 周期额度 · 余额 · 按量付费; display only) and a write-only API key (shown only as set; 更换密钥 replaces it). Never an agent's Profile: not in Profile lists, pickers, @ or agent creation, and agents can't see it. Settings → 工具 → 功能 Profile; cutex `feature-profiles` (owner 2026-11-25). Not 应用 Profile / 工具 Profile. | `modules/feature-profiles`, `lib/featureProfiles.ts`, `shared/featureProfiles.ts` |
+| 个人助理 | Personal Assistant | An agent the owner sets up to arrange work across chosen projects (on any paired host; cross-host by nature, owner 2026-11-25). It drafts requests for each project's Director, which go out only after the owner confirms, and never does project work itself. Front desk in the title bar (also offered in 新建智能体). The word is a term (`{{assistant}}`, Settings → 通用 → 用语; the Maid wording says Lady's Maid). Not 助手 / 管家. | `modules/personal-assistants` |
+| 助理请求（发给主管 · 取消请求） | assistant request (Send to Director · Cancel request) | A request a 个人助理 drafted for a project's Director; it waits for the owner as 待确认 first, then shows 进行中 / 已结束. | `modules/personal-assistants` |
 
 ## 托盘 Tray
 
@@ -148,6 +153,7 @@ The layout rules for these are at the top of `.claude/reports/settings-layout-au
 |---|---|---|---|
 | 设置导航 · 分组 | settings nav · groups | The left list of settings pages, top to bottom: 你 (no heading) · 应用 (通用 外观 通知 键盘与手势) · 面板 · 连接 (主机 网络代理) · 智能体 · 工具 · 数据 · 系统 (模块 and the two update pages) · 帮助与关于 (关于 新功能 帮助). Owner 2026-11-11; the grouping is display only, page ids and links are unchanged. | `lib/settingsNav.ts` |
 | 页头 | page header | A settings page's title, one-line purpose and its place / timing chips (and host picker). | `SettingsPage` |
+| 位置标签 | scope chip | Where a page's or card's settings are kept: 「桌面应用」 (kept by the desktop app) or 「主机 · {host}」 (kept by that host's cutex); a click floats the explanation. Never 此设备 / 这台桌面应用: the daemon and the desktop app can run on the same device. Running text says 「保存在桌面应用里」 (owner 2026-11-25). | `ScopeChip`, `WhereChip` |
 | 分部 · 分部导航 | part · part bar | A long page's parts (会话: 消息 / 输入 / 布局 / 旁边对话与批注): a quiet heading on a rule, and the row of chips at the top that jumps to them. | `PartHeading`, `PartNav` |
 | 设置卡片 | settings card | A titled group of settings: title + chips + actions on one line, a hint under it, then the card. A card holds settings; a note alone is a title + hint with no card. | `Section`, `Card` |
 | 设置行 | setting row | One setting: label (+ hint or ⓘ) on the left, its control on the right; under the label in a narrow card. A picture picker sits under its label. | `SettingRow` |
@@ -200,6 +206,58 @@ The layout rules for these are at the top of `.claude/reports/settings-layout-au
 | 计划（旧称 进程） | plan | The model's update_plan checklist. | `modules/plan` |
 | 目标 | goal | The objective an agent works toward, with an optional budget. | `modules/goal` |
 | 工作流 | workflow | A multi-step run of several agents. | `modules/workflows` |
+
+## 动作与状态 Verbs and states
+
+One meaning, one word (copy round 3, 2026-11-25). The owner asked for it without pre-approval and will
+change what he dislikes. Use these words on 接下来, 委托, 留言, 闹钟, 作业, 后台操作 and the composer, and in
+new text anywhere. Change list: `.claude/reports/copy-round3-changes.md`. Narrow guards:
+`test/i18nTermsAudit.test.ts` ("copy round 3").
+
+| 意思 | 中文 | English | 定义 | 不要用 / 例外 |
+|---|---|---|---|---|
+| send | 发送（已发送 · 未发送） | send (sent · not sent) | The desktop or an agent sends a message or request. | Not 发出 / 没发出去. A delegation is 发起 (delegate), not 发出. |
+| initiate a delegation | 发起 | delegate | An agent or the owner creates a delegation. | Not 发出 / 发送 for a delegation itself; its result is 交回. |
+| queue | 排队（排队中 · 重新排队） | queue (queued) | Waits in cutex's queue for its turn. | Not 入队 / 排入队列. 「输入队列」 as a place name is fine. |
+| hand over | 交给（交回 for a result） | hand over (hand back) | cutex passes an item to the runtime or a recipient; it is not yet read. | Not 交付. 提交 only for submitting a result for review, a job, a delegation attempt (正在提交), or resubmitting an operation. |
+| deliver | 送达（待送达 · 未送达） | deliver (delivered · not delivered) | 送达 means the item has arrived in the recipient's input. 投递 may describe the sending process (「消息投递」, the Settings section). | Not 送到 / 重投. Never promise 送达 for a retry or resend: say 发送 / 重新发送 (「系统会继续尝试发送」), because arrival is not known yet. |
+| read in | 读入（已读入） | read (in) | An agent or model takes the item into its context. | Not 读到 / 读进去. The app loading data is 读取; the owner reading a notice is 已读. |
+| accept | 接收（已接收） | accept | A host or runtime took the item, before any effect. | Not 收下 / 接下. Delegation status 「已接收」 is decided on fix/delegation-card-routing-ui. |
+| record a request | 记下（已记下停止） | record | cutex wrote the request down; nothing happened yet. | 记为 means "mark as"; 记录 is the noun (送达记录). |
+| start | 开始 | start | A turn, delegation or step begins. | 启动 only for a runtime, process, service or app. Never 开 alone. |
+| continue | 继续 | continue / resume | Work goes on after a pause or wait. | 恢复 only for archives, files, connections, hidden rows and members. |
+| scheduled continue | 定时继续（自动继续已到期 · 允许继续 · 已取消自动继续） | scheduled continue (auto-continue expired · allow to continue · auto-continue cancelled) | A delegation the bus wakes on its own until its run/time limit; when that runs out it waits for the owner or requester to allow another stretch (card, side detail, delegation tree). | Not 续接 / 续跑 (owner 2026-11-25). Next Up still shows a limited delegation as 等待中. |
+| continuation approval | 待允许继续（允许继续 · 拒绝并停止 · 已允许，等 X 空闲后继续） | waiting to be allowed to continue (allow to continue · deny and stop · allowed; continues once X is free) | On supporting hosts, an expired stretch becomes a request to the owner or the project's Director (approvals page section 待允许继续; card and side detail). Allowing starts another stretch (up to 32 runs or 24 hours) when the handler can run; denying needs a reason, stops the delegation and tells the requester. | Same verb as 定时继续: 继续 only. Not 批准续跑. After an approval the card adds the scheduler hold (「已允许，等 X 空闲后继续 · 现在：…」); an archived handler cancels the stretch (「X 已归档，这一段自动继续已取消，不会再继续」 — restoring does not pick it up). |
+| pause (owner) | 暂停 · 随中断暂停 | pause · held by your interrupt | The owner stops new work until 继续 / 放行. | Not 扣住. |
+| hold | 暂缓（已暂缓） | hold (held) | An item is kept back and goes on when released: by the runtime or bus on its own, or by the owner's per-message hold on 接下来. | Not 扣住 / 扣下 / 被扣留. The per-message button that lets one held message go stays 「允许发送」. |
+| release | 放行 | release | The owner lets paused items go as a group: 「放行新委托」 for the new-delegation queue, 「已放行」 as its result. | One held message uses 「允许发送」. Not for approvals; that is 批准. |
+| interrupt | 中断 | interrupt | Ends the current turn. | 打断 only inside the action name 「打断并发送」. |
+| stop | 停止（已请求停止 · 停止未确认） | stop | Ends a runtime, job, service, delegation or subagent. | Not 停下 / 停. An agent's pause point is 暂停, not 停下. |
+| dismiss | 放弃 | dismiss / abandon | Give up an item of your own (an unsent message, a delegation). | Not 丢弃 for your own rows. |
+| discard | 丢弃（已丢弃） | discard | Remove an undelivered message from cutex so it is never delivered (Agent Bus, paused queue). | Not 放弃 for these. |
+| withdraw | 撤下 · 撤回 | withdraw | 撤下: take a waiting item out of a queue. 撤回: take back something already sent. | 撤销 is undo (files, rules, stop idle). |
+| end follow-up | 结束跟进（已结束跟进） | end follow-up | Stop waiting for a result; nothing is stopped. | Not 不再跟踪. 「不再等待」 may explain it in a sentence. |
+| approve / allow | 批准 · 允许 | approve · allow | 批准: a yes to one request. 允许: a rule or permission. | 审批 is the noun. The delegation approval UI 「委托审批」 (审核 → 审批, no 路由) is decided on fix/delegation-card-routing-ui. |
+| take effect | 生效（已生效） | take effect | An approved decision or setting now applies. | approvals.state.consumed 「已生效」 is decided on fix/delegation-card-routing-ui. |
+| fail | 失败 (labels) · 未能 (sentences) | failed · could not | Something was tried and did not work. | Not 没能 / 没发出去. |
+| retry · resend | 重试 · 重新发送 | retry · resend | 重试: try the same operation again. 重新发送: send a message again (may arrive twice). | Not 重发 / 再发一次. 「稍后再试」 is fine as a phrase. |
+| wait | 等待（等待中 · 等待继续） | waiting | Nothing to do but wait. | Not 等着. 「等 {name} …」 is fine in short labels. |
+| unconfirmed | 未确认（结果未确认） | unconfirmed | The outcome is not known; the app does not guess. | Not 不明 / 不确定. |
+| stuck | 卡住 | stuck | Waited much longer than it should. | Not 受阻 for waits; 需要你处理 when the owner must act. |
+
+Also decided on fix/delegation-card-routing-ui (accent-theme-ui owns these strings): the routing review's
+stale and cancelled labels and their hover (state-surfaces W3a–c).
+
+### 语气 Tone
+
+- Plain and natural: what the person would say across a desk. Not colloquial (停下、没发出去、扣住、等着),
+  not stiff or bureaucratic (予以、进行、该).
+- Short labels (buttons, tags, states): a verb or 已 + verb, no subject, no ending punctuation
+  (「重新发送」「已送达」「停止未确认」). Join two facts with 「 · 」.
+- Sentences (hover, hints, dialogs): say who does what, then the result; full-width 「，；：。」, and a
+  full stop at the end only when there are two or more sentences. Quote UI names with 「」.
+- en follows the same split: sentence case labels, no full stop on a single-clause hint.
+- Say 你 for the owner, 对方 / the term word for the other agent; keep `{{agent}}` / `{{owner}}`.
 
 ## 智能体菜单 Agent menu
 

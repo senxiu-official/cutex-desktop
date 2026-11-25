@@ -24,7 +24,7 @@ export const en: Record<keyof typeof zhCN, string> = {
   "alarms.state.queued": "Handed to the message queue",
   "alarms.queuedHint": "When the alarm went off it was only handed to the message queue: the recipient may not have received or read it yet. Act on it from its Next Up row.",
   "alarms.viewMessage": "View the message",
-  "alarms.messageNotFound": "Couldn't find the message: it may have been handled already, or isn't in what was read of this {{agent}}.",
+  "alarms.messageNotFound": "Couldn't find the message. It may have been handled already, or there is no record to view right now.",
   "alarms.state.cancelled": "cancelled",
   "alarms.cancel": "Cancel",
   "alarms.cancelConfirm": "Click again to cancel this alarm",

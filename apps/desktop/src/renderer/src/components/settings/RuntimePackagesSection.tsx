@@ -16,6 +16,8 @@ import { Button, ErrorNote, Loading, Section, SettingsGroup } from "./Form";
 import { Tag } from "../../components/Tag";
 import { ArmedButton } from "../ArmedButton";
 import { btnFace, btnShape } from "../Button";
+import { EntityMention } from "../EntityIcon";
+import { useStaggeredCount } from "../../lib/useStagger";
 
 const STATE_TONE = { busy: "text-warn", offline: "text-subtle", online: "text-ok-text" } as const;
 const KNOWN_ERRORS = ["run_in_progress", "nothing_to_upgrade", "selected_unavailable", "nothing_to_revert", "run_not_found"];
@@ -52,6 +54,8 @@ function Body({ hostLabel, starting, claudeAgents }: { hostLabel: string; starti
   const view = host.view!;
   const [open, setOpen] = useState(false);
   const nativeOutdated = view.agents.length;
+  // Every agent of the host can be outdated: avatars past the first rows mount in steps (lib/useStagger).
+  const icons = useStaggeredCount(open ? view.agents.length + claudeAgents.length : 0);
   const targetParts = [nativeOutdated > 0 || claudeAgents.length === 0 ? packageLabel(view.selected) : null, claudeAgents.length > 0 ? `${t("modules.component.claude-runtime.name")} ${claudeAgents[0]!.target}` : null].filter((part): part is string => !!part);
   const target = targetParts.join(" · ") || t("runtimePackages.unknownTarget");
   const counts = combinedRuntimeCounts(view.agents, claudeAgents);
@@ -95,11 +99,11 @@ function Body({ hostLabel, starting, claudeAgents }: { hostLabel: string; starti
               </button>
               {open && (
                 <ul className="pt-1 pb-1">
-                  {view.agents.map((a) => (
-                    <AgentRow key={a.cutexSessionId} agent={a} selected={view.selected} />
+                  {view.agents.map((a, i) => (
+                    <AgentRow key={a.cutexSessionId} agent={a} selected={view.selected} icon={i < icons} />
                   ))}
-                  {claudeAgents.map((a) => (
-                    <ClaudeAgentRow key={a.cutexSessionId} agent={a} />
+                  {claudeAgents.map((a, i) => (
+                    <ClaudeAgentRow key={a.cutexSessionId} agent={a} icon={view.agents.length + i < icons} />
                   ))}
                 </ul>
               )}
@@ -112,13 +116,13 @@ function Body({ hostLabel, starting, claudeAgents }: { hostLabel: string; starti
   );
 }
 
-function ClaudeAgentRow({ agent }: { agent: OutdatedClaudeRuntimeAgent }) {
+function ClaudeAgentRow({ agent, icon }: { agent: OutdatedClaudeRuntimeAgent; icon: boolean }) {
   const { t } = useI18n();
   const state = agent.busy ? "busy" : agent.online ? "online" : "offline";
   return (
     <li className="flex items-baseline gap-2 py-1 text-xs">
-      <span className="w-24 shrink-0 truncate text-foreground" title={agent.cutexSessionId}>
-        {agent.name}
+      <span className="w-28 shrink-0 truncate text-foreground" title={agent.cutexSessionId}>
+        <EntityMention entity={icon ? { kind: "agent", id: agent.cutexSessionId, name: agent.name } : null}>{agent.name}</EntityMention>
       </span>
       <span className="min-w-0 flex-1 truncate font-mono text-caption/[inherit] text-muted">
         {agent.current} → {agent.target}
@@ -130,14 +134,14 @@ function ClaudeAgentRow({ agent }: { agent: OutdatedClaudeRuntimeAgent }) {
   );
 }
 
-function AgentRow({ agent, selected }: { agent: OutdatedRuntimeAgent; selected: RuntimePackageSummary | null }) {
+function AgentRow({ agent, selected, icon }: { agent: OutdatedRuntimeAgent; selected: RuntimePackageSummary | null; icon: boolean }) {
   const { t } = useI18n();
   const state = agentRuntimeState(agent);
   const { current, target } = agentPackages(agent, selected);
   return (
     <li className="flex items-baseline gap-2 py-1 text-xs">
-      <span className="w-24 shrink-0 truncate text-foreground" title={agent.cutexSessionId}>
-        {agent.name}
+      <span className="w-28 shrink-0 truncate text-foreground" title={agent.cutexSessionId}>
+        <EntityMention entity={icon ? { kind: "agent", id: agent.cutexSessionId, name: agent.name } : null}>{agent.name}</EntityMention>
       </span>
       <span className="min-w-0 flex-1 truncate font-mono text-caption/[inherit] text-muted" title={agent.repair ? (agent.current.missing ?? []).join("\n") || undefined : (agent.current.manifest ?? undefined)}>
         {agent.repair ? t("runtimePackages.agent.missing") : (current ?? t("runtimePackages.unreadable"))} → {target ?? "?"}

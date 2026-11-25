@@ -7,8 +7,12 @@ import { memo, useEffect, useState, type ReactNode } from "react";
 import { ArrowDownLeft, ArrowUpRight, Bot, Check, ChevronDown, ChevronRight, CircleAlert, FileBox, Globe, History, ListChecks, ListTree, Send, SquareTerminal, Target, Users } from "lucide-react";
 import type { AskSummary } from "../../../../shared/ipc";
 import { StatusAvatar } from "../../components/AgentStatus";
+import { ActivityStepChip } from "../../components/ActivityStepChip";
 import { Avatar } from "../../components/Avatar";
+import { blockerKey, nextKey } from "../../lib/activityStep";
 import { ProjectBadge } from "../../components/ProjectBadge";
+import { projectIcon } from "../../lib/projectIcons";
+import { useProjectIcons } from "../../lib/projectIconSync";
 import { useI18n, type MessageKey } from "../../i18n";
 import { formatElapsed, showsRunningRing } from "../../lib/agentAttention";
 import { openMenuFrom } from "../../lib/contextMenu";
@@ -339,6 +343,7 @@ function activityText(item: ActivityItem, data: ProjectData, t: T): string {
     case "delegate":
       return t("project-view.act.delegate", { from: who, to: data.nameOf(item.to, item.toName) ?? t("project-view.someone"), title: item.title });
     case "complete":
+      if (item.ended) return t("project-view.act.ended", { title: item.title, status: t(`delegation.status.${item.ended}` as MessageKey, { name: who, n: "", host: "" }) });
       return item.failed
         ? t("project-view.act.failed", { to: who, title: item.title })
         : t("project-view.act.complete", { to: who, from: item.from === null && !item.fromName ? t("project-view.you") : (data.nameOf(item.from, item.fromName) ?? t("project-view.someone")), title: item.title });
@@ -351,7 +356,10 @@ function activityText(item: ActivityItem, data: ProjectData, t: T): string {
     case "service":
       return t("project-view.act.service", { who, name: item.name });
     case "needsDelegation":
-      return t("project-view.act.needsDelegation", { title: item.title, reason: reason(item.reason) });
+      // The host's current blocker (r295 Z3) when it names one; else the reason this desktop derives.
+      return t("project-view.act.needsDelegation", { title: item.title, reason: item.step ? t(blockerKey(item.step.blocker) as MessageKey) : reason(item.reason) });
+    case "blocked":
+      return t("project-view.act.blocked", { title: item.title, blocker: t(blockerKey(item.step.blocker) as MessageKey) });
     case "needsAgent":
       return item.error ? t("project-view.act.error", { who, text: item.text ?? "" }) : t("project-view.act.needs", { who, reason: item.text ?? reason("other") });
   }
@@ -361,7 +369,8 @@ function activityText(item: ActivityItem, data: ProjectData, t: T): string {
  *  (a sidebar refresh, a live status), and every row with its avatar used to re-render with it. */
 const ActivityRow = memo(function ActivityRow({ item, hostId, text, when, avatar }: { item: ActivityItem; hostId: string; text: string; when: string; avatar: RowAvatar | null }) {
   const Icon = item.what === "service" ? Globe : KIND_ICON[item.kind];
-  return (
+  const step = item.what === "needsDelegation" || item.what === "blocked" || item.what === "needsAgent" ? item.step : undefined;
+  const row = (
     <button type="button" onClick={() => openTarget(hostId, item.open)} data-testid="project-view-activity-row" className="press flex w-full min-w-0 items-start gap-2 px-3 py-1.5 text-left hover:bg-hover">
       <span className="w-8 shrink-0 pt-0.5 text-right text-caption/[inherit] text-subtle tabular-nums">{when}</span>
       <span className="relative mt-px shrink-0">
@@ -376,6 +385,15 @@ const ActivityRow = memo(function ActivityRow({ item, hostId, text, when, avatar
       </span>
       <span className={`min-w-0 flex-1 line-clamp-2 text-meta/[inherit] ${item.kind === "needsYou" ? "text-warn-text" : ""}`}>{text}</span>
     </button>
+  );
+  // The next step (查看审批 / 查看结果 / 查看委托, or 等待 as words) beside the row's own click: a sibling button, never nested.
+  const next = step && item.open.kind === "delegation" ? { askId: item.open.askId, title: item.open.title } : step?.action?.kind === "approvals" ? { askId: "", title: undefined } : null;
+  if (!step || !next || !nextKey(step)) return row;
+  return (
+    <div className="relative flex min-w-0 items-start" data-activity-row-step="">
+      <div className="min-w-0 flex-1">{row}</div>
+      <ActivityStepChip step={step} hostId={hostId} askId={next.askId} title={next.title} blocker={false} fallback={() => openTarget(hostId, item.open)} className="shrink-0 pt-1.5 pr-3 text-meta/[inherit]" />
+    </div>
   );
 }, (a, b) => a.item === b.item && a.hostId === b.hostId && a.text === b.text && a.when === b.when && sameAvatar(a.avatar, b.avatar));
 
@@ -445,6 +463,7 @@ function Header({ data, state, setState, onHandoverHistory }: { data: ProjectDat
   const hasTree = useApp(s => !!data.target && featuresOf(s, data.target.hostId).has("delegation-tree-stop-v1"));
   const hasHandover = useApp(s => !!data.target && ["director-address", "director-change-notices", "director-handover", "management-start-adoption"].some(feature => featuresOf(s, data.target!.hostId).has(feature)));
   const [sizeRef, sizeFlags] = useSizeFlags(HEADER_SIZES);
+  const icons = useProjectIcons();
   const g = data.group;
   const pick = (el: HTMLElement) =>
     openMenuFrom(el, [
@@ -453,7 +472,7 @@ function Header({ data, state, setState, onHandoverHistory }: { data: ProjectDat
       ...data.choices.map((c) => ({
         label: data.choices.filter((x) => x.name === c.name).length > 1 ? `${c.name} · ${c.hostId}` : c.name,
         hint: String(c.agents),
-        icon: !data.following && data.target?.projectId === c.projectId && data.target.hostId === c.hostId ? <Check size={14} /> : <ProjectBadge badge={c.badge} color={c.color} size="sm" />,
+        icon: !data.following && data.target?.projectId === c.projectId && data.target.hostId === c.hostId ? <Check size={14} /> : <ProjectBadge icon={projectIcon(icons, c.hostId, c.projectId)} badge={c.badge} color={c.color} size="sm" />,
         onSelect: () => setState({ ...state, hostId: c.hostId, projectId: c.projectId, evAgent: null }),
       })),
       ...(hasHandover && onHandoverHistory ? ["separator" as const, { label: t("project-view.directorUi.history"), onSelect: onHandoverHistory }] : []),
@@ -462,7 +481,7 @@ function Header({ data, state, setState, onHandoverHistory }: { data: ProjectDat
   return (
     <div ref={sizeRef} className="shrink-0 border-b border-border px-3 pt-2.5 pb-2" data-testid="project-view-header">
       <div className="flex min-w-0 items-center gap-2">
-        {g && <ProjectBadge badge={g.badge} color={g.color} size="lg" />}
+        {g && <ProjectBadge icon={data.target ? projectIcon(icons, data.target.hostId, data.target.projectId) : null} badge={g.badge} color={g.color} size="lg" />}
         <button type="button" onClick={(e) => pick(e.currentTarget)} className="press flex min-w-0 items-center gap-1 rounded-md px-1 py-0.5 hover:bg-hover" title={t("project-view.pick")}>
           <span className="min-w-0 truncate text-title/[inherit] font-semibold">{g?.name ?? t("project-view.pick")}</span>
           <ChevronDown size={14} className="shrink-0 text-subtle" />

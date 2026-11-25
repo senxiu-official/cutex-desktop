@@ -1,5 +1,5 @@
 // LEGACY(input-ledger-v1): frozen delivery inference for older hosts.
-// Delete only when EVERY host advertises input-ledger-v1 (including hachimi).
+// Delete only when EVERY host advertises input-ledger-v1 (including hostc).
 // The composer's "a turn is running" look (stop button, busy placeholder) across a turn boundary that
 // is about to start the next turn: cutex flushes the queue (or admits a delegation) only after the
 // native's turn/completed reached it, and the next turn/started arrives as a separate event — tens to

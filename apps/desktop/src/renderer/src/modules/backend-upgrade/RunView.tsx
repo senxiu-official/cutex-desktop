@@ -14,6 +14,7 @@ import { useTargetApi } from "../../lib/targetHost";
 import { useUpgradeAction } from "./hooks";
 import { canCancel, formatDuration, runActive, runModeKeys, runRuntime, runSteps, runtimeLine, secondsSince, servicesDown, unixOf, type StepState } from "./model";
 import { loadUpgradeStatus } from "./store";
+import { EntityMention } from "../../components/EntityIcon";
 
 /** "12 分钟前" with the full time as tooltip. */
 export function When({ iso }: { iso: string | null | undefined }) {
@@ -111,7 +112,7 @@ export function RunDetail({ run }: { run: UpgradeRun }) {
             <ul className="mt-1 space-y-0.5">
               {(run.waitingFor ?? []).map((b, i) => (
                 <li key={`${b.cutexSessionId ?? ""}|${b.reason}|${i}`} className="flex gap-2">
-                  <span className="min-w-0 truncate">{b.name || b.cutexSessionId || t("backend-upgrade.run.someone")}</span>
+                  <span className="min-w-0 truncate"><EntityMention entity={b.cutexSessionId ? { kind: "agent", id: b.cutexSessionId, name: b.name || b.cutexSessionId } : null}>{b.name || b.cutexSessionId || t("backend-upgrade.run.someone")}</EntityMention></span>
                   <span className="shrink-0 text-subtle">{t(`backend-upgrade.busy.${["activeTurn", "threadActive", "packageRun"].includes(b.reason) ? b.reason : "other"}` as MessageKey, { reason: b.reason })}</span>
                   {b.detail && <span className="min-w-0 truncate text-subtle">· {b.detail}</span>}
                 </li>

@@ -8,6 +8,7 @@
 // the idle agent so it reads its pending notes in. A note from an agent on another host (peers
 // cross-host tell, `remote`) shows its `name@host` sender with a small 另一台主机 tag; on cutex older than
 // 0.1.5 (no `remote`) the `ptell-` row's sender label gives both (lib/agentMessages peerSenderOf).
+import { useCrossHost, usePeerHost } from "../lib/useCrossHost";
 import type { AgentRuntime } from "../lib/agentFeatures";
 import type { InputRecord } from "@cutex-desktop/protocol";
 import { LedgerAdmissionRow } from "./AdmissionRows";
@@ -61,6 +62,9 @@ function MessageRow({ message, busy, label, cancel, ranSince, hostId }: { messag
   const conv = useConvScope();
   const agentName = useApp((s) => rowsOf(s.sidebar, convSidebarOf(conv, s)).find((r) => r.cutexSessionId === message.from)?.displayName ?? message.senderName ?? message.from ?? "?");
   const peer = peerSenderOf(message);
+  // peer-delivery-receipts-v1: the sending host by instance id (its current name here; the id when two share a name).
+  const ch = useCrossHost(message, hostId);
+  const peerHost = usePeerHost(ch?.peer.instanceId, ch?.peer.label ?? peer?.host ?? "");
   const name = peer ? peer.label : senderLabel(t, message.from, message.sourceKind, agentName);
   const failed = message.state === "failed";
   // 取消发送: cutex still holds it (pending / stale_held); one already in the inbox has no button (cutex refuses it).
@@ -81,7 +85,7 @@ function MessageRow({ message, busy, label, cancel, ranSince, hostId }: { messag
         <SenderAvatar id={message.from} sourceKind={peer ? null : message.sourceKind} name={name} size={16} />
         <span className="min-w-0 max-w-[16em] shrink-0 truncate whitespace-nowrap font-medium" data-tip={name} data-tip-overflow="">{name}</span>
         {peer && (
-          <Tag title={t("agentMsg.remoteHint", { host: peer.host })} data-testid="pending-message-remote">
+          <Tag title={peerHost?.ambiguous ? `${t("agentMsg.remoteHint", { host: peerHost.name })}\n${t("crossHost.instance", { id: peerHost.instanceId })}` : t("agentMsg.remoteHint", { host: peerHost?.name ?? peer.host })} data-testid="pending-message-remote" data-cross-host-peer={peerHost?.instanceId}>
             {t("agentMsg.remote")}
           </Tag>
         )}

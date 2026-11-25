@@ -13,6 +13,7 @@ import { approvalRuleDraft, isDirectorRoleRule, ruleSaveAction } from "../../lib
 import { matchesFilter } from "../../lib/listFilter";
 import { useTargetApi, useTargetHostId, useTargetSidebar } from "../../lib/targetHost";
 import { useApp } from "../../store";
+import { EntityMention } from "../../components/EntityIcon";
 
 const message = (e: unknown) => e instanceof Error ? e.message : String(e);
 const kindLabel = (t: (key: MessageKey, params?: Record<string, string | number>) => string, kind: ApprovalKind) => t(`approvals.kind.${kind}` as MessageKey);
@@ -27,6 +28,8 @@ function expiryText(rule: Pick<ApprovalRuleDraft, "expiry">, t: (key: MessageKey
 
 function RuleRow({ api, view, rule, name, refresh }: { api: DaemonApi; view: ApprovalRulesView; rule: ApprovalRule; name: string; refresh(): Promise<void> }) {
   const { t, locale } = useI18n();
+  const hostId = useTargetHostId();
+  const sidebar = useTargetSidebar();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -41,7 +44,7 @@ function RuleRow({ api, view, rule, name, refresh }: { api: DaemonApi; view: App
   };
   const revoke = async () => { setBusy(true); setError(null); try { await api.deleteApprovalRule(rule.ruleId, view.revision); await refresh(); } catch (e) { setError(message(e)); } finally { setBusy(false); } };
   return <SettingsGroup agents="now" source="host">{decoration => <li {...decoration.attributes} className="border-t border-border py-3 first:border-0" data-approval-rule={rule.ruleId}>
-    <div className="flex flex-wrap items-start gap-2"><span className="min-w-0 flex-1"><span className="font-medium">{name}</span>{decoration.marker}{rule.projectId && <span className="ml-2 text-subtle">· {rule.projectId}</span>}{roleGranted && <span className="ml-2 rounded-full bg-accent-soft px-2 py-0.5 text-caption text-accent">{t("approvals.rules.grantedByDirector")}</span>}<span className="mt-0.5 block text-meta text-muted" title={rule.kinds.map((kind) => `${kindLabel(t, kind)}：${kindHint(t, kind)}`).join("\n")}>{rule.kinds.map((kind) => kindLabel(t, kind)).join("、")} · {expiryText(rule, t, locale)}</span></span>
+    <div className="flex flex-wrap items-start gap-2"><span className="min-w-0 flex-1"><span className="font-medium"><EntityMention entity={{ kind: "agent", id: rule.subject.cutexSessionId, name }}>{name}</EntityMention></span>{decoration.marker}{rule.projectId && <span className="ml-2 text-subtle">· <EntityMention entity={{ kind: "project", id: rule.projectId, hostId }}>{sidebar?.projects?.projects.find((p) => p.project_id === rule.projectId)?.presentation.display_name || rule.projectId}</EntityMention></span>}{roleGranted && <span className="ml-2 rounded-full bg-accent-soft px-2 py-0.5 text-caption text-accent">{t("approvals.rules.grantedByDirector")}</span>}<span className="mt-0.5 block text-meta text-muted" title={rule.kinds.map((kind) => `${kindLabel(t, kind)}：${kindHint(t, kind)}`).join("\n")}>{rule.kinds.map((kind) => kindLabel(t, kind)).join("、")} · {expiryText(rule, t, locale)}</span></span>
       <Button size="sm" disabled={busy || rule.expired} onClick={() => {
         setSaved(false);
         const draft = approvalRuleDraft(rule, !rule.enabled);

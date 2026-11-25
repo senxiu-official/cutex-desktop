@@ -6,7 +6,7 @@
 export const zhCN = {
   "followUp.end": "结束跟进",
   "followUp.ending": "结束跟进中…",
-  "followUp.confirm": "不再等这件事的结果。不会停下或撤回已经发出的动作；结果记为「未确认」，以后迟到的结果也不会让它重新出现。",
+  "followUp.confirm": "不再等待这件事的结果。不会停止或撤回已经发送的操作；结果记为「未确认」，以后迟到的结果也不会让它重新出现。",
   "followUp.confirmButton": "再左键点击一次，结束跟进",
   "followUp.oldHost": "这台主机的 cutex 版本较旧，不能结束跟进。",
   "followUp.actionConflict": "这次操作已经用不同的内容提交过。刷新后再看。",
@@ -31,7 +31,7 @@ export const en: Record<keyof typeof zhCN, string> = {
 export const zhHant: Record<keyof typeof zhCN, string> = {
   "followUp.end": "結束跟進",
   "followUp.ending": "結束跟進中…",
-  "followUp.confirm": "不再等這件事的結果。不會停下或撤回已經發出的動作；結果記爲「未確認」，以後遲到的結果也不會讓它重新出現。",
+  "followUp.confirm": "不再等待這件事的結果。不會停止或撤回已經發送的操作；結果記爲「未確認」，以後遲到的結果也不會讓它重新出現。",
   "followUp.confirmButton": "再左鍵點擊一次，結束跟進",
   "followUp.oldHost": "這臺主機的 cutex 版本較舊，不能結束跟進。",
   "followUp.actionConflict": "這次操作已經用不同的內容提交過。刷新後再看。",

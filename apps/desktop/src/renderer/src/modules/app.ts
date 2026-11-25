@@ -15,6 +15,7 @@ import { showShelfToast } from "../lib/shelves";
 import { checkStatusContributions } from "../lib/statusSurfaces";
 import { useApp } from "../store";
 import { pinFlippedDefaults } from "./defaultFlips";
+import { syncWhatsAppModule } from "./whatsappSync";
 import { createModuleHost } from "./host";
 import { subscribeActivity, subscribeUsage } from "../lib/activityFeed";
 import { subscribeOwnerWaiting } from "../lib/ownerWaiting";
@@ -177,8 +178,13 @@ export function startAppModules(modules: readonly AppModule[]): AppModuleHost {
   const unsubscribe = useApp.subscribe((s, prev) => {
     if (s.hosts !== prev.hosts || s.features !== prev.features || s.featuresKnown !== prev.featuresKnown || s.byHost !== prev.byHost) void host.setHosts(hostsInput(s));
   });
+  // main keeps its own copy of the WhatsApp module switch: migrate once, then keep it in step (whatsappSync.ts).
+  let stopWhatsApp: (() => void) | null = null, disposed = false;
+  void syncWhatsAppModule(host, storage, bridge.browser).then((off) => { if (disposed) off(); else stopWhatsApp = off; });
   const dispose = host.dispose.bind(host);
   host.dispose = () => {
+    disposed = true;
+    stopWhatsApp?.();
     unsubscribe();
     if (instance === host) instance = null;
     return dispose();

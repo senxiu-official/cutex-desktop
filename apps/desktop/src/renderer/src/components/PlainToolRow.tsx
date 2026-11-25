@@ -1,6 +1,6 @@
 // Core tool fallback: always available even when a specialized module is disabled.
 import { openModifiers } from "../lib/openModifiers";
-import { useState, type ReactNode } from "react";
+import { useContext, useState, type ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 import { Bot, ChevronDown, ChevronRight, CircleQuestionMark, CircleStop, FilePen, Globe, Loader2, ShieldAlert, ShieldX, SquareTerminal, Wrench, X } from "lucide-react";
 import { useI18n, type MessageKey } from "../i18n";
@@ -12,9 +12,11 @@ import { parseFileLink, rootFor, scopeFor } from "../lib/workspace";
 import { agentState, useApp, viewOf } from "../store";
 import { convSignal, useConvHost, useConvScope, useConvSession, useConvSidebar } from "../lib/conversationScope";
 import { toolErrorText, type TaskRowOutcome } from "../lib/taskRows";
+import { ToolTimelineContext, turnRunningOf } from "../lib/toolTimeline";
 import { ToolErrorText } from "./ToolErrorText";
 import { openPath } from "../lib/sideOpen";
 import { useUserLayoutToggle } from "../lib/userLayoutToggle";
+import { SelectionActions } from "./SelectionActions";
 
 function formatMs(ms: number): string {
   const s = Math.round(ms / 1000);
@@ -27,20 +29,20 @@ function toolLabel(item: RawItem): { key: MessageKey; detail: string } {
   return { key, detail: toolDetail(item) };
 }
 
-const NO_ITEMS: string[] = [];
+const NO_ITEMS: readonly string[] = [];
 
-/** toolLiveness for a row of the conversation's timeline (lib/conversationScope; subagent rows: "running" as before). */
+/**
+ * toolLiveness for a row of the conversation's timeline (lib/conversationScope; subagent rows: "running" as before).
+ * A provided ToolTimelineContext (the iPad conversation, which does not fill the store) replaces the store's view.
+ */
 function useToolLiveness(item: RawItem) {
+  const provided = useContext(ToolTimelineContext);
   const selectedId = useConvSession();
   const hostId = useConvHost();
-  const turnRunning = useApp((s) => {
-    const tl = selectedId ? viewOf(s, hostId, selectedId)?.timeline : undefined;
-    const entry = tl?.entries.get(item.id);
-    const turn = entry?.turnId ? tl!.turns.find((x) => x.id === entry.turnId) : undefined;
-    return !turn || turn.status === "inProgress";
-  });
-  const background = useApp((s) => (selectedId ? agentState(s.backgroundItems, hostId, selectedId) : undefined) ?? NO_ITEMS);
-  return toolLiveness(item, turnRunning, background);
+  const storeRunning = useApp((s) => provided ? true : turnRunningOf(selectedId ? viewOf(s, hostId, selectedId)?.timeline : undefined, item.id));
+  const storeBackground = useApp((s) => (!provided && selectedId ? agentState(s.backgroundItems, hostId, selectedId) : undefined) ?? NO_ITEMS);
+  if (provided) return toolLiveness(item, turnRunningOf(provided.timeline, item.id), provided.background ?? NO_ITEMS);
+  return toolLiveness(item, storeRunning, storeBackground);
 }
 
 /**
@@ -153,7 +155,7 @@ export function PlainToolRow({ item, safetyBlock = null, presentation }: { item:
       {open && error && !blocked && <ToolErrorText text={error} className="mt-1 ml-5" />}
       {open && presentation && !blocked && <div className="mt-1 ml-5 min-w-0">{presentation.details}</div>}
       {open && (!presentation || blocked) && (blocked || !(error && output)) && (
-        <pre className="mt-1 ml-5 max-h-72 overflow-auto rounded-md bg-surface p-2 font-mono text-caption/[inherit] whitespace-pre-wrap text-muted">{output ?? (approval ? toolErrorText(item) : null) ?? JSON.stringify(item, null, 2)}</pre>
+        <SelectionActions as="pre" className="selectable mt-1 ml-5 max-h-72 overflow-auto rounded-md bg-surface p-2 font-mono text-caption/[inherit] whitespace-pre-wrap text-muted">{output ?? (approval ? toolErrorText(item) : null) ?? JSON.stringify(item, null, 2)}</SelectionActions>
       )}
     </div>
   );

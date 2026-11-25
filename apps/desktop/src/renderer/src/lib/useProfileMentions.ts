@@ -100,8 +100,9 @@ export function useProfileMentions(options: Options) {
   const commit = (next: { text: string; caret: number }) => { options.onChange(next.text, next.caret); options.focusAt(next.caret); };
   /** A profile replaces the trigger text (`p@…` or `@…`) and opens its model step. */
   function pickProfile(profile: ProfileItem, range: { start: number; end: number }) {
-    const raw = profileMentionText(profile.id), next = { text: text.slice(0, range.start) + raw + text.slice(range.end), caret: range.start + raw.length };
-    setPicked({ profile: profile.id, item: profile, start: range.start, end: next.caret, raw, stage: "model", hostId, sessionId });
+    // The ID is the reference; the name goes along so the agent knows which profile is meant (lib/profileMentions).
+    const raw = profileMentionText(profile.id, null, null, profile.name), next = { text: text.slice(0, range.start) + raw + text.slice(range.end), caret: range.start + raw.length };
+    setPicked({ profile: profile.id, name: profile.name, item: profile, start: range.start, end: next.caret, raw, stage: "model", hostId, sessionId });
     commit(next);
   }
   function pickAt(index: number) {
@@ -117,10 +118,11 @@ export function useProfileMentions(options: Options) {
       const start = validCascade ? cascade!.start : trigger?.start;
       if (start === undefined || !target) return;
       const nextEffort = !!row.model.id && row.model.efforts.length > 0;
-      const raw = profileMentionText(profileId, row.model.id);
+      const profileName = validCascade ? cascade!.name ?? null : null;
+      const raw = profileMentionText(profileId, row.model.id, null, profileName);
       const end = validCascade ? caret : trigger!.end;
       const after = text.slice(end), separator = !nextEffort && !after.startsWith(" ") ? " " : "";
-      if (nextEffort) setPicked({ profile: profileId, model: row.model.id, item: target, stage: "effort", choice: row.model, start, end: start + raw.length, raw, hostId, sessionId });
+      if (nextEffort) setPicked({ profile: profileId, name: profileName, model: row.model.id, item: target, stage: "effort", choice: row.model, start, end: start + raw.length, raw, hostId, sessionId });
       else setPicked(null);
       commit({ text: text.slice(0, start) + raw + separator + after, caret: start + raw.length + separator.length });
     } else if (row.effort && validCascade) {

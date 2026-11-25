@@ -40,6 +40,15 @@ const mockApprovals: MockApproval[] = [
       args: { locales: 11 }, draftPath: "/home/sam/Projects/cutex-desktop/.cutex/workflow-drafts/audit-i18n-catalogs-1.js", resumedFrom: null },
     requestSha256: "e81c…", state: "pending", createdAt: iso(50),
   },
+  // r295 Z3: Lead retries a run whose steps' outcome is unconfirmed (workflows mock run #6): the owner checks them first.
+  {
+    approvalId: "apr-wf000009", kind: "workflow_run", reason: "workflow_run", requesterCutexSessionId: "lead", requesterName: "Lead", projectId: "desktop",
+    summary: "Review unconfirmed steps before retrying workflow migrate-home-layout",
+    details: { runId: "wr-1d4f7e20-ff07", seq: 7, name: "migrate-home-layout", description: "Move every agent home to the v3 layout, one host at a time",
+      phases: [{ title: "Migrate" }], stepProfiles: ["gamma"], claudeProfiles: [], models: [], defaultProfile: "gamma", maxAgents: 8, maxConcurrency: 2, maxTokens: 400_000, hardStop: false,
+      cwd: "/home/sam/Projects/cutex", scriptSha256: "9b1c".repeat(16), args: { hosts: ["host-a", "host-b", "host-c"] }, draftPath: null, resumedFrom: "wr-c3e8a611-ff06", unconfirmedSteps: true },
+    requestSha256: "c40d…", state: "pending", createdAt: iso(40),
+  },
   browserClaim("apr-c1a1m001", "eva", "Eva", "核对收件箱里 CI 的失败通知，汇总到 PROGRESS.md", "https://mail.example.com/inbox", 20),
   browserClaim("apr-c1a1m002", "mika", "Mika", "看一下夜猫望月页面的排版", "cutex:service/yemao/", 45),
   // peers-v2: a delegation from an agent on the paired host "workstation-lab" (review = always).

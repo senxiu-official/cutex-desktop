@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { ApprovalDecision, AskSummary } from "../../../shared/ipc";
 import type { AskReviewReference } from "../../../shared/delegationReviews";
 import type { UpgradeApprovalRead } from "../../../shared/delegationUpgradePreview";
@@ -11,6 +11,7 @@ import { ROUTING_REVIEW_FEATURE, checkRoutingOutcome, refreshRoutingReviews, use
 import { ArmedButton } from "./ArmedButton";
 import { runDelegationCommand } from "../lib/delegationMenu";
 import { DelegationReviewerGrant } from "./DelegationReviewerGrant";
+import { refreshDelegation } from "../lib/delegationStore";
 
 export function RoutingDecision({ record, host, dense = false, onDecision }: { record: UpgradeApprovalRead; host: string; dense?: boolean; onDecision?(decision: ApprovalDecision): void }) {
   const { t } = useI18n();
@@ -32,7 +33,7 @@ export function RoutingDecision({ record, host, dense = false, onDecision }: { r
     {record.state === "pending" && allowed && (['approve', 'deny'] as const).map(decision => record.allowedActions[decision] && <button key={decision} type="button" data-routing-decision={decision}
       disabled={busy || !!operation} title={t(decision === "approve" ? "delegation.routing.approveHint" : "delegation.routing.denyHint")}
       onClick={event => { event.stopPropagation(); void run(decision); }}
-      className={`rounded px-2 py-0.5 disabled:opacity-50 ${decision === "approve" ? "bg-accent text-white hover:opacity-90" : "border border-border text-muted hover:text-danger"}`}>{t(decision === "approve" ? "delegation.routing.approve" : "delegation.routing.deny")}</button>)}
+      className={`rounded px-2 py-0.5 disabled:opacity-50 ${decision === "approve" ? "bg-accent text-on-accent hover:opacity-90" : "border border-border text-muted hover:text-danger"}`}>{t(decision === "approve" ? "delegation.routing.approve" : "delegation.routing.deny")}</button>)}
     {operation && (record.state !== "approved" || operation.kind !== "grant") && <><span className="text-warn">{t("delegation.routing.unknown")}</span><button type="button" className="text-accent hover:underline" disabled={busy || !allowed} onClick={event => {
       event.stopPropagation(); setBusy(true); void checkRoutingOutcome(host, record.projectId, `approval:${record.id}`).catch(() => setError(t("delegation.routing.unknown"))).finally(() => setBusy(false));
     }}>{t("delegation.routing.check")}</button></>}
@@ -48,6 +49,12 @@ export function RoutingDelegationReview({ d, host, refValue, variant }: { d: Ask
   const access = useHostAccess(host);
   const review = useRoutingReview(host, refValue, active && supported);
   const mismatched = !!review.record && review.record.delegationRef.id !== d.askId;
+  // r295: the host renews a stale approval (new id / revision / digest) and points the ask at it. A card still holding the
+  // old reference re-reads the ask once, so the renewed approval (still decidable by the owner) replaces 已失效.
+  const staleKey = review.record?.state === "stale" && d.execution === "pendingReview" && !mismatched ? `${review.record.id}:${review.record.revision}` : null;
+  useEffect(() => {
+    if (staleKey) void refreshDelegation(host, d.askId);
+  }, [staleKey, host, d.askId]);
   if (!active) return null;
   const shape = variant === "card" ? "ml-5" : variant === "side" ? "mb-2" : "";
   return <div className={`${shape} flex ${variant === "row" ? "min-w-0 shrink-0 items-center" : "flex-col"} gap-1 text-xs`} data-testid="delegation-routing-review">

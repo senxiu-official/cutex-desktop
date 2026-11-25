@@ -45,7 +45,7 @@ export function WorkspaceRail({ paneId, hostId, sessionId, name, order, at = "ri
         onClick={(e) => e.target === e.currentTarget && focus()}
         data-shelf-card=""
         data-shelf-collapsed=""
-        className={`shelf-card flex w-10 shrink-0 cursor-pointer flex-col items-center gap-[3px] rounded-xl border border-card-border py-1 transition-colors shelf-rail-card ${hot ? "border-[#3b82f6] shadow-[inset_0_0_0_999px_rgba(59,130,246,0.1)]" : ""}`}
+        className={`shelf-card flex w-10 shrink-0 cursor-pointer flex-col items-center gap-[3px] rounded-xl border border-card-border py-1 transition-colors shelf-rail-card ${hot ? "border-accent shadow-[inset_0_0_0_999px_color-mix(in_srgb,var(--accent)_10%,transparent)]" : ""}`}
       >
         <RailOwner hostId={hostId} sessionId={sessionId} onClick={focus} />
         {pages.map((page) => {

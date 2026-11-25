@@ -1,3 +1,4 @@
+import { DEFAULT_BROWSER_IDENTITY_ID, isBrowserIdentityId } from "../../../../shared/browserIdentity";
 import { browserCursorView } from "../../../../shared/browserCursor";
 // Passive, host-scoped metadata only. Reading a tab never opens a guest or starts a poll.
 import { BROWSER_ZOOM_BOUNDS, type BrowserTabView } from "../../../../shared/browser";
@@ -30,6 +31,8 @@ export function createBrowserCache() {
         favicon: safeBrowserFavicon(view.favicon), error: view.error ? browserError(view.error) : undefined,
         zoom: typeof view.zoom === "number" && Number.isFinite(view.zoom) && view.zoom >= BROWSER_ZOOM_BOUNDS.min && view.zoom <= BROWSER_ZOOM_BOUNDS.max && view.zoom !== 1 ? view.zoom : undefined,
         pool: view.pool === "agent" ? "agent" : "owner",
+        // 浏览器身份 of an owner tab (absent: the default identity; never for the agent pool).
+        browserIdentityId: view.pool !== "agent" && isBrowserIdentityId(view.browserIdentityId) && view.browserIdentityId !== DEFAULT_BROWSER_IDENTITY_ID ? view.browserIdentityId : undefined,
         desktopLoopback: view.desktopLoopback === true ? true : undefined,
         lease: view.lease ? Object.freeze({ ...view.lease }) : undefined,
         confirmedOpen: view.confirmedOpen,

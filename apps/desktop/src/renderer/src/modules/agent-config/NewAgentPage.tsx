@@ -39,6 +39,8 @@ import { useTrackOverlay } from "../../lib/openOverlays";
 import { profileColor } from "../../lib/profileLook";
 import { saveAgentPicture } from "../../lib/agentPicture";
 import { AgentAvatarPicker } from "../../components/AgentAvatarPicker";
+import { EntityIcon } from "../../components/EntityIcon";
+import { projectEntity } from "../../lib/entityIcon";
 import { pickDirectory, useFolderPickBlocked, useImagePickBlocked } from "../../lib/remoteMode";
 import { imageFileToDataUrl } from "../../lib/images";
 import { draftSubmit, hasDraftContent } from "../../lib/pendingChat";
@@ -72,6 +74,8 @@ import { rememberCreateHost, useCreateHost, type CreateHost } from "../../lib/us
 import { draftFits, dropNewAgentDraft, keepNewAgentDraft, keptNewAgentDraft } from "../../lib/newAgentReturn";
 import { setSettingsHost } from "../../lib/settingsHost";
 import { HostPicker } from "../../components/HostPicker";
+import { AssistantChoice } from "./AssistantChoice";
+import { PERSONAL_ASSISTANTS_FEATURE } from "../../../../shared/personalAssistants";
 import { useApp } from "../../store";
 import { apiFor, bridge } from "../../bridge";
 import type { PageParams } from "../slots";
@@ -809,7 +813,7 @@ function NewAgentForm({ params, target, presetHost, restored }: { params: PagePa
           <>
             <div className="px-2 py-1 text-xs text-subtle">{t("agent-config.newAgent.profile")}</div>
             {profileRuntimeAvailable(effectiveProfile(profiles, ""), features) && <button type="button" disabled={locked} onClick={() => select("")} className="launch-profile-choice">
-              <span>{t("agent-config.newAgent.profileDefault", { name: defaultName })}</span>{!profile && <Check size={14} className="text-accent" />}
+              <ProfileChoiceName profile={effectiveProfile(profiles, "")} hostId={hostId}>{t("agent-config.newAgent.profileDefault", { name: defaultName })}</ProfileChoiceName>{!profile && <Check size={14} className="text-accent" />}
             </button>}
           </>
         )}
@@ -817,7 +821,7 @@ function NewAgentForm({ params, target, presetHost, restored }: { params: PagePa
           const runtime = defaultVariantOf(p)?.runtime ?? p.cliKind;
           return (
             <button type="button" key={p.id} disabled={locked || (isClaudeProfile(p) && !claudeOk)} onClick={() => select(p.id)} className="launch-profile-choice">
-              <span>{isClaudeProfile(p) && !claudeOk ? t("agent-config.newAgent.claudeUnsupportedOption", { name: p.name }) : p.name}</span>
+              <ProfileChoiceName profile={p} hostId={hostId}>{isClaudeProfile(p) && !claudeOk ? t("agent-config.newAgent.claudeUnsupportedOption", { name: p.name }) : p.name}</ProfileChoiceName>
               <CreationRuntimeTag runtime={runtime} enabled={isAcpRuntime(runtime) && acpRuntimeAvailable(runtime, features)} />
               {(shownGroup ? !autoSelected && chosen?.id === p.id : profile === p.id) && <Check size={14} className="text-accent" />}
             </button>
@@ -852,7 +856,7 @@ function NewAgentForm({ params, target, presetHost, restored }: { params: PagePa
                           ...projects.map((p) => {
                             const label = withHost(projects.some((q) => q !== p && q.presentation.display_name === p.presentation.display_name) ? `${p.presentation.display_name} (${p.project_id})` : p.presentation.display_name || p.project_id);
                             // No 项目目录 yet: say so before it is picked.
-                            return { value: p.project_id, label: p.workspace_root ? label : `${label} · ${t("agent-config.newAgent.projectNoRootTag")}` };
+                            return { value: p.project_id, label: p.workspace_root ? label : `${label} · ${t("agent-config.newAgent.projectNoRootTag")}`, entity: projectEntity(hostId, p) };
                           }),
                           ...(optional ? [{ value: NEW_PROJECT, label: t("agent-config.newAgent.newProject") }] : []),
                         ]} onChange={(value) => { setProject(value); setCwdTouched(false); }} />
@@ -904,6 +908,8 @@ function NewAgentForm({ params, target, presetHost, restored }: { params: PagePa
   return (
     <LaunchPage intro={<LaunchIntro portraits={{ profileId: chosen?.id, profiles: available ? available.filter((p) => !isClaudeProfile(p) || claudeOk) : null, selected: portraitSelected, disabled: locked, onSelect: (id) => { if (locked) return; setPortraitSelected(true); setProfile(id); setLaunch((f) => ({ ...f, model: "", reasoningEffort: "" })); setPanel(null); } }} provider={chosen ? profileProvider(chosen) : undefined} icon={<Sparkles size={24} />} title={t("agent-config.newAgent.welcome")} hint={t("agent-config.newAgent.welcomeHint")} />}>
       <LaunchDock>
+        {/* A host with personal assistants offers one here too (its own create form, on that host). */}
+        {features.has(PERSONAL_ASSISTANTS_FEATURE) && !locked && <AssistantChoice hostId={hostId} disabled={!online} />}
         {projectReady?.outcome === "reused" && projectReady.id === project && <p role="status" className="mb-2 text-xs text-subtle">{t("agent-config.newAgent.projectReused", { project: projectReady.name })}</p>}
         {elsewhere && !locked && (
           <p className="mb-2 text-xs text-warn">
@@ -1115,5 +1121,15 @@ function NewAgentForm({ params, target, presetHost, restored }: { params: PagePa
         </div>
       </LaunchDock>
     </LaunchPage>
+  );
+}
+
+/** A Profile choice's name after its face (owner 2026-11-24: Profiles show their icon wherever they are named). */
+function ProfileChoiceName({ profile, hostId, children }: { profile: ProfileItem | null; hostId: string; children: ReactNode }) {
+  return (
+    <span className="flex min-w-0 flex-1 items-center gap-2">
+      {profile ? <EntityIcon entity={{ kind: "profile", profile, hostId }} /> : <span className="w-4 shrink-0" aria-hidden />}
+      <span className="min-w-0">{children}</span>
+    </span>
   );
 }

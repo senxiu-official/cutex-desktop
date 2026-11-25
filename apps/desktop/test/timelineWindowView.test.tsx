@@ -61,11 +61,12 @@ afterEach(async () => {
   vi.restoreAllMocks(); vi.unstubAllGlobals();
 });
 
-function fixture(scale: number) {
+function fixture(scale: number, size = { turns: 327, replies: 7974 }) {
   const state = emptyTimeline();
-  state.turns = Array.from({ length: 327 * scale }, (_, i) => ({ id: `t${i}`, status: "completed", startedAt: null, completedAt: null, entryIds: [] }));
-  for (let i = 0; i < 7974 * scale; i++) {
-    const turn = state.turns[Math.floor(i * state.turns.length / (7974 * scale))]!;
+  state.turns = Array.from({ length: size.turns * scale }, (_, i) => ({ id: `t${i}`, status: "completed", startedAt: null, completedAt: null, entryIds: [] }));
+  const replyCount = size.replies * scale;
+  for (let i = 0; i < replyCount; i++) {
+    const turn = state.turns[Math.floor(i * state.turns.length / replyCount)]!;
     const entry = { kind: "agent" as const, id: `i${i}`, turnId: turn.id, text: `reply ${i}`, streaming: false };
     turn.entryIds.push(entry.id); state.entries.set(entry.id, entry);
   }
@@ -105,7 +106,7 @@ describe("native TimelineBody window path", () => {
 
   it("does not resurrect hidden native owner or received inputs at the tail", async () => {
     fx.limit = 2;
-    const timeline = fixture(1);
+    const timeline = fixture(1, { turns: 3, replies: 3 });
     const turn = timeline.turns[0]!;
     const native = { kind: "user" as const, id: "native-owner", clientId: "owner-client", turnId: turn.id, text: "hidden owner body" };
     turn.entryIds.push(native.id); timeline.entries.set(native.id, native);
@@ -117,9 +118,13 @@ describe("native TimelineBody window path", () => {
     const ledger = applyInputLedgerSnapshot(emptyInputLedgerSession(), { ledgerEpoch: "e", stateRevision: 1, records, delivery: delivery("idle", 1), coverage: { kind: "full" } }).session;
     Object.assign(fx.state, { features: new Set(["input-ledger-v1"]), inputs: { [key]: ledger }, ledgerOutbox: { [key]: [{ inputId: native.clientId, strategy: "auto", predictedSurface: "timeline", text: native.text, extra: [] }] } });
     await show();
+    expect(host.textContent).toContain("reply 1");
+    expect(host.textContent).toContain("reply 2");
+    expect(host.textContent).not.toContain("reply 0");
     for (const text of [native.text, received.message.text, "owner ledger preview", "received ledger preview", "waiting next up"]) expect(host.textContent).not.toContain(text);
     const button = [...host.querySelectorAll("button")].find(button => button.textContent?.includes("conversation.showEarlier"))!;
-    await act(async () => { for (let i = 0; i < 164; i++) button.click(); });
+    await act(async () => button.click());
+    expect(host.textContent).toContain("reply 0");
     expect(host.textContent).toContain(native.text);
     expect(host.textContent).toContain(received.message.text);
     expect(host.textContent).not.toContain("owner ledger preview");

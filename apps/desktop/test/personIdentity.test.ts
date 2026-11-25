@@ -3,6 +3,7 @@
 // helpers (users module) and Settings → 你 → 你能访问的主机 rows (lib/myAccess).
 import { createHash, createPublicKey, verify } from "node:crypto";
 import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -153,9 +154,10 @@ describe("claim flow (main PersonIdentityService)", () => {
 
 describe("person key (main)", () => {
   let dir: string | null = null;
-  afterEach(() => {
-    if (dir) rmSync(dir, { recursive: true, force: true });
+  afterEach(async () => {
+    const fixture = dir;
     dir = null;
+    if (fixture) await rm(fixture, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it("signs the claim message with Ed25519 (verifiable with the raw public key)", () => {

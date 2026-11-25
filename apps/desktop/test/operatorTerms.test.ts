@@ -2,9 +2,10 @@ import { readFileSync, readdirSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
+import { STATIC_SCAN } from "./staticScan";
 import { applyTerms, DEFAULT_TERMS, TERM_IDS, TERM_LOCALES, resolveTerms, type TermOverrides } from "../src/renderer/src/lib/terms";
 import { termPresets, presetOverrides, currentTermPreset } from "../src/renderer/src/lib/termPresets";
-import { migrateMaidTerms } from "../src/renderer/src/lib/termPresetMigration";
+import { migrateAssistantTerm, migrateMaidTerms } from "../src/renderer/src/lib/termPresetMigration";
 import { APP_LOCALES } from "../src/shared/locales";
 
 it("defines independent singular and plural operator terms in every shipped locale", () => {
@@ -44,13 +45,14 @@ it("migrates the complete old Maid signature while preserving unrelated override
   expect(migrated.en?.shelf).toEqual(old.en?.shelf);
   expect(migrated["zh-CN"]).toBe(old["zh-CN"]);
   expect(old.en?.parentagent?.one).toBe("Head Maid");
-  expect(currentTermPreset("en", migrated)).toBe("maid");
+  expect(currentTermPreset("en", migrated)).toBeNull(); // the Maid set gained Lady's Maid later (migrateAssistantTerm)
+  expect(currentTermPreset("en", migrateAssistantTerm(migrated))).toBe("maid");
   expect(migrateMaidTerms(migrated)).toBe(migrated);
   expect(migrateMaidTerms({ en: { ...old.en, operator: { one: "Deputy", many: "Deputies" } } }).en?.operator).toEqual({ one: "Deputy", many: "Deputies" });
   expect(migrateMaidTerms({ en: { ...old.en, owner: { one: "Custom", many: "Customs" } } }).en?.parentagent?.one).toBe("Head Maid");
 });
 
-it("contains no hard-coded visible Operator labels outside the term table", () => {
+it("contains no hard-coded visible Operator labels outside the term table", STATIC_SCAN, () => {
   const root = resolve(dirname(fileURLToPath(import.meta.url)), "../src/renderer/src");
   const bad: string[] = [];
   function scan(dir: string) {

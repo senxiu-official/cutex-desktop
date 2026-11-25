@@ -10,7 +10,7 @@ import { SettingsSections } from "../../modules/Outlet";
 import { setUiPref, useUiPrefs } from "../../lib/prefs";
 import { pageLabel } from "../../lib/sideActions";
 import { useSideRegistry } from "../../lib/sideComponents";
-import { DEFAULT_ORDER, findPage } from "../../lib/sideLayout";
+import { DEFAULT_ORDER, movedTo } from "../../lib/sideLayout";
 import { useSide } from "../../lib/sideLayoutStore";
 import { setSingleShelfNow } from "../../lib/shelves";
 import { resetSideLayout, restoreKindDefaultNow } from "../../lib/sideMenus";
@@ -24,6 +24,9 @@ import { matchesFilter } from "../../lib/listFilter";
 import { useScrollToSettingsAnchor } from "../../lib/settingsFocus";
 import { useApp } from "../../store";
 import { ShelfPlacementSection } from "../WorkSurfaceSettings";
+
+/** The select's entry for a move onto a page (no page group names it). */
+const MOVED = "\u0000moved";
 
 /** 组件默认位置: `all` = the sub-page (every component, with a filter); else only the ones you changed + the way there. */
 function DefaultsTable({ all = false }: { all?: boolean }) {
@@ -45,7 +48,7 @@ function DefaultsTable({ all = false }: { all?: boolean }) {
   // The page: only the components you changed (another default group, or moved); all of them are on the
   // sub-page (owner 2026-10-18: twenty rows of selects made the page mostly this table).
   const [filter, setFilter] = useState("");
-  const changed = rows.filter(({ item }) => sideHomes[item.id] !== undefined || layout.overrides[item.id]);
+  const changed = rows.filter(({ item }) => sideHomes[item.id] !== undefined || movedTo(layout, item.id));
   const shown = all ? rows.filter(({ item }) => matchesFilter(filter, t(item.titleKey), homeLabel(sideHomes[item.id] ?? item.placement.home))) : changed;
   // A new default group re-places the open ones too (their moved-to page, if any, is forgotten).
   const setHome = (kind: ItemId, home: string, declared: string) => {
@@ -61,21 +64,23 @@ function DefaultsTable({ all = false }: { all?: boolean }) {
       {!all && changed.length === 0 && <p className="border-b border-border/60 py-2 text-xs text-subtle">{t("shell.sides.defaults.allDefault")}</p>}
       {shown.map(({ item }) => {
         const Icon = item.icon;
-        const override = layout.overrides[item.id];
-        const page = override ? findPage(layout, override.page) : null;
+        // One answer to 「where does it open」 (owner 2026-11-24): a move (its page still there) wins over the default
+        // group, so the select shows the moved-to page; picking a group sets the default and ends the move.
+        const page = movedTo(layout, item.id);
         const declared = item.placement.home;
         const home = sideHomes[item.id] ?? declared;
+        const pageName = page ? pageLabel(page) : "";
         return (
           <SettingRow agents="none" source="local" key={item.id}
             label={<span className="inline-flex min-w-0 items-center gap-2"><Icon size={14} className="shrink-0 text-subtle" />{t(item.titleKey)}</span>}
-            hint={override ? <>{t("shell.sides.defaults.moved", { page: page ? pageLabel(page) : t("shell.sides.defaults.gonePage") })}<HintAction onClick={() => restoreKindDefaultNow(item.id)}>{t("side.restoreDefault")}</HintAction></> : undefined}
+            hint={page ? <>{t("shell.sides.defaults.moved", { page: pageName })}<HintAction onClick={() => restoreKindDefaultNow(item.id)}>{t("side.restoreDefault")}</HintAction></> : undefined}
           >
             <Select
               width="w-36"
               label={t(item.titleKey)}
-              value={home}
-              options={homes.map((h) => ({ value: h, label: homeLabel(h) }))}
-              onChange={(v) => setHome(item.id, v, declared)}
+              value={page ? MOVED : home}
+              options={[...(page ? [{ value: MOVED, label: t("shell.sides.defaults.movedOption", { page: pageName }) }] : []), ...homes.map((h) => ({ value: h, label: homeLabel(h) }))]}
+              onChange={(v) => v !== MOVED && setHome(item.id, v, declared)}
             />
           </SettingRow>
         );

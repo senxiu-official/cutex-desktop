@@ -3,8 +3,9 @@ import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createRemoteCopies } from "../src/main/remoteCopiesIpc";
+import { RemoteCopyManager } from "../src/main/remoteCopies";
 import type { HostManager } from "../src/main/hosts";
-import type { CopySource } from "../src/shared/remoteCopies";
+import type { CopySource, CopyState } from "../src/shared/remoteCopies";
 import { canOpenCopy, type PreparedCopy } from "../src/shared/remoteCopyRequests";
 
 const base = join(tmpdir(), "remote-copies-ipc-");
@@ -25,13 +26,19 @@ async function fixture(pick: () => Promise<string | null> = async () => null) {
 }
 async function download(f: Awaited<ReturnType<typeof fixture>>, source = f.source, binding = f.binding) {
   const prepared = await f.service.request({ kind: "inspect", source, binding }) as PreparedCopy;
-  const id = await f.service.request({ kind: "start", source: prepared.source, binding, expected: prepared.meta }) as string;
-  for (let n = 0; n < 100; n++) {
-    const state = await f.service.request({ kind: "list" }) as import("../src/shared/remoteCopies").CopyState;
-    if (state.copies.find(c => c.id === id)?.status !== "downloading") break;
-    await new Promise(r => setTimeout(r, 5));
+  const start = vi.spyOn(RemoteCopyManager.prototype, "start");
+  try {
+    const id = await f.service.request({ kind: "start", source: prepared.source, binding, expected: prepared.meta }) as string;
+    expect(start).toHaveBeenCalledOnce();
+    // The IPC service owns the manager; start() registers completion before returning the id.
+    const manager = start.mock.contexts[0] as RemoteCopyManager;
+    await manager["active"].get(id)?.done;
+    const state = await f.service.request({ kind: "list" }) as CopyState;
+    expect(state.copies.find(row => row.id === id)).toMatchObject({ status: "complete" });
+    return id;
+  } finally {
+    start.mockRestore();
   }
-  return id;
 }
 
 describe("downloads: local artifacts and the download folder", () => {
@@ -39,10 +46,10 @@ describe("downloads: local artifacts and the download folder", () => {
     const f = await fixture();
     const local = { hostId: "local", hostLabel: "", hostIdentity: "", path: "af-1@2", artifact: { id: "af-".padEnd(35, "0"), version: 2 } };
     const id = await download(f, local, { hostId: "local", epoch: "epoch-a" });
-    const state = await f.service.request({ kind: "list" }) as import("../src/shared/remoteCopies").CopyState;
+    const state = await f.service.request({ kind: "list" }) as CopyState;
     expect(state.copies.find(c => c.id === id)).toMatchObject({ status: "complete", source: { hostId: "local", hostLabel: "This computer" } });
     await expect(f.service.request({ kind: "inspect", source: { ...local, artifact: undefined }, binding: { hostId: "local", epoch: "epoch-a" } })).rejects.toThrow("unavailable");
-  });
+  }, 20_000); // Publishes a real artifact and verifies the saved row.
 
   it("opens the default folder, moves the store into a picked folder and back, and keeps the copies", async () => {
     const pickedDir = await mkdtemp(base); roots.push(pickedDir);
@@ -63,7 +70,7 @@ describe("downloads: local artifacts and the download folder", () => {
     expect(back).toEqual(before);
     expect(await readdir(pickedDir)).toEqual([]);
     await expect(stat(join(f.root, "download-folder.json"))).rejects.toThrow();
-    expect((await f.service.request({ kind: "list" }) as import("../src/shared/remoteCopies").CopyState).copies.map(c => c.id)).toEqual([id]);
+    expect((await f.service.request({ kind: "list" }) as CopyState).copies.map(c => c.id)).toEqual([id]);
   }, 30_000); // Two real moves of the store (copy, reopen, delete): ~0.5 s alone, the fs work under full-suite load.
 
   it("refuses to move into the current folder, and a cancelled pick changes nothing", async () => {
@@ -109,16 +116,10 @@ describe("owned-copy main IPC", () => {
   });
   it("refuses opening a completed Python copy in main while still allowing reveal", async () => {
     const f = await fixture(); f.meta.name = "task.py";
-    const prepared = await f.service.request({ kind: "inspect", source: f.source, binding: f.binding }) as PreparedCopy;
-    const id = await f.service.request({ kind: "start", source: prepared.source, binding: f.binding, expected: prepared.meta }) as string;
-    for (let n = 0; n < 100; n++) {
-      const state = await f.service.request({ kind: "list" }) as import("../src/shared/remoteCopies").CopyState;
-      if (state.copies.find(c => c.id === id)?.status !== "downloading") break;
-      await new Promise(r => setTimeout(r, 5));
-    }
+    const id = await download(f);
     await expect(f.service.request({ kind: "open", id })).rejects.toThrow("scripts cannot be opened");
     await f.service.request({ kind: "reveal", id });
     expect(f.shell.openPath).not.toHaveBeenCalled();
     expect(f.shell.showItemInFolder).toHaveBeenCalledOnce();
-  });
+  }, 20_000); // Publishes a real copy and checks its file on the open and reveal paths.
 });

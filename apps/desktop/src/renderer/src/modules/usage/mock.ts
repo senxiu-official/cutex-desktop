@@ -3,7 +3,7 @@
 // with this machine, relay only there, a model unpriced on both), its own price table, no extra
 // directories, and a fresher gamma quota. `?usagenorate`: no exchange rates anywhere (the AUD host's
 // API value cannot be converted).
-import type { ModuleMock } from "../../dev/mockTypes";
+import type { MockCore, ModuleMock } from "../../dev/mockTypes";
 import type { DesktopApi, QuotaGauge, UsageReport, UsagePrices } from "../../../../shared/ipc";
 import { USAGE_SOURCE_KIND_DEFAULTS, type UsageSource, type UsageSourceResult } from "../../../../shared/usageSources";
 
@@ -165,9 +165,15 @@ const REMOTE_QUOTA: Record<string, QuotaGauge[]> = {
   ],
 };
 
+/** `?manyArchived`: the archived agents' usage too (设置 → 归档's per-agent tokens). */
+const archivedAgents = (core: MockCore | undefined): MockAgent[] =>
+  !core?.projectRecords || typeof location === "undefined" || !new URLSearchParams(location.search).has("manyArchived")
+    ? []
+    : core.projectRecords().retired.map((s, i) => ({ agent: s.cutexSessionId, agentName: s.displayName, profile: s.profile ?? "omega", model: i % 4 === 1 ? "claude-opus-5-5" : "gpt-5.5", project: "", projectName: "" }));
+
 export const mock: ModuleMock = {
-  api: () => ({
-    usage: (query) => ledger(query, { agents: localAgents(), table: prices, currency: "USD", factor: 1 }),
+  api: (core) => ({
+    usage: (query) => ledger(query, { agents: [...localAgents(), ...archivedAgents(core)], table: prices, currency: "USD", factor: 1 }),
     async usagePrices() {
       return structuredClone(prices);
     },

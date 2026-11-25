@@ -1,5 +1,5 @@
 // LEGACY(input-ledger-v1): frozen delivery inference for older hosts.
-// Delete only when EVERY host advertises input-ledger-v1 (including hachimi).
+// Delete only when EVERY host advertises input-ledger-v1 (including hostc).
 // 接下来 rows already read in (owner 2026-10-24): a ride-along item (admission.nextStep: a wake, a tell,
 // an alarm …) whose `external_event` item is in the timeline has reached the agent, so its row leaves
 // at once. cutex keeps listing it until the runtime's receipt: Codex sends that as it reads the input,

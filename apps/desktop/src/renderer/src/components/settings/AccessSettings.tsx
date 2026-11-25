@@ -6,6 +6,7 @@
 //   remote-access). With full control only; otherwise your own user there (components/settings/MeOnHost).
 // - 跨机协作 (peers, users.peers) and 高级 (主机信息, 你的权限, listen / CORS, 诊断) are sub-pages;
 //   全部设备 too. Owner and permissions are kept apart.
+import { HeavyReadSection } from "./HeavyReadSection";
 import type { ReactNode } from "react";
 import { useApp } from "../../store";
 import { useSlot } from "../../modules/react";
@@ -126,6 +127,7 @@ export function AdvancedSubPage() {
       </PartSource>
       <HostCards hostId={hostId}>
         {access.isOwner && <SettingsSections page="access" only={ADVANCED_SECTIONS} />}
+        <HeavyReadSection hostId={hostId} />
         <Diagnostics />
       </HostCards>
     </>

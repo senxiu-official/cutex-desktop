@@ -1,4 +1,5 @@
 import { isImeComposing } from "../lib/ime";
+import { isEditableTarget } from "../lib/escInterrupt";
 import { ForkProfileDialog } from "./ForkProfileDialog";
 import { QuickChatPromoteDialog } from "./QuickChatPromoteDialog";
 import { AgentMcpDialog } from "./AgentMcpDialog";
@@ -20,6 +21,7 @@ import { BatchModelDialog } from "./BatchModelDialog";
 import { FolderBrowser } from "./FolderBrowser";
 import { OwnerLayer } from "./OwnerLayer";
 import { useOwnerDocument, useOwnerWindow } from "../lib/ownerContext";
+import { useStaggeredCount } from "../lib/useStagger";
 
 /** The rows' on / off buttons (MenuToggle), flipped by a click or by Space on the active row. */
 interface Toggles {
@@ -137,6 +139,13 @@ function ContextMenuView({ x, y, items, above, minWidth, trigger }: { x: number;
         closeMenu();
         return;
       }
+      // A held key's auto-repeat never selects: the first Enter arms a row, confirming (删除, 允许 iPad 访问…) takes a
+      // second, separate press. Also stops the focused flyout button's native activation. Held Space in a text field
+      // (flyout search) still types.
+      if (e.repeat && (e.key === "Enter" || (e.key === " " && !isEditableTarget(e.target)))) {
+        e.preventDefault();
+        return;
+      }
       if (inFlyout) {
         const rows = flyoutRows();
         const at = rows.indexOf(doc.activeElement as HTMLElement);
@@ -249,6 +258,8 @@ interface Arming {
 function MenuItems({ items, active, setActive, armed, select, shown, flyoutClosed = false }: { items: (MenuAction | "separator")[]; active: number; setActive(i: number): void; flyoutClosed?: boolean } & Arming) {
   useRowForetell(items, active);
   const base = useId();
+  // Long menus (an agent submenu of hundreds, each with its avatar): row icons mount in steps (lib/useStagger).
+  const icons = useStaggeredCount(items.length);
   return (
     <>
       {items.map((item, i) =>
@@ -264,7 +275,7 @@ function MenuItems({ items, active, setActive, armed, select, shown, flyoutClose
             </div>
           )
         ) : (
-          <MenuRow key={i} item={item} i={i} base={base} active={active === i} flyoutClosed={flyoutClosed} setActive={setActive} armed={armed} select={select} shown={shown} />
+          <MenuRow key={i} item={item} i={i} base={base} showIcon={i < icons} active={active === i} flyoutClosed={flyoutClosed} setActive={setActive} armed={armed} select={select} shown={shown} />
         ),
       )}
     </>
@@ -295,8 +306,8 @@ function MenuInfoTip({ row: rowRef, children }: { row: { current: HTMLElement | 
 }
 
 /** Only the old and new active rows change while moving through a long submenu. */
-const MenuRow = memo(function MenuRow({ item, i, base, active, flyoutClosed, setActive, armed, select, shown }: {
-  item: MenuAction; i: number; base: string; active: boolean; flyoutClosed: boolean; setActive(i: number): void;
+const MenuRow = memo(function MenuRow({ item, i, base, showIcon = true, active, flyoutClosed, setActive, armed, select, shown }: {
+  item: MenuAction; i: number; base: string; showIcon?: boolean; active: boolean; flyoutClosed: boolean; setActive(i: number): void;
 } & Arming) {
   const row = useRef<HTMLDivElement>(null);
   // A disabled row's reason (`title`) is its ⓘ too (owner 2026-11-05: why 分叉 is grey), shown on hover like any ⓘ.
@@ -315,11 +326,11 @@ const MenuRow = memo(function MenuRow({ item, i, base, active, flyoutClosed, set
         onClick={() => (item.submenu || item.flyout !== undefined ? setActive(i) : select(item))}
         // Armed keeps the danger face while focused (it always is, after its first click): no focus:bg-* with it.
         className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left outline-none disabled:opacity-40 ${
-          armed === item ? `${ARMED_COUNTDOWN} bg-danger-solid text-white` : `press focus:bg-surface-2 ${active && !item.disabled ? "bg-surface-2" : ""} ${item.danger ? "text-danger" : ""}`
+          armed === item ? `${ARMED_COUNTDOWN} ${item.armedTone === "accent" ? "bg-accent text-on-accent" : "bg-danger-solid text-white"}` : `press focus:bg-surface-2 ${active && !item.disabled ? "bg-surface-2" : ""} ${item.danger ? "text-danger" : ""}`
         }`}
       >
         {/* A rich row without an icon (e.g. the identity menu's avatar header) starts at the left edge. */}
-        {(item.icon || !item.labelNode) && <span className={`flex w-4 justify-center ${armed === item ? "text-white" : "text-muted"}`}>{item.icon}</span>}
+        {(item.icon || !item.labelNode) && <span className={`flex min-w-4 shrink-0 justify-center ${armed === item ? (item.armedTone === "accent" ? "text-on-accent" : "text-white") : "text-muted"}`}>{showIcon && item.icon}</span>}
         {armed === item ? (
           <span className="max-w-80 min-w-0 flex-1" role="alert">
             {shown.armedText ?? item.armed}
@@ -434,7 +445,7 @@ function DialogCheckbox({ check }: { check: DialogCheck }) {
   );
 }
 
-function PromptView({ title, initial, placeholder, multiline, maxLength, hint, check, expect, mismatch, resolve }: { title: string; initial: string; placeholder?: string; multiline?: boolean; maxLength?: number; hint?: string; check?: DialogCheck; expect?: string; mismatch?: string; resolve(v: string | null): void }) {
+function PromptView({ title, initial, placeholder, multiline, maxLength, hint, check, expect, mismatch, danger, okLabel, resolve }: { title: string; initial: string; placeholder?: string; multiline?: boolean; maxLength?: number; hint?: string; check?: DialogCheck; expect?: string; mismatch?: string; danger?: boolean; okLabel?: string; resolve(v: string | null): void }) {
   const { t } = useI18n();
   const [value, setValue] = useState(initial);
   // A typed confirmation that does not match stays open with the note (the owner corrects it, not starts over).
@@ -475,15 +486,15 @@ function PromptView({ title, initial, placeholder, multiline, maxLength, hint, c
         <button onClick={() => done(null)} className="press rounded-md px-3 py-1 text-sm text-muted hover:bg-surface-2">
           {t("dialog.cancel")}
         </button>
-        <button onClick={() => done(value)} className="press-solid rounded-md bg-accent px-3 py-1 text-sm text-white">
-          {t("dialog.ok")}
+        <button onClick={() => done(value)} data-dialog-ok="" data-danger={danger ? "" : undefined} className={`press-solid rounded-md px-3 py-1 text-sm ${danger ? "bg-danger-solid text-white" : "bg-accent text-on-accent"}`}>
+          {okLabel ?? t("dialog.ok")}
         </button>
       </div>
     </>
   );
 }
 
-function ConfirmView({ message, danger, notice, labels, check, resolve }: { message: string; danger: boolean; notice?: boolean; labels?: { ok: string; cancel: string }; check?: DialogCheck; resolve(ok: boolean): void }) {
+function ConfirmView({ message, danger, notice, safe, labels, check, resolve }: { message: string; danger: boolean; notice?: boolean; safe?: boolean; labels?: { ok: string; cancel: string }; check?: DialogCheck; resolve(ok: boolean): void }) {
   const { t } = useI18n();
   const doc = useOwnerDocument();
   const done = (ok: boolean) => {
@@ -494,7 +505,8 @@ function ConfirmView({ message, danger, notice, labels, check, resolve }: { mess
     const onKey = (e: KeyboardEvent) => {
       if (isImeComposing(e)) return;
       if (e.key === "Escape") done(false);
-      else if (e.key === "Enter") done(true);
+      // A permanent delete (safe): Enter activates the focused button only (取消 first), never confirms by itself.
+      else if (e.key === "Enter" && !safe) done(true);
     };
     doc.addEventListener("keydown", onKey);
     return () => doc.removeEventListener("keydown", onKey);
@@ -505,11 +517,11 @@ function ConfirmView({ message, danger, notice, labels, check, resolve }: { mess
       {check && <DialogCheckbox check={check} />}
       <div className="mt-4 flex justify-end gap-2">
         {!notice && (
-          <button onClick={() => done(false)} className="press rounded-md px-3 py-1 text-sm text-muted hover:bg-surface-2">
+          <button autoFocus={safe} data-dialog-cancel="" onClick={() => done(false)} className="press rounded-md px-3 py-1 text-sm text-muted hover:bg-surface-2 focus-visible:outline-2 focus-visible:outline-accent">
             {labels?.cancel ?? t("dialog.cancel")}
           </button>
         )}
-        <button autoFocus onClick={() => done(true)} className={`press-solid rounded-md px-3 py-1 text-sm text-white ${danger ? "bg-danger-solid" : "bg-accent"}`}>
+        <button autoFocus={!safe} data-dialog-ok="" onClick={() => done(true)} className={`press-solid rounded-md px-3 py-1 text-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ${danger ? "bg-danger-solid text-white" : "bg-accent text-on-accent"}`}>
           {notice ? t("dialog.ok") : (labels?.ok ?? t("dialog.confirm"))}
         </button>
       </div>

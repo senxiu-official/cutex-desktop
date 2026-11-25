@@ -177,7 +177,7 @@ export const zhCN = {
   "peers.deleted": "已删除与 {label} 的互联",
   // writes / refusals
   "peers.readOnlyLink": "这台主机只接受本机回环连接上的修改，桌面连它的方式不是回环，所以这里只能查看：请在那台主机上操作，或经 SSH 连接",
-  "peers.retryWrites": "再试一次",
+  "peers.retryWrites": "重试",
   "peers.refusal.self_peer": "这是本机自己的地址，不能和自己互联",
   "peers.refusal.peer_exists": "已经有与这台主机的互联",
   "peers.refusal.label_taken": "这个名字已被另一条互联使用，换一个名字",

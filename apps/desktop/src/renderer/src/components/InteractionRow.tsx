@@ -1,12 +1,14 @@
 // One timeline row for a handled server request (lib/interactionLog): collapsed a single compact
 // line — 问：… → 答：… / 批准：命令 … / 拒绝：… / 已在别处处理：… — opened by click to the full
 // question with every option and the selected one (the approval's subject and decision). Hidden
-// with Settings → 对话 → 在时间线中保留已处理的交互 off.
+// with Settings → 对话 → 在时间线中保留已处理的交互 off. A secret answer is never shown — not in the
+// collapsed line, not opened: 「（已隐藏）」, also when cutex kept only that it was answered (`redacted`),
+// so it never reads as unanswered. Opened, a row says who answered and when (saved rows: cutex's record).
 import { useState } from "react";
 import { Check, ChevronDown, ChevronRight, MessageCircleQuestion, MonitorSmartphone, X } from "lucide-react";
 import { useI18n, type MessageKey } from "../i18n";
 import { useUiPrefs } from "../lib/prefs";
-import { choiceOf, glyphOf, questionAnswers, rowParts, type InteractionGlyph, type InteractionRecord } from "../lib/interactionLog";
+import { answerHidden, choiceOf, glyphOf, questionAnswers, rowParts, type InteractionGlyph, type InteractionRecord } from "../lib/interactionLog";
 import { useUserLayoutToggle } from "../lib/userLayoutToggle";
 
 const GLYPH_ICON: Record<InteractionGlyph, typeof Check> = {
@@ -44,8 +46,18 @@ function joinAnswers(locale: string, values: string[]): string {
 }
 
 /** One requestUserInput question with its options and the selected values. */
-function QuestionDetail({ header, question, options, selected, isSecret }: { header: string; question: string; options: { label: string; description: string | null }[]; selected: string[]; isSecret: boolean }) {
+function QuestionDetail({ header, question, options, selected, isSecret, hidden }: { header: string; question: string; options: { label: string; description: string | null }[]; selected: string[]; isSecret: boolean; hidden: boolean }) {
   const { t, locale } = useI18n();
+  if (hidden) {
+    // Answered, the answer not kept (secret): neither its options nor 「没有回答」 — only that it is hidden.
+    return (
+      <div className="mb-2 last:mb-0" data-interaction-hidden="">
+        <div className="mb-0.5 text-caption/[inherit] font-semibold uppercase tracking-wide">{header}</div>
+        <p className="selectable mb-1 text-xs whitespace-pre-wrap">{question}</p>
+        <p className="text-xs"><span className="mr-1.5">{t("interactionLog.answer")}</span>{t("interactionLog.secret")}</p>
+      </div>
+    );
+  }
   const typed = selected.filter((value) => !options.some((o) => o.label === value));  return (
     <div className="mb-2 last:mb-0">
       <div className="mb-0.5 text-caption/[inherit] font-semibold uppercase tracking-wide">{header}</div>
@@ -91,7 +103,7 @@ function InteractionDetail({ record }: { record: InteractionRecord }) {
     return (
       <div>
         {asked.questions.map((q) => (
-          <QuestionDetail key={q.id} header={q.header} question={q.question} options={(q.options ?? []).map((o) => ({ label: o.label, description: o.description || null }))} selected={answers[q.id] ?? []} isSecret={q.isSecret} />
+          <QuestionDetail key={q.id} header={q.header} question={q.question} options={(q.options ?? []).map((o) => ({ label: o.label, description: o.description || null }))} selected={answers[q.id] ?? []} isSecret={q.isSecret} hidden={answerHidden(record, q.id)} />
         ))}
       </div>
     );
@@ -133,6 +145,19 @@ function InteractionDetail({ record }: { record: InteractionRecord }) {
   return <p className="text-xs text-subtle">{t("interaction.unsupported", { method: asked.request.method })}</p>;
 }
 
+/** Who answered and when: a saved row names its answerer; a reply sent here just its time. */
+function AnsweredBy({ record }: { record: InteractionRecord }) {
+  const { t, locale } = useI18n();
+  if (record.settled.kind !== "answered" || !record.at) return null;
+  const time = new Date(record.at * 1000).toLocaleString(locale, { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  const actor = record.actor;
+  const who = !actor ? null
+    : actor.kind === "owner" ? t("interactionLog.byOwner")
+    : actor.kind === "user" ? actor.name || t("interactionLog.byUser")
+    : actor.agentName || t("interactionLog.byAgent");
+  return <p className="text-caption/[inherit] text-subtle" data-interaction-by="">{who ? t("interactionLog.by", { who, time }) : t("interactionLog.at", { time })}</p>;
+}
+
 export function InteractionRow({ record }: { record: InteractionRecord }) {
   const { t, locale } = useI18n();
   const userToggle = useUserLayoutToggle();
@@ -142,13 +167,16 @@ export function InteractionRow({ record }: { record: InteractionRecord }) {
   const Icon = GLYPH_ICON[glyph];
   const parts = rowParts(record);
   // Questions: 问：… → 答：…; approvals carry the decision in their word (批准 / 拒绝).
-  const answerValues = record.settled.kind === "answered" && record.asked?.kind === "questions" ? questionAnswers(record)[record.asked.questions[0]?.id ?? ""] ?? [] : [];
-  const answer = answerValues.length > 0 ? joinAnswers(locale, answerValues) : null;
+  const first = record.asked?.kind === "questions" ? record.asked.questions[0] : undefined;
+  const answerValues = record.settled.kind === "answered" && first ? questionAnswers(record)[first.id] ?? [] : [];
+  // A secret answer never shows in the line, whether this desktop sent it or cutex kept only that it was answered.
+  const hidden = !!first && record.settled.kind === "answered" && (answerHidden(record, first.id) || (first.isSecret && answerValues.length > 0));
+  const answer = hidden ? t("interactionLog.secret") : answerValues.length > 0 ? joinAnswers(locale, answerValues) : null;
   // Permissions subjects are JSON blobs, not a readable line — the kind label stands in.
   const subject = parts.subject ?? (record.asked?.kind === "approval" ? t(`interactionLog.subject.${record.asked.title}` as MessageKey) : null);
   const elsewhere = record.settled.kind === "elsewhere";
   return (
-    <div className="my-0.5 text-xs">
+    <div className="my-0.5 text-xs" data-interaction-row={record.key} data-interaction-saved={record.saved ? "" : undefined}>
       <button onClick={() => userToggle(() => setOpen(!open))} aria-expanded={open} className="flex max-w-full items-center gap-1.5 text-muted hover:text-foreground">
         <Icon size={13} className={`shrink-0 ${GLYPH_CLASS[glyph]}`} />
         <span className="flex min-w-0 items-center gap-1.5">
@@ -170,6 +198,8 @@ export function InteractionRow({ record }: { record: InteractionRecord }) {
         <div className="mt-1 mb-1.5 ml-1.5 flex flex-col gap-1.5 border-l border-border pl-3 text-muted">
           {elsewhere && <p className="text-xs text-subtle">{t("interactionLog.elsewhereNote")}</p>}
           <InteractionDetail record={record} />
+          {record.truncated && <p className="text-caption/[inherit] text-subtle" data-interaction-truncated="">{t("interactionLog.truncated")}</p>}
+          <AnsweredBy record={record} />
         </div>
       )}
     </div>

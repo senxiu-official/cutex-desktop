@@ -46,7 +46,7 @@ export const DEFAULTS_SEARCH: Search = {
   sections: [
     { anchor: "newAgent", titleKey: "agent-config.defaults.newAgent", keywords: ["agent-config.defaults.profile", "agent-config.defaults.directLaunch", ...THREAD_DEFAULTS] },
     { anchor: "quickWork", titleKey: "agent-config.quickChats", keywords: ["agent-config.quickChats.profile", ...THREAD_DEFAULTS] },
-    { anchor: "titles", titleKey: "agent-config.titles", keywords: ["agent-config.titles.auto", "agent-config.titles.model"], requires: { capabilities: [AUTO_TITLES_FEATURE] } },
+    { anchor: "titles", titleKey: "agent-config.quickChats.titles", keywords: ["agent-config.quickChats.titles.auto", "agent-config.quickChats.titles.hint", "agent-config.quickChats.titles.model"], requires: { capabilities: [AUTO_TITLES_FEATURE] } },
     { anchor: "promptCache", titleKey: "agent-config.promptCache.title", keywords: ["agent-config.promptCache.share"], requires: { capabilities: [PROMPT_CACHE_KEY_FEATURE] } },
   ],
 };

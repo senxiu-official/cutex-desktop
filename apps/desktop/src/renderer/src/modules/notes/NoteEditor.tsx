@@ -8,6 +8,8 @@ import { useI18n } from "../../i18n";
 import { hasPin, sameScope, togglePin } from "./model";
 import { notesCache, patchNoteDraft, setNoteDraft, useNoteDrafts, useHostSidebar } from "./store";
 import { noteErrorText } from "./errors";
+import { EntityMention } from "../../components/EntityIcon";
+import { projectEntity } from "../../lib/entityIcon";
 
 export function NoteEditor({ hostId, draftKey, currentNote, onSaved, onCancel, onDismiss }: { hostId: string; draftKey: string; currentNote?: Note; onSaved?(): void; onCancel?(): void; onDismiss?(): void }) {
   const { t } = useI18n();
@@ -63,7 +65,7 @@ export function NoteEditor({ hostId, draftKey, currentNote, onSaved, onCancel, o
         </div>
         {!!projects?.length && <div className="flex flex-wrap items-center gap-2">
           <Select label={t("notes.chooseProject")} value={projectId} width="max-w-full w-44" disabled={busy}
-            options={[{ value: "", label: t("notes.chooseProject") }, ...projects.map((project) => ({ value: project.project_id, label: project.presentation.display_name || project.project_id }))]} onChange={setProjectId} />
+            options={[{ value: "", label: t("notes.chooseProject") }, ...projects.map((project) => ({ value: project.project_id, label: project.presentation.display_name || project.project_id, entity: projectEntity(hostId, project) }))]} onChange={setProjectId} />
           <Button disabled={!pinProject || busy} onClick={() => pinProject && patch({ pins: togglePin(draft.pins, pinProject) })}>
             {pinProject && hasPin(draft.pins, pinProject) ? t("notes.unpin") : t("notes.pin")}
           </Button>
@@ -72,7 +74,7 @@ export function NoteEditor({ hostId, draftKey, currentNote, onSaved, onCancel, o
           {draft.pins.filter((pin): pin is NoteScope & { kind: "project"; id: string } => pin.kind === "project").map((pin) => <button key={pin.id} disabled={busy}
             className="press rounded bg-accent/10 px-2 py-1 text-accent hover:bg-accent/20 disabled:opacity-50" title={t("notes.unpin")}
             onClick={() => patch({ pins: draft.pins.filter((other) => !sameScope(pin, other)) })}>
-            {projects?.find((project) => project.project_id === pin.id)?.presentation.display_name || pin.id} ×
+            <EntityMention entity={{ kind: "project", id: pin.id, hostId }}>{projects?.find((project) => project.project_id === pin.id)?.presentation.display_name || pin.id}</EntityMention> ×
           </button>)}
         </div>
       </div>

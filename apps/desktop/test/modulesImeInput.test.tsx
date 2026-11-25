@@ -31,6 +31,9 @@ import { paletteKey } from "../src/renderer/src/modules/quick-switch/model";
 import { TrayNoteEditor } from "../src/renderer/src/modules/home/TrayNoteEditor";
 import { useNoteEdit } from "../src/renderer/src/modules/home/trayNotes";
 
+// The store double is too thin for the avatar stack (agent looks, Profile pictures): icons are stubbed.
+vi.mock("../src/renderer/src/components/EntityIcon", () => import("./helpers/entityIconStub"));
+
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let container: HTMLDivElement, root: Root, uninstall: () => void;
 const scrollIntoView = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollIntoView");

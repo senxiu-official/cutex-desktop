@@ -20,7 +20,7 @@ export const zhCN = {
   "alarms.state.queued": "已交给消息队列",
   "alarms.queuedHint": "闹钟到点后只是交给了消息队列：对方可能还没收到、没读。去「接下来」那一行处置。",
   "alarms.viewMessage": "查看这条消息",
-  "alarms.messageNotFound": "没找到这条消息：它可能已被处置，或不在这个{{agent}}已读到的记录里。",
+  "alarms.messageNotFound": "未找到这条消息。它可能已被处理，或当前没有可查看的记录。",
   "alarms.state.cancelled": "已取消",
   "alarms.cancel": "取消",
   "alarms.cancelConfirm": "再左键点击一次取消这个闹钟",

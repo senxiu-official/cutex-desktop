@@ -4,14 +4,20 @@ import { BROWSER_OWNER_INPUT_KINDS, isBrowserControlSettings, isBrowserToolSurfa
 import { browserLoginOrigin } from "./loginWarning";
 import { isBrowserClaimMode } from "../../shared/browserClaim";
 import type { HostBinding } from "../../shared/hosts";
+import { isBrowserIdentityId } from "../../shared/browserIdentity";
 import { admitHostBinding, type FenceHosts, type HostFence } from "../hostFence";
 
 export function parseBrowserRequest(raw: unknown): BrowserRequest {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("invalid_browser_request");
   const value = raw as Record<string, unknown>;
-  if (value.op === "resetOrigins" || value.op === "reserveOwnerTab") {
+  if (value.op === "resetOrigins" || value.op === "whatsAppWatch") {
     if (Object.keys(value).length !== 1) throw Error("invalid_browser_request");
     return { op: value.op };
+  }
+  if (value.op === "reserveOwnerTab") {
+    if (Object.keys(value).some(k => k !== "op" && k !== "browserIdentityId")
+      || value.browserIdentityId !== undefined && !isBrowserIdentityId(value.browserIdentityId)) throw Error("invalid_browser_request");
+    return { op: value.op, ...(isBrowserIdentityId(value.browserIdentityId) ? { browserIdentityId: value.browserIdentityId } : {}) };
   }
   if (value.op === "cursorColor") {
     if (Object.keys(value).some(k => !["op", "color"].includes(k)) || (value.color !== undefined && value.color !== null && !isBrowserCursorColor(value.color))) throw Error("invalid_browser_request");
@@ -20,6 +26,10 @@ export function parseBrowserRequest(raw: unknown): BrowserRequest {
   if (value.op === "carrierFrameRate") {
     if (Object.keys(value).some(k => !["op", "frameRate"].includes(k)) || (value.frameRate !== undefined && !isBrowserCarrierFrameRate(value.frameRate))) throw Error("invalid_browser_request");
     return value.frameRate === undefined ? { op: "carrierFrameRate" } : { op: "carrierFrameRate", frameRate: value.frameRate as BrowserCarrierFrameRate };
+  }
+  if (value.op === "whatsAppModule") {
+    if (Object.keys(value).some(k => !["op", "enabled"].includes(k)) || (value.enabled !== undefined && typeof value.enabled !== "boolean")) throw Error("invalid_browser_request");
+    return value.enabled === undefined ? { op: "whatsAppModule" } : { op: "whatsAppModule", enabled: value.enabled };
   }
   if (value.op === "externalPages") {
     if (Object.keys(value).some(k => !["op", "enabled"].includes(k)) || (value.enabled !== undefined && typeof value.enabled !== "boolean")) throw Error("invalid_browser_request");
@@ -38,11 +48,23 @@ export function parseBrowserRequest(raw: unknown): BrowserRequest {
     if (Object.keys(value).some(k => !["op", "forget"].includes(k))) throw Error("invalid_browser_request");
     if (forget === undefined) return { op: "sitePermissions" };
     if (forget === "all") return { op: "sitePermissions", forget: "all" };
-    if (!forget || typeof forget !== "object" || Array.isArray(forget) || Object.keys(forget).length !== 2 || (forget.pool !== "owner" && forget.pool !== "agent")
+    if (!forget || typeof forget !== "object" || Array.isArray(forget) || Object.keys(forget).some(k => !["pool", "origin", "browserIdentityId"].includes(k))
+      || (forget.pool !== "owner" && forget.pool !== "agent")
+      || (forget.browserIdentityId !== undefined && (forget.pool !== "owner" || !isBrowserIdentityId(forget.browserIdentityId)))
       || typeof forget.origin !== "string" || !forget.origin || forget.origin.length > 300 || /[\x00-\x1f\x7f]/.test(forget.origin)) throw Error("invalid_browser_request");
-    return { op: "sitePermissions", forget: { pool: forget.pool, origin: forget.origin } };
+    return { op: "sitePermissions", forget: { pool: forget.pool, origin: forget.origin,
+      ...(isBrowserIdentityId(forget.browserIdentityId) ? { browserIdentityId: forget.browserIdentityId } : {}) } };
   }
   const validId = (v: unknown): v is string => typeof v === "string" && /^[A-Za-z0-9._:-]{1,200}$/.test(v);
+  if (value.op === "setWhatsAppWatch" || value.op === "unbindWhatsAppWatch") {
+    if (typeof value.tabKey !== "string" || !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(value.tabKey)) throw Error("invalid_browser_request");
+    const fields = Object.keys(value).sort().join();
+    if (value.op === "unbindWhatsAppWatch" && fields === "op,tabKey") return { op: value.op, tabKey: value.tabKey };
+    if (value.op === "setWhatsAppWatch" && fields === "enabled,op,preview,tabKey"
+      && typeof value.enabled === "boolean" && typeof value.preview === "boolean")
+      return { op: value.op, tabKey: value.tabKey, enabled: value.enabled, preview: value.preview };
+    throw Error("invalid_browser_request");
+  }
   if (value.op === "openBlockedNavigation") {
     if (Object.keys(value).sort().join() !== "id,op,tabKey" || !validId(value.tabKey) || !validId(value.id)) throw Error("invalid_browser_request");
     return { op: "openBlockedNavigation", tabKey: value.tabKey, id: value.id };
@@ -147,11 +169,13 @@ export function parseBrowserRequest(raw: unknown): BrowserRequest {
     let identity: Extract<BrowserRequest, {op:"open"}>["identity"];
     if (value.op === "open" && value.identity !== undefined) {
       const raw = value.identity as Record<string, unknown>;
-      if (!raw || typeof raw !== "object" || Array.isArray(raw) || Object.keys(raw).some(k => !["pendingOpen", "agentOpened", "carrier"].includes(k))
+      if (!raw || typeof raw !== "object" || Array.isArray(raw) || Object.keys(raw).some(k => !["pendingOpen", "agentOpened", "carrier", "browserIdentityId"].includes(k))
         || (raw.pendingOpen !== undefined && !validId(raw.pendingOpen)) || (raw.agentOpened !== undefined && raw.agentOpened !== true)
-        || (raw.carrier !== undefined && (raw.carrier !== "background" || value.receipt !== undefined))) throw Error("invalid_browser_request");
+        || (raw.carrier !== undefined && (raw.carrier !== "background" || value.receipt !== undefined))
+        || raw.browserIdentityId !== undefined && (!isBrowserIdentityId(raw.browserIdentityId) || raw.agentOpened === true || raw.pendingOpen !== undefined || raw.carrier !== undefined)) throw Error("invalid_browser_request");
       identity = { ...(raw.pendingOpen !== undefined ? { pendingOpen: raw.pendingOpen as string } : {}), ...(raw.agentOpened === true ? { agentOpened: true as const } : {}),
-        ...(raw.carrier === "background" ? { carrier: "background" as const } : {}) };
+        ...(raw.carrier === "background" ? { carrier: "background" as const } : {}),
+        ...(isBrowserIdentityId(raw.browserIdentityId) ? { browserIdentityId: raw.browserIdentityId } : {}) };
     }
     if (value.op === "open" && value.receipt !== undefined) {
       const r = value.receipt as Record<string, unknown>;
@@ -179,13 +203,15 @@ export function createBrowserChannel<E, D extends { readonly generation: number 
   /** Owner switch, host-independent and reachable while the module is off (it only narrows or
    * widens what a later browser tab may reach; main enforces it on every request). */
   externalPages?(enabled?: boolean): unknown;
+  /** The WhatsApp module switch (host-independent; reachable while the browser module is off). */
+  whatsAppModule?(enabled?: boolean): unknown;
   /** 「浏览器通过系统代理上网」: host-independent like externalPages; main stores and enforces it. */
   systemProxy?(enabled?: boolean): unknown;
   cursorColor?(color?: string | null): unknown;
   carrierFrameRate?(frameRate?: BrowserCarrierFrameRate): unknown;
   /** Remembered site permissions (host-independent, owner UI only). */
   sitePermissions?(forget?: Extract<BrowserRequest, { op: "sitePermissions" }>["forget"]): unknown;
-  execute(request: Exclude<BrowserRequest, { op: "setEnabled" | "resetOrigins" | "externalPages" | "systemProxy" | "sitePermissions" | "cursorColor" | "carrierFrameRate" }>, hostId: string, fence?: HostFence<D>): Promise<unknown>;
+  execute(request: Exclude<BrowserRequest, { op: "setEnabled" | "resetOrigins" | "externalPages" | "systemProxy" | "sitePermissions" | "cursorColor" | "carrierFrameRate" | "whatsAppModule" }>, hostId: string, fence?: HostFence<D>): Promise<unknown>;
 }) {
   return async (event: E, raw: unknown, binding: HostBinding | null | undefined): Promise<unknown> => {
     if (!options.isAppSender(event)) throw new Error("untrusted_sender");
@@ -198,6 +224,10 @@ export function createBrowserChannel<E, D extends { readonly generation: number 
     if (request.op === "carrierFrameRate") {
       if (!options.carrierFrameRate) throw Error("unsupported_operation");
       return options.carrierFrameRate(request.frameRate);
+    }
+    if (request.op === "whatsAppModule") {
+      if (!options.whatsAppModule) throw Error("unsupported_operation");
+      return options.whatsAppModule(request.enabled);
     }
     if (request.op === "systemProxy") {
       if (!options.systemProxy) throw Error("unsupported_operation");

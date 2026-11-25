@@ -252,6 +252,8 @@ export function useProjectData(state: ViewState, now: number): ProjectData {
     if (own) void loadClosedDelegations();
   }, [own]);
   const asks = useMemo(() => (target ? projectAsks(Object.values(records), target.projectId, ids) : []), [records, target?.projectId, ids]); // eslint-disable-line react-hooks/exhaustive-deps
+  // r295 Z3: the host's delegation rows carry `activityLink` (any row: events drop it until the next read).
+  const activityLinks = useMemo(() => Object.values(records).some((d) => d.activityLink !== undefined), [records]);
 
   const jobs = useOpenJobs(hostId);
   const services_ = useApp((s) => (hostId ? (hostData(s, hostId)?.services ?? null) : null));
@@ -336,7 +338,7 @@ export function useProjectData(state: ViewState, now: number): ProjectData {
     const needs: AgentNeed[] = members.flatMap((m): AgentNeed[] => {
       if (m.signal === "error") return [{ sessionId: m.id, at: m.lastActivity, error: true, text: m.error }];
       // Needs that a delegation row already says (its ask ids) are not repeated.
-      if (m.signal === "needsYou" && m.needs && m.needs.count > m.needs.askIds.length) return [{ sessionId: m.id, at: m.lastActivity, error: false, text: m.signalText }];
+      if (m.signal === "needsYou" && m.needs && m.needs.count > m.needs.askIds.length) return [{ sessionId: m.id, at: m.lastActivity, error: false, text: m.signalText, approval: m.needs.reasons.includes("approval") }];
       return [];
     });
     const liveArtifacts = (live?.artifacts ?? []).filter((a) => a.projectId === target.projectId || (a.sessionId !== null && ids.has(a.sessionId)));
@@ -349,11 +351,12 @@ export function useProjectData(state: ViewState, now: number): ProjectData {
       artifacts: [...liveArtifacts, ...artifacts],
       services: (services_ ?? []) as ServiceView[],
       needs,
+      activityLinks,
     });
     const shared = shareActivity(prev, items);
     sharedActivity.current = new Map(shared.map((item) => [item.id, item]));
     return shared;
-  }, [target?.projectId, members, ids, asks, live, artifacts, services_]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [target?.projectId, members, ids, asks, live, artifacts, services_, activityLinks]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const nameOf = useMemo(() => {
     const names = new Map<string, string>();

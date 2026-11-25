@@ -42,7 +42,7 @@ afterEach(() => vi.unstubAllGlobals());
 
 describe("D5 store recovery", () => {
   it("restores O0, checks exact ids without resending, and retains missing messages", async () => {
-    save("present"); save("missing"); save("missing", "hachimi");
+    save("present"); save("missing"); save("missing", "hostc");
     fx.records = [record("present", { state: "inContext", rev: 2, stateRevision: 2 })];
     const store = await app();
     await store.getState().reloadSession(SID, "local");
@@ -50,7 +50,7 @@ describe("D5 store recovery", () => {
     expect(fx.calls.filter(c => c.method === "submit")).toEqual([]);
     expect(store.getState().ledgerOutbox[key]).toEqual([expect.objectContaining({ inputId: "missing", phase: "unconfirmed", error: "input_not_found" })]);
     expect(storage.getItem('cutex-desktop.inputLedger.o0.v1:["local","cutex.s1","present"]')).toBeNull();
-    expect(storage.getItem('cutex-desktop.inputLedger.o0.v1:["hachimi","cutex.s1","missing"]')).not.toBeNull();
+    expect(storage.getItem('cutex-desktop.inputLedger.o0.v1:["hostc","cutex.s1","missing"]')).not.toBeNull();
     store.getState().discardLedgerOutbox(SID, "missing", "local");
     expect(storage.getItem('cutex-desktop.inputLedger.o0.v1:["local","cutex.s1","missing"]')).toBeNull();
   }, 60_000);

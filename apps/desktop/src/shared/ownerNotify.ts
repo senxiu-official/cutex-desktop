@@ -1,7 +1,7 @@
 // Owner notify (agent → owner messages, capability `owner-notify`; docs/research/owner-notify.md):
 // pure predicates and helpers shared by the main process (big alert, main/ownerAlert.ts) and the
 // renderer (timeline card, 需要你, OS notification, settings). No Electron / DOM imports.
-import type { OwnerNotification, OwnerNotifyChannel, OwnerNotifyLevel, OwnerNotifySettings, OwnerNotifySettingsPatch, OwnerNotifyState, SafetyBlock, SafetyBlockState } from "@cutex-desktop/protocol";
+import type { OwnerNotification, OwnerNotifyChannel, OwnerNotifyLevel, OwnerNotifySettings, OwnerNotifySettingsPatch, OwnerNotifyState, SafetyBlock, SafetyBlockState, TemplateReview } from "@cutex-desktop/protocol";
 import type { OwnerAlertItem } from "./ownerAlert";
 import { OWNER_NOTIFY_CREATED, OWNER_NOTIFY_DELETE_FEATURE, OWNER_NOTIFY_DELETED, OWNER_NOTIFY_FEATURE, OWNER_NOTIFY_UPDATED } from "@cutex-desktop/protocol";
 
@@ -129,7 +129,18 @@ export function asRecord(raw: unknown): OwnerNotification | null {
     ...(Array.isArray(r.actions) ? { actions: r.actions.filter((a): a is string => typeof a === "string") } : {}),
     ...(typeof r.systemKind === "string" ? { systemKind: r.systemKind } : {}),
     ...(asSafetyBlock(r.safetyBlock) ? { safetyBlock: asSafetyBlock(r.safetyBlock)! } : {}),
+    ...(asTemplateReview(r.templateReview) ? { templateReview: asTemplateReview(r.templateReview)! } : {}),
   };
+}
+
+/** The system kind of a 定期任务 that needs re-confirming (cutex r296). */
+export const TEMPLATE_REVIEW_KIND = "assistantTemplateNeedsReview";
+/** A template review from the wire (r296 `templateReview`), or null. */
+export function asTemplateReview(raw: unknown): TemplateReview | null {
+  const v = raw as Partial<TemplateReview> | null | undefined;
+  if (!v || typeof v !== "object" || typeof v.assistantId !== "string" || !v.assistantId || typeof v.scheduleId !== "string" || !v.scheduleId) return null;
+  if (typeof v.templateRevision !== "number" || !Number.isSafeInteger(v.templateRevision)) return null;
+  return { assistantId: v.assistantId, scheduleId: v.scheduleId, templateRevision: v.templateRevision, reason: typeof v.reason === "string" ? v.reason : "" };
 }
 
 const BLOCK_STATES = new Set<string>(["blocked", "granted", "used", "dismissed", "expired"]);

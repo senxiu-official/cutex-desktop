@@ -47,7 +47,7 @@ const subThreads: Record<string, unknown> = {
           items: [
             { type: "userMessage", id: "su2", content: [{ type: "text", text: "并行检查 Windows 上 ACL 相关测试为什么不稳定" }] },
             { type: "commandExecution", id: "sc4", command: "icacls %USERPROFILE%\\.cutex-desktop-dev", status: "completed", exitCode: 0, durationMs: 300 },
-            { type: "agentMessage", id: "sm2", text: "dev home 的 ACL 正常（owner-only）。怀疑是测试临时目录继承了 Authenticated Users，继续跑 task_service 验证。" },
+            { type: "agentMessage", id: "sm2", text: "dev home 的 ACL 正常（owner-only）。怀疑是测试临时目录继承了 Authenticated Users，继续运行 task_service 验证。" },
             { type: "commandExecution", id: "sc5", command: "cargo test --lib task_service", status: "inProgress", aggregatedOutput: "test task_service::tests::persists_owner_private ... FAILED\ntest task_service::tests::rejects_shared_acl ... ok" },
           ],
         },

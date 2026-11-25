@@ -50,6 +50,6 @@ describe("wake-busy-wait (cutex r220)", () => {
       expect(catalog["agentMsg.pending.nextStep"]).toBeTruthy();
       expect(catalog["agentMsg.pending.afterTurn"]).toBeTruthy();
     }
-    expect(zhCN["agentMsg.pending.afterTurn"]).toBe("本轮结束后处理");
+    expect(zhCN["agentMsg.pending.afterTurn"]).toBe("本回合结束后处理");
   });
 });

@@ -12,6 +12,8 @@ import { OwnerLayer } from "./OwnerLayer";
 
 // The 动作预告 colours (docs/design/008): blue = into a Shelf / here, green = beside, red = replace, grey = refused.
 const TONE: Record<WsTone, string> = { project: "var(--accent)", beside: "var(--ok)", replace: "var(--danger)", refuse: "var(--fg-subtle)" };
+/** Text on each tone's fill: the accent's own (a pale custom accent gets dark text), white on the others. */
+const ON_TONE: Record<WsTone, string> = { project: "var(--on-accent)", beside: "#fff", replace: "#fff", refuse: "#fff" };
 
 /** In the window the drag runs in (a desk window's drag draws there, multi-window). */
 export function WorkspaceDndLayer() {
@@ -74,7 +76,7 @@ function WorkspaceDndView() {
             // 拖放落点预览: the dashed outline in the action's colour; 框线+底色 also tints it (lib/dropTint).
             style={{ ...dropTint(color, 11), left: s.zone.left, top: s.zone.top, width: s.zone.width, height: s.zone.height, borderColor: color }}
           >
-            <div className="absolute top-1/2 left-1/2 flex -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-px rounded-card px-4 py-[7px] text-ui/[inherit] font-semibold whitespace-nowrap text-white shadow-e2" style={{ background: s.tone === "refuse" ? "var(--fg-muted)" : color }}>
+            <div className="absolute top-1/2 left-1/2 flex -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-px rounded-card px-4 py-[7px] text-ui/[inherit] font-semibold whitespace-nowrap shadow-e2" style={{ background: s.tone === "refuse" ? "var(--fg-muted)" : color, color: s.tone ? ON_TONE[s.tone] : "#fff" }}>
               {s.label}
               {s.sub && <small className="text-caption/[inherit] font-normal opacity-90">{s.sub}</small>}
             </div>
@@ -87,7 +89,7 @@ function WorkspaceDndView() {
           style={{ left: s.x + 14, top: s.y + 18 }}
         >
           {s.title}
-          <span className="rounded-full px-[7px] text-caption/[inherit] leading-[18px] font-semibold" style={s.tone && s.tone !== "refuse" ? { background: color, color: "#fff" } : { background: "var(--surface-2)", color: "var(--fg-muted)" }}>
+          <span className="rounded-full px-[7px] text-caption/[inherit] leading-[18px] font-semibold" style={s.tone && s.tone !== "refuse" ? { background: color, color: ON_TONE[s.tone] } : { background: "var(--surface-2)", color: "var(--fg-muted)" }}>
             {s.action}
           </span>
         </div>

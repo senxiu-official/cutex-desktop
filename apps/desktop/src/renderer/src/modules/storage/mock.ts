@@ -15,9 +15,11 @@ export function mockStorageView(host = "preview-host"): StorageOverview {
     ["diagnostics", "logs", "runtime/diagnostics", 0.57, "none"],
     ["codex-home-backups", "backups", "codex-home/db-backups", 3.4, "none"],
     ["user-input", "management", "runtime/management-v2/user-input-state.json", 0.001, "internal"],
+    // cutex storage/stock-tmp-reclaim: Native shell temp dirs (`?nostocktmp`: an older host without it).
+    ...(typeof location !== "undefined" && new URLSearchParams(location.search).has("nostocktmp") ? [] : [["stock-tmp", "logs", "runtime/stock-tmp", 1.4, "none"] as const]),
   ] as const;
   const stores: StorageStore[] = definitions.map(([id, group, path, gib, rule]) => ({
-    id, group, labelKey: `storage.store.${id}`, label: id, path, kind: id === "user-input" ? "json" : "directory", bytes: Math.round(gib * 1024 ** 3), files: id === "light-homes" ? 208625 : 100,
+    id, group, labelKey: `storage.store.${id}`, label: id, path, kind: id === "user-input" ? "json" : "directory", bytes: Math.round(gib * 1024 ** 3), files: id === "light-homes" ? 208625 : id === "stock-tmp" ? 48210 : 100,
     links: id === "light-homes" ? 160 : 0, unreadable: id === "diagnostics" ? 2 : 0, oldestAt: "2026-06-02T08:14:00Z", newestAt: measuredAt,
     measure: id === "user-input" ? "stat" : "walk", measuredAt, datesFrom: "mtime", items: { count: id === "light-homes" ? 61 : null, unit: "item" },
     retention: { rule, days: id === "user-input" ? 30 : null, keepReferenced: id === "attachments", configurable: false, setting: null, ...(id === "history-media" ? { maxBytes: 2 * 1024 ** 3 } : {}) },
@@ -26,7 +28,13 @@ export function mockStorageView(host = "preview-host"): StorageOverview {
   const groups = [...new Set(stores.map((s) => s.group))].map((id) => ({ id, labelKey: `storage.group.${id}`, label: id, bytes: stores.filter((s) => s.group === id).reduce((sum, s) => sum + s.bytes, 0) }));
   return { host, home: "/preview/cutex", generatedAt: new Date().toISOString(), volume: { totalBytes: 1024 ** 4, freeBytes: 170 * 1024 ** 3 }, totals: { bytes: stores.reduce((n, s) => n + s.bytes, 0), files: stores.reduce((n, s) => n + s.files, 0) }, walk: { state: "idle", startedAt: measuredAt, finishedAt: measuredAt, durationMs: 15193, progress: null, stale: false, error: null }, groups, stores };
 }
-export function mockStorageApi(legacy: boolean, emit: (method: string, params: Record<string, unknown>) => void, host?: string): StorageApi {
+/** An archived agent's local copy (light-homes item naming it, like cutex): a size from its id, so figures are stable. */
+function archivedHome(id: string, name: string): StorageItem {
+  let h = 0;
+  for (const c of id) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return { id: `light-homes-${id}`, path: `runtime/light/agents/${id}`, name, cutexSessionId: id, state: "retired", bytes: (3 + (h % 900)) * 1024 ** 2 + (h % 1000) * 1024, files: 40 + (h % 4000), links: 0, unreadable: 0, oldestAt: "2026-06-02T08:14:00Z", newestAt: "2026-11-01T08:00:00Z", rolloutBytes: (1 + (h % 60)) * 1024 ** 2 };
+}
+export function mockStorageApi(legacy: boolean, emit: (method: string, params: Record<string, unknown>) => void, host?: string, archived: () => { id: string; name: string }[] = () => []): StorageApi {
   const view = mockStorageView(host);
   return {
     async storage() { return legacy ? null : structuredClone(view); },
@@ -51,6 +59,9 @@ export function mockStorageApi(legacy: boolean, emit: (method: string, params: R
         state: storeId === "light-homes" ? index % 3 === 0 ? "retired" : "active" : undefined,
         bytes: Math.round((61 - index) * 1024 ** 2), files: 200, links: 0, unreadable: 0, oldestAt: "2026-06-02T08:14:00Z", newestAt: view.walk.finishedAt, rolloutBytes: storeId === "light-homes" ? 4 * 1024 ** 2 : 0,
       }));
+      // The host's archived agents have their copies here too (设置 → 归档's figures); largest first like cutex.
+      if (storeId === "light-homes") all.push(...archived().map((a) => archivedHome(a.id, a.name)));
+      all.sort((a, b) => b.bytes - a.bytes);
       const from = Number(query.cursor ?? 0), limit = query.limit ?? 50;
       return { store: storeId, items: all.slice(from, from + limit), nextCursor: from + limit < all.length ? String(from + limit) : null };
     },
@@ -58,17 +69,31 @@ export function mockStorageApi(legacy: boolean, emit: (method: string, params: R
 }
 export const mock: ModuleMock = {
   features: { new: [STORAGE_FEATURE, ...(typeof location === "undefined" || !new URLSearchParams(location.search).has("nocleanup") ? [STORAGE_CLEANUP_FEATURE] : [])] },
-  api: (core) => ({ ...mockStorageApi(core.legacy, (method, params) => core.emitHost(method, params)), ...mockCleanupApi(core.legacy, (method, params) => core.emitHost(method, params)) }),
+  api: (core) => ({ ...mockStorageApi(core.legacy, (method, params) => core.emitHost(method, params), undefined, () => core.projectRecords().retired.map((s) => ({ id: s.cutexSessionId, name: s.displayName }))), ...mockCleanupApi(core.legacy, (method, params) => core.emitHost(method, params)) }),
   remote: (hostId, emit) => ({ ...mockStorageApi(false, emit, hostId), ...mockCleanupApi(false, emit) }),
 };
 
 const query = () => new URLSearchParams(typeof location === "undefined" ? "" : location.search);
+/** cutex stock-tmp candidates: launch-owned first (stopped = eligible, held / replaced = blocked), then unknown ownership. */
+export function mockStockTmpPreview(uuid: () => string = () => crypto.randomUUID()): StorageCleanupPreview {
+  const MiB = 1024 ** 2;
+  const rows: [string, number, number, boolean, string, string][] = [
+    ["runtime/stock-tmp/managed/occ-4f1a/shell", 820, 12400, true, "stock_temp_stopped", "kai · generation 3 · stopped; publication lease released"],
+    ["runtime/stock-tmp/managed/occ-9b2c/shell", 214, 3100, true, "stock_temp_stopped", "sora · generation 7 · stopped; publication lease released"],
+    ["runtime/stock-tmp/managed/occ-77de/shell", 64, 880, false, "stock_temp_held", "eva · generation 12 · no complete stop or holder evidence"],
+    ["runtime/stock-tmp/managed/occ-legacy-3", 12, 140, false, "stock_temp_unknown", "No launch ownership receipt was published"],
+    ["runtime/stock-tmp/codex-shell-8f2e", 296, 31690, false, "stock_temp_unknown", "Ownership unknown; older Native or tool temporary data"],
+  ];
+  return { previewId: uuid(), action: "stock-tmp", expiresAt: new Date(Date.now() + 600000).toISOString(), risk: "high", freeableBytes: (820 + 214) * MiB, complete: true,
+    items: rows.map(([path, mib, files, eligible, code, reason]) => ({ id: uuid(), path, bytes: mib * MiB, files, mtime: "2026-11-20T09:30:00Z", eligible, code, reason })) };
+}
 function mockCleanupApi(legacy: boolean, emit: (method: string, params: Record<string, unknown>) => void): StorageCleanupApi {
   const previews = new Map<string, StorageCleanupPreview>(); const runs = new Map<string, StorageCleanupRun>(); const requests = new Map<string, string>(); let dropped = false;
   const uuid = () => crypto.randomUUID();
   return {
     async storageCleanupPreview(request) {
       if (legacy) throw new Error("storage-cleanup unavailable");
+      if (request.action === "stock-tmp") { const preview = mockStockTmpPreview(uuid); previews.set(preview.previewId, preview); return structuredClone(preview); }
       const vacuum = request.action === "vacuum";
       const paths = vacuum ? ["runtime/summary/summary.sqlite3", "runtime/notes/notes.sqlite3", "runtime/activity/active.sqlite3"] : request.action === "old-backups" ? ["codex-home/db-backups/state-20260801.sqlite", "codex-home/db-backups/state-20260901.sqlite", "codex-home/db-backups/current.sqlite"] : request.action === "old-logs" ? ["runtime/diagnostics/20260801.log", "logs/management-r240.log", "logs/management-current.log"] : request.action === "retired-homes" ? ["runtime/light/agents/retired-a/cache", "runtime/light/agents/retired-b/plugins", "runtime/light/agents/active-c/cache"] : ["runtime/light/agents/deleted-a", "runtime/light/agents/deleted-b", "runtime/light/agents/current-c"];
       const preview: StorageCleanupPreview = { previewId: uuid(), action: request.action, expiresAt: new Date(Date.now() + (query().has("cleanupexpired") ? 1200 : 600000)).toISOString(), risk: ["old-logs", "vacuum"].includes(request.action) ? "medium" : "high", freeableBytes: vacuum ? 512 * 1024 : 15 * 1024 ** 2, items: paths.map((path, index) => ({ id: uuid(), path, bytes: (index ? 3 : 12) * 1024 ** 2, files: vacuum ? 1 : 80, mtime: "2026-08-01T00:00:00Z", eligible: index !== 2, reason: index === 2 ? "仍在使用，保留" : request.action === "retired-homes" ? "可重新生成，对话记录保留" : "不再使用且超过保留时间", code: index === 2 ? "active" : "eligible" })) };

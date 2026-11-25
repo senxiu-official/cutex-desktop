@@ -385,7 +385,8 @@ export const ARTIFACT_VIEW = "artifacts.view";
  * artifact / page goes through the workspaces API (lib/workspaces openRef "beside": the other workspace's
  * Shelf, or a new page of this one's Shelf — `besideAction` says which, and whether there is a beside at
  * all). A service or artifact of a host the Shelf does not show (`showsHost`: lib/sideServices
- * sideShowsHost) opens in place the way its own list does then: the system browser / the artifact ref.
+ * sideShowsHost) opens in place the way its own list does then: lib/services openServiceExternal (this machine's: the
+ * system browser; another host's: its agent first, then the in-app tab there) / the artifact ref.
  */
 export type OpenPlan =
   | { via: "panes"; kind: string; params: Record<string, string>; beside: boolean; fallback?: OpenPlan }

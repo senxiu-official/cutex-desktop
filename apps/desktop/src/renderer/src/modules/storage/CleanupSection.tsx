@@ -9,12 +9,31 @@ import { useTrackOverlay } from "../../lib/openOverlays";
 import { useNow } from "../../lib/time";
 import { useApp } from "../../store";
 import { highRisk, selectedBytes, type CleanupController } from "./cleanupController";
-import { cleanupReason } from "./cleanupReason";
+import { cleanupReason, stockTempOwner } from "./cleanupReason";
+import { sidebarOf } from "../../store";
 import { useCleanup } from "./cleanupHooks";
 import { formatBytes } from "./model";
 import { isHTMLElement } from "../../lib/ownerWindow";
 import { useOwnerDocument } from "../../lib/ownerContext";
+import { EntityMention } from "../../components/EntityIcon";
+import { tNodes } from "../../lib/textNodes";
 const ACTIONS: readonly StorageCleanupAction[] = ["orphan-homes", "retired-homes", "old-backups", "old-logs", "vacuum"];
+/** stock-tmp only on a host whose inventory lists the stock-tmp store (cutex storage/stock-tmp-reclaim; no own capability). */
+const actionsFor = (stockTmp: boolean): readonly StorageCleanupAction[] => (stockTmp ? [...ACTIONS, "stock-tmp"] : ACTIONS);
+const HINTS: Partial<Record<StorageCleanupAction, string>> = { "retired-homes": "retiredHint", vacuum: "vacuumHint", "old-logs": "logsHint", "stock-tmp": "stockTmpHint" };
+
+/** A stock-tmp candidate's launch: the agent's name (its id when this host does not list it) and the launch generation. */
+function StockTempOwner({ reason, hostId }: { reason: string | null; hostId: string }) {
+  const { t } = useI18n();
+  const owner = stockTempOwner(reason);
+  const name = useApp((s) => {
+    if (!owner) return null;
+    const sidebar = sidebarOf(s, hostId);
+    return [...(sidebar?.active ?? []), ...(sidebar?.retired ?? [])].find((r) => r.cutexSessionId === owner.sessionId)?.displayName ?? owner.sessionId;
+  });
+  if (!owner || !name) return null;
+  return <span className="mt-1 block text-ui" data-stock-tmp-owner={owner.sessionId}>{tNodes(t, "storage.cleanup.stockTmpOwner", { name: <EntityMention entity={{ kind: "agent", id: owner.sessionId, name }}>{name}</EntityMention>, generation: owner.generation })}</span>;
+}
 
 function DeleteConfirmation({ preview, count, bytes, host, busy, expired, close, submit }: { preview: StorageCleanupPreview; count: number; bytes: string; host: string; busy: boolean; expired: boolean; close(): void; submit(text: string): void }) {
   const doc = useOwnerDocument();
@@ -26,9 +45,10 @@ function DeleteConfirmation({ preview, count, bytes, host, busy, expired, close,
     <p className="mt-2 text-meta text-muted">{t("storage.cleanup.target", { host })}</p>
     <p className="mt-2 text-ui text-muted">{t(`storage.cleanup.${preview.action}` as MessageKey)}</p>
     {preview.action === "retired-homes" && <p className="mt-3 text-ui">{t("storage.cleanup.retiredHint")}</p>}
+    {preview.action === "stock-tmp" && <p className="mt-3 text-ui">{t("storage.cleanup.stockTmpHint")}</p>}
     <label className="mt-4 block text-ui">{t("storage.cleanup.type", { text: "删除" })}<input ref={input} value={text} onChange={(event) => setText(event.target.value)} disabled={busy} autoComplete="off" className="mt-2 block w-full rounded-ctl border border-border bg-background px-3 py-2 outline-none focus:border-accent" /></label>
     {expired && <p role="status" className="mt-2 text-meta text-warn-text">{t("storage.cleanup.expired")}</p>}
-    <div className="mt-4 flex justify-end gap-2"><Button disabled={busy} onClick={close}>{t("storage.cleanup.cancel")}</Button><button type="button" disabled={text !== "删除" || !count || busy || expired} onClick={() => submit(text)} className="rounded-ctl bg-danger-solid px-3 py-1.5 text-ui text-on-accent disabled:opacity-40">{t(busy ? "storage.cleanup.busy" : "storage.cleanup.delete", { n: count, bytes })}</button></div>
+    <div className="mt-4 flex justify-end gap-2"><Button disabled={busy} onClick={close}>{t("storage.cleanup.cancel")}</Button><button type="button" disabled={text !== "删除" || !count || busy || expired} onClick={() => submit(text)} className="rounded-ctl bg-danger-solid px-3 py-1.5 text-ui text-white disabled:opacity-40">{t(busy ? "storage.cleanup.busy" : "storage.cleanup.delete", { n: count, bytes })}</button></div>
   </dialog>, doc.body);
 }
 function RunResult({ run }: { run: StorageCleanupRun }) {
@@ -41,14 +61,14 @@ function RunResult({ run }: { run: StorageCleanupRun }) {
   </div>;
 }
 /** Clock ticks and history events do not rebuild a potentially large preview list. */
-const PreviewItems = memo(function PreviewItems({ preview, selected, locked, controller }: { preview: StorageCleanupPreview; selected: readonly string[]; locked: boolean; controller: CleanupController }) {
+const PreviewItems = memo(function PreviewItems({ preview, selected, locked, controller, hostId }: { preview: StorageCleanupPreview; selected: readonly string[]; locked: boolean; controller: CleanupController; hostId: string }) {
   const { t, locale } = useI18n();
   const selectedSet = useMemo(() => new Set(selected), [selected]);
   const label = (key: string) => t(`storage.cleanup.${key}` as MessageKey);
-  return <ul className="mt-2 max-h-80 overflow-y-auto">{preview.items.map((item) => <li key={item.id} className="border-t border-border py-2 text-meta"><label className="flex items-start gap-2"><input type="checkbox" className="mt-1" checked={selectedSet.has(item.id)} disabled={!item.eligible || locked} onChange={(event) => controller.select(item.id, event.target.checked)} /><span className="min-w-0 flex-1"><span className="block break-all font-mono">{item.path}</span><span className="mt-1 flex flex-wrap gap-x-3 text-muted"><span>{formatBytes(item.bytes, locale)}</span><span>{t("storage.cleanup.files", { n: item.files })}</span><span>{label(item.eligible ? "eligible" : "blocked")}</span></span><span className="mt-1 block text-muted" title={item.reason ?? undefined}>{cleanupReason(item.code, item.reason, t)}</span>{item.mtime && <span className="mt-1 block text-subtle">{t("storage.cleanup.mtime", { time: new Date(item.mtime).toLocaleString(locale) })}</span>}</span></label></li>)}</ul>;
+  return <ul className="mt-2 max-h-80 overflow-y-auto">{preview.items.map((item) => <li key={item.id} className="border-t border-border py-2 text-meta"><label className="flex items-start gap-2"><input type="checkbox" className="mt-1" checked={selectedSet.has(item.id)} disabled={!item.eligible || locked} onChange={(event) => controller.select(item.id, event.target.checked)} /><span className="min-w-0 flex-1" data-cleanup-item={item.code ?? ""}>{preview.action === "stock-tmp" && <StockTempOwner reason={item.reason} hostId={hostId} />}<span className="block break-all font-mono">{item.path}</span><span className="mt-1 flex flex-wrap gap-x-3 text-muted"><span>{formatBytes(item.bytes, locale)}</span><span>{t("storage.cleanup.files", { n: item.files })}</span><span>{label(item.eligible ? "eligible" : "blocked")}</span></span><span className="mt-1 block text-muted" title={item.reason ?? undefined}>{cleanupReason(item.code, item.reason, t)}</span>{item.mtime && <span className="mt-1 block text-subtle">{t("storage.cleanup.mtime", { time: new Date(item.mtime).toLocaleString(locale) })}</span>}</span></label></li>)}</ul>;
 });
 
-export function CleanupSection() {
+export function CleanupSection({ stockTmp = false }: { stockTmp?: boolean }) {
   const cleanup = useCleanup(); const { t, locale } = useI18n();
   const [action, setAction] = useState<StorageCleanupAction>("orphan-homes"); const [days, setDays] = useState(30); const [confirming, setConfirming] = useState(false);
   const { preview, selected, controller } = cleanup;
@@ -71,8 +91,8 @@ export function CleanupSection() {
     <Section title={label("title")} hint={<><span className="block">{label("hint")}</span><span className="block">{t("storage.cleanup.target", { host })}</span></>}>
       <SettingsGroup agents="none" source="host">
       {!cleanup.allowed ? <EmptyState>{label("desktopOnly")}</EmptyState> : cleanup.pending ? null : <>
-        <SettingRow agents="none" source="host" label={label("action")} hint={["retired-homes", "vacuum", "old-logs"].includes(action) ? label(action === "retired-homes" ? "retiredHint" : action === "vacuum" ? "vacuumHint" : "logsHint") : undefined}>
-          <Select<StorageCleanupAction> label={label("action")} width={FIELD_W.model} value={action} disabled={locked || cleanup.loading} options={ACTIONS.map((id) => ({ value: id, label: label(id) }))} onChange={(next) => { setAction(next); controller.clearPreview(); }} />
+        <SettingRow agents="none" source="host" label={label("action")} hint={HINTS[action] ? label(HINTS[action]) : undefined}>
+          <Select<StorageCleanupAction> label={label("action")} width={FIELD_W.model} value={action} disabled={locked || cleanup.loading} options={actionsFor(stockTmp).map((id) => ({ value: id, label: label(id) }))} onChange={(next) => { setAction(next); controller.clearPreview(); }} />
           {action !== "old-logs" && previewButton}
         </SettingRow>
         {action === "old-logs" && <SettingRow agents="none" source="host" label={label("days")}>
@@ -90,7 +110,7 @@ export function CleanupSection() {
         {preview.action === "vacuum" && <p className="mt-1 text-meta text-muted">{t(preview.complete === false ? "storage.cleanup.partialVacuumEstimate" : "storage.cleanup.vacuumEstimate", { bytes: formatBytes(preview.freeableBytes, locale) })}</p>}
         <p className="mt-1 text-meta text-subtle">{t("storage.cleanup.expires", { time: new Date(preview.expiresAt).toLocaleTimeString(locale) })}</p>
         {!preview.items.length && <p className="mt-3 text-ui text-muted">{label(preview.complete === false ? "partialEmpty" : "empty")}</p>}
-        <PreviewItems preview={preview} selected={selected} locked={locked} controller={controller} />
+        <PreviewItems preview={preview} selected={selected} locked={locked} controller={controller} hostId={cleanup.hostId} />
         {expired && <p role="status" className="mt-2 text-ui text-warn-text">{label("expired")}</p>}
         <div className="mt-3">{highRisk(preview) ? <Button disabled={!selected.length || locked || expired} onClick={() => setConfirming(true)}>{label("confirm")}</Button> : <button type="button" disabled={!selected.length || locked || expired} onClick={medium} className={armed ? ARMED_FORM_BUTTON : "rounded-ctl border border-border bg-surface-2 px-3 py-1.5 text-ui disabled:opacity-40"}>{t(preview.action === "vacuum" ? armed ? "storage.cleanup.confirmVacuum" : "storage.cleanup.startVacuum" : armed ? "storage.cleanup.confirmMedium" : "storage.cleanup.delete", { n: selected.length, bytes })}</button>}</div>
       </div>}

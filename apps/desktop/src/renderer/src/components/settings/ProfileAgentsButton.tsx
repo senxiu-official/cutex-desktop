@@ -9,6 +9,7 @@ import { useUiPrefs } from "../../lib/prefs";
 import { useTargetHostId, useTargetSidebar } from "../../lib/targetHost";
 import { Popover } from "../Menu";
 import { SearchablePickerBody } from "../SearchablePicker";
+import { EntityIcon } from "../EntityIcon";
 
 /** Up to this many agents the plain menu is enough. */
 export const PROFILE_AGENTS_MENU_MAX = 8;
@@ -35,7 +36,7 @@ export function ProfileAgentsButton({ agents, onPick, title, className, disabled
         className={className}
         onClick={(e) => {
           stop(e);
-          openMenuFrom(e.currentTarget, agents.map((a) => ({ label: a.displayName, onSelect: () => onPick(a.cutexSessionId) })));
+          openMenuFrom(e.currentTarget, agents.map((a) => ({ label: a.displayName, icon: <EntityIcon entity={{ kind: "agent", id: a.cutexSessionId, name: a.displayName }} />, onSelect: () => onPick(a.cutexSessionId) })));
         }}
       >
         {children}
@@ -43,14 +44,15 @@ export function ProfileAgentsButton({ agents, onPick, title, className, disabled
     );
   const ids = agents.map((a) => a.cutexSessionId);
   // Rows the sidebar does not know (not loaded yet) still get a plain row under their own name.
-  const known = sidebarPickerRows(sidebar, { include: "all", only: ids });
+  const known = sidebarPickerRows(sidebar, { include: "all", only: ids, hostId });
   const missing = agents.filter((a) => !known.some((r) => r.value === a.cutexSessionId)).map((a) => ({ value: a.cutexSessionId, name: a.displayName, projectId: null, projectName: null, archived: false, searchText: `${a.displayName}\n${a.cutexSessionId}` }));
   const options = agentPickerOptions([...known, ...missing], labels, { rank: pickerProjectRank(sidebar, projectOrder ?? [], hostId) });
   return (
     <span onClick={stop} className="contents">
       <Popover disabled={disabled} triggerTitle={title} triggerLabel={title} triggerClassName={className} width="w-72" trigger={children}>
-        {(close) => (
+        {(close, dismiss) => (
           <SearchablePickerBody
+            onDismiss={dismiss}
             options={options}
             label={title}
             placeholder={labels.search}

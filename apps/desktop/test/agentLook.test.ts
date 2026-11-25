@@ -5,7 +5,7 @@ import type { SidebarSnapshot } from "../src/shared/ipc";
 
 vi.mock("../src/renderer/src/store", () => ({ useApp: Object.assign(() => null, { getState: () => ({}) }), featuresOf: () => new Set(), pinnedOn: (hostId: string) => new Set(hostId === "hosta" ? ["t-pinned"] : []) }));
 
-const { agentIndex, lookOf, sessionProfileName } = await import("../src/renderer/src/lib/agentLook");
+const { agentIndex, entryLookKey, lookOf, sessionProfileName } = await import("../src/renderer/src/lib/agentLook");
 
 const session = (id: string, over: Partial<SessionResource> = {}): SessionResource =>
   ({
@@ -47,6 +47,27 @@ describe("agentIndex", () => {
     const s = { hosts: { active: "local" }, sidebar: snapshot([session("a")]), byHost: {}, pinned: new Set<string>() };
     expect(agentIndex(s)).toBe(agentIndex({ ...s }));
     expect(agentIndex(s)).not.toBe(agentIndex({ ...s, sidebar: snapshot([session("a")]) }));
+  });
+});
+
+describe("entryLookKey", () => {
+  const index = (sessions: SessionResource[], director?: string) => agentIndex({ hosts: { active: "local" }, sidebar: snapshot(sessions, director), byHost: {}, pinned: new Set<string>() });
+
+  it("is the same across refreshes that change nothing an avatar draws (avatars do not re-render)", () => {
+    const a = index([session("a", { displayName: "A" })]).get("a")!;
+    const b = index([session("a", { displayName: "A", runtime: { backend: "codex", status: "busy" } as never })]).get("a")!;
+    expect(a).not.toBe(b);
+    expect(entryLookKey(a)).toBe(entryLookKey(b));
+  });
+
+  it("changes with what lookOf reads", () => {
+    const key = (over: Partial<SessionResource>, director?: string) => entryLookKey(index([session("a", over)], director).get("a")!);
+    const base = key({});
+    expect(key({ launchedProfile: "sigma" })).not.toBe(base);
+    expect(key({ avatarMode: "fixed" })).not.toBe(base);
+    expect(key({ badge: { text: "x" } as never })).not.toBe(base);
+    expect(key({ runtime: { backend: "claude", status: "online" } as never })).not.toBe(base);
+    expect(key({}, "a")).not.toBe(base);
   });
 });
 

@@ -106,6 +106,28 @@ Owner-created browser tabs and agent-created tabs use separate host-level browse
 An explicitly granted owner tab retains its logins, and the grant interface states that access.
 Granting a tab can permit account actions; it is not a read-only guarantee.
 
+Owner tabs also belong to a named browser identity, with a separate cookie pool for each
+identity and host. The default identity retains the existing owner partition. Agent tabs
+have their own pool and cannot select an owner identity. A tab's identity is fixed at
+creation; opening under another identity creates a new tab. Host-bound owner browsing
+uses the shared My browser page. History and address-bar search preferences belong to
+main; agents have no history read API. Granting a tab discloses its identity and signed-in
+sites without exposing cookie values.
+
+Saved passwords belong to an identity. On Windows, main seals entries to a vault key
+protected by Windows Hello and stores ciphertext in Credential Manager. Fill, reveal,
+copy and enabling the optional five-minute grace period require fresh native owner input.
+Main checks Hello policy and exact origin; a tab with an agent lease cannot capture or
+fill passwords. Copy requires verification even during grace, and lock/suspend clear the
+memory cache. Linux requires safeStorage backed by libsecret/kwallet; basic_text is refused.
+macOS uses the Keychain. Passwords never reach the renderer or the agent browser pool.
+Windows alone lazily loads pinned koffi 3.3.8; other packages do not require koffi.
+
+Background playback is a per-owner-tab choice; unticked tabs pause when off screen.
+WhatsApp observation is a separate default-off module. It observes an owner tab only
+while enabled, using the general service-notification contract. Disabling observation
+retains the binding until the owner removes it.
+
 External browser traffic uses the main-controlled browser egress proxy and the external-page
 setting. Admission is per tab and origin. Renderer sessions and artifact frames remain
 network-locked. Host control ports are never browser targets. Main decides popups, downloads

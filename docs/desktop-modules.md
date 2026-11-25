@@ -5,6 +5,19 @@ For a complete authoring guide and generated API reference, see
 [Writing a module](module-authoring.md). The API version is `MODULE_API_VERSION`;
 it is independent of the desktop release version.
 
+The built-in browser uses optional app-side `side.component` controls: a fixed shared
+page, tab-row leading controls and new-tab menus, additional tab-menu items, tab tint
+and a trailing marker. These do not change the public experimental slot identifier,
+declaration snapshots or module API version. WhatsApp is a separate default-off module;
+service notifications remain the general channel for all services.
+
+Settings labels distinguish source (core, built-in, downloaded or local), version,
+publisher verification and any reason a module is unused. A folder build counts as
+running only while the host's registered definition is the one it loaded. If another
+source takes that ID, the loader withdraws its running record and styles, waits for
+the ID to become free, and reloads after the host becomes idle. Failed rebuilds keep
+the last working definition; asynchronous loads recheck ownership after each await.
+
 ## 1. Scope and trust
 
 Built-in modules, signed first-party packs and owner-installed modules use the same
@@ -191,7 +204,7 @@ a process able to change the application's files can also change module files.
 
 **信任记录。** `local.json` 的 `trust[id]` 记版本、压缩包 sha256 和每个文件的哈希。`verifyInstalled` 接受好签名，或者「目录里完全没有 `.signed/` 且记录版本相符」，两者都逐文件比哈希。文件变了：启动时进 `broken`，运行中协议 404 并标 `broken`；要回来只能重新从文件安装，再确认一次。
 
-**标记。** 设置 → 模块的 `本地安装 vX · 作者未验证`，侧边栏入口和页面标题的 `本地安装`（`LocalBadge`）。移除由 main 的原生对话框确认，同时问保留还是删除它的数据（v1.31，§30.6）。
+**标记。** 设置 → 模块的 `本地安装` 标签、灰字 `vX` 和 `未验证` 标签（§23.9），侧边栏入口和页面标题的 `本地安装`（`LocalBadge`）。移除由 main 的原生对话框确认，同时问保留还是删除它的数据（v1.31，§30.6）。
 
 **安全启动。**
 

@@ -7,7 +7,7 @@ export const en: Record<keyof typeof zhCN, string> = {
   "backend-upgrade.description": "View, download, install and roll back the cutex release on a host",
   "backend-upgrade.page": "Host backend updates",
   "backend-upgrade.navAttention": "A host backend (cutex) update is available or needs you: Settings → Host backend updates",
-  "backend-upgrade.pageHint": "The cutex backend on the host picked in the header, where the {{agents}} run. This desktop app's own updates are under Updates & diagnostics.",
+  "backend-upgrade.pageHint": "The cutex backend on the host picked in the header, where the {{agents}} run. The desktop app's own updates are under Updates & diagnostics.",
   "backend-upgrade.desktopLink": "Desktop app updates",
   "backend-upgrade.check": "Check for updates",
   "backend-upgrade.checking": "Checking…",

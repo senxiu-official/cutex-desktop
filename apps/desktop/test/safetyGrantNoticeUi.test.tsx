@@ -25,6 +25,9 @@ import { NEXT_UP_DETAILS, fill } from "../src/renderer/src/lib/inputLedger/nextU
 import { SafetyBlockCard } from "../src/renderer/src/components/SafetyBlockCard";
 import { formatAbsolute, formatAt } from "../src/renderer/src/lib/time";
 
+// The store double is too thin for the avatar stack (agent looks, Profile pictures): icons are stubbed.
+vi.mock("../src/renderer/src/components/EntityIcon", () => import("./helpers/entityIconStub"));
+
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const NOW = Date.parse("2026-11-10T07:00:00.000Z");
 const iso = (mins: number) => new Date(NOW + mins * 60_000).toISOString();

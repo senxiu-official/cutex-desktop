@@ -67,6 +67,21 @@ it("a typed confirmation stays open on a mismatch with a note, and resolves once
   expect(settled).toHaveBeenCalledWith("Host A");
 });
 
+it("a destructive prompt opts in to a red, labelled OK; others keep the plain accent OK", async () => {
+  act(() => root.render(h(Overlays)));
+  act(() => { void promptDialog("Delete", "", { expect: "删除", danger: true, okLabel: "永久删除 2 个" }); });
+  let ok = node.querySelector<HTMLButtonElement>("[data-dialog-ok]")!;
+  expect(ok.textContent).toBe("永久删除 2 个");
+  expect(ok.className).toContain("bg-danger-solid");
+  await act(async () => { key(node.querySelector("input")!, "Escape"); await Promise.resolve(); });
+  act(() => { void promptDialog("Rename", "x"); });
+  ok = node.querySelector<HTMLButtonElement>("[data-dialog-ok]")!;
+  expect(ok.textContent).toBe("dialog.ok");
+  expect(ok.className).toContain("bg-accent");
+  expect(ok.hasAttribute("data-danger")).toBe(false);
+  await act(async () => { key(node.querySelector("input")!, "Escape"); await Promise.resolve(); });
+});
+
 it("font search retains its composing draft and does not pick or cancel until committed", () => {
   const change = vi.fn(); act(() => root.render(h(FontCombo, { value: "", fonts: ["宋体"], defaultLabel: "Default", onChange: change })));
   const input = node.querySelector("input")!; act(() => input.focus()); type(input, "黑体"); compose(input, "compositionstart");

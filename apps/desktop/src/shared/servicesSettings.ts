@@ -17,6 +17,11 @@ export const SERVICES_IDLE_PRESETS_FEATURE = "service-idle-presets-v1";
 /** cutex portless services (docs/design/portless-services-v1.md): runtime `worker`; the capability also comes as `features.servicesWorkersV1`. */
 export const SERVICES_WORKERS_FEATURE = "services-workers-v1";
 export const SERVICES_WORKERS_FLAG = "servicesWorkersV1";
+/**
+ * cutex services-remote-access-v1 (docs/management/service-remote-access.md): the owner opts a service into the private
+ * client-certificate gateway (the owner's iPad). `remoteAccess` on the service; owner-only PATCH with `ifRegistration`.
+ */
+export const SERVICES_REMOTE_ACCESS_FEATURE = "services-remote-access-v1";
 export const DEFAULT_AGENT_PERSISTENT_APPROVAL: AgentPersistentApproval = "ask";
 
 export function isAgentPersistentApproval(v: unknown): v is AgentPersistentApproval {

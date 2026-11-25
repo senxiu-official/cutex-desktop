@@ -1,5 +1,5 @@
 // LEGACY(input-ledger-v1): frozen delivery inference for older hosts.
-// Delete only when EVERY host advertises input-ledger-v1 (including hachimi).
+// Delete only when EVERY host advertises input-ledger-v1 (including hostc).
 // 隐藏 / 清除 (owner 2026-10-24): rows the owner no longer wants to see in the 接下来 / 委托 panels — a finished delegation,
 // a note that lingers although the agent ran turns since. Only this desktop forgets them (localStorage); cutex keeps
 // everything, the 委托 page still lists them. One batch can be undone. Never used for something still pending.

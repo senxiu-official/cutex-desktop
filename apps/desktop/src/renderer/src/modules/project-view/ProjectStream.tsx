@@ -4,11 +4,15 @@
 // then the type chips + agent filter and the day-grouped timeline (newest first, older pages on scroll,
 // live rows; scrolled down, new rows wait behind 「↑ N 条新动态」). Rules in stream.ts, data in
 // streamStore.ts / streamData.ts.
-import { memo, useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import { memo, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { Bot, Check, ChevronDown, ChevronRight, CircleAlert, FileBox, History, Loader2, RefreshCw, Send, ShieldCheck, Square, SquareTerminal, Workflow, X } from "lucide-react";
 import type { BackgroundAgent, BackgroundItem, ProjectEvent } from "../../../../shared/projectEvents";
 import { ArmedHint } from "../../components/ArmedHint";
+import { ActivityStepChip } from "../../components/ActivityStepChip";
 import { Avatar } from "../../components/Avatar";
+import { nextKey, sameStep, type ActivityStep } from "../../lib/activityStep";
+import { useDelegations } from "../../lib/delegationStore";
+import { hostKey } from "../../lib/hostKeys";
 import { useI18n, type MessageKey } from "../../i18n";
 import { formatElapsed } from "../../lib/agentAttention";
 import { ARMED_COUNTDOWN, useArmed } from "../../lib/armedConfirm";
@@ -19,6 +23,7 @@ import { openAgentBeside, openStreamTarget } from "./open";
 import {
   attentionRows,
   clockOf,
+  currentAskSteps,
   describeRow,
   formatDuration,
   groupByDay,
@@ -229,7 +234,7 @@ export function sameAvatar(a: RowAvatar, b: RowAvatar): boolean {
 
 // Compared on what it shows: the panel re-renders on every project data change (a sidebar refresh, the minute
 // tick) with a new avatar object per row, and every row used to render again with it (perf audit 2026-10-23).
-const StreamRow = memo(function StreamRow({ e, hostId, who, avatar, t }: { e: ProjectEvent; hostId: string; who: string | null; avatar: RowAvatar; t: T }) {
+const StreamRow = memo(function StreamRow({ e, hostId, who, avatar, t, step }: { e: ProjectEvent; hostId: string; who: string | null; avatar: RowAvatar; t: T; /** The delegation's current blocker (its newest row only). */ step?: ActivityStep }) {
   const v = describeRow(e);
   const target = rowTarget(e);
   if (e.kind === "journal.gap")
@@ -240,7 +245,8 @@ const StreamRow = memo(function StreamRow({ e, hostId, who, avatar, t }: { e: Pr
     );
   const [Icon, iconTone] = BADGE[v.badge];
   const facts = [v.detail, v.durationMs !== null ? formatDuration(v.durationMs) : null, v.toolCalls !== null ? t("project-view.stream.tools", { n: v.toolCalls }) : null].filter(Boolean).join(" · ");
-  return (
+  const askId = target?.kind === "delegation" ? target.askId : null;
+  const row = (
     <button
       type="button"
       disabled={!target}
@@ -271,10 +277,19 @@ const StreamRow = memo(function StreamRow({ e, hostId, who, avatar, t }: { e: Pr
             {facts}
           </span>
         )}
+        {step && askId && <span className="block truncate text-meta/[inherit] text-warn-text" data-stream-blocker={step.blocker}>{t(`delegation.step.blocker.${step.blocker}` as MessageKey)}</span>}
       </span>
     </button>
   );
-}, (a, b) => a.e === b.e && a.hostId === b.hostId && a.who === b.who && a.t === b.t && sameAvatar(a.avatar, b.avatar));
+  // Its next step beside the row (a sibling button, never nested in the row's own).
+  if (!step || !askId || !nextKey(step)) return row;
+  return (
+    <div className="flex min-w-0 items-start" data-stream-row-step="">
+      <div className="min-w-0 flex-1">{row}</div>
+      <ActivityStepChip step={step} hostId={hostId} askId={askId} title={e.title ?? undefined} blocker={false} fallback={() => target && openStreamTarget(hostId, target)} className="shrink-0 pt-1 pr-3 text-meta/[inherit]" />
+    </div>
+  );
+}, (a, b) => a.e === b.e && a.hostId === b.hostId && a.who === b.who && a.t === b.t && sameAvatar(a.avatar, b.avatar) && sameStep(a.step, b.step));
 
 function dayLabel(day: string, t: T, locale: string): string {
   if (day === "today") return t("project-view.stream.today");
@@ -306,6 +321,9 @@ export function ProjectStream({ data, state, setState, now }: { data: ProjectDat
   const includeOwnerTurns = !state.needsOnly && state.evKinds.includes("turn") && includeOwnerPreference;
   const activity = withoutOwnerTurns(feed.rows, includeOwnerTurns);
   const rows = state.needsOnly ? attentionRows(activity) : activity;
+  // r295 Z3: each open delegation's newest row says where it is stuck now (records of this host, by ask id).
+  const records = useDelegations((s) => s.byKey);
+  const steps = useMemo(() => currentAskSteps(rows, (askId) => records[hostKey(hostId, askId)]), [rows, records, hostId]);
   const projectionKey = `${key}\nowner:${includeOwnerTurns}`;
   const scroller = useRef<HTMLDivElement>(null);
   const [seenSeq, setSeenSeq] = useState(-1);
@@ -384,7 +402,7 @@ export function ProjectStream({ data, state, setState, now }: { data: ProjectDat
             <div className="sticky top-0 z-[1] bg-background px-3 pt-1.5 pb-0.5 text-caption/[inherit] font-semibold text-subtle">{dayLabel(g.day, t, locale)}</div>
             {g.rows.map((e) => {
               const who = e.kind === "journal.gap" ? null : (data.nameOf(e.cutexSessionId, e.agentName) ?? e.agentName);
-              return <StreamRow key={e.cursor} e={e} hostId={hostId} who={who} avatar={avatarOf(e.cutexSessionId)} t={t} />;
+              return <StreamRow key={e.cursor} e={e} hostId={hostId} who={who} avatar={avatarOf(e.cutexSessionId)} t={t} step={steps.get(e.cursor)} />;
             })}
           </section>
         ))}
@@ -440,7 +458,7 @@ export function ProjectStream({ data, state, setState, now }: { data: ProjectDat
             type="button"
             data-testid="project-stream-new"
             onClick={() => scroller.current?.scrollTo({ top: 0, behavior: "smooth" })}
-            className="sticky top-1 z-[2] mx-auto block w-max rounded-full bg-accent px-2.5 py-0.5 text-meta/[inherit] text-white shadow-md"
+            className="sticky top-1 z-[2] mx-auto block w-max rounded-full bg-accent px-2.5 py-0.5 text-meta/[inherit] text-on-accent shadow-md"
           >
             {t("project-view.stream.new", { n: fresh })}
           </button>

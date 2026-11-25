@@ -84,9 +84,9 @@ describe("identity across hosts (owner 2026-10-20: a fresh desktop showed its OS
   });
 
   it("adopts the display name another host has when the focus host has none", () => {
-    const access = { hachimi: user(null), remote: user("林青") };
-    const seen = { hachimi: observeHostIdentity(undefined, access.hachimi, 5), remote: observeHostIdentity(undefined, access.remote, 5) };
-    const got = adoptedIdentity(access, seen, "hachimi");
+    const access = { hostc: user(null), remote: user("林青") };
+    const seen = { hostc: observeHostIdentity(undefined, access.hostc, 5), remote: observeHostIdentity(undefined, access.remote, 5) };
+    const got = adoptedIdentity(access, seen, "hostc");
     expect(got.name).toBe("林青");
     expect(identityName({ isOwner: true, name: null, displayName: null }, "", "Lixinyu", true, got.name)).toBe("林青");
   });

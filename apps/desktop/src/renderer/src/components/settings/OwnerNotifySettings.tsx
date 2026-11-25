@@ -20,6 +20,7 @@ import { LEGACY_PRESET, NOTIFICATION_LEVELS_FEATURE, NOTIFICATION_PRESETS_NO_LEG
 import { useNotificationLevels } from "../../lib/notificationLevelsStore";
 import { settingsAnchorId } from "../../lib/settingsNav";
 import { compareNames } from "../../lib/rosterOrder";
+import { EntityIcon } from "../EntityIcon";
 
 const AUDIENCES: OwnerNotifyToolAudience[] = ["ownerFacing", "everyone", "directors", "none"];
 /** cutex's default audience for owner_notify (docs/research/notification-levels.md §4.3). */
@@ -162,7 +163,7 @@ export function Overrides({ overrides, onChange }: { overrides: Record<string, O
       <div className="mb-1.5 text-xs text-subtle">{t("owner-notify.overridesHint")}</div>
       {Object.entries(overrides).map(([id, v]) => (
         <div key={id} className="flex items-center gap-2 border-t border-border/60 py-1.5">
-          <span className="min-w-0 flex-1 truncate text-sm">{nameOf(id)}</span>
+          <span className="flex min-w-0 flex-1 items-center gap-2 text-sm"><EntityIcon entity={{ kind: "agent", id, name: nameOf(id) }} /><span className="min-w-0 truncate">{nameOf(id)}</span></span>
           <SettingsGroup agents="now" source="host"><Select value={v} width="w-36" options={modes} onChange={(next) => onChange({ ...overrides, [id]: next })} label={nameOf(id)} /></SettingsGroup>
           <SettingsGroup agents="now" source="host"><IconButton
             label={t("owner-notify.overrideRemove")}
@@ -180,7 +181,7 @@ export function Overrides({ overrides, onChange }: { overrides: Record<string, O
           value={pick}
           width="min-w-0 flex-1"
           label={t("owner-notify.overrideAgent")}
-          options={[{ value: "", label: t("owner-notify.overrideAgent") }, ...free.map((a) => ({ value: a.cutexSessionId, label: a.displayName }))]}
+          options={[{ value: "", label: t("owner-notify.overrideAgent") }, ...free.map((a) => ({ value: a.cutexSessionId, label: a.displayName, entity: { kind: "agent" as const, id: a.cutexSessionId, name: a.displayName } }))]}
           onChange={setPick}
         /></SettingsGroup>
         <SettingsGroup agents="now" source="host"><Select value={mode} width="w-36" options={modes} onChange={setMode} label={t("owner-notify.overrides")} /></SettingsGroup>

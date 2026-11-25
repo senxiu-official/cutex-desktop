@@ -4,12 +4,15 @@
 // activity line. Expanded: brief, progress notes, questions, the result, actions. The state comes
 // from lib/delegationStore through selectors (MemoEntry only re-renders on entry changes), else
 // from what the transcript says (purged delegations).
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeftRight, ChevronDown, ChevronRight, MoreHorizontal } from "lucide-react";
 import type { AskAnswerPage } from "../../../shared/ipc";
+import { asCrossHost } from "../../../shared/crossHost";
 import { useI18n } from "../i18n";
 import { ARMED_FRAME } from "../lib/armedConfirm";
 import { contextMenu, openMenuFrom } from "../lib/contextMenu";
+import { ownStepOf } from "../lib/activityOpen";
+import { ActivityStepChip } from "./ActivityStepChip";
 import { attemptSeconds, delegateCallOf, delegationActions, delegationCanResume, delegationStatus, formatSpan, NO_DELEGATION_ACTIONS, openContinuationWait, peerPartyText, requesterSession, stopPending, waitSeconds, type DelegationStatus } from "../lib/delegations";
 import { canEndDelegationFollowUp, delegationMenu, endFollowUpShown, runDelegationCommand, runEndFollowUp } from "../lib/delegationMenu";
 import { delegationApi, hasDelegationViews, loadCardDelegation, loadDelegationDetail, useDelegations } from "../lib/delegationStore";
@@ -24,7 +27,6 @@ import { featuresOf, useApp } from "../store";
 import { useConvHost } from "../lib/conversationScope";
 import { continueClock } from "../lib/quotaContinue";
 import { gateClosed, gateClosedCause, useDelegationQuota } from "../lib/delegationHoldText";
-import { DelegationQuotaOutcome } from "./DelegationQuotaOutcome";
 import type { AskQuestion, AskSummary } from "../../../shared/ipc";
 import { DelegationHops, DelegationStatusMark, DelegationTag } from "./DelegationParts";
 import { PeerParty } from "./PeerParty";
@@ -32,9 +34,13 @@ import { useUserLayoutToggle } from "../lib/userLayoutToggle";
 import { DelegationPeerSection } from "./DelegationPeer";
 import { DelegationReviewActions } from "./DelegationReview";
 import { ArmedButton } from "./ArmedButton";
+import { DelegationContinuationAllow } from "./DelegationContinuationAllow";
 import { Markdown } from "./Markdown";
+import { SelectionActions, SelectionSourceScope } from "./SelectionActions";
+import type { SelectionAttribution } from "../lib/selectionMenu";
 import { Who } from "./Parties";
 import { rawIdTitle, useModelName } from "../lib/modelDisplay";
+import { DelegationEndingSection, EndingBy, mayHaveEnding, useDelegationEnding, useEndingRequest } from "./DelegationEnding";
 
 const NO_NOTES: { text: string; at: string }[] = [];
 const NO_QUESTIONS: AskQuestion[] = [];
@@ -159,6 +165,11 @@ export function DelegationDetailBody({ d, brief, here, host, layout = "card" }: 
   const took = attemptSeconds(d.attempt, Date.now());
   const answerMeta = [detail?.answer?.bytes ? `${Math.max(1, Math.round(detail.answer.bytes / 1024))} KB` : null, took !== null && d.execution === "answered" ? t("delegation.took", { t: formatSpan(took) }) : null].filter(Boolean).join(" · ");
   const armed = stopArmed || abandonArmed;
+  // Whose words the selection menu asks about (not the conversation this card sits in, review 2026-11-25 P1): the brief
+  // is the requesting agent's (the owner's or a peer's: ambiguous, only 复制); the result is the target's, at the turn it
+  // ran in (a mirror of another host: only 复制). Both are agents of the record's host.
+  const briefSource: SelectionAttribution = requester ? { hostId: host, sessionId: requester } : "copy";
+  const resultSource: SelectionAttribution = d.remote ? "copy" : { hostId: host, sessionId: d.target, turnId: d.attempt?.turnId ?? null };
   // Its target is an agent of the open agent's host (not the focus host's).
   const openTarget = () => (views && d.attempt?.turnId ? focusTurn(d.target, d.attempt.turnId, host) : void useApp.getState().select(d.target, host));
   const button = `${ACTION_SHAPE} ${ACTION_IDLE}`;
@@ -166,14 +177,21 @@ export function DelegationDetailBody({ d, brief, here, host, layout = "card" }: 
     <div className={`message-body ${layout === "card" ? "mt-1 ml-5 max-w-[85%]" : ""} rounded-xl border px-3 py-2 text-xs transition-colors ${armed ? ARMED_FRAME : "border-transparent bg-surface"}`}>
       {/* The side detail (opened from the 需要你 strip, a queue row, a list): the owner review on top. The card has it under its line. */}
       {layout === "side" && <DelegationReviewActions d={d} host={host} variant="side" />}
+      <OwnStep d={d} host={host} />
       <GateClosedHint d={d} />
-      <DelegationQuotaOutcome d={d} host={host} />
+      {/* 自动继续已到期: why, and 允许继续 when cutex allows it (owner 2026-11-25). */}
+      <DelegationContinuationAllow d={d} host={host} />
+      {/* No handler-wide quota history here (2026-11-25): QuotaContinueView.last belongs to the handler, not to this
+          delegation or its attempt; an undelivered ask once showed the handler's week-old 「已发送」. The ask's own hold
+          text (GateClosedHint, the status line) is what applies. */}
       {brief && (
         <Section title={t("delegation.brief")}>
-          <div className={`${layout === "card" ? "max-h-48 overflow-y-auto" : ""} text-ui/[inherit]`}>
-            <Markdown text={brief} streaming={false} />
-          </div>
-          {artifact && <FullBrief artifactId={artifact} hostId={host} />}
+          <SelectionSourceScope source={briefSource}>
+            <div className={`${layout === "card" ? "max-h-48 overflow-y-auto" : ""} text-ui/[inherit]`}>
+              <Markdown text={brief} streaming={false} />
+            </div>
+            {artifact && <FullBrief artifactId={artifact} hostId={host} />}
+          </SelectionSourceScope>
         </Section>
       )}
       {notes.length > 0 && (
@@ -200,13 +218,19 @@ export function DelegationDetailBody({ d, brief, here, host, layout = "card" }: 
           ))}
         </Section>
       )}
-      <DelegationPeerSection d={d} hostId={host} />
+      <DelegationPeerSection d={d} hostId={host} detail={layout === "side"} />
+      {/* r295: how it ended or failed (who / what and why), when the host records it. */}
+      <DelegationEndingSection d={d} host={host} />
       {(d.answerPreview || d.answerId) && (
+        <div data-delegation-result-section="" className="scroll-mt-2">
         <Section title={t("delegation.result")}>
-          {d.answerPreview && <div className="selectable text-ui/[inherit] whitespace-pre-wrap">{d.answerPreview}</div>}
-          {answerMeta && <div className="mt-0.5 text-caption/[inherit] text-subtle">{answerMeta}</div>}
-          {d.answerId && <FullAnswer askId={d.askId} hostId={host} />}
+          <SelectionSourceScope source={resultSource}>
+            {d.answerPreview && <SelectionActions data-delegation-result="" className="selectable text-ui/[inherit] whitespace-pre-wrap">{d.answerPreview}</SelectionActions>}
+            {answerMeta && <div className="mt-0.5 text-caption/[inherit] text-subtle">{answerMeta}</div>}
+            {d.answerId && <FullAnswer askId={d.askId} hostId={host} />}
+          </SelectionSourceScope>
         </Section>
+        </div>
       )}
       <div className="mt-2 flex flex-wrap items-center gap-1 border-t border-border/60 pt-1.5">
         {/* Stop / 放弃 arm in place (ArmedButton: same button, floating hint), so nothing in the row moves. */}
@@ -295,7 +319,7 @@ export function DelegationCard({ item, sessionId }: { item: RawItem; sessionId: 
       <button onClick={() => userToggle(() => setOpen(!open))} className="flex w-full min-w-0 max-w-full items-center gap-1.5 overflow-hidden rounded-md py-0.5 text-left text-xs text-muted hover:text-foreground">
         <ArrowLeftRight size={13} className="shrink-0 text-subtle" />
         <span className="shrink-0">{t("delegation.label")}</span>
-        <span className="inline-flex min-w-0 max-w-[30%] shrink-0">{d.remote ? <PeerParty text={peerPartyText(d.remote.targetName || targetName, d.target, d.remote.label)} label={d.remote.label} size={16} /> : <Who id={d.target || null} name={targetName} size={16} />}</span>
+        <span className="inline-flex min-w-0 max-w-[30%] shrink-0">{d.remote ? <PeerParty text={peerPartyText(d.remote.targetName || targetName, d.target, d.remote.label)} label={d.remote.label} size={16} instanceId={asCrossHost(d.crossHost)?.peer.instanceId} hostId={host} /> : <Who id={d.target || null} name={targetName} size={16} />}</span>
         {model && <span className="min-w-0 max-w-[25%] truncate text-subtle" title={d.attempt?.model ? rawIdTitle(d.attempt.model, model) : undefined}>· {model}</span>}
         <DelegationTag askId={askId} />
         {/* Held (queued, waiting for quota …): why, on the card's one line — a second line under it went again when the
@@ -319,12 +343,14 @@ export function DelegationCard({ item, sessionId }: { item: RawItem; sessionId: 
           {!live && <span className="truncate text-subtle">{t("delegation.snapshot")}</span>}
           {ownerSteered && <OwnerSteeredBadge />}
           {live || d.revision >= 0 || status.key !== "queued" ? <DelegationStatusMark status={shown} name={targetName} trailing={time} error={d.attempt?.lastError ?? d.remote?.lastError} /> : null}
+          {/* r295: who or what ended it (closed without an answer, or its attempt failed), beside the status word. */}
+          {live && mayHaveEnding(d) && <CardEndingBy d={d} host={host} targetName={targetName} />}
           {open ? <ChevronDown size={13} className="shrink-0" /> : <ChevronRight size={13} className="shrink-0" />}
         </span>
       </button>
       {/* Delegating to a wider target waits for the owner first (cutex pendingReview): decide it here. */}
       <DelegationReviewActions d={d} host={host} variant="card" />
-      {!open && <div className="ml-5"><GateClosedHint d={d} /><DelegationQuotaOutcome d={d} host={host} /></div>}
+      {!open && <div className="ml-5"><GateClosedHint d={d} /></div>}
       {open && !live && <button className="ml-5 text-xs text-muted hover:text-foreground" onClick={() => {
         void loadCardDelegation(host, askId, sessionId, true);
       }}>{t("chat.retry")}</button>}
@@ -350,6 +376,16 @@ function QuotaHoldLine({ host, d, waited }: { host: string; d: AskSummary; waite
       {waited && <span className="text-subtle"> · {t("delegation.waited", { t: waited })}</span>}
     </>
   );
+}
+
+/**
+ * The next step this delegation's host names (r295 Z3), when it leads elsewhere: 查看结果 (the result, checked against its
+ * answer id) or 查看审批 when no review buttons are shown here. The status word already says the blocker.
+ */
+function OwnStep({ d, host }: { d: AskSummary; host: string }) {
+  const step = ownStepOf(d);
+  if (!step) return null;
+  return <div className="mb-1" data-delegation-own-step=""><ActivityStepChip step={step} hostId={host} askId={d.askId} title={d.title} blocker={false} /></div>;
 }
 
 function GateClosedHint({ d }: { d: AskSummary }) {
@@ -379,4 +415,12 @@ function heldWord(status: DelegationStatus): DelegationStatus["key"] {
   if (status.key === "needsAction" || status.key === "waiting") return status.key;
   if (status.key === "offline") return "waiting";
   return status.dangerText ? "needsAction" : "queued";
+}
+
+/** A collapsed card's 「由 X」: its detail is read only while the card is on screen (lib/endingLoader bounds it). */
+function CardEndingBy({ d, host, targetName }: { d: AskSummary; host: string; targetName: string }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  useEndingRequest(host, d, ref);
+  const { notices, ending } = useDelegationEnding(host, d);
+  return <span ref={ref} className="inline-flex min-w-0" data-card-ending="">{ending && <EndingBy notice={ending} notices={notices} targetName={targetName} className="max-w-[12em]" />}</span>;
 }

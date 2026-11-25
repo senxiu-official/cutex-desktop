@@ -19,6 +19,7 @@
 }
 .foretell-mark[data-foretell-mark="open"] {
   --ft: var(--accent);
+  --ft-on: var(--on-accent);
 }
 .foretell-mark[data-foretell-mark="beside"] {
   --ft: var(--ok);
@@ -35,7 +36,8 @@
   padding: 4px 10px;
   border-radius: 999px;
   background: var(--ft);
-  color: #fff;
+  /* White on danger / ok / grey; the accent's own text colour on 打开 (a pale custom accent gets dark text). */
+  color: var(--ft-on, #fff);
   font-size: 12px;
   line-height: 16px;
   text-align: center;

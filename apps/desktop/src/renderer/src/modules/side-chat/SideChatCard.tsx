@@ -3,9 +3,9 @@ import { useI18n } from "../../i18n";
 import { useArmed } from "../../lib/armedConfirm";
 import { useModulePref } from "../react";
 import type { SideBodyProps } from "../slots";
-import { forkInput, initSide, sideStart, takeSideText, type SideState } from "./cardState";
+import { forkInput, initSide, reopenParams, sideStart, takeSideDraft, takeSideQuote, takeSideText, type SideState } from "./cardState";
 import { useTurnLabel } from "./hooks";
-import { closeSideInstance, isSideGone, loadSide, openSideChat, setSideDraft, showSide, sideKey, useSides } from "./state";
+import { closeSideInstance, isSideGone, loadSide, openSideChat, setSideDraft, setSideQuote, showSide, sideKey, useSides } from "./state";
 import { SideChatBody } from "./SideChatBody";
 import { useModuleHostGate } from "../../lib/hostGatingView";
 import { sideErrorText } from "./errors";
@@ -41,6 +41,8 @@ function SideChatCardBody(props: SideBodyProps<SideState>) {
     setError(null); setGone(false);
     const task = chatId ? loadSide(hostId, sessionId, chatId) : openSideChat(instance.id, hostId, sessionId, forkInput(sideStart(start), String(scope), String(model)), sideStart(start).text ?? "").then(id => {
       takeSideText(start);
+      const quote = takeSideQuote(start); if (quote) setSideQuote(hostId, id, quote);
+      const draft = takeSideDraft(start); if (draft.trim()) setSideDraft(hostId, id, draft);
       if (!disposed) setState({ chatId: id, ...(start ? { request: start } : {}) });
     });
     void task.catch(e => { if (!disposed) { setGone(isSideGone(e)); setError(e instanceof Error ? e.message : String(e)); } });
@@ -48,17 +50,27 @@ function SideChatCardBody(props: SideBodyProps<SideState>) {
   }, [instance.id, hostId, sessionId, chatId, start, visible, retry]);
   useEffect(() => {
     if (!visible || !hostId || !chatId) return;
-    const hide = showSide(hostId, chatId);
+    return showSide(hostId, chatId);
+  }, [hostId, chatId, visible]);
+  // A new 解释这段 / 批注追问 for this open side chat: taken once its view is here and no message is pending (the
+  // composer and quote are locked then); until then the request waits, it is not dropped (review 2026-11-25 P2-2).
+  const hasView = !!view;
+  const pending = !!view?.pendingMessage;
+  useEffect(() => {
+    if (!visible || !hostId || !chatId || !hasView || pending) return;
     const text = takeSideText(request); if (text.trim()) setSideDraft(hostId, chatId, text);
-    return hide;
-  }, [hostId, chatId, visible, request]);
+    const quote = takeSideQuote(request); if (quote) setSideQuote(hostId, chatId, quote);
+    const draft = takeSideDraft(request); if (draft.trim()) setSideDraft(hostId, chatId, draft);
+  }, [hostId, chatId, visible, request, hasView, pending]);
   const reopen = async () => {
     if (!hostId || !sessionId || reopening) return;
     setReopening(true);
+    // Read before closing: closing clears the old side chat's quote and note.
+    const carried = view ? { quote: view.quote ?? view.pendingMessage?.quote ?? null, draft: view.draft || view.pendingMessage?.draft || "" } : null;
     try {
       if (await closeSideInstance(instance.id, hostId, sessionId, chatId)) {
         setGone(false); setError(null); setArmed(false);
-        setState(initSide(params, null));
+        setState(initSide(reopenParams(params, carried), null));
       }
     } finally { setReopening(false); }
   };

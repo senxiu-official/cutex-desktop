@@ -1,5 +1,5 @@
 // LEGACY(input-ledger-v1): frozen delivery inference for older hosts.
-// Delete only when EVERY host advertises input-ledger-v1 (including hachimi).
+// Delete only when EVERY host advertises input-ledger-v1 (including hostc).
 // Agent messages v2 (留言 note / 唤醒 wake; docs/research/agent-messaging.md §4, capability
 // `agent-messages-v2`): one record per agent-bus message id, built from the cutex events
 // (`cutex/agentBus/messageSent|Queued|Delivered|Failed`) and the bootstrap snapshots
@@ -7,6 +7,7 @@
 // Feeds the sender's status dot (未读 / 已读入 / 失败) and the recipient's 待读留言 section.
 // Pure and framework-free; lib/agentMessageStore.ts holds the state.
 
+import { asCrossHost, newerCrossHost, type CrossHost } from "../../../../shared/crossHost";
 import type { MessageSettlement } from "@cutex-desktop/protocol";
 import { noteDiagnostics, type NoteDiagnostics } from "../inputLedger/noteDelivery";
 import { MESSAGE_SETTLEMENT_EVENT, mergeMessageSettlement, readMessageSettlement } from "../../../../shared/messageSettlement";
@@ -53,6 +54,8 @@ export interface AgentMessageRecord {
    * another host, `from` / `senderName` its `name@host` label, never a local session or a service.
    */
   remote: RemoteSender | null;
+  /** peer-delivery-receipts-v1: the cross-host receipt and the peer's instance id (gated on the host's capability where shown). */
+  crossHost?: CrossHost | null;
   /** cutex-reported names (`sender.name` / `recipient.name`); null → the sidebar name. */
   senderName: string | null;
   recipientName: string | null;
@@ -218,6 +221,11 @@ function merge(map: MessageMap, messageId: string, patch: Partial<AgentMessageRe
     }
     if (v === null || v === undefined || v === "") continue;
     if (k === "remote" && prev.remote) continue; // fills in once (a fresh object would always differ)
+    if (k === "crossHost") {
+      // A late observation never moves the receipt back (shared/crossHost newerCrossHost).
+      next.crossHost = newerCrossHost(prev.crossHost, v as CrossHost);
+      continue;
+    }
     (next as unknown as Record<string, unknown>)[k] = v;
   }
   // Final states stick: a late queued / sent event never turns a read-in message back to 未读.
@@ -254,6 +262,7 @@ export function applyMessageEvent(map: MessageMap, method: string, params: Recor
     from: str(params.fromCutexSessionId) ?? sender.id,
     to: str(params.toCutexSessionId) ?? recipient.id,
     remote: remoteOf(params.remote),
+    crossHost: asCrossHost(params.crossHost),
     senderName: sender.name,
     recipientName: recipient.name,
     kind: deliveryKindOf(params.deliveryKind, params.deliveryMode),
@@ -296,6 +305,7 @@ export function seedMessages(map: MessageMap, sessionId: string, received: unkno
       sourceKind: origin.sourceKind,
       timing: origin.timing,
       remote: remoteOf(m.remote),
+      crossHost: asCrossHost(m.crossHost),
       senderName: sender.name,
       recipientName: party(m.recipient).name,
       kind: deliveryKindOf(m.deliveryKind, m.deliveryMode),
@@ -318,6 +328,7 @@ export function seedMessages(map: MessageMap, sessionId: string, received: unkno
       settlement: readMessageSettlement(m.settlement),
       from: sessionId,
       to: str(m.toCutexSessionId) ?? recipient.id,
+      crossHost: asCrossHost(m.crossHost),
       recipientName: recipient.name,
       kind: deliveryKindOf(m.deliveryKind, m.deliveryMode),
       downgraded: m.wakeDowngraded === true || undefined,

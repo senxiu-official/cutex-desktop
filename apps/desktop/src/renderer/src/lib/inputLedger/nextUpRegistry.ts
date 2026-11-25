@@ -7,7 +7,7 @@ import type { InputAction, InputKind, InputRecord, InputState, InputWaitingReaso
 import { INPUT_ACTIONS, INPUT_KINDS, INPUT_REASONS_BY_STATE, INPUT_STAGES } from "@cutex-desktop/protocol";
 
 /** docs/design/next-up-registry.md version this table implements. */
-export const REGISTRY_VERSION = "2.5";
+export const REGISTRY_VERSION = "2.11";
 
 export type Lang = "zh" | "en";
 export interface Text { zh: string; en: string }
@@ -72,12 +72,12 @@ export const NEXT_UP_STATES = {
     meaning: { zh: "对方正在干活：干完就送；行末倒计时先到，就在它下一次调用工具的间隙插进去（转为第 4 种）。", en: "The agent is working: it gets this when it is done; if the countdown at the row end runs out first, it is put in at its next tool call (then “Delivered, unread”)." },
     tone: "neutral", buttons: ["interruptSend", "hold", "dismiss", "ignoreNotice", "viewDelegation"], exit: { kind: "owner", disposals: ["dismiss", "ignoreNotice"] },
     /** Shown only for the `timed` variant (the countdown). */
-    info: { zh: "对方忙完就发；倒计时到了还没忙完，就在它下一次调用工具的间隙插进去，不会打断它。", en: "Sent as soon as the agent is done; if the countdown runs out first, it goes in at the agent's next tool call, without interrupting it." },
+    info: { zh: "当前回合结束后发送。如果倒计时先结束，消息会在对方下次调用工具时插入，当前回合会继续。", en: "Sent once the current turn ends. If the countdown ends first, the message is inserted at the agent's next tool call and the current turn goes on." },
   },
   /** A message that reached the agent but is not read in yet (inserted into a running turn, or waiting for the next read point). The owner can dismiss it (their own message: interrupt and send). Ends when the agent reads it. */
   awaitingRead: {
     n: 4,
-    meaning: { zh: "已经送到，对方还没读进去。", en: "It has arrived; the agent has not read it yet." },
+    meaning: { zh: "已经送达，对方还没读入。", en: "It has arrived; the agent has not read it yet." },
     tone: "neutral", buttons: ["interruptSend", "dismiss", "ignoreNotice", "viewDelegation"], exit: { kind: "owner", disposals: ["dismiss", "ignoreNotice"] },
   },
   /** A note (passive message): it never wakes the agent; it is read during the agent's next work. The owner can have it read now (agent idle) or dismiss it. */
@@ -87,7 +87,7 @@ export const NEXT_UP_STATES = {
     tone: "neutral", buttons: ["readNow", "dismiss", "ignoreNotice"], exit: { kind: "owner", disposals: ["dismiss", "ignoreNotice"] },
     // Read timing verified 2026-11-14 (registry 1.7).
     info: {
-      zh: "留言不会叫醒对方，也不会自己开新一回合。对方正在工作时，会在它下一次思考（模型请求）前读到——写最终回复通常也算一次，所以多半本回合就读了。只有本回合没有下一次思考时，才会等它下次开工；这期间一直显示「待读留言」，可以「现在读取」或「放弃」。",
+      zh: "留言不会叫醒对方，也不会自己开始新回合。对方正在工作时，会在它下一次思考（模型请求）前读入——写最终回复通常也算一次，所以多半本回合就读了。只有本回合没有下一次思考时，才会等它下次开工；这期间一直显示「待读留言」，可以「现在读取」或「放弃」。",
       en: "A note never wakes the agent or starts a turn. If the agent is working, it reads the note before its next model request — writing the final reply usually counts, so mostly still in this turn. Only if the turn has no further request does it wait until the agent next works; meanwhile it shows “Unread note” with Read now / Dismiss.",
     },
   },
@@ -133,12 +133,12 @@ export const NEXT_UP_STATES = {
     n: 12,
     meaning: { zh: "不知道对方收到没有。", en: "It is not known whether the agent got it." },
     tone: "warn", buttons: ["retry", "retryNotice", "dismiss", "ignoreNotice", "hideLocal", "viewReason"], exit: { kind: "owner", disposals: ["dismiss", "ignoreNotice", "hideLocal"] },
-    info: { zh: "重新发送可能让对方收到两次；放弃不会撤回可能已经送到的内容。", en: "Resending may make it arrive twice; dismissing does not withdraw anything that may have arrived." },
+    info: { zh: "重新发送可能让对方收到两次；放弃不会撤回可能已经送达的内容。", en: "Resending may make it arrive twice; dismissing does not withdraw anything that may have arrived." },
   },
   /** A message that certainly did not reach the agent. It stays until the owner resends it, puts the text back in the input box, or dismisses it. */
   failed: {
     n: 13,
-    meaning: { zh: "确定没送到。会一直留在这里，直到你处理。", en: "It certainly did not arrive. It stays here until you handle it." },
+    meaning: { zh: "确定未送达。会一直留在这里，直到你处理。", en: "It certainly did not arrive. It stays here until you handle it." },
     tone: "danger", buttons: ["retry", "retryNotice", "moveToComposer", "dismiss", "ignoreNotice", "hideLocal", "viewReason"], exit: { kind: "owner", disposals: ["dismiss", "ignoreNotice", "hideLocal"] },
   },
   /** A message whose status the host reported in a form this table does not know (a newer host). The message is kept and nothing is sent or withdrawn; the owner can refresh, read the details, or clear the notice on this computer. */
@@ -177,10 +177,10 @@ export const NEXT_UP_EFFECTS = {
   remove: { label: { zh: "删除", en: "Delete" }, disposal: true, action: "cancel" },
   hold: { label: { zh: "暂缓这条", en: "Hold" }, disposal: false, action: "hold" },
   releaseHold: { label: { zh: "允许发送", en: "Allow sending" }, disposal: false, action: "releaseHold" },
-  dismiss: { label: { zh: "放弃", en: "Dismiss" }, tip: { zh: "不再发送这一条；已经送到的内容不会被撤回", en: "Stop sending this; anything already delivered is not withdrawn" }, disposal: true, action: "dismiss" },
+  dismiss: { label: { zh: "放弃", en: "Dismiss" }, tip: { zh: "不再发送这一条；已经送达的内容不会被撤回", en: "Stop sending this; anything already delivered is not withdrawn" }, disposal: true, action: "dismiss" },
   ignoreNotice: { label: { zh: "忽略此通知", en: "Ignore this notice" }, disposal: true, action: "dismiss" },
   viewDelegation: { label: { zh: "查看委托", en: "View delegation" }, disposal: false, action: null },
-  interruptSend: { label: { zh: "打断并发送", en: "Interrupt and send" }, tip: { zh: "停下当前这一轮，马上发这条", en: "Stop the current turn and send this now" }, disposal: false, action: "interruptSend" },
+  interruptSend: { label: { zh: "打断并发送", en: "Interrupt and send" }, tip: { zh: "中断当前回合，马上发这条", en: "Interrupt the current turn and send this now" }, disposal: false, action: "interruptSend" },
   readNow: { label: { zh: "现在读取", en: "Read now" }, disposal: false, action: null },
   resume: { label: { zh: "继续", en: "Resume" }, disposal: false, action: null },
   viewDetails: { label: { zh: "查看详情", en: "View details" }, disposal: false, action: null },
@@ -189,11 +189,11 @@ export const NEXT_UP_EFFECTS = {
   approve: { label: { zh: "批准", en: "Approve" }, disposal: false, action: null },
   reject: { label: { zh: "拒绝", en: "Reject" }, disposal: true, action: null },
   retry: { label: { zh: "重新发送", en: "Resend" }, tip: { zh: "可能收到两次", en: "It may arrive twice" }, disposal: false, action: "retry" },
-  retryNotice: { label: { zh: "重发通知", en: "Resend notice" }, tip: { zh: "只重发这条通知，任务不会重新开始；可能收到两次", en: "Only the notice is sent again; the task does not restart. It may arrive twice" }, disposal: false, action: "retry" },
+  retryNotice: { label: { zh: "重新发送通知", en: "Resend notice" }, tip: { zh: "只重新发送这条通知，任务不会重新开始；可能收到两次", en: "Only the notice is sent again; the task does not restart. It may arrive twice" }, disposal: false, action: "retry" },
   moveToComposer: { label: { zh: "放回输入框", en: "Back to input box" }, tip: { zh: "把原文放回输入框，并放弃这一条", en: "Put the text back in the input box and dismiss this" }, disposal: true, action: "dismiss" },
   refresh: { label: { zh: "刷新状态", en: "Refresh status" }, disposal: false, action: null },
   clearNotice: { label: { zh: "清除此提示", en: "Clear this notice" }, tip: { zh: "只在本机不再显示；不撤回消息", en: "Only hides it on this computer; the message is not withdrawn" }, disposal: true, action: null },
-  hideLocal: { label: { zh: "不再显示", en: "Hide" }, tip: { zh: "只在本机不再显示；不会撤回可能已经送到的内容", en: "Only hides it on this computer; anything that may have been delivered is not withdrawn" }, disposal: true, action: null },
+  hideLocal: { label: { zh: "不再显示", en: "Hide" }, tip: { zh: "只在本机不再显示；不会撤回可能已经送达的内容", en: "Only hides it on this computer; anything that may have been delivered is not withdrawn" }, disposal: true, action: null },
 } as const satisfies Record<NextUpEffectId, NextUpEffectDef>;
 
 /** Fixed panel controls that are not messages (registry §三). Same freeze rules. */
@@ -220,22 +220,48 @@ export const isLedgerPanelControl = (id: string | undefined): id is NextUpPanelC
  * Registry 2.1 (§三之二): the only words a delegation row in 接下来 may show for a yielded wait (cutex r290 P14
  * continuationWait). Each form = the status word's i18n key + the trailing text's key(s) (null: none). Approved by
  * Cutex maintainers on 2026-11-18 because the owner saw a waiting delegation as 运行中; all are sub-forms of the
- * approved 「等待中 · 约{时间}继续」. 续接已达上限 (limited) is not one: it stays on delegation cards / lists, and a
+ * approved 「等待中 · 约{时间}继续」. 自动继续已到期 (limited) is not one: it stays on delegation cards / lists, and a
  * 接下来 row shows such a wait as plain 等待中 (lib/nextUpDelegation).
  */
 export const NEXT_UP_DELEGATION_WAITS = {
-  timed: { status: "delegation.status.continuationWait", trailing: ["delegation.cont.inMinutes", "delegation.cont.at"], text: { zh: "等待中 · 约{时间}继续", en: "Waiting · continues ~{time}" } },
-  due: { status: "delegation.status.continuationWait", trailing: ["delegation.cont.soon"], text: { zh: "等待中 · 即将继续", en: "Waiting · continues shortly" } },
-  children: { status: "delegation.status.continuationWait", trailing: ["delegation.cont.children"], text: { zh: "等待中 · 等子委托完成", en: "Waiting · until its delegations finish" } },
-  jobs: { status: "delegation.status.continuationWait", trailing: ["delegation.cont.jobs"], text: { zh: "等待中 · 等作业完成", en: "Waiting · until its jobs finish" } },
+  timed: { status: "delegation.status.continuationWait", trailing: ["delegation.cont.inMinutes", "delegation.cont.inHours", "delegation.cont.at"], text: { zh: "等待中 · 约 N 分钟/小时后继续 · 预计{时间}继续", en: "Waiting · continues in ~N min / h · expected to continue {time}" } },
+  due: { status: "delegation.status.continuationWait", trailing: ["delegation.cont.overdue"], text: { zh: "等待中 · 已到时间，还未继续", en: "Waiting · time reached, not continued yet" } },
+  children: { status: "delegation.status.continuationWait", trailing: ["delegation.cont.children"], text: { zh: "等待中 · 等待子委托完成", en: "Waiting · waiting for its delegations to finish" } },
+  jobs: { status: "delegation.status.continuationWait", trailing: ["delegation.cont.jobs"], text: { zh: "等待中 · 等待作业完成", en: "Waiting · waiting for its jobs to finish" } },
   plain: { status: "delegation.status.continuationWait", trailing: null, text: { zh: "等待中", en: "Waiting" } },
   ready: { status: "delegation.status.continuationReady", trailing: null, text: { zh: "等待继续", en: "Ready to continue" } },
 } as const satisfies Record<string, { status: string; trailing: readonly string[] | null; text: Text }>;
 /** Who approved the forms above, when and why (registry change log 2.1). */
-export const NEXT_UP_DELEGATION_WAITS_APPROVAL = { by: "Cutex maintainers", date: "2026-11-18", why: "owner saw a waiting delegation as 运行中; sub-forms of the approved 「等待中 · 约{时间}继续」" } as const;
+export const NEXT_UP_DELEGATION_WAITS_APPROVAL = { by: "owner via Cutex maintainers", date: "2026-11-25", why: "2.1 (2026-11-18): owner saw a waiting delegation as 运行中. 2.9: say when it continues; an overdue wait reads 已到时间，还未继续, never 即将继续" } as const;
+
+/**
+ * Registry 2.10 (§三之五): the only next-step buttons a delegation row in 接下来 may show, from the host's current blocker
+ * (cutex r295 `activityLink`; lib/activityStep ownSurfaceStep). Navigation only: they open the delegation's detail at its
+ * result / its approval and decide nothing. A row with 批准 / 拒绝 of its own shows no 查看审批; the blocker itself is
+ * not shown (the row's registered status word says the state). Older hosts: no button.
+ */
+export const NEXT_UP_DELEGATION_STEPS = {
+  result: { label: "delegation.step.next.result", text: { zh: "查看结果", en: "View result" } },
+  approval: { label: "delegation.step.next.approval", text: { zh: "查看审批", en: "View approval" } },
+} as const satisfies Record<string, { label: string; text: Text }>;
+export const NEXT_UP_DELEGATION_STEPS_APPROVAL = { by: "Cutex maintainers (navigation metadata)", date: "2026-11-25", why: "Show the host's next step on delegation rows; only navigation, never a decision" } as const;
+
+/**
+ * Registry 2.11 (§三之六): a delegation status notice row (kind `delegationStatus`) may show, after its title, who or
+ * what ended the delegation or failed its attempt, from the host's terminal notices (cutex r295). Display only: no new
+ * state or button; the whole sequence (time, status, who, attempt, reason) on hover. An unknown actor reads 未记录由谁,
+ * never 你. Older hosts: nothing.
+ */
+export const NEXT_UP_DELEGATION_ENDING = {
+  by: { label: "delegation.ending.by", text: { zh: "由 {who}", en: "by {who}" } },
+  byYou: { label: "delegation.ending.byYou", text: { zh: "由你", en: "by you" } },
+  byUnknown: { label: "delegation.ending.byUnknown", text: { zh: "未记录由谁", en: "not recorded by whom" } },
+} as const satisfies Record<string, { label: string; text: Text }>;
+export const NEXT_UP_DELEGATION_ENDING_APPROVAL = { by: "Cutex maintainers (terminal notices)", date: "2026-11-25", why: "The requester must see when a delegation is stopped, closed or its handler fails, and by whom" } as const;
 
 /** Words that must never show again (registry §二); a test checks no Next Up string contains them. */
-export const RETIRED_WORDS = ["对方正忙", "主机正忙", "等待插入时机", "合并结果", "已接收", "已登记", "积压过久等你放行"] as const;
+/** 已接收 left the list in 2.9 (owner 2026-11-25: a delegation's starting status reads 已接收). */
+export const RETIRED_WORDS = ["对方正忙", "主机正忙", "等待插入时机", "合并结果", "已登记", "积压过久等你放行"] as const;
 
 // ---------- projection: backend record → registry state ----------
 
@@ -397,14 +423,14 @@ export const langOf = (locale: string | undefined): Lang => (locale ?? "").start
 export const DISABLED_REASONS = {
   notOffered: { zh: "这台主机现在不接受这个操作", en: "The host does not accept this right now" },
   loading: { zh: "正在读取这条消息，稍等", en: "Loading this message, one moment" },
-  noDelegation: { zh: "还没读到这个委托", en: "This delegation has not loaded yet" },
-  notReviewable: { zh: "这个委托现在不能在这里审核，点「查看委托」", en: "This delegation cannot be reviewed here now; use “View delegation”" },
+  noDelegation: { zh: "还没读取这个委托", en: "This delegation has not loaded yet" },
+  notReviewable: { zh: "这个委托现在不能在这里审批，点「查看委托」", en: "This delegation cannot be approved here now; use “View delegation”" },
   notStartable: { zh: "这个 agent 现在不能从这里启动", en: "This agent cannot be started from here now" },
-  notIdle: { zh: "对方正在工作，下次工作时会读到", en: "The agent is working; it reads this during its next work" },
+  notIdle: { zh: "对方正在工作，下次工作时会读入", en: "The agent is working; it reads this during its next work" },
   noText: { zh: "原文不在本机，不能放回输入框", en: "The text is not on this computer, so it cannot go back to the input box" },
   readOnly: { zh: "这里只能查看", en: "View only here" },
   pending: { zh: "正在处理", en: "Working on it" },
-  composerBusy: { zh: "输入框里还有没发出的文字，先发出或清空", en: "The input box still has unsent text; send or clear it first" },
+  composerBusy: { zh: "输入框里还有未发送的文字，先发送或清空", en: "The input box still has unsent text; send or clear it first" },
 } as const satisfies Record<string, Text>;
 export type DisabledReasonId = keyof typeof DISABLED_REASONS;
 
@@ -551,7 +577,7 @@ export function localSendView(phase: "sending" | "unconfirmed", error?: string):
 }
 
 /** 「不再显示」 could not be stored: the row stays (registry 1.4: a hide that is not durable is not claimed done). */
-export const LOCAL_HIDE_FAILED: Text = { zh: "没能保存「不再显示」，这一条还会显示", en: "Could not save “Hide”; this one still shows" };
+export const LOCAL_HIDE_FAILED: Text = { zh: "未能保存「不再显示」，这一条还会显示", en: "Could not save “Hide”; this one still shows" };
 
 /**
  * The identity of a row (registry 1.7 / 1.9): one delivery occurrence, not one delegation. The host's input id is that

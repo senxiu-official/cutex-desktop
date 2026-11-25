@@ -61,7 +61,7 @@ function session(id: string, lastTurnError: LastTurnError | null | undefined): S
     registrationClass: null,
     lifecycle: "active",
     revision: 1,
-    cwd: `/home/ema/${id}`,
+    cwd: `/home/user/${id}`,
     note: null,
     avatar: null,
     profile: "gamma",

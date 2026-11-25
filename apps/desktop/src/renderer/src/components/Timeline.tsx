@@ -4,7 +4,7 @@ import { useAgentPauseHint } from "./AgentPauseParts";
 import { viewKey } from "../lib/viewKey";
 import type { InputRecord } from "@cutex-desktop/protocol";
 import { usesInputLedger, usesOwnerCarries } from "../lib/deliveryMode";
-import { showStandaloneDelivery } from "../lib/inputLedger/deliveryPresentation";
+import { ledgerTailTurn, quietDeliveryHold, showStandaloneDelivery } from "../lib/inputLedger/deliveryPresentation";
 import { missingTimelineRecords, placeMissingRecords, strandedNote, timelineRecordIndex, ownerRecordFor, ownerTimelineEntry, ownerOutboxTimelineEntry, predictedOwnerSurface, type LedgerOwnerOutbox } from "../lib/inputLedger/owner";
 import { carriedInputs, carriedReceivedRow } from "../lib/inputLedger/carries";
 import { placeholderMessage } from "../lib/inputLedger/placeholder";
@@ -12,6 +12,8 @@ import { useDelegation } from "../lib/delegationStore";
 import { CarriedInputRows } from "./CarriedInputRows";
 import { InputStatus } from "./InputStatus";
 import { featuresOf } from "../store";
+import { CrossHostNote } from "./CrossHostReceipt";
+import { useCrossHost } from "../lib/useCrossHost";
 // Timeline rendering shared by the conversation and the read-only sub-agent view: turn headers
 // (duration + time), work groups (§4.14), messages incl. compact agent-bus rows (§4.15), and the
 // running turn's live line at the end of the stream.
@@ -39,7 +41,7 @@ import { formatAbsolute, formatAt, formatWhen, useClock, useNow } from "../lib/t
 import { orderedEntries, type TimelineEntry, type TimelineState, type TurnView } from "../lib/timeline";
 import { segmentEntries } from "../lib/workGroups";
 import { pairSentCalls } from "../lib/sentToolPairs";
-import { createTimelineWindow, recentEntries } from "../lib/timelineWindow";
+import { createTimelineWindow, recentEntries, visibleTurnPositions } from "../lib/timelineWindow";
 import { createTimelineIdentityEntries, createTimelineTurnIndex } from "../lib/timelineEntries";
 import { pendingTail, pendingUserEntry, sendRowKey, timelineRowKey, timelineTail, type OutboxEntry } from "../lib/legacyDelivery/outbox";
 import { LedgerPendingStatus, SessionDeliveryStatus, PendingStatus } from "./PendingSends";
@@ -96,6 +98,7 @@ import { Avatar } from "./Avatar";
 import { shownUserName } from "../../../shared/users";
 import { useOwnerWindow } from "../lib/ownerContext";
 import { useTurnStop } from "../lib/runtimeStops";
+import { SelectionActions } from "./SelectionActions";
 
 function formatDuration(seconds: number): string {
   const s = Math.max(0, Math.round(seconds));
@@ -201,7 +204,16 @@ export function TurnTail({ timeline, sessionId, thread = "agent" }: { timeline: 
   </div>;
   if (ledgerEnabled) {
     const running = delivery?.state === "turn";
-    if (!running && !showStandaloneDelivery(delivery, false)) return retryLine;
+    if (!running && !showStandaloneDelivery(delivery, false)) {
+      // Held for a delegation lease (the Composer shows the lease): the line keeps its box, empty and still, like every
+      // other delivery state keeps it, so the timeline does not shrink and grow by 22 px each time delivery flips
+      // between the turn and the hold (owner 2026-11-26). No busy dots, no text: no running turn is invented.
+      if (quietDeliveryHold(delivery)) return <>
+        <div className="mt-1.5 flex h-4 items-center gap-2" data-testid="turn-working" data-turn-held="" aria-hidden />
+        {retryLine}
+      </>;
+      return retryLine;
+    }
     return <>
       <div className="mt-1.5 flex h-4 items-center gap-2" data-testid="turn-working">
         {running ? <><BusyDots /><span className="text-caption text-subtle">{t("turn.activity.working")}</span></>
@@ -300,7 +312,7 @@ function LedgerPlaceholderRow({ record, hostId, carried, nameOf, sessionId, read
   // A new entry per record / ask change: MemoEntry compares the entry, not the ledger record.
   const entry = useMemo<TimelineEntry>(() => ({ kind: "received", id: record.timelineItemId ?? record.inputId, turnId: record.turnId ?? "", message: placeholderMessage(record, ask) }), [record, ask]);
   return <div data-input-id={record.inputId} data-ledger-placeholder={record.kind} data-carried-input-id={carried ? record.inputId : undefined}>
-    <MemoEntry entry={entry} ledgerRecord={record} nameOf={nameOf} sessionId={sessionId} readOnly={readOnly} actionable={false} bar={undefined} dropped={0} foldRole="off" />
+    <MemoEntry entry={entry} ledgerRecord={record} placeholder nameOf={nameOf} sessionId={sessionId} readOnly={readOnly} actionable={false} bar={undefined} dropped={0} foldRole="off" />
   </div>;
 }
 
@@ -308,7 +320,9 @@ function LedgerPlaceholderRow({ record, hostId, carried, nameOf, sessionId, read
 function SentMessage({ entry, name, onContextMenu }: { entry: Extract<TimelineEntry, { kind: "sent" }>; name: string; onContextMenu: React.MouseEventHandler }) {
   const record = useAgentMessage(entry.messageId ?? null);
   const recipient = useAgentFeatures(entry.to);
-  return <BusMessage direction="out" name={name} mode={entry.deliveryMode} text={entry.text} preview={entry.preview ?? null} kind={record?.kind ?? entry.deliveryKind ?? null} downgraded={!!record?.downgraded} messageId={entry.messageId ?? null} recipientId={entry.to || null} recipientRuntime={recipient.runtime} recipientFeatures={recipient.map} onContextMenu={onContextMenu} />;
+  // peer-delivery-receipts-v1: a note to another host says which host and how far it got (the sender's host's record).
+  const ch = useCrossHost(record, useConvHost());
+  return <><BusMessage direction="out" name={name} mode={entry.deliveryMode} text={entry.text} preview={entry.preview ?? null} kind={record?.kind ?? entry.deliveryKind ?? null} downgraded={!!record?.downgraded} messageId={entry.messageId ?? null} recipientId={entry.to || null} recipientRuntime={recipient.runtime} recipientFeatures={recipient.map} onContextMenu={onContextMenu} />{ch && <div className="-mt-1 mb-2 min-w-0 pl-6" data-sent-cross-host=""><CrossHostNote ch={ch} /></div>}</>;
 }
 
 /**
@@ -382,7 +396,7 @@ function useSentImages(hostId: string, sessionId: string, id: string | null, led
   return useMemo(() => (extra?.length ? messageImages(extra as { type: string }[]) : undefined), [extra]);
 }
 
-function Entry({ entry: initial, ledgerRecord, ledgerRecords, ledgerPending, pending, nameOf, sessionId, readOnly, actionable, bar, dropped, foldRole, changes, reply }: { /** 已回复 (handler side): shown in the reply's action row (design 040 step 10). */ reply?: DelegationAskRow; entry: TimelineEntry; ledgerRecord?: InputRecord; ledgerRecords?: readonly InputRecord[]; ledgerPending?: LedgerOwnerOutbox; /** The user's send not in the thread yet (lib/outbox): the same row, dimmed, with its status line. */ pending?: OutboxEntry; nameOf: (id: string) => string; sessionId: string; readOnly: boolean; actionable: boolean; bar: ReplyBar | undefined; dropped: number; foldRole: FoldRole; /** The finished turn's file changes (turn summary; only with `bar`). */ changes?: TurnChanges }) {
+function Entry({ entry: initial, ledgerRecord, ledgerRecords, ledgerPending, placeholder = false, pending, nameOf, sessionId, readOnly, actionable, bar, dropped, foldRole, changes, reply }: { /** 已回复 (handler side): shown in the reply's action row (design 040 step 10). */ reply?: DelegationAskRow; entry: TimelineEntry; ledgerRecord?: InputRecord; ledgerRecords?: readonly InputRecord[]; /** A ledger record drawn before its native item (LedgerPlaceholderRow): the body is only the preview, so the row keeps its timeline status and actions — nothing else offers them. */ placeholder?: boolean; ledgerPending?: LedgerOwnerOutbox; /** The user's send not in the thread yet (lib/outbox): the same row, dimmed, with its status line. */ pending?: OutboxEntry; nameOf: (id: string) => string; sessionId: string; readOnly: boolean; actionable: boolean; bar: ReplyBar | undefined; dropped: number; foldRole: FoldRole; /** The finished turn's file changes (turn summary; only with `bar`). */ changes?: TurnChanges }) {
   const entry = useStreamedEntry(sessionId, initial);
   const userDisplay = useMemo(() => {
     if (entry.kind !== "user") return null;
@@ -427,7 +441,7 @@ function Entry({ entry: initial, ledgerRecord, ledgerRecords, ledgerPending, pen
               className={`selectable message-body max-w-[75%] rounded-2xl border bg-bubble px-4 py-2 text-[length:var(--chat-font-size,14px)] font-chat-context whitespace-pre-wrap transition-[opacity,border-color] duration-200 [font-family:var(--font-chat,var(--font-sans))] motion-reduce:transition-none ${failed ? "border-danger/60" : "border-border"} ${(pending || ledgerPending) && !failed ? "opacity-80" : ""}`}
               data-send-bubble=""
             >
-              <Foldable fold={fold} stickyLeft><MentionText text={text} hostId={hostId} sessionId={sessionId} /></Foldable>
+              <Foldable fold={fold} stickyLeft><SelectionActions as="span" turnId={entry.turnId ?? null}><MentionText text={text} hostId={hostId} sessionId={sessionId} /></SelectionActions></Foldable>
             </div>
           )}
           {ledgerPending || (ledgerRecord && ledgerRecord.state !== "inContext") || pending || ((text || extra) && !readOnly) ? (
@@ -475,7 +489,7 @@ function Entry({ entry: initial, ledgerRecord, ledgerRecords, ledgerPending, pen
     // renders by its view schema (lib/receivedRows); whatever no branch claims is a bus message.
     case "received":
       return <><ReceivedOutlet message={entry.message} sessionId={sessionId} readOnly={readOnly}
-        fallback={<BusMessage direction="in" name={entry.message.senderName} senderId={entry.message.senderId} sourceKind={entry.message.sourceKind} mode={entry.message.deliveryMode} text={entry.message.text} kind={entry.message.envelope?.kind ?? null} envelope={entry.message.envelope ?? null} recipientRuntime={agent.runtime} recipientFeatures={agent.map} onContextMenu={menu("received", entry.message.text)} />} />{(ledgerRecords ?? (ledgerRecord ? [ledgerRecord] : [])).map(record => <span key={record.inputId} title={record.preview ?? record.inputId}><InputStatus record={record} sessionId={sessionId} hostId={hostId} readOnly={readOnly} timeline /></span>)}</>;
+        fallback={<BusMessage direction="in" name={entry.message.senderName} senderId={entry.message.senderId} sourceKind={entry.message.sourceKind} mode={entry.message.deliveryMode} text={entry.message.text} kind={entry.message.envelope?.kind ?? null} envelope={entry.message.envelope ?? null} recipientRuntime={agent.runtime} recipientFeatures={agent.map} onContextMenu={menu("received", entry.message.text)} />} />{(ledgerRecords ?? (ledgerRecord ? [ledgerRecord] : [])).map(record => <span key={record.inputId} title={record.preview ?? record.inputId}><InputStatus record={record} sessionId={sessionId} hostId={hostId} readOnly={readOnly} timeline history={!placeholder} /></span>)}</>;
     case "sent":
       return <SentMessage entry={entry} name={nameOf(entry.to)} onContextMenu={menu("sent", entry.text)} />;
     case "tool":
@@ -541,15 +555,18 @@ export function TimelineBody({ timeline, entries: suppliedEntries, version, sess
     [recent, visibleTurns, version, turnCount, activeTurn, retryVisible]);
   const derived = useMemo(() => ({
     turnOf: new Map(visibleTurns.map((turn) => [turn.id, turn])),
+    // Each shown turn's position, for a user row's 「之后 N 轮」 count (one lookup per row, not a scan from the start:
+    // perf audit 2026-11-24 #3). The first position of an ID, as findIndex gave.
+    turnAt: visibleTurnPositions(visibleTurns),
     bars: replyBars(visibleTurns, entries),
     latestReply: latestReplyIds(entries),
     // Handler side: the final reply of a turn a delegation started gets the 已回复 badge.
     replied: handlerReplies(entries, visibleTurns),
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [entries, visibleTurns, version, turnCount, activeTurn]);
-  const { turnOf, bars, latestReply, replied } = derived;
+  const { turnOf, turnAt, bars, latestReply, replied } = derived;
   const droppedFrom = (turnId: string) => {
-    const index = visibleTurns.findIndex(turn => turn.id === turnId);
+    const index = turnAt.get(turnId) ?? -1;
     return index < 0 ? 0 : visibleTurns.length - index;
   };
   // Turn summary: each turn's completed fileChange items, merged per file.
@@ -663,6 +680,8 @@ export function TimelineBody({ timeline, entries: suppliedEntries, version, sess
     [entries, reasoningShown, timelineInteractions, tools],
   );
   const olderHistory = hiddenTurns > 0 || !!older?.cursor;
+  // The conversation's first history page is still on its way (a fresh view: loading, no turn read yet).
+  const firstPagePending = loading && turnCount === 0;
   // An explicitly bound hidden note must not fall back to its creation time in the visible
   // window. This metadata-only check changes on paging/window changes, not streamed text.
   const notesForWindow = useMemo(() => {
@@ -680,14 +699,17 @@ export function TimelineBody({ timeline, entries: suppliedEntries, version, sess
       if (turnId) lastSegOf.set(turnId, i);
     });
     return {
-      placed: notes.length ? placeOwnerNotes(segTurns.length ? notesForWindow : notes, segTurns, visibleTurns, { olderHistory }) : { head: [], after: new Map() },
+      // Before the first history page lands nothing is placed: every note would pile up at the head (no rows yet) and
+      // most would vanish into hidden turns a moment later. Notes still waiting for the owner are in the status bar's
+      // 需要你 row (PendingOwnerNotes) meanwhile. A session with no turns at all shows them all at the head once its (empty) page is here.
+      placed: notes.length && !firstPagePending ? placeOwnerNotes(segTurns.length ? notesForWindow : notes, segTurns, visibleTurns, { olderHistory }) : { head: [], after: new Map() },
       turnErrors: turnErrorPlacement(segTurns, visibleTurns),
       turnStops: turnInterruptedPlacement(segTurns, visibleTurns),
       lastSegOf,
       barTurns: new Set([...bars.values()].map((b) => b.turnId)),
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [segments, notes, notesForWindow, visibleTurns, version, turnCount, activeTurn, olderHistory, bars]);
+  }, [segments, notes, notesForWindow, visibleTurns, version, turnCount, activeTurn, olderHistory, bars, firstPagePending]);
   const { placed, turnErrors, turnStops, lastSegOf, barTurns } = placement;
   const tailAttachments = (i: number) => {
     const turnId = segTurn(segments[i]!);
@@ -772,7 +794,7 @@ export function TimelineBody({ timeline, entries: suppliedEntries, version, sess
   const carriedRows = (ownerId: string | undefined) => ownerId && carries.byOwner.has(ownerId)
     ? <CarriedInputRows records={carries.byOwner.get(ownerId)!} received={receivedEntries.get(ownerId)!} renderRecord={ledgerInputRow} renderReceived={(entry, records) => <>
       <MemoEntry entry={entry} nameOf={nameOf} sessionId={sessionId} readOnly={readOnly} actionable={false} bar={undefined} dropped={0} foldRole={foldRoleOf(entry)} />
-      {records.map(record => <span key={record.inputId} title={record.preview ?? record.inputId} data-carried-input-id={record.inputId}><InputStatus record={record} sessionId={sessionId} hostId={view.hostId} readOnly={readOnly} timeline /></span>)}
+      {records.map(record => <span key={record.inputId} title={record.preview ?? record.inputId} data-carried-input-id={record.inputId}><InputStatus record={record} sessionId={sessionId} hostId={view.hostId} readOnly={readOnly} timeline history /></span>)}
     </>} /> : null;
   // Native items now own the full body/attachments. Do not keep a second unbounded history in local drafts.
   useEffect(() => {
@@ -876,7 +898,7 @@ export function TimelineBody({ timeline, entries: suppliedEntries, version, sess
         {undefined}
       </div></Fragment>),
       ...missingPlaced.trailing.map(missingRow),
-      ...timelineTail(ledgerEnabled ? ledger?.delivery?.turn?.turnId ?? null : timeline.activeTurnId, headed).flatMap((slot) => {
+      ...timelineTail(ledgerEnabled ? ledgerTailTurn(ledger?.delivery, timeline.activeTurnId) : timeline.activeTurnId, headed).flatMap((slot) => {
         if (slot === "pending")
           return pendingRows.flatMap((p) => {
             const key = sendRowKey(p.id);
@@ -895,7 +917,10 @@ export function TimelineBody({ timeline, entries: suppliedEntries, version, sess
             ];
           });
         const active = turnOf.get(timeline.activeTurnId ?? "");
-        if (slot === "header") return active ? [<TurnHeader key="header" turn={active} />] : [];
+        // The slot is decided on the tail's turn (on the input-ledger path the delivery's), the header shown is the
+        // thread's active turn: when the two ids differ, the active turn may already carry its header in its own row,
+        // and a second divider sat at the end, coming and going with the delivery's turn id (owner 2026-11-26).
+        if (slot === "header") return active && !headed.has(active.id) ? [<TurnHeader key="header" turn={active} />] : [];
         return [<TurnTail key="tail" timeline={timeline} sessionId={sessionId} thread={thread} />];
       })]}
 

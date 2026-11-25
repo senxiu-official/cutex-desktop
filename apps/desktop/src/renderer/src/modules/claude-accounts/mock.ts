@@ -79,6 +79,8 @@ function gauge(index: number, label: string, usedPercent: number, resetInMin: nu
 }
 const totals = (turns: number, total: number, estimatedCost: number) => ({ turns, requests: turns, input: Math.round(total * 0.8), cachedInput: Math.round(total * 0.5), output: Math.round(total * 0.2), total, estimatedCost });
 
+const EXPIRING = typeof location !== "undefined" && new URLSearchParams(location.search).has("claudeDiag");
+
 function quotaFor(account: ClaudeAccount): ProfileQuotaDetail {
   const claudeAccount = { id: account.id, label: account.label, kind: account.kind };
   if (account.kind === "api") {
@@ -89,8 +91,10 @@ function quotaFor(account: ClaudeAccount): ProfileQuotaDetail {
   }
   const gauges = account.isDefault ? [gauge(0, "5h", 38, 138), gauge(1, "7d", 12, 60 * 52)] : [gauge(0, "5h", 4, 290), gauge(1, "7d", 61, 60 * 20)];
   // A second subscription shows the expired-token state (cutex claude-quota-stale-credentials).
-  if (!account.isDefault) return { source: "claude", gauges, nativeQuota: { claudeAccount, fetchedAt: now() - 120, stale: false, refreshing: false, consecutiveFailures: 0, lastError: null, credentialsExpired: true, credentialsExpiredAt: now() - 600, source: "read" } };
-  return { source: "claude", gauges, nativeQuota: { claudeAccount, fetchedAt: now() - 120, stale: false, refreshing: false, consecutiveFailures: 0, lastError: null, source: "read" } };
+  if (!account.isDefault) return { source: "claude", gauges, nativeQuota: { claudeAccount, fetchedAt: now() - 120, stale: false, refreshing: false, consecutiveFailures: 0, lastError: null, credentialsExpired: true, credentialsExpiredAt: now() - 600, loginDiagnostic: "loginExpired", source: "read" } };
+  // `?claudeDiag` (r295): the default account's credential is about to expire (it still reads).
+  if (EXPIRING) return { source: "claude", gauges, nativeQuota: { claudeAccount, fetchedAt: now() - 120, stale: false, refreshing: false, consecutiveFailures: 0, lastError: null, credentialsExpired: true, credentialsExpiredAt: now() + 3600, loginDiagnostic: "loginExpiring", source: "read" } };
+  return { source: "claude", gauges, nativeQuota: { claudeAccount, fetchedAt: now() - 120, stale: false, refreshing: false, consecutiveFailures: 0, lastError: null, loginDiagnostic: null, source: "read" } };
 }
 
 /** The account a Claude profile is bound to (accounts' `profiles`; unbound = `default`, like cutex). */

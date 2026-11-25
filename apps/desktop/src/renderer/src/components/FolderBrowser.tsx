@@ -118,7 +118,7 @@ export function FolderBrowser({ start, hostId, resolve }: { start: string | null
         <button onClick={() => done(null)} className="rounded-md px-3 py-1 text-sm text-muted hover:bg-surface-2">
           {t("dialog.cancel")}
         </button>
-        <button disabled={!dir || loading} onClick={() => dir && done(dir.path)} className="rounded-md bg-accent px-3 py-1 text-sm text-white disabled:opacity-40">
+        <button disabled={!dir || loading} onClick={() => dir && done(dir.path)} className="rounded-md bg-accent px-3 py-1 text-sm text-on-accent disabled:opacity-40">
           {t("folder.choose")}
         </button>
       </div>

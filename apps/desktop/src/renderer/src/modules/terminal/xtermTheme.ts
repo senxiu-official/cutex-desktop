@@ -101,7 +101,7 @@ export function themeFromTokens(tokens: { bg?: string; fg?: string; accent?: str
   const mode: "light" | "dark" = lum !== null && lum < 0.18 ? "dark" : "light";
   const background = tokens.bg || PALETTE_BACKGROUND[mode];
   const foreground = tokens.fg || (mode === "dark" ? "#ececec" : "#1d1d1f");
-  const accent = tokens.accent || (mode === "dark" ? "#60a5fa" : "#3b82f6");
+  const accent = tokens.accent || (mode === "dark" ? "#79acff" : "#1861d2");
   return {
     ...ANSI_PALETTES[mode],
     background,
@@ -117,10 +117,10 @@ export function terminalTheme(): ITheme {
   return themeFromTokens({ bg: cssVar("--bg"), fg: cssVar("--fg"), accent: cssVar("--accent") });
 }
 
-/** Calls `onChange` when the app theme (data-theme) or the system colour scheme changes. */
+/** Calls `onChange` when the app theme (data-theme), the accent (data-accent) or the system colour scheme changes. */
 export function watchTheme(onChange: () => void): () => void {
   const observer = new MutationObserver(onChange);
-  observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+  observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme", "data-accent"] });
   const media = typeof matchMedia === "function" ? matchMedia("(prefers-color-scheme: dark)") : null;
   media?.addEventListener("change", onChange);
   return () => {

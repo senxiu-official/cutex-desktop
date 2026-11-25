@@ -2,7 +2,7 @@
 import { act, createElement as h } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { useDevicePixelRatio } from "../src/renderer/src/lib/pixelRatio";
+import { ceilToDevicePixel, roundToDevicePixel, useDevicePixelRatio } from "../src/renderer/src/lib/pixelRatio";
 import { OwnerDocumentContext } from "../src/renderer/src/lib/ownerContext";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -53,4 +53,24 @@ it("uses the desk's display ratio rather than the main window's", () => {
     expect(host.textContent).toBe("1.25");
     act(() => root.render(null));
   } finally { frame.remove(); }
+});
+
+// The timeline's bottom-follow room and its column padding / lead (components/Conversation) sit on whole device pixels:
+// at 1.875 a part-pixel length moved what follows by a part of a pixel, and some lines jumped while others stayed.
+it("puts lengths on the device pixel grid (1.875: whole multiples of 8/15 px)", () => {
+  const onGrid = (px: number, ratio: number) => Math.abs(px * ratio - Math.round(px * ratio)) < 1e-9;
+  for (const v of [2.1, 46, 76.27, 0.4, 13.7]) {
+    expect(onGrid(roundToDevicePixel(v, 1.875), 1.875)).toBe(true);
+    expect(onGrid(ceilToDevicePixel(v, 1.875), 1.875)).toBe(true);
+    expect(Math.abs(roundToDevicePixel(v, 1.875) - v)).toBeLessThanOrEqual(0.5 / 1.875 + 1e-9);
+    expect(ceilToDevicePixel(v, 1.875)).toBeGreaterThanOrEqual(v - 0.02 / 1.875);
+  }
+  expect(ceilToDevicePixel(46, 1.875)).toBeCloseTo(46.4, 9); // the lead in the 1.875 check: 86.25 -> 87 device px
+  expect(roundToDevicePixel(2.13336, 1.875)).toBeCloseTo(32 / 15, 9); // already 4 device px: unchanged
+  expect(roundToDevicePixel(24, 2)).toBe(24);
+  expect(ceilToDevicePixel(16, 1.25)).toBe(16);
+  // A hair over a boundary (layout float noise) does not add a pixel; a bad ratio falls back to 1.
+  expect(ceilToDevicePixel(32 / 15 + 1e-6, 1.875)).toBeCloseTo(32 / 15, 9);
+  expect(roundToDevicePixel(3.4, 0)).toBe(3);
+  expect(ceilToDevicePixel(3.4, Number.NaN)).toBe(4);
 });

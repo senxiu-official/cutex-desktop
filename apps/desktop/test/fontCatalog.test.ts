@@ -106,6 +106,34 @@ describe("catalog fonts in the font plan", () => {
     expect(controller.getStatus().failedFamilies).toEqual(["Swei Spring SC"]);
   });
 
+  // Owner 2026-11-24: Bitter (界面·西文) and Literata (对话·西文) rendered in the preview, yet 「以下字体未能加载，已使用默认字体：
+  // Bitter, Literata」. Both are variable fonts ("100 900" / "200 900"); the check wanted a loaded face of weight "400".
+  it("a loaded variable catalog font is not reported as fallen back; a failed one still is", async () => {
+    const run = async (fail: (spec: RoutedFace) => boolean) => {
+      const controller = new FontRoutingController<{ load(): Promise<unknown> }>({
+        createFace: (spec) => ({ load: () => (fail(spec) ? Promise.reject(new Error("404")) : Promise.resolve()) }),
+        add: () => {}, remove: () => {}, publish: () => {},
+      });
+      await controller.update({ ...DEFAULT_APPEARANCE, uiFont: "Bitter", chatFont: "Literata" });
+      return controller.getStatus();
+    };
+    const ok = await run(() => false);
+    expect(ok.phase).toBe("ready");
+    expect(ok.failedFamilies).toEqual([]);
+    const failed = await run((spec) => spec.family === "Literata");
+    expect(failed.failedFamilies).toEqual(["Literata"]);
+    // Installed (local) fonts: their regular face still decides; a bold face that loaded alone does not count.
+    const controller = new FontRoutingController<{ load(): Promise<unknown> }>({
+      createFace: (spec) => ({ load: () => (spec.family === "Georgia" && spec.descriptors.weight === "400" ? Promise.reject(new Error("missing")) : Promise.resolve()) }),
+      add: () => {}, remove: () => {}, publish: () => {},
+    });
+    await controller.update({ ...DEFAULT_APPEARANCE, uiFont: "Georgia" });
+    expect(controller.getStatus().failedFamilies).toEqual(["Georgia"]);
+    // Exactly one regular face per routed family alias.
+    const plan = buildFontPlan({ ...DEFAULT_APPEARANCE, uiFont: "Bitter", chatFont: "Literata" }, 1);
+    for (const alias of new Set(plan.faces.map((face) => face.alias))) expect(plan.faces.filter((face) => face.alias === alias && face.regular)).toHaveLength(1);
+  });
+
   it("plans again with the same choices on reload (a pack family was imported)", async () => {
     let creates = 0;
     const controller = new FontRoutingController<{ load(): Promise<unknown> }>({ createFace: () => (creates++, { load: () => Promise.resolve() }), add: () => {}, remove: () => {}, publish: () => {} });

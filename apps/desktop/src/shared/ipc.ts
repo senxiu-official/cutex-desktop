@@ -3,7 +3,9 @@ import type { SessionForkRequest, SessionForkResult, SessionForkPreview, Session
 import type { AgentMcpResult } from "./sessionMcp";
 import type { FilesRevertRequest, FilesRevertResult } from "./filesRevert";
 import type { AskReviewFields } from "./delegationReviews";
+import type { CrossHost } from "./crossHost";
 import type { ApprovalPage, OwnerStorePageQuery } from "./notificationPaging";
+import type { ServiceNotificationOpen } from "./serviceNotifications";
 // IPC contract between Electron main and the renderer. The renderer never sees the cutex token
 // and never talks to the daemon directly; everything goes through these calls.
 import type { AgentPauseResult } from "./agentPause";
@@ -315,7 +317,7 @@ export interface ProfileAccountLink {
   source: "auto" | "manual";
   secretId: string;
 }
-export type ProfileAppearanceRevisions = Partial<Record<"color" | "avatarThemes" | "avatarStyle" | "introGreeting" | "avatar" | "introPortrait", { etag: string | null; updatedAt: string | null }>>;
+export type ProfileAppearanceRevisions = Partial<Record<"color" | "avatarThemes" | "avatarStyle" | "introGreeting" | "avatar" | "introPortrait" | "planLabel", { etag: string | null; updatedAt: string | null }>>;
 
 /** `GET /v2/profiles` item. */
 /** `ProfileVariantFields`: cutex profile-runtime-variants (shared/profileVariants.ts); absent on older hosts. */
@@ -349,6 +351,8 @@ export interface ProfileItem extends ProfileVariantFields {
   authKind: "chatgpt" | "apiKey" | "claude" | "none";
   /** cutex `profile-plan-label`: ChatGPT profiles show the signed-in account's plan, else the stored label. */
   planLabel: string | null;
+  /** Explicit owner label for cross-host sync. Absent on older hosts. */
+  planLabelManual?: string | null;
   /** Where `planLabel` came from ("account" = the ChatGPT login). Absent on older cutex. */
   planLabelSource?: "account" | "manual" | null;
   isDefault: boolean;
@@ -965,6 +969,16 @@ export interface GlobalSettings {
    *  images does — `queue` (default; the original image goes out when the turn ends) or `steer`. Explicit
    *  queue / queue-steer / owner join never read it. PATCH `{imageInput: {busyBehavior}}`. */
   imageInput?: { busyBehavior: ImageBusyBehavior };
+  /** cutex r295 heavy-read slots (absent on older cutex): how many heavy reads (session history, …) the Management
+   *  service handles at once. The saved manual choice or null = automatic; PATCH `{heavyReadConcurrency: n | null}`
+   *  (owner only). A change applies after the Management service restarts (`restartRequired` lists it). */
+  heavyReadConcurrency?: number | null;
+  /** The host-computed automatic number (read-only). */
+  heavyReadConcurrencyDefault?: number;
+  /** The number the running Management service uses (read-only). */
+  heavyReadConcurrencyActive?: number;
+  /** Allowed manual choices, currently [2, 4, 6, 8] (read-only). */
+  heavyReadConcurrencyOptions?: number[];
 }
 
 /** `imageInput.busyBehavior` of the host settings (image-input-steering). */
@@ -1634,10 +1648,12 @@ export interface HostApi {
    * are a result, not a throw.
    */
   copyProfileToHost(request: import("./profileTransfer").ProfileTransferRequest): Promise<import("./profileTransfer").ProfileTransferResult>;
+  /** 项目 table: one batch at a time across every window (main/projectBatchLease). */
+  projectBatchLease(request: import("./projectBatchOutcome").ProjectBatchLeaseRequest): Promise<import("./projectBatchOutcome").ProjectBatchLeaseResult>;
 }
 
 /** HostApi method names: served by main `HostManager`, never routed to a daemon (main + preload). */
-export const HOST_METHOD_NAMES = ["profileLinkState", "syncProfileLinks", "resetProfileLinks", "hosts", "sshConfigHosts", "addSshHost", "importSshHostToken", "pairSshHost", "setSshConnectAs", "updateSshHost", "removeSshHost", "switchHost", "setScope", "reconnectHost", "connectHost", "setHostAutoConnect", "setHostAppearance", "saveHostGroups", "testHost", "setHostStartOn", "sshPrompts", "answerSshPrompt", "identityState", "exportIdentity", "importIdentity", "copyIdentityKey", "importIdentityKey", "setIdentityName", "copyProfileToHost"] as const satisfies readonly (keyof HostApi)[];
+export const HOST_METHOD_NAMES = ["profileLinkState", "syncProfileLinks", "resetProfileLinks", "hosts", "sshConfigHosts", "addSshHost", "importSshHostToken", "pairSshHost", "setSshConnectAs", "updateSshHost", "removeSshHost", "switchHost", "setScope", "reconnectHost", "connectHost", "setHostAutoConnect", "setHostAppearance", "saveHostGroups", "testHost", "setHostStartOn", "sshPrompts", "answerSshPrompt", "identityState", "exportIdentity", "importIdentity", "copyIdentityKey", "importIdentityKey", "setIdentityName", "copyProfileToHost", "projectBatchLease"] as const satisfies readonly (keyof HostApi)[];
 
 /** Request/response calls (renderer → main). */
 /** Native Windows sandbox readiness (`windowsSandbox/readiness`; cutex windows-sandbox-readiness). */
@@ -1661,6 +1677,7 @@ export interface ThreadSearchPage {
 
 import type { StorageOverview, StorageRefresh, StorageItemsPage, StorageItemQuery } from "./storage";
 import type { StorageCleanupApi } from "./storageCleanup";
+import type { SearchTurnPreview, SessionSearchQuery, SessionSearchResponse } from "./sessionSearch";
 
 export interface HistoryMediaExpected { mime: string; size: number }
 export type HistoryMediaPayload = { bytes: Uint8Array; mime: string; size: number } | { dataUrl: string };
@@ -1684,6 +1701,32 @@ export interface DaemonApi extends StorageCleanupApi {
   sideInterrupt(sessionId: string, chatId: string): Promise<{ chat: SideChat }>;
   sideRespond(sessionId: string, chatId: string, requestId: string | number, reply: SideReply): Promise<{ chat: SideChat }>;
   sideClose(sessionId: string, chatId: string): Promise<{ closed: true }>;
+  /** `GET /v2/sessions/search` (session-search-v1): the sidebar's directory filter and 查找旧任务, one page, background read. */
+  sessionSearch(query: SessionSearchQuery): Promise<SessionSearchResponse>;
+  /** history-turn-read: one search result's turn as plain text with its times (the search page's preview); null = no such turn. */
+  sessionSearchTurn(sessionId: string, turnId: string): Promise<SearchTurnPreview | null>;
+  // ---- 个人助理 (cutex r295 personal-assistants-local-v1, r296 recurring / owner views; main/personalAssistantsApi.ts) ----
+  paList(query?: { cursor?: string | null; limit?: number }): Promise<import("./personalAssistants").PaList>;
+  paGet(id: string): Promise<import("./personalAssistants").PaView>;
+  paCreate(input: import("./personalAssistants").PaCreateInput): Promise<import("./personalAssistants").PaView>;
+  paUpdate(id: string, input: import("./personalAssistants").PaUpdateInput): Promise<import("./personalAssistants").PaView>;
+  paAgenda(id: string, query?: import("./personalAssistants").PaAgendaQuery): Promise<import("./personalAssistants").PaAgenda>;
+  paAudit(id: string, query?: { cursor?: number | null; limit?: number }): Promise<import("./personalAssistants").PaAuditPage>;
+  paRequests(id: string, query?: import("./personalAssistants").PaRequestsQuery): Promise<import("./personalAssistants").PaRequestPage>;
+  paRequest(id: string, requestId: string): Promise<import("./personalAssistants").PaRequestDetail>;
+  paConfirm(id: string, requestId: string, input: import("./personalAssistants").PaConfirmInput): Promise<import("./personalAssistants").PaRequest>;
+  paCancel(id: string, requestId: string, input: import("./personalAssistants").PaCancelInput): Promise<import("./personalAssistants").PaRequest>;
+  /** r296 owner query: requests of every assistant for a project and/or a Director seat (newest first). */
+  paOwnerRequests(query: import("./personalAssistants").PaOwnerRequestsQuery): Promise<import("./personalAssistants").PaRequestPage>;
+  paNotes(id: string, query?: import("./personalAssistants").PaNotesQuery): Promise<import("./personalAssistants").PaNotePage>;
+  paTemplates(id: string, query?: { cursor?: string | null; limit?: number }): Promise<import("./personalAssistants").PaTemplatePage>;
+  /** A new 定期任务 (`key` null) or the re-confirmation of one (resume, change, after the assistant / Director changed). */
+  paTemplateConfirm(id: string, key: string | null, input: import("./personalAssistants").PaTemplateConfirmInput): Promise<import("./personalAssistants").PaTemplate>;
+  paTemplateStop(id: string, key: string, how: "pause" | "cancel", input: import("./personalAssistants").PaTemplateStopInput): Promise<import("./personalAssistants").PaTemplate>;
+  paTemplateRuns(id: string, key: string, query?: { cursor?: string | null; limit?: number }): Promise<import("./personalAssistants").PaRunPage>;
+  paCalendar(id: string): Promise<import("./personalAssistants").PaCalendarInfo>;
+  paCalendarImport(id: string, input: import("./personalAssistants").PaCalendarImport): Promise<import("./personalAssistants").PaCalendarInfo>;
+  paCalendarClear(id: string, input: import("./personalAssistants").PaCalendarClear): Promise<import("./personalAssistants").PaCalendarInfo>;
   daemonState(): Promise<DaemonState>;
   /** `GET /v2/fs/dirs` (fs-dir-browse): the in-app folder browser on a remote host; null on older cutex. */
   browseDirs(path?: string): Promise<DirBrowse | null>;
@@ -1699,6 +1742,8 @@ export interface DaemonApi extends StorageCleanupApi {
   bootstrap(sessionId: string, turnLimit?: number, opts?: { boundedBus?: boolean }): Promise<SessionBootstrap>;
   /** bootstrap-bounded-bus: a page of the agent's bus messages linked to turns / items; null on a host without it. */
   busMessages(sessionId: string, request: import("./boundedBus").BusMessagesRequest): Promise<import("@cutex-desktop/protocol").BusMessagesPage | null>;
+  /** session-interaction-history-v1: a page of the agent's saved answered questions / approvals; null on a host without it. */
+  interactionHistoryPage(sessionId: string, request: import("./interactionHistory").InteractionHistoryRequest): Promise<import("@cutex-desktop/protocol").InteractionHistoryPage | null>;
   /**
    * A page of turns (offline-history; with history-pages also while live): the newest `limit`
    * (default 20) older than `cursor`. Null if unsupported.
@@ -1840,6 +1885,11 @@ export interface DaemonApi extends StorageCleanupApi {
   /** Starts an on-demand service if needed; returns the URL to open. */
   openService(slug: string): Promise<{ url: string; localUrl: string }>;
   serviceLogs(slug: string, tail?: number): Promise<{ text: string }>;
+  /** service-notifications-v1 (owner): one service's notification settings (shared/serviceNotifications.ts). */
+  serviceNotificationSettings(slug: string): Promise<import("./serviceNotifications").ServiceNotificationConfiguration>;
+  setServiceNotificationSettings(slug: string, settings: import("./serviceNotifications").ServiceNotificationSettings): Promise<import("./serviceNotifications").ServiceNotificationConfiguration>;
+  /** service-notifications-v1 (owner): the host's short history, newest first (`before` pages older). */
+  serviceNotificationHistory(query: import("./serviceNotificationQueries").ServiceNotificationHistoryQuery): Promise<import("./serviceNotifications").ServiceNotificationPage>;
   /** `PATCH /v2/services` (root): registry settings (shared/servicesSettings.ts); returns the resulting settings. */
   patchServicesSettings(patch: ServicesSettingsPatch): Promise<ServicesSettings>;
   /** profile-login: account state of a Codex profile; null when unsupported (Claude, older cutex). */
@@ -1923,6 +1973,12 @@ export interface DaemonApi extends StorageCleanupApi {
   delegationUpgradeSnapshot(projectId: string, cursor?: string): Promise<import("./delegationUpgradePreview").UpgradeSnapshot>;
   delegationUpgradeAction(projectId: string, action: import("./delegationUpgradePreview").UpgradeAction): Promise<import("./delegationUpgradePreview").UpgradeResult>;
   delegationUpgradeApproval(approvalId: string): Promise<import("./delegationUpgradePreview").UpgradeApprovalRead>;
+  /** One delegation's 允许继续 permission (tree node rooted at it); null when this host cannot say. */
+  delegationContinuationResume(projectId: string | null, askId: string): Promise<import("./delegationUpgradePreview").ContinuationResumeRead | null>;
+  /** r296 pending continuation approvals of a project (null: project-less); [] on hosts without delegation-continuation-approval-v1. */
+  delegationContinuationApprovals(projectId: string | null): Promise<import("./delegationUpgradePreview").ContinuationApprovalRead[]>;
+  /** r296 owner decision (approve / deny with reason) on one continuation approval; main re-reads it first. */
+  delegationContinuationDecision(projectId: string | null, request: import("./delegationUpgradePreview").ContinuationDecisionRequest): Promise<Pick<import("./delegationUpgradePreview").UpgradeResult, "effectState" | "receipt">>;
   delegationRoutingApprovals(projectId: string): Promise<import("./delegationUpgradePreview").UpgradeApprovalRead[]>;
   delegationUpgradeOperation(actionId: string): Promise<import("./delegationUpgradePreview").UpgradeOperationLookup>;
   delegationRetirementReview(projectId: string, request: import("./delegationUpgradePreview").PermanentRetirementReviewRequest): Promise<import("./delegationUpgradePreview").PermanentRetirementReview>;
@@ -1941,6 +1997,16 @@ export interface DaemonApi extends StorageCleanupApi {
   runtimePrunePlan(): Promise<RuntimePrunePlan>;
   /** Drops this host's plan reads still waiting (Settings closed, or the renderer gave up). */
   cancelRuntimePrunePlan(): void;
+  /** 提示词增强: `POST /v2/text-rewrite` (feature text-rewrite-v1, shared/textRewrite.ts). Never retried; failures come back as a result. */
+  textRewrite(request: import("./textRewrite").TextRewriteRequest): Promise<import("./textRewrite").TextRewriteResult>;
+  /** Drops that call: main aborts the request, which closes the connection and cancels it in cutex. */
+  cancelTextRewrite(requestId: string): void;
+  /** 功能 Profile (cutex feature-profiles, shared/featureProfiles.ts): app-feature endpoints, never agents'. Owner only.
+   *  The key is write-only: sent on create / replace, never returned (rows carry `keyPresent`). */
+  featureProfiles(): Promise<import("./featureProfiles").FeatureProfileListView>;
+  createFeatureProfile(input: import("./featureProfiles").FeatureProfileCreate): Promise<import("./featureProfiles").FeatureProfile>;
+  patchFeatureProfile(id: string, patch: import("./featureProfiles").FeatureProfilePatch): Promise<import("./featureProfiles").FeatureProfile>;
+  deleteFeatureProfile(id: string): Promise<void>;
   pruneRuntimes(ids: string[]): Promise<RuntimePruneResult>;
   /** `GET /v2/claude/accounts` (feature claude-accounts); null when the daemon predates it. */
   claudeAccounts(): Promise<ClaudeAccountList | null>;
@@ -2132,6 +2198,12 @@ export interface DaemonApi extends StorageCleanupApi {
   operatorRuntimeNotice(projectId: string, sessionId: string): Promise<{ state: "required" | "offline" }>;
   operatorAction(request: OperatorActionRequest): Promise<OperatorActionReceipt>;
   projectMutation(projectId: string, expected: { authorityEpoch: number; projectRevision: number }, operation: ProjectMutationOperation): Promise<unknown>;
+  /** 项目 table batch: archive / restore answered with what it proves (a lost reply is `unknown`, shared/projectBatchOutcome). */
+  projectLifecycle(projectId: string, expected: { authorityEpoch: number; projectRevision: number }, kind: "archive" | "restore"): Promise<import("./projectBatchOutcome").WriteOutcome>;
+  /** The project's run control alone (cutex `project-run-control-v1`). */
+  projectBatchRunControl(projectId: string): Promise<import("@cutex-desktop/protocol").ProjectRunControl>;
+  /** 项目 table batch: pause / resume every member, answered with what the receipt proves. */
+  projectBatchControl(projectId: string, action: import("./projectBatchOutcome").RunControlWrite): Promise<import("./projectBatchOutcome").WriteOutcome>;
   /** cutex project presentation update (name / badge / color; `icon` on cutex `project-icon`: omitted keeps it, null clears it). */
   projectPresentation(projectId: string, expected: { authorityEpoch: number; presentationRevision: number }, presentation: ProjectPresentationUpdate): Promise<unknown>;
   /** `GET /v2/projects/{id}/memory`; null on older cutex. */
@@ -2152,6 +2224,8 @@ export interface DaemonApi extends StorageCleanupApi {
   asks(filter: AskFilter): Promise<AskSummary[] | null>;
   /** One delegation (`GET /v2/asks/{id}`); null when unknown (purged after 30 days). */
   ask(askId: string): Promise<AskDetail | null>;
+  /** cutex r296 `asks-short-id-lookup-v1`: delegations by a short id (prefix / …suffix / full); null without the route. */
+  askIdLookup(idPrefix: string, limit?: number): Promise<AskIdLookup | null>;
   /** A page of a delegation's answer (`GET /v2/asks/{id}/answer?cursor=`); null when there is none. */
   askAnswer(askId: string, cursor?: number): Promise<AskAnswerPage | null>;
   /** `GET /v2/artifacts/{id}` (a delegation's full brief, …); null when unknown. */
@@ -2329,13 +2403,14 @@ export interface DaemonApi extends StorageCleanupApi {
    * Job Service jobs (`POST /v2/job-service/management-query`, root; feature job-service): one page,
    * newest first. `query` matches job id, action id or session id (substring).
    */
-  jobs(params: { query?: string; cursor?: string | null; limit?: number }): Promise<JobResult<JobListPage>>;
+  jobs(params: JobListParams): Promise<JobResult<JobListPage>>;
   /** `GET /v2/job-service/capabilities`: what the running Job Service offers humans (`humanOperations`). */
   jobServiceCapabilities(): Promise<JobResult<JobServiceCapabilities>>;
   /** `POST /v2/job-service/cancel` (revision-guarded). */
   cancelJob(jobId: string, expectedRevision: number): Promise<JobResult<unknown>>;
-  /** `POST /v2/job-service/output`: one page (<= 8 KiB) of a job's stdout / stderr. */
-  jobOutput(jobId: string, stream: JobStream, offset: number): Promise<JobResult<JobOutputPage>>;
+  /** `POST /v2/job-service/output`: one page (<= 8 KiB) of a job's stdout / stderr; `"tail"` (r296 humanOperations
+   *  readOutputTail): the newest retained page, with its real byte offsets. */
+  jobOutput(jobId: string, stream: JobStream, offset: number | "tail"): Promise<JobResult<JobOutputPage>>;
   /** `POST /v2/job-service/mark-external` (feature job-external): the owner settles an external job. */
   markExternalJob(input: MarkExternalInput): Promise<JobResult<unknown>>;
   /** `GET /v2/inbound-mail` (feature inbound-mail): the owner mailbox for PBS mail; never a password. */
@@ -2563,7 +2638,7 @@ export interface ServiceView {
   /** Agent `service_list` views only (the owner's Management list omits it: the owner manages every service). */
   youMayManage?: boolean;
   /** `worker` (cutex services-workers-v1): a supervised background program with no port or web page. */
-  runtime: "external" | "managed" | "static" | "worker";
+  runtime: "external" | "managed" | "static" | "worker" | "integration";
   portAllocated?: boolean;
   createdAt: string;
   updatedAt?: string;
@@ -2594,6 +2669,8 @@ export interface ServiceView {
   maxIdleTtlMinutes?: number;
   /** Owner pin: suppress automatic TTL reclaim until the owner is archived. */
   pinned?: boolean;
+  /** cutex services-remote-access-v1: open to the owner's iPad gateway (absent on older hosts = false). */
+  remoteAccess?: boolean;
   /** Owner-only organisation (`services-organize`). */
   groupName?: string | null;
   starred?: boolean;
@@ -2629,6 +2706,10 @@ export interface ServicePatch {
   sortOrder?: number;
   note?: string | null;
   hidden?: boolean;
+  /** cutex services-remote-access-v1 (owner only). */
+  remoteAccess?: boolean;
+  /** The registration it was decided on (409 service_registration_changed when it has changed since). */
+  ifRegistration?: { createdAt: string; ownerCutexSessionId: string | null };
 }
 
 /** `POST /v2/services` body (owner). */
@@ -2748,6 +2829,8 @@ export interface DesktopEvents {
   debug: import("./debug").DebugEvent;
   profileLinkState: import("./profileLink").ProfileLinkState;
   browserEvent: HostTag & import("./browser").BrowserEvent;
+  /** 浏览器身份: identity list, history, saved-password prompts / fill offers (not host-tagged; payloads name their host). */
+  browserIdentityEvent: import("./browserIdentity").BrowserIdentityEvent;
   /** One host's connection state (every connected host, not only the focus host). */
   daemonState: HostTag & { state: DaemonState };
   /** Host list / scope / focus host / connections changed (a changed `active` = the focus host changed). */
@@ -2778,6 +2861,7 @@ export interface DesktopEvents {
   ownerNotifyOpen: { hostId: string; agentId: string; notificationId: string };
   /** A desktop notification / event big alert the renderer raised was clicked (the window was shown). */
   notifyClick: { key: string };
+  serviceNotificationOpen: ServiceNotificationOpen;
   /** A click in the 项目看板 window (main/board.ts): the main window was shown; open this target. */
   boardOpen: { target: import("./board").BoardTarget };
   /** P2 person identity: key or per-host claim state changed (main/personIdentity.ts). */
@@ -2976,6 +3060,7 @@ export interface ShellState {
   quickstart?: boolean;
 }
 /** A desktop notification raised through main (Electron `Notification`, works while hidden to the tray). */
+export type { ServiceNotificationOpen } from "./serviceNotifications";
 export interface ShellNotification {
   /** Click → `notifyClick` with this key; also the replace tag. */
   key: string;
@@ -3363,6 +3448,8 @@ export interface AskSummary extends AskReviewFields {
   hops?: number;
   /** An outgoing mirror: the remote target and its sync state. */
   remote?: AskRemote | null;
+  /** peer-delivery-receipts-v1: the delivery receipt and the peer's instance id (shared/crossHost; read with asCrossHost). */
+  crossHost?: CrossHost | null;
   lateAnswer?: AskLateAnswer | null;
   /** An incoming ask whose result could not be sent back to the requesting host. */
   resultUndeliverable?: boolean;
@@ -3373,6 +3460,11 @@ export interface AskSummary extends AskReviewFields {
   /** The handler ended its turn and continues this delegation later (yielded continuation); null = no such wait.
    *  Absent on hosts without it (the status then follows execution / hold as before). */
   continuationWait?: ContinuationWait | null;
+  // ---------- r295 Z3 ----------
+  /** Current blocker, next step and destination references (cutex `activityLink`), as the wire sent it: read it only
+   *  through renderer lib/activityStep `askActivityLink`. Valid for this row's revision: a newer state event drops it
+   *  until the next list read. Absent on older hosts. */
+  activityLink?: unknown;
 }
 
 /** r290 P14 yielded wait (cutex docs/r290-p14-yielded-deliver.md). `nextWakeAt` (UTC) only for a timed wait. */
@@ -3381,6 +3473,8 @@ export interface ContinuationWait {
   kind: "after" | "children" | "jobs" | (string & {});
   since: string | null;
   nextWakeAt: string | null;
+  /** Why a wait has not continued (cutex continuation-audit, 2026-11-25); absent on older hosts or when none is known. */
+  blockedReason?: string | null;
 }
 
 export interface AskFilter {
@@ -3395,6 +3489,24 @@ export interface AskFilter {
   /** "open" | "closed" | an execution state. */
   state?: string;
   limit?: number;
+}
+
+/** One hit of cutex r296 short-id lookup (`GET /v2/asks?idPrefix=`): the full stored id and a few row fields. */
+export interface AskIdLookupHit {
+  askId: string;
+  title?: string;
+  target?: string;
+  targetName?: string | null;
+  projectId?: string | null;
+  execution?: AskExecution;
+  closed?: AskClosed | null;
+  updatedAt?: string;
+}
+/** `hasMore`: the host's candidate window was cut — a longer id narrows it. */
+export interface AskIdLookup {
+  hostId: string | null;
+  asks: AskIdLookupHit[];
+  hasMore: boolean;
 }
 
 /** `GET /v2/asks/{id}` → `ask`: the stored record plus queue position, attempts, answer, questions. */
@@ -3501,11 +3613,34 @@ export interface JobRow {
   stale?: boolean | null;
   /** Job Service 0.1.2+, a running local job on Linux: what its process was last seen doing. Not a job state or an outcome. */
   observedProcessState?: { state: string; observedAtEpochMillis: number } | null;
+  /** The launch is still being set up (counted as running). */
+  launchPending?: boolean | null;
+  /** A local process of the job is still alive, whatever the state (counted as running; r296 grouping). */
+  processAlive?: boolean | null;
+  /** r296 `includeWaiters` with a trusted snapshot (`waitersAvailable`): open delegations bound to this job and still
+   *  waiting for it ([] = none). Absent: not asked, the snapshot could not be read, or an older host. */
+  waitingDelegationIds?: string[];
 }
 
 export interface JobListPage {
   data: JobRow[];
   nextCursor: string | null;
+  /** r296: the host's running / queued totals (whole host, independent of query, limit and cursor); absent on older hosts. */
+  activeCounts?: { running: number; queued: number } | null;
+  /** r296 `includeWaiters`: true = rows carry `waitingDelegationIds`; false = the waiting state could not be read (never
+   *  "nobody waits"); absent = not asked / older host. */
+  waitersAvailable?: boolean | null;
+  /** Records the Job Service keeps and its cap. */
+  retention?: { records: number; limit: number } | null;
+}
+
+/** `jobs` parameters. `activeOnly` / `includeWaiters`: only to a host whose capabilities list `activeList` (r296). */
+export interface JobListParams {
+  query?: string;
+  cursor?: string | null;
+  limit?: number;
+  activeOnly?: boolean;
+  includeWaiters?: boolean;
 }
 
 export interface JobServiceCapabilities {

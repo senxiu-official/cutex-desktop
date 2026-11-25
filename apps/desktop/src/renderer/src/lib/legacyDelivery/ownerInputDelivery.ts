@@ -1,5 +1,5 @@
 // LEGACY(input-ledger-v1): frozen delivery inference for older hosts.
-// Delete only when EVERY host advertises input-ledger-v1 (including hachimi).
+// Delete only when EVERY host advertises input-ledger-v1 (including hostc).
 // Only positive owner-input evidence wins over a stale queue/insert projection. An empty queue,
 // an old timestamp, a completed turn or an agent-bus nativeReceipt is not delivery evidence.
 import type { QueueAdmission, QueueItem } from "@cutex-desktop/protocol";

@@ -4,6 +4,10 @@
 //     Esc interrupts.
 //   cli (Codex CLI style): Enter steers while a turn runs, Tab queues, Esc interrupts — and while
 //     steers are still waiting it interrupts and sends them right away.
+// 「多行时 Enter 换行」 (owner 2026-11-24, off by default; .claude/reports/composer-enter-study-20261124.md 方案 B): once the
+// draft has a line break, plain Enter only adds a line; Ctrl/Cmd+Enter keeps its meaning (send when idle, steer while a
+// turn runs), Shift+Enter, Ctrl+Shift+Enter, Tab and Esc are unchanged; a one-line draft behaves as above. An IME
+// composition's Enter never reaches this (the composers stop it first).
 
 export type SendKeyPreset = "queueFirst" | "cli";
 
@@ -32,6 +36,20 @@ export interface ComposerKeyContext {
   pendingSteers: number;
   /** Caret without a selection (Esc keeps clearing a selection otherwise). */
   collapsedSelection: boolean;
+  /** 「多行时 Enter 换行」 applies to this press: the setting is on and the draft already has a line break. */
+  multilineNewline?: boolean;
+}
+
+/** A draft with a line break (where 「多行时 Enter 换行」 turns plain Enter into a new line). */
+export const isMultilineDraft = (text: string): boolean => /\r|\n/.test(text);
+
+/** The composer hint while 「多行时 Enter 换行」 applies: what Ctrl/Cmd+Enter does now and how to queue. */
+export type MultilineHint = "idle" | "busyQueueFirst" | "busyCli" | "busyQueueOnly";
+export function multilineHint(preset: SendKeyPreset, busy: boolean, steerKeysQueue = false): MultilineHint {
+  if (!busy) return "idle";
+  // A delegation turn without steer shortcuts: Ctrl+Enter queues (lib/delegationTurn delegationKeyAction).
+  if (steerKeysQueue) return "busyQueueOnly";
+  return preset === "cli" ? "busyCli" : "busyQueueFirst";
 }
 
 /** Action for a key press in the composer textarea (popups handled before), or null = default. */
@@ -47,6 +65,7 @@ export function composerKeyAction(preset: SendKeyPreset, e: ComposerKeyEvent, ct
   if (e.key !== "Enter") return null;
   if (e.shift && !e.ctrl) return null; // newline
   if (e.ctrl) return e.shift ? "interruptSend" : "steer";
+  if (ctx.multilineNewline) return null; // 「多行时 Enter 换行」: a new line
   return preset === "cli" ? "steer" : "send";
 }
 

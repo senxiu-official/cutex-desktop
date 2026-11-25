@@ -9,6 +9,8 @@ import { bridge } from "../../bridge";
 import { useI18n, type MessageKey } from "../../i18n";
 import { approvalFacts } from "../../lib/approvals";
 import { ApprovalSource } from "../../components/ApprovalSource";
+import { EntityMention } from "../../components/EntityIcon";
+import { tNodes } from "../../lib/textNodes";
 
 export function BrowserOpenCard({ hostId, approval }: { hostId: string; approval: ApprovalRecord }) {
   const { t } = useI18n();
@@ -36,7 +38,7 @@ export function BrowserOpenCard({ hostId, approval }: { hostId: string; approval
     <div data-browser-open-card>
       <div className="flex items-center gap-2 pr-5 text-sm font-medium">
         <Globe size={14} className="shrink-0 text-accent" />
-        <span className="min-w-0 truncate">{t("approvals.open.title", { name: approval.requesterName ?? "" })}</span>
+        <span className="min-w-0 truncate">{tNodes(t, "approvals.open.title", { name: <EntityMention entity={{ kind: "agent", id: approval.requesterCutexSessionId, name: approval.requesterName ?? "" }}>{approval.requesterName ?? ""}</EntityMention> })}</span>
         <ApprovalSource source="cutex" className="ml-auto" />
       </div>
       {facts.length > 0 && (
@@ -53,7 +55,7 @@ export function BrowserOpenCard({ hostId, approval }: { hostId: string; approval
       <div className="mt-2 flex items-center gap-2">
         <span className="min-w-0 flex-1 truncate text-caption/[inherit] text-subtle" title={t("approvals.open.skipHint")}>{t("approvals.open.skipHint")}</span>
         <button type="button" disabled={busy} onClick={() => void decide("deny")} className="rounded-md border border-border px-3 py-1 text-xs hover:bg-hover disabled:opacity-40">{t("approvals.deny")}</button>
-        <button type="button" disabled={busy} onClick={() => void decide("approve")} title={t("approvals.browser.retryHint")} className="rounded-md bg-accent px-3 py-1 text-xs text-white disabled:opacity-40">{t("approvals.browser.approveOpen")}</button>
+        <button type="button" disabled={busy} onClick={() => void decide("approve")} title={t("approvals.browser.retryHint")} className="rounded-md bg-accent px-3 py-1 text-xs text-on-accent disabled:opacity-40">{t("approvals.browser.approveOpen")}</button>
       </div>
       {error && <p className="mt-1 truncate text-xs text-danger" title={error}>{error}</p>}
     </div>

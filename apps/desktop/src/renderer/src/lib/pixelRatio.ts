@@ -52,6 +52,22 @@ function storeFor(win: Window | undefined): RatioStore {
   return store;
 }
 
+/**
+ * `px` (CSS) on the device pixel grid: Math.round(px * ratio) / ratio. At a fractional ratio (1.875: system 125 % ×
+ * app 150 %) a CSS length that is not a whole number of device pixels moves what follows by a part of a pixel, and the
+ * lines whose rounded position tips over jump a pixel while the others stay (owner recording 2026-11-26).
+ */
+export function roundToDevicePixel(px: number, ratio: number): number {
+  const r = ratio > 0 && Number.isFinite(ratio) ? ratio : 1;
+  return Math.round(px * r) / r;
+}
+
+/** As roundToDevicePixel, upwards (a clearance must not shrink); a hair over a pixel boundary does not round up. */
+export function ceilToDevicePixel(px: number, ratio: number): number {
+  const r = ratio > 0 && Number.isFinite(ratio) ? ratio : 1;
+  return Math.ceil(px * r - 0.02) / r;
+}
+
 /** Electron zoom and moving a window between displays both change its device pixel ratio. */
 export function useDevicePixelRatio(): number {
   const store = storeFor(useOwnerWindow());

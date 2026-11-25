@@ -14,10 +14,19 @@ import { openClaimTab } from "./claimOpen";
 import { inBrowserTabWindow, openPopupTab, pressBrowserTab, revealBrowserTab } from "./popupOpen";
 import { browserThumbnails } from "./thumbnails";
 import { watchBrowserMedia } from "./media";
+import { identityBridge, watchBrowserIdentities } from "./identities";
+import { watchPasswordUi } from "./passwordUi";
+import { openIdentityHistory } from "./identityMenus";
+import { DEFAULT_BROWSER_IDENTITY_ID } from "../../../../shared/browserIdentity";
 
 /** A preview intentionally has no browser bridge, hence no real webview or website requests. */
 export async function startBrowser(context: ModuleContext): Promise<void> {
   const browser = bridge.browser;
+  // Dev preview (no browser bridge, mock.ts `?browserIdentities`): only the identities, for the switcher and settings.
+  if (!browser && import.meta.env.DEV && identityBridge() && !context.signal.aborted) {
+    const off = watchBrowserIdentities(), offPasswords = watchPasswordUi();
+    context.signal.addEventListener("abort", () => { off(); offPasswords(); }, { once: true });
+  }
   if (!browser || context.signal.aborted) return;
   const activation = browserActivation.begin();
   const opens = createBrowserAgentOpens({ side: context.services.side,
@@ -38,6 +47,8 @@ export async function startBrowser(context: ModuleContext): Promise<void> {
   await browser.setEnabled(true);
   if (context.signal.aborted) return;
   const offMedia = watchBrowserMedia();
+  const offIdentities = watchBrowserIdentities();
+  const offPasswords = watchPasswordUi();
   const offHosts = watchBrowserHosts((hostId, epoch) => opens.invalidateHost(hostId, epoch));
   const offBrowser = browser.subscribe((event) => {
     if (context.signal.aborted || !browserHostCurrent(event.hostId, event.epoch)) return;
@@ -58,6 +69,8 @@ export async function startBrowser(context: ModuleContext): Promise<void> {
     // A background agent tab's live frame: display only, no tab-state change.
     if (event.kind === "thumbnail") { browserThumbnails.set(event.hostId, event.tabKey, event.thumbnail); return; }
     // The owner pressed in a tab's page (design 017): like a press in its pane.
+    // Ctrl+H in an owner page (main forwards it only for owner-identity tabs): that identity's 浏览历史 on its host.
+    if (event.kind === "history") { if (event.pool !== "agent") openIdentityHistory(event.browserIdentityId ?? DEFAULT_BROWSER_IDENTITY_ID, event.hostId); return; }
     if (event.kind === "pressed") { inBrowserTabWindow(event.hostId, event.tabKey, () => pressBrowserTab(event)); return; }
     if (event.kind === "agent-open") { if (event.openIntent) opens.open(event.openIntent); return; }
     if (event.kind === "agent-open-cancel") { if (event.openRequestId) opens.cancelled(event.hostId, event.openRequestId); return; }
@@ -79,7 +92,7 @@ export async function startBrowser(context: ModuleContext): Promise<void> {
       if (event.newTabAgent) context.services.ui.notice(translate(event.newTabGranted ? "browser.newTab.agentGranted" : "browser.newTab.agent", { name: browserTitle(event.lease?.agentName ?? "") }));
     }
   });
-  off = () => { offMedia(); offHosts(); offBrowser(); };
+  off = () => { offMedia(); offIdentities(); offPasswords(); offHosts(); offBrowser(); };
   browserActivation.complete(activation);
 }
 

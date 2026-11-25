@@ -1,5 +1,5 @@
 // LEGACY(input-ledger-v1): frozen delivery inference for older hosts.
-// Delete only when EVERY host advertises input-ledger-v1 (including hachimi).
+// Delete only when EVERY host advertises input-ledger-v1 (including hostc).
 // A hidden receipt that the server has since closed (this desktop's close, another client's, or a
 // live settlement event) is shown again: a closed row leaves 接下来 on its own, so the hidden entry
 // would only linger in 待清理. Local display state only; nothing is sent.

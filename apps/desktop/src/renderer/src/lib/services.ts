@@ -3,21 +3,27 @@
 import type { ProjectSummary } from "@cutex-desktop/protocol";
 import type { ServicePatch, ServiceView, SidebarSnapshot } from "../../../shared/ipc";
 import { LOCAL_HOST_ID } from "../../../shared/hosts";
-import { SERVICES_EPHEMERAL_TTL_FEATURE, SERVICES_ORGANIZE_FEATURE, SERVICES_PROJECT_SCOPE_FEATURE, SERVICES_IDLE_PRESETS_FEATURE } from "../../../shared/servicesSettings";
+import { SERVICES_REMOTE_ACCESS_FEATURE, SERVICES_EPHEMERAL_TTL_FEATURE, SERVICES_ORGANIZE_FEATURE, SERVICES_PROJECT_SCOPE_FEATURE, SERVICES_IDLE_PRESETS_FEATURE } from "../../../shared/servicesSettings";
 import { api, apiFor } from "../bridge";
-import type { MessageKey } from "../i18n";
+import { translate, type MessageKey } from "../i18n";
 import { services } from "../modules/app";
-import { useApp } from "../store";
+import { recentAgentOn, useApp } from "../store";
+import { windowShowing } from "./windowRoute";
+import { currentWindow } from "./windowScope";
 import { confirmDialog, promptDialog, type MenuEntry } from "./contextMenu";
 import type { ReactNode } from "react";
 import { hostData } from "./hostScope";
 import { copyText } from "./menus";
+import { showShelfToast } from "./shelves";
 import { serviceAddressOf, serviceCopyEntries } from "./serviceAddress";
 import { sideShowsHost } from "./sideServices";
 import { SERVICE_COMPONENT } from "./sideKinds";
 import { refActionEntries } from "./refActions";
 import { claimProjectChoices, scopePatch, serviceMayManage, serviceScope } from "./projectServices";
 import { isSupervised, isWorker, isWorkerOn, showWorker } from "./serviceWorker";
+import { createElement } from "react";
+import { EntityIcon } from "../components/EntityIcon";
+import { projectEntity } from "./entityIcon";
 
 type T = (key: MessageKey, vars?: Record<string, string | number>) => string;
 
@@ -50,15 +56,131 @@ export function openInApp(slug: string, hostId: string, path: string): boolean {
 }
 
 /**
- * The system browser (starts an on-demand service first). Same host → loopback URL; a remote host's
- * loopback is not this machine's, so its host URL is used (reachable on the LAN / tailnet only —
- * forwarding service ports over the SSH tunnel is phase 2).
+ * Whether a host's services can open in the system browser: this machine's only (its loopback URL). A remote host's
+ * service is reached only through the app's own connection to that host (the in-app tab: view ticket over the SSH /
+ * management forward). cutex's `url` names the daemon machine (`http://hosta:<port>`): it works only where that name
+ * resolves and the service listens beyond loopback, and depends on the route — never used (owner report 2026-11-23,
+ * Hostb → EVA over the relay). A ticket for the system browser through main waits for the owner's decision.
  */
-export async function openServiceExternal(s: Pick<ServiceView, "slug">, hostId = focusId(), path = "/"): Promise<void> {
-  if (isWorkerOn(hostId, s.slug)) return showWorker(s.slug);
+export const systemBrowserOpens = (hostId: string): boolean => hostId === LOCAL_HOST_ID;
+
+/**
+ * The system browser (starts an on-demand service first), for this machine's services: the loopback URL. A remote
+ * host's service never goes there: it opens in the app on its own host's Shelf (openOnItsHost), or a notice says why
+ * not (remoteServiceNotice). Resolves true when it opened.
+ */
+export async function openServiceExternal(s: Pick<ServiceView, "slug"> & { displayName?: string | null }, hostId = focusId(), path = "/"): Promise<boolean> {
+  if (isWorkerOn(hostId, s.slug)) {
+    showWorker(s.slug);
+    return true;
+  }
+  if (!systemBrowserOpens(hostId)) {
+    const why = sideShowsHost(hostId) ? undefined : await openOnItsHost(s.slug, hostId, path);
+    if (why === "opened") return true;
+    // The owner went elsewhere meanwhile: nothing more (no toast about what they left).
+    if (why !== "moved") remoteServiceNotice(s, hostId, why);
+    return false;
+  }
   const r = await daemonOf(hostId).openService(s.slug);
-  const base = hostId !== LOCAL_HOST_ID ? r.url || r.localUrl : r.localUrl || r.url;
+  const base = r.localUrl || r.url;
   await api.openExternal(path === "/" ? base : new URL(path.replace(/^\/+/, ""), base.endsWith("/") ? base : `${base}/`).href);
+  return true;
+}
+
+/**
+ * The agents that may bring `hostId`'s Shelf into view: listed now as active, shown (not hidden), not archived. Empty
+ * when the host is not connected or lists none.
+ */
+function shelfCandidates(hostId: string) {
+  const active = hostData(useApp.getState(), hostId)?.sidebar?.active ?? [];
+  // Not one shown in another window's column: switching to it would mean going to that window (one copy per agent).
+  const here = currentWindow();
+  const elsewhere = (id: string) => {
+    const w = windowShowing(hostId, id);
+    return w !== null && w !== here;
+  };
+  return active.filter((a) => a.visible !== false && !a.retiredAt && (a.archiveKind === undefined || a.archiveKind === "active") && !elsewhere(a.cutexSessionId));
+}
+
+/**
+ * The agent whose conversation brings `hostId`'s Shelf into view: the one of that host the owner viewed last while it is
+ * still a candidate (shelfCandidates; cross-review 2026-11-24: hidden / archived / gone since is skipped), else the
+ * most recently active candidate. null = none.
+ */
+export function shelfAgentFor(hostId: string): string | null {
+  const candidates = shelfCandidates(hostId);
+  const recent = recentAgentOn(hostId);
+  if (recent && candidates.some((a) => a.cutexSessionId === recent)) return recent;
+  const at = (a: (typeof candidates)[number]) => Date.parse(a.lastActivityAt ?? "") || 0;
+  return [...candidates].sort((x, y) => at(y) - at(x))[0]?.cutexSessionId ?? null;
+}
+
+/** How long the Shelf may take to reach the service's host (its agent's selection, not its history). */
+export const SHELF_SWITCH_MS = 4000;
+
+/**
+ * "opened"; "no-agent" (no candidate to open); "not-switched" (the Shelf did not reach the host in time: the agent
+ * opened in another window, or the open failed); "moved" (the owner went elsewhere meanwhile: nothing more is done);
+ * "no-tab" (reached, but the tab could not open: the browser module is off).
+ */
+export type OpenOnHostOutcome = "opened" | "no-agent" | "not-switched" | "moved" | "no-tab";
+
+/**
+ * A remote host's service while the Shelf shows another host (Director 2026-11-24, auto-switch): the Shelf follows the
+ * open agent's host (lib/sideServices sideShowsHost), so that host's agent is opened (shelfAgentFor) — without marking
+ * it read (the owner did not read it; `keepUnread`) — and the service opens in the in-app tab there as soon as the
+ * Shelf shows that host: not after the agent's history has loaded (cross-review: a stalled history load never opened
+ * it), at most SHELF_SWITCH_MS, and never once the owner has gone elsewhere (no late open in another context).
+ */
+export async function openOnItsHost(slug: string, hostId: string, path: string): Promise<OpenOnHostOutcome> {
+  const agent = shelfAgentFor(hostId);
+  if (!agent) return "no-agent";
+  const start = useApp.getState();
+  const was = { id: start.selectedId, host: start.selectedHost };
+  // Given up (moved / late): the open is cancelled too, so a selection still on its way (the host's scope coming in,
+  // store openAgent → inAllDevices) is never made after it (cross-review 2026-11-24).
+  const cancel = new AbortController();
+  const reached = await new Promise<"reached" | "moved" | "late">((resolve) => {
+    let done = false;
+    let unsubscribe = () => {};
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const finish = (r: "reached" | "moved" | "late") => {
+      if (done) return;
+      done = true;
+      if (r !== "reached") cancel.abort();
+      unsubscribe();
+      if (timer) clearTimeout(timer);
+      resolve(r);
+    };
+    let conversation = false;
+    const check = (s: ReturnType<typeof useApp.getState>) => {
+      if (s.selectedId === agent && s.selectedHost === hostId && sideShowsHost(hostId)) return finish("reached");
+      // Another agent selected than before and than ours, or the conversation left after our open showed it.
+      if (s.selectedId !== was.id && s.selectedId !== agent) return finish("moved");
+      if (s.view.kind === "conversation") conversation = true;
+      else if (conversation) finish("moved");
+    };
+    unsubscribe = useApp.subscribe(check);
+    timer = setTimeout(() => finish("late"), SHELF_SWITCH_MS);
+    void useApp.getState().openAgent(agent, hostId, { keepUnread: true, signal: cancel.signal }).catch(() => {});
+    check(useApp.getState());
+  });
+  if (reached === "moved") return "moved";
+  if (reached === "late") return "not-switched";
+  return openInApp(slug, hostId, path) ? "opened" : "no-tab";
+}
+
+/**
+ * A remote host's service that the in-app tab could not open: no agent of its host to show its Shelf (not connected,
+ * or none), the switch did not happen in this window, or the browser module is off.
+ */
+export function remoteServiceNotice(s: Pick<ServiceView, "slug"> & { displayName?: string | null }, hostId: string, why?: OpenOnHostOutcome): void {
+  const name = s.displayName || s.slug;
+  const host = useApp.getState().hosts?.hosts.find((h) => h.id === hostId)?.label ?? hostId;
+  const key: MessageKey = why === "not-switched" ? "services.remote.notSwitched" : sideShowsHost(hostId) ? "services.remote.needsBrowser" : "services.remote.otherHost";
+  // The window-wide toast (components/side/ShelfToast, in every window): the composer notice shows only beside an open
+  // conversation, so on the home page / the 服务 page the click would look dead (cross-review 2026-11-23).
+  showShelfToast(translate(key, { name, host }));
 }
 
 export function serviceMenu(s: ServiceView, t: T, onError: (e: string) => void, toggleLogs?: () => void, hostId?: string, toggleOrganize?: () => void, organization: MenuEntry[] = [], ownerFlyout?: ReactNode): MenuEntry[] {
@@ -77,7 +199,9 @@ export function serviceMenu(s: ServiceView, t: T, onError: (e: string) => void, 
   const supportsIdle = host?.features.has(SERVICES_IDLE_PRESETS_FEATURE) === true;
   // An agent view says whether it may manage the service (`youMayManage`); the owner's list leaves it out (manages all).
   const manage = serviceMayManage(s);
-  const scopeRows = manage && !s.archived && (host?.features.has(SERVICES_PROJECT_SCOPE_FEATURE) ?? false) ? serviceScopeEntries(s, t, host?.sidebar, (patch) => run(() => api.patchService(s.slug, patch))) : [];
+  // 允许 iPad 访问: only where the host offers it (not greyed elsewhere); web services only (a worker has no page).
+  const remoteRow = remoteAccessShown(s, hostId ?? focusId()) && manage;
+  const scopeRows = manage && !s.archived && (host?.features.has(SERVICES_PROJECT_SCOPE_FEATURE) ?? false) ? serviceScopeEntries(s, t, host?.sidebar, (patch) => run(() => api.patchService(s.slug, patch)), hostId ?? focusId()) : [];
   const currentTtl = s.effectiveIdleTtlMinutes ?? Number.POSITIVE_INFINITY;
   const ttlChoices = [30, 120, 480, 1440].filter((minutes) => minutes > currentTtl && minutes <= (s.maxIdleTtlMinutes ?? 1440));
   const controls: MenuEntry[] = supervised && !s.archived ? [
@@ -90,7 +214,11 @@ export function serviceMenu(s: ServiceView, t: T, onError: (e: string) => void, 
     ...(worker ? controls : []),
     worker && controls.some(Boolean) && "separator",
     !worker && !s.archived && { label: t("services.open"), onSelect: () => run(() => openService(s, hostId)) },
-    !worker && !s.archived && { label: t("services.openExternal"), onSelect: () => run(() => openService(s, hostId, "/", { external: true })) },
+    !worker && !s.archived && {
+      label: t("services.openExternal"),
+      ...(systemBrowserOpens(hostId ?? focusId()) ? {} : { disabled: true, title: t("services.remote.noSystemBrowser") }),
+      onSelect: () => run(() => openService(s, hostId, "/", { external: true })),
+    },
     // The loopback address, not cutex's `url` (the daemon machine's name); another host's is labelled as its own (lib/serviceAddress).
     ...(!s.archived ? serviceCopyEntries(serviceAddressOf(s, hostId ?? focusId(), useApp.getState().hosts?.hosts.find((h) => h.id === (hostId ?? focusId()))), t, copyText) : []),
     // The owner picker is the flyout (components/ServiceOwnerFlyout): the service's own host, searchable,
@@ -115,6 +243,15 @@ export function serviceMenu(s: ServiceView, t: T, onError: (e: string) => void, 
         info: t("services.keepPinned.hint"),
         onSelect: () => run(() => api.patchService(s.slug, { pinned: !s.pinned })),
       },
+    remoteRow && "separator",
+    remoteRow && {
+      label: `${s.remoteAccess ? "✓ " : ""}${t("services.remoteAccess")}`,
+      info: t("services.remoteAccess.hint"),
+      // Opening it to the iPad: medium risk, confirmed in place (armed); closing it: low risk, at once.
+      // Not destructive: the armed row in the app's primary colour, not the red of 删除.
+      ...(s.remoteAccess ? {} : { armed: t("services.remoteAccess.armed", { name: s.displayName || s.slug }), armedTone: "accent" as const }),
+      onSelect: () => run(() => setRemoteAccess(s, hostId ?? focusId(), !s.remoteAccess)),
+    },
     supportsOrganize && "separator",
     supportsOrganize && {
       label: t("services.note.edit"),
@@ -190,6 +327,28 @@ export function serviceMenu(s: ServiceView, t: T, onError: (e: string) => void, 
   ];
 }
 
+/** The 允许 iPad 访问 switch is shown: the host offers services-remote-access-v1, a web service, not archived. */
+export function remoteAccessShown(s: Pick<ServiceView, "runtime" | "archived">, hostId: string): boolean {
+  return hostData(useApp.getState(), hostId)?.features.has(SERVICES_REMOTE_ACCESS_FEATURE) === true && !isWorker(s as Pick<ServiceView, "runtime">) && !s.archived;
+}
+
+/**
+ * 允许 iPad 访问 on / off (cutex services-remote-access-v1, owner only): decided on the registration shown
+ * (`ifRegistration`). A registration that changed since (another registrant, deleted and registered again) is a 409
+ * service_registration_changed: the list is read again and the owner decides again — never retried here.
+ */
+export async function setRemoteAccess(s: Pick<ServiceView, "slug" | "createdAt" | "ownerCutexSessionId">, hostId: string, on: boolean): Promise<ServiceView> {
+  try {
+    return await daemonOf(hostId).patchService(s.slug, { remoteAccess: on, ifRegistration: { createdAt: s.createdAt, ownerCutexSessionId: s.ownerCutexSessionId } });
+  } catch (e) {
+    if (/service_registration_changed/.test(e instanceof Error ? e.message : String(e))) {
+      void useApp.getState().refreshServices(hostId).catch(() => {});
+      throw new Error(translate("services.remoteAccess.changed"));
+    }
+    throw e;
+  }
+}
+
 /** Not running under cutex now: stopped (by the owner or idle), crash-looped, or an unsupervised entry that answers nothing. */
 function serviceStopped(s: ServiceView): boolean {
   if (s.health === "stopped" || s.health === "stoppedIdle" || s.health === "crashLooped") return true;
@@ -213,7 +372,7 @@ function currentService(s: ServiceView, hostId: string | undefined): ServiceView
  * 转为项目服务 / 转为个人服务 (cutex `services-project-scope`, owner): medium risk, so the row confirms in place
  * (armed). A record without a projectId picks the project in a submenu, the registrant's project first.
  */
-export function serviceScopeEntries(s: ServiceView, t: T, sidebar: SidebarSnapshot | null | undefined, send: (patch: ServicePatch) => void): MenuEntry[] {
+export function serviceScopeEntries(s: ServiceView, t: T, sidebar: SidebarSnapshot | null | undefined, send: (patch: ServicePatch) => void, hostId = focusId()): MenuEntry[] {
   const nameOf = (id: string | null | undefined) => (id && sidebar?.projects?.projects.find((p) => p.project_id === id)?.presentation.display_name) || id || "";
   if (serviceScope(s) === "project") {
     const patch = scopePatch(s, "session")!;
@@ -230,6 +389,7 @@ export function serviceScopeEntries(s: ServiceView, t: T, sidebar: SidebarSnapsh
     info: t("services.ownerScope.toProject.hint"),
     submenu: choices.map(({ project, registrants }) => ({
       label: project.presentation.display_name || project.project_id,
+      icon: createElement(EntityIcon, { entity: projectEntity(hostId, project) }),
       hint: registrants ? t("services.ownerScope.registrantsProject") : undefined,
       // The row names the project already; a short text keeps the narrow submenu from wrapping.
       armed: t("services.claim.armed"),

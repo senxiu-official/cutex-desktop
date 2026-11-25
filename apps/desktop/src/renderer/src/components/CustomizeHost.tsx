@@ -98,7 +98,7 @@ export function CustomizeHost() {
             data-customize-done=""
             title={t("customize.doneTip")}
             onClick={finish}
-            className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md bg-accent px-2.5 text-xs font-medium text-white outline-none hover:bg-accent/90 focus-visible:ring-2 focus-visible:ring-accent/60"
+            className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md bg-accent px-2.5 text-xs font-medium text-on-accent outline-none hover:bg-accent/90 focus-visible:ring-2 focus-visible:ring-accent/60"
           >
             <Check size={13} aria-hidden />
             {t("customize.done")}

@@ -96,7 +96,7 @@ export function DesktopLayer({ reason, hostId: _focus, tray = false }: PaneDeskt
             {t("home.edit")}
             {panel ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
           </button>
-          <button onClick={() => setHomeEditing(false)} className="rounded-full bg-accent px-3 py-1 font-medium text-white">
+          <button onClick={() => setHomeEditing(false)} className="rounded-full bg-accent px-3 py-1 font-medium text-on-accent">
             {t("home.done")}
           </button>
         </div>

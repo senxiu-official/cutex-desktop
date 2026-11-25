@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { dirname } from "node:path";
+import { DEFAULT_BROWSER_IDENTITY_ID as DEFAULT_ID, isBrowserIdentityId } from "../../shared/browserIdentity";
 
 interface Io { read(path: string): string; write(path: string, text: string): void }
 const defaultIo: Io = {
@@ -20,27 +21,48 @@ export class BrowserDesktopLoopbackStore {
     catch { return this.hosts = new Set(); }
     try {
       const parsed = JSON.parse(text) as unknown;
-      const stored = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>).desktopLoopback : undefined;
-      if (!stored || typeof stored !== "object" || Array.isArray(stored)) return this.hosts = new Set();
-      return this.hosts = new Set(Object.entries(stored).filter(([, enabled]) => enabled === true).map(([hostId]) => hostId));
+      const fields = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+      const hosts = new Set<string>();
+      for (const [name, withIdentity] of [["desktopLoopback", false], ["identityDesktopLoopback", true]] as const) {
+        const stored = fields[name];
+        if (!stored || typeof stored !== "object" || Array.isArray(stored)) continue;
+        for (const [key, enabled] of Object.entries(stored)) {
+          if (enabled !== true) continue;
+          const [identityId, hostId, extra] = withIdentity ? key.split(" ") : [DEFAULT_ID, key];
+          if (isBrowserIdentityId(identityId) && (!withIdentity || identityId !== DEFAULT_ID) && hostId && !/\s/.test(hostId) && extra === undefined)
+            hosts.add(`${identityId} ${hostId}`);
+        }
+      }
+      return this.hosts = hosts;
     } catch { return this.hosts = new Set(); }
   }
-  enabled(hostId: string): boolean {
-    try { return this.read().has(hostId); } catch { return false; }
+  enabled(hostId: string, identityId = DEFAULT_ID): boolean {
+    try { return this.read().has(`${identityId} ${hostId}`); } catch { return false; }
   }
-  set(hostId: string, enabled: boolean): { enabled: boolean } {
-    const hosts = new Set(this.read());
-    if (!enabled) { hosts.delete(hostId); this.hosts = hosts; }
-    if (this.file) this.io.write(this.file, `${JSON.stringify({ desktopLoopback: Object.fromEntries([...hosts, ...(enabled ? [hostId] : [])].sort().map(id => [id, true])) }, null, 2)}\n`);
-    if (enabled) hosts.add(hostId);
-    this.hosts = hosts;
+  set(hostId: string, enabled: boolean, identityId = DEFAULT_ID): { enabled: boolean } {
+    if (!isBrowserIdentityId(identityId) || !hostId || /\s/.test(hostId)) throw Error("invalid_browser_identity");
+    const hosts = new Set(this.read()), key = `${identityId} ${hostId}`;
+    if (enabled) hosts.add(key); else { hosts.delete(key); this.hosts = hosts; }
+    this.save(hosts);
     return { enabled };
   }
+  forgetIdentity(identityId: string): void {
+    const hosts = new Set([...this.read()].filter(key => !key.startsWith(`${identityId} `)));
+    if (hosts.size !== this.read().size) { this.hosts = hosts; this.save(hosts); }
+  }
   retain(hostIds: Iterable<string>): void {
-    const keep = new Set(hostIds), hosts = new Set([...this.read()].filter(hostId => keep.has(hostId)));
+    const keep = new Set(hostIds), hosts = new Set([...this.read()].filter(key => keep.has(key.split(" ")[1]!)));
     if (hosts.size === this.read().size) return;
     this.hosts = hosts;
-    if (this.file) this.io.write(this.file, `${JSON.stringify({ desktopLoopback: Object.fromEntries([...hosts].sort().map(id => [id, true])) }, null, 2)}\n`);
+    this.save(hosts);
+  }
+  private save(hosts: Set<string>): void {
+    const keys = [...hosts].sort();
+    const defaults = keys.filter(key => key.startsWith(`${DEFAULT_ID} `)).map(key => [key.slice(DEFAULT_ID.length + 1), true]);
+    const named = keys.filter(key => !key.startsWith(`${DEFAULT_ID} `)).map(key => [key, true]);
+    if (this.file) this.io.write(this.file, `${JSON.stringify({ desktopLoopback: Object.fromEntries(defaults),
+      ...(named.length ? { identityDesktopLoopback: Object.fromEntries(named) } : {}) }, null, 2)}\n`);
+    this.hosts = hosts;
   }
 }
 

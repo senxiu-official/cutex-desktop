@@ -18,6 +18,8 @@ import { HostMark } from "../../components/HostMark";
 import { ApprovalSource } from "../../components/ApprovalSource";
 import { Button } from "../../components/settings/Form";
 import { bridge } from "../../bridge";
+import { UnconfirmedSteps } from "./UnconfirmedSteps";
+import { unconfirmedRetryRun } from "./workflowRetry";
 import { ApprovalDifferences } from "./ApprovalDifferences";
 import { BrowserClaimPanel } from "./BrowserClaimPanel";
 import { browserOwnerErrorKey as browserErrorKey } from "../../../../shared/browser";
@@ -148,6 +150,7 @@ export function PendingCard({ record, origin, variant = "page" }: { record: Appr
   const [claimBusy, setClaimBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const grant = grantKind(record);
+  const retryRun = unconfirmedRetryRun(record);
   const heading = approvalHeading(record, t);
   const openApprovalsPage = useApp((s) => s.openPage);
   // The agent retries itself after the decision (services, agent profiles, browser opens); with
@@ -220,6 +223,8 @@ export function PendingCard({ record, origin, variant = "page" }: { record: Appr
       </div>
       {record.autoDecision && record.matchedRuleId && <p className="mt-1 text-caption/[inherit] text-accent">{t("approvals.rules.autoDecided", { rule: record.matchedRuleId })}</p>}
       <Facts record={record} hostId={origin.hostId} />
+      {/* A retry after steps whose outcome is unconfirmed (r295 Z3): which steps to look at before approving. */}
+      {retryRun && <UnconfirmedSteps hostId={origin.hostId} runId={retryRun} />}
       {record.kind !== "browser_claim" && record.kind !== "browser_open" && <ApprovalDifferences value={record.details?.differences} />}
       {grant !== "other" && grant !== "claimBrowser" && (
         <p className="mt-2 flex items-start gap-1.5 text-xs text-warn">

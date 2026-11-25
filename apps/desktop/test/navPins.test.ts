@@ -40,7 +40,7 @@ describe("pins", () => {
   it("pinning appends, unpinning removes; defaults until changed", () => {
     expect(navPins(null)).toBe(DEFAULT_NAV_PINS);
     expect(withNavPin(null, "jobs.nav", true)).toEqual([...DEFAULT_NAV_PINS, "jobs.nav"]);
-    expect(withNavPin(null, "quick-chats.nav", false)).toEqual(["agent-config.newAgent", "delegations.nav", "approvals.nav"]);
+    expect(withNavPin(null, "quick-chats.nav", false)).toEqual(["personal-assistants.nav", "agent-config.newAgent", "delegations.nav", "approvals.nav"]);
     expect(withNavPin(["a", "b"], "a", true)).toEqual(["b", "a"]);
     expect(withNavPin([], "a", false)).toEqual([]);
   });

@@ -6,7 +6,8 @@
   --fg: #1b1b1f;
   --fg-muted: #5b5c63;
   --border: #e3e3e6;
-  --accent: #3b82f6;
+  --accent: var(--accent-light, #1861d2);
+  --on-accent: var(--on-accent-light, #ffffff);
   --warn: #d97706;
   --danger: #dc2626;
   --danger-solid: #dc2626;
@@ -20,7 +21,8 @@
     --fg: #ececec;
     --fg-muted: #a4a4aa;
     --border: #36363a;
-    --accent: #60a5fa;
+    --accent: var(--accent-dark, #79acff);
+    --on-accent: var(--on-accent-dark, #0f1115);
     --warn: #f59e0b;
     --danger: #f87171;
     --danger-solid: #dc2626;
@@ -34,7 +36,8 @@
   --fg: #ececec;
   --fg-muted: #a4a4aa;
   --border: #36363a;
-  --accent: #60a5fa;
+  --accent: var(--accent-dark, #79acff);
+  --on-accent: var(--on-accent-dark, #0f1115);
   --warn: #f59e0b;
   --danger: #f87171;
   --danger-solid: #dc2626;
@@ -59,6 +62,7 @@ body {
 }
 .card {
   --level: var(--accent);
+  --on-level: var(--on-accent);
   position: relative;
   display: flex;
   flex-direction: column;
@@ -68,9 +72,11 @@ body {
 }
 .card.level-attention {
   --level: var(--warn);
+  --on-level: #fff;
 }
 .card.level-urgent {
   --level: var(--danger);
+  --on-level: #fff;
 }
 .stripe {
   height: 5px;
@@ -227,7 +233,7 @@ body {
 .btn.primary {
   border-color: transparent;
   background: var(--level);
-  color: #fff;
+  color: var(--on-level, #fff);
   font-weight: 600;
 }
 .btn.primary:hover:not(:disabled) {

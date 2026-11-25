@@ -4,9 +4,12 @@ import { isImeComposing } from "../../lib/ime";
 import { DROP_TINT, dropTint } from "../../lib/dropTint";
 import { useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type ReactNode } from "react";
 import { ChevronDown, ChevronRight, GripVertical, MoreHorizontal, Star } from "lucide-react";
+import { RemoteAccessMark } from "./RemoteAccessMark";
 import type { ServicePatch, ServiceView } from "../../../../shared/ipc";
 import { readServiceTile } from "../../../../shared/home";
 import { apiFor } from "../../bridge";
+import { intersectionObserverFor } from "../../lib/ownerWindow";
+import { listedTile, queuedTileRead } from "./serviceTiles";
 import { openMenuFrom, type MenuEntry } from "../../lib/contextMenu";
 import { openService, serviceHealthTitle } from "../../lib/services";
 import { isWorker, serviceHealthKey } from "../../lib/serviceWorker";
@@ -21,6 +24,8 @@ import {
   type OrganizedServiceSection,
   type ServiceSection,
 } from "./model";
+import { EntityMention } from "../../components/EntityIcon";
+import type { EntityRef } from "../../lib/entityIcon";
 
 export interface ServiceCardRow {
   hostId: string;
@@ -31,6 +36,8 @@ export interface ServiceCardRow {
 interface Props {
   rows: ServiceCardRow[];
   ownerName(row: ServiceCardRow): string;
+  /** Who `ownerName` names (its icon before the name). */
+  ownerEntity?(row: ServiceCardRow): EntityRef | null;
   /** Tooltip of the card's owner line (a project service: project, Director and registrant). */
   ownerTitle?(row: ServiceCardRow): string | undefined;
   /** The host's name in messages (「这台主机需要升级…」). */
@@ -75,9 +82,10 @@ function groupOf(section: OrganizedServiceSection<ServiceCardRow>, name: string)
   return found;
 }
 
-function CompactServiceCard({ row, ownerName, ownerTitle, stale, tileEnabled, canDrag, blocked, highlighted, menu, beginDrag, finishDrag, dragOver, drop, error }: {
+function CompactServiceCard({ row, ownerName, ownerEntity, ownerTitle, stale, tileEnabled, canDrag, blocked, highlighted, menu, beginDrag, finishDrag, dragOver, drop, error }: {
   row: ServiceCardRow;
   ownerName: string;
+  ownerEntity?: EntityRef | null;
   ownerTitle?: string;
   stale: boolean;
   tileEnabled: boolean;
@@ -93,18 +101,33 @@ function CompactServiceCard({ row, ownerName, ownerTitle, stale, tileEnabled, ca
   error(message: string): void;
 }) {
   const { t } = useI18n();
-  const [tile, setTile] = useState<ReturnType<typeof readServiceTile>>(null);
+  const [fetchedTile, setTile] = useState<ReturnType<typeof readServiceTile>>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
+  // A static tile comes with the list; other tiles are asked for once the card nears the viewport, a few at a
+  // time per host (modules/services/serviceTiles: perf audit 2026-11-24 #4).
+  const rawTile = (row.item as ServiceView & { tile?: unknown }).tile;
+  const listed = useMemo(() => listedTile(row.item), [rawTile, (row.item as ServiceView & { tilePath?: unknown }).tilePath, row.item.runtime]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [near, setNear] = useState(false);
+  useEffect(() => {
+    if (near || listed || row.item.archived || !tileEnabled) return;
+    const el = cardRef.current;
+    const observer = intersectionObserverFor(el, (entries) => { if (entries.some((entry) => entry.isIntersecting)) setNear(true); }, { rootMargin: "200px" });
+    if (!el || !observer) { setNear(true); return; }
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [near, listed, row.item.archived, tileEnabled]);
   useEffect(() => {
     let active = true;
-    if (row.item.archived || !tileEnabled) return;
-    void apiFor(row.hostId).serviceTile(row.item.slug).then((answer) => active && setTile(readServiceTile(answer?.tile))).catch(() => {});
+    if (row.item.archived || !tileEnabled || listed || !near) return;
+    void queuedTileRead(row.hostId, () => active, () => apiFor(row.hostId).serviceTile(row.item.slug))
+      .then((answer) => { if (active && answer !== undefined) setTile(readServiceTile(answer?.tile)); }).catch(() => {});
     return () => { active = false; };
-  }, [row.hostId, row.item.slug, row.item.archived, tileEnabled]);
+  }, [row.hostId, row.item.slug, row.item.archived, tileEnabled, listed, near]);
+  const tile = listed && !row.item.archived && tileEnabled ? listed.tile : fetchedTile;
   const service = row.item;
   const title = tile?.title || service.displayName || service.slug;
   const worker = isWorker(service);
   const health = t(serviceHealthKey(service)) + (service.health === "stoppedIdle" && service.stoppedIdleAt ? ` · ${new Date(service.stoppedIdleAt).toLocaleString()}` : "");
-  const cardRef = useRef<HTMLDivElement>(null);
   // A background service has no page: the card opens its menu (start / stop / restart / logs) instead.
   const open = () => {
     if (stale || service.archived) return;
@@ -134,15 +157,16 @@ function CompactServiceCard({ row, ownerName, ownerTitle, stale, tileEnabled, ca
         <span aria-hidden="true" className={`size-2 shrink-0 rounded-full ${service.health === "reachable" ? "bg-ok" : service.health === "starting" ? "bg-warn" : service.health === "crashLooped" ? "bg-danger" : "bg-subtle"}`} />
         <span className="truncate text-sm font-medium">{title}</span>
         {service.starred ? <Star size={12} className="shrink-0 fill-current text-warn-text" /> : null}
+        <RemoteAccessMark on={service.remoteAccess} />
         {worker ? <WorkerBadge /> : null}
         {tile?.badge ? <span className="max-w-20 truncate rounded bg-accent/10 px-1 py-0.5 text-caption/[inherit] text-accent">{tile.badge}</span> : null}
       </div>
-      <div className="mt-1 flex min-w-0 items-center gap-1.5 pl-3.5 text-caption/[inherit] text-subtle"><span className="truncate" title={serviceHealthTitle(health, service, t)}>{health}</span><span aria-hidden="true">·</span><span className="truncate" title={ownerTitle} data-service-scope={ownerTitle ? "project" : undefined}>{ownerName}</span></div>
+      <div className="mt-1 flex min-w-0 items-center gap-1.5 pl-3.5 text-caption/[inherit] text-subtle"><span className="truncate" title={serviceHealthTitle(health, service, t)}>{health}</span><span aria-hidden="true">·</span><span className="truncate" title={ownerTitle} data-service-scope={ownerTitle ? "project" : undefined}><EntityMention entity={ownerEntity}>{ownerName}</EntityMention></span></div>
     </div>
   );
 }
 
-export function ServiceCards({ rows, ownerName, ownerTitle, hostName, stale, tileEnabled, organizable, menu, logs, refresh, error }: Props) {
+export function ServiceCards({ rows, ownerName, ownerEntity, ownerTitle, hostName, stale, tileEnabled, organizable, menu, logs, refresh, error }: Props) {
   const { t } = useI18n();
   const sections = useMemo(() => organizedServiceSections(rows), [rows]);
   const dragRef = useRef<Dragged | null>(null);
@@ -312,7 +336,7 @@ export function ServiceCards({ rows, ownerName, ownerTitle, hostName, stale, til
   return (
     <div className="space-y-4" data-service-cards="dense-direct">
       {rows.some((row) => !organizable(row)) && <p role="status" className="text-xs text-muted">{t("services.organize.upgrade", { host: hostName(rows.find((row) => !organizable(row))!) })}</p>}
-      {pendingKeep ? <div data-service-lifetime-confirm="" role="status" className="flex flex-wrap items-center gap-2 rounded-lg border border-accent/40 bg-accent/5 px-3 py-2 text-xs"><span className="mr-auto">{pendingKeep.section === "temporary" ? t("services.temporary.confirm") : t("services.keep.confirm", { section: t(`services.purpose.${pendingKeep.section}`) })}</span><button type="button" disabled={busy} onClick={() => void moveService(pendingKeep.rowKey, pendingKeep.section, pendingKeep.group, pendingKeep.targetKey, pendingKeep.after, true)} className="press-solid rounded bg-accent px-2 py-1 text-white hover:brightness-110 disabled:opacity-50">{t(pendingKeep.section === "temporary" ? "services.temporary.confirmAction" : "services.keep.confirmAction")}</button><button type="button" disabled={busy} onClick={() => setPendingKeep(null)} className="press rounded border border-border px-2 py-1 hover:bg-surface-2 disabled:opacity-50">{t("dialog.cancel")}</button></div> : null}
+      {pendingKeep ? <div data-service-lifetime-confirm="" role="status" className="flex flex-wrap items-center gap-2 rounded-lg border border-accent/40 bg-accent/5 px-3 py-2 text-xs"><span className="mr-auto">{pendingKeep.section === "temporary" ? t("services.temporary.confirm") : t("services.keep.confirm", { section: t(`services.purpose.${pendingKeep.section}`) })}</span><button type="button" disabled={busy} onClick={() => void moveService(pendingKeep.rowKey, pendingKeep.section, pendingKeep.group, pendingKeep.targetKey, pendingKeep.after, true)} className="press-solid rounded bg-accent px-2 py-1 text-on-accent hover:brightness-110 disabled:opacity-50">{t(pendingKeep.section === "temporary" ? "services.temporary.confirmAction" : "services.keep.confirmAction")}</button><button type="button" disabled={busy} onClick={() => setPendingKeep(null)} className="press rounded border border-border px-2 py-1 hover:bg-surface-2 disabled:opacity-50">{t("dialog.cancel")}</button></div> : null}
       {visibleSections.map((sectionName) => {
         const section = sections.find((candidate) => candidate.section === sectionName) ?? { section: sectionName, groups: [] };
         const sectionHint = `section:${sectionName}`;
@@ -330,11 +354,11 @@ export function ServiceCards({ rows, ownerName, ownerTitle, hostName, stale, til
                   {group.name ? <button type="button" draggable disabled={busy} aria-label={t("services.group.drag", { name: group.name })} onClick={(event) => event.stopPropagation()} onDragStart={(event) => beginGroup(sectionName, group.name, event)} onDragEnd={finishDrag} className="ml-auto cursor-grab rounded p-1 text-subtle hover:bg-surface-2 active:cursor-grabbing"><GripVertical size={13} /></button> : null}
                 </div>
                 {renaming === group.key ? <form className="mb-2 flex gap-2" onSubmit={(event) => { event.preventDefault(); if (isImeComposing(event)) return; const input = new FormData(event.currentTarget).get("name"); void renameGroup(sectionName, group.name, typeof input === "string" ? input : ""); }}><input name="name" autoFocus defaultValue={group.name} maxLength={80} onKeyDown={(event) => { if (!isImeComposing(event) && event.key === "Escape") setRenaming(null); }} onBlur={(event) => { if (!isImeComposing(event)) setRenaming(null); }} className="min-w-0 flex-1 rounded border border-accent bg-background px-2 py-1 text-xs outline-none" /><span className="self-center text-caption/[inherit] text-subtle">{t("services.group.renameHint")}</span></form> : null}
-                {!folded ? <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-2">{group.rows.map((row) => <CompactServiceCard key={row.key} row={row} ownerName={ownerName(row)} ownerTitle={ownerTitle?.(row)} stale={stale(row)} tileEnabled={tileEnabled(row)} canDrag={!busy} blocked={blockedReason(row)} highlighted={dropHint.startsWith(`card:${row.key}:`)} menu={() => menu(row, organizationEntries(row))} beginDrag={(event) => beginService(row, event)} finishDrag={finishDrag} dragOver={(event) => { const drag = dragRef.current; if (drag?.kind !== "service" || drag.key === row.key) return; event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = "move"; const rect = event.currentTarget.getBoundingClientRect(); const after = event.clientY > rect.top + rect.height / 2 || (Math.abs(event.clientY - (rect.top + rect.height / 2)) < rect.height / 4 && event.clientX > rect.left + rect.width / 2); setDropHint(`card:${row.key}:${after ? "after" : "before"}`); }} drop={(event) => { event.preventDefault(); event.stopPropagation(); const drag = dragRef.current; if (drag?.kind !== "service" || drag.key === row.key) return; const after = dropHint === `card:${row.key}:after`; void moveService(drag.key, sectionName, group.name, row.key, after); }} error={error} />)}</div> : null}
+                {!folded ? <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-2">{group.rows.map((row) => <CompactServiceCard key={row.key} row={row} ownerName={ownerName(row)} ownerEntity={ownerEntity?.(row)} ownerTitle={ownerTitle?.(row)} stale={stale(row)} tileEnabled={tileEnabled(row)} canDrag={!busy} blocked={blockedReason(row)} highlighted={dropHint.startsWith(`card:${row.key}:`)} menu={() => menu(row, organizationEntries(row))} beginDrag={(event) => beginService(row, event)} finishDrag={finishDrag} dragOver={(event) => { const drag = dragRef.current; if (drag?.kind !== "service" || drag.key === row.key) return; event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = "move"; const rect = event.currentTarget.getBoundingClientRect(); const after = event.clientY > rect.top + rect.height / 2 || (Math.abs(event.clientY - (rect.top + rect.height / 2)) < rect.height / 4 && event.clientX > rect.left + rect.width / 2); setDropHint(`card:${row.key}:${after ? "after" : "before"}`); }} drop={(event) => { event.preventDefault(); event.stopPropagation(); const drag = dragRef.current; if (drag?.kind !== "service" || drag.key === row.key) return; const after = dropHint === `card:${row.key}:after`; void moveService(drag.key, sectionName, group.name, row.key, after); }} error={error} />)}</div> : null}
                 {!folded && logs ? group.rows.map((row) => { const body = logs(row); return body ? <div key={`logs:${row.key}`} data-service-card-logs={row.key} className="mt-2 rounded-lg border border-border bg-surface px-2.5 py-2"><div className="mb-1 truncate text-xs font-medium text-muted">{row.item.displayName || row.item.slug}</div>{body}</div> : null; }) : null}
               </div>;
             })}
-            <div className={`rounded-lg border border-dashed px-2 py-1.5 text-xs ${dropHint === `new:${sectionName}` ? `border-accent text-accent ${DROP_TINT}` : "border-border text-subtle"}`} style={dropHint === `new:${sectionName}` ? tint : undefined} onDragOver={(event) => { if (dragRef.current?.kind === "service") { event.preventDefault(); event.stopPropagation(); setDropHint(`new:${sectionName}`); } }} onDrop={(event) => { event.preventDefault(); event.stopPropagation(); const drag = dragRef.current; if (drag?.kind === "service") startNewGroup(drag.key, sectionName); }}>{newGroup?.section === sectionName ? <form className="flex items-center gap-2" onSubmit={(event) => { event.preventDefault(); if (isImeComposing(event)) return; const name = new FormData(event.currentTarget).get("name"); if (typeof name === "string" && name.trim()) { const target = newGroup; setNewGroup(null); void moveService(target.rowKey, sectionName, name.trim()); } }}><input name="name" autoFocus maxLength={80} placeholder={t("services.group.namePlaceholder")} onKeyDown={(event) => { if (!isImeComposing(event) && event.key === "Escape") setNewGroup(null); }} className="min-w-0 flex-1 rounded border border-accent bg-background px-2 py-1 text-foreground outline-none" /><button type="submit" className="rounded bg-accent px-2 py-1 text-white">{t("services.group.create")}</button></form> : <span>＋ {t("services.group.new")}</span>}</div>
+            <div className={`rounded-lg border border-dashed px-2 py-1.5 text-xs ${dropHint === `new:${sectionName}` ? `border-accent text-accent ${DROP_TINT}` : "border-border text-subtle"}`} style={dropHint === `new:${sectionName}` ? tint : undefined} onDragOver={(event) => { if (dragRef.current?.kind === "service") { event.preventDefault(); event.stopPropagation(); setDropHint(`new:${sectionName}`); } }} onDrop={(event) => { event.preventDefault(); event.stopPropagation(); const drag = dragRef.current; if (drag?.kind === "service") startNewGroup(drag.key, sectionName); }}>{newGroup?.section === sectionName ? <form className="flex items-center gap-2" onSubmit={(event) => { event.preventDefault(); if (isImeComposing(event)) return; const name = new FormData(event.currentTarget).get("name"); if (typeof name === "string" && name.trim()) { const target = newGroup; setNewGroup(null); void moveService(target.rowKey, sectionName, name.trim()); } }}><input name="name" autoFocus maxLength={80} placeholder={t("services.group.namePlaceholder")} onKeyDown={(event) => { if (!isImeComposing(event) && event.key === "Escape") setNewGroup(null); }} className="min-w-0 flex-1 rounded border border-accent bg-background px-2 py-1 text-foreground outline-none" /><button type="submit" className="rounded bg-accent px-2 py-1 text-on-accent">{t("services.group.create")}</button></form> : <span>＋ {t("services.group.new")}</span>}</div>
           </div>
         </section>;
       })}

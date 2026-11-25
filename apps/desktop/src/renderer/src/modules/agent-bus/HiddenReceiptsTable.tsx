@@ -19,6 +19,7 @@ import { featuresOf, useApp, viewOf } from "../../store";
 import { CleanupTable } from "./CleanupTable";
 import { CLEANUP_ACTION, CLEANUP_ACTION_IDLE, cleanupAge } from "./cleanupText";
 import { secondsSince } from "./cleanup";
+import { EntityMention } from "../../components/EntityIcon";
 
 const IDENTITY = (id: string) => id;
 
@@ -108,7 +109,7 @@ export function HiddenReceiptsTable({ hostId, rows, nameOf = IDENTITY }: { hostI
           return {
             what: text || <span className="text-subtle">{r.id}</span>,
             whatTitle: text || r.id,
-            who: `${from} → ${nameOf(r.session)}`,
+            who: <><EntityMention entity={record?.from ? { kind: "agent", id: record.from, name: from } : null}>{from}</EntityMention> → <EntityMention entity={{ kind: "agent", id: r.session, name: nameOf(r.session) }}>{nameOf(r.session)}</EntityMention></>,
             whoTitle: r.session,
             age: cleanupAge(sent, t),
             state: write?.error ? (

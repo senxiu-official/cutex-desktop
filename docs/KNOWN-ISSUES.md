@@ -1,6 +1,6 @@
 # Known issues
 
-Applies to **Cutex Desktop 0.2.6 — Beautiful World** with **cutex 0.2.4 — Beautiful World**,
+Applies to **Cutex Desktop 0.2.8 — Beautiful World** with **cutex 0.2.6 — Beautiful World**,
 unless an entry specifies an older host version. Update the desktop and each host separately.
 
 The application displays these entries in Settings → About → Known issues. Three Windows entries
@@ -64,7 +64,14 @@ recovery fixes do not establish or resolve the cause of DNS, TLS, proxy or provi
 
 ## claude-r46 direct stdio on non-UTF-8 locales
 
-Claude claude-r46 direct stdio uses Python stdout encoding. Under a non-UTF-8 locale, non-ASCII JSON may not be readable by UTF-8 clients. This is fixed in claude-r55. Existing agents retain their selected runtime; updating the desktop does not replace a pinned runtime. Normal cutex-managed sessions use a loopback WebSocket and do not use this stdio writer.
+Claude claude-r46 direct stdio uses Python stdout encoding. Under a non-UTF-8 locale, non-ASCII JSON may not be readable by UTF-8 clients. This is fixed in claude-r48. Existing agents retain their selected runtime; updating the desktop does not replace a pinned runtime. Normal cutex-managed sessions use a loopback WebSocket and do not use this stdio writer.
 
-- Workaround: use claude-r55 for new direct-stdio launches, or set `PYTHONIOENCODING=utf-8` for the existing direct-stdio process.
-- Fix schedule: not scheduled for the immutable claude-r46 release; fixed in claude-r55.
+- Workaround: use claude-r48 for new direct-stdio launches, or set `PYTHONIOENCODING=utf-8` for the existing direct-stdio process.
+- Fix schedule: not scheduled for the immutable claude-r46 release; fixed in claude-r48.
+
+## Linux Native sandbox requires system bubblewrap
+
+Native 0.172.0-r70 requires a capable system bwrap, pidfd_open (Linux 5.3 or newer), and a host policy that permits sandbox startup. It does not bundle bubblewrap. AppArmor restrictions on user namespaces can prevent transparent TCP proxy mode. Missing requirements refuse startup without silently weakening sandboxing.
+
+- Workaround: Use a Linux host that meets these requirements. Explicit-proxy support does not establish transparent-TCP compatibility.
+- Fix schedule: not scheduled.

@@ -23,6 +23,7 @@ import { formatAbsolute, formatWhen, useClock } from "../../lib/time";
 import { usePeerResource, usePeerWrite, usePeerWrites } from "./hooks";
 import { exportChoices, exportMode, hasExport, inflightEffect, peerErrorText, policyPatch, toggleExport, withExportMode, type ExportChoice, type ExportMode } from "./model";
 import { StateBadge } from "./PeerParts";
+import { EntityIcon } from "../../components/EntityIcon";
 
 const SANDBOXES = [
   { value: "read-only", key: "peers.policy.sandbox.readOnly" },
@@ -91,9 +92,10 @@ const EXPORT_LIST_SIZES = { narrow: widthBelow(36) } as const;
 /** One project / agent of the 「部分」 export checklist (rendered inside its SettingsGroup). */
 function ExportCheck({ choice: c, exports, disabled, onCommit }: { choice: ExportChoice; exports: PeerExport[]; disabled: boolean; onCommit(next: PeerExport[]): void }) {
   const { t } = useI18n();
+  const hostId = useTargetHostId();
   return (
     <Check checked={hasExport(exports, c.item)} disabled={disabled} onChange={(on) => onCommit(toggleExport(exports, c.item, on))}>
-      {c.color && <span className="h-2 w-2 shrink-0 rounded-sm" style={{ background: c.color }} />}
+      {"project" in c.item ? <EntityIcon entity={{ kind: "project", id: c.item.project, hostId }} /> : "agent" in c.item ? <EntityIcon entity={{ kind: "agent", id: c.item.agent, name: c.name }} /> : null}
       <span className="truncate">{c.name}</span>
       {c.members !== null && <span className="shrink-0 text-xs text-subtle">{t("peers.policy.export.members", { n: c.members })}</span>}
     </Check>

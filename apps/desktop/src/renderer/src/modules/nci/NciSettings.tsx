@@ -23,7 +23,7 @@ import { intervalLabel, mailboxDraft, mailPasswordRequired, mailToView, NCI_MODU
 import { JOB_SERVICE_COMPONENT } from "../../lib/componentCard";
 import { settingsAnchorId } from "../../lib/settingsNav";
 import { useTargetApi, useTargetFeatures, useTargetHostId } from "../../lib/targetHost";
-import { formatAbsolute, formatWhen, useClock } from "../../lib/time";
+import { formatAbsolute, formatAt, formatWhen, useClock } from "../../lib/time";
 import { useHostData } from "../../lib/useHostScope";
 import { useModulePref } from "../react";
 
@@ -687,6 +687,17 @@ function EnableStep({ mail, nci, state, hasMail, verification }: { mail: Status<
                     {" · "}
                     {t("nci.enable.tracked", { n: s.trackedJobs ?? 0 })}
                   </span>
+                  {/* r296: next check estimate and completion notices, in the 作业 page's words. */}
+                  {s.enabled && s.nextCheckAt !== undefined && (
+                    <>
+                      <br />
+                      <span data-nci-next="" title={s.nextCheckAt ? formatAbsolute(s.nextCheckAt) : undefined}>
+                        {s.nextCheckAt ? t("jobs.nci.nextCheck", { at: formatAt(s.nextCheckAt, now) }) : t("jobs.nci.noNextCheck")}
+                        {(s.pendingDeliveries ?? 0) > 0 ? ` · ${t("jobs.nci.pending", { n: s.pendingDeliveries ?? 0 })}` : ""}
+                        {s.deliveryErrorCode ? ` · ${t("jobs.nci.deliveryError", { code: s.deliveryErrorCode })}` : ""}
+                      </span>
+                    </>
+                  )}
                 </>
               )
             }

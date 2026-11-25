@@ -6,14 +6,15 @@
 // `settings.section` items targeting "collab": policy (轮换主管, 服务审批, 消息投递) first, the
 // agent-bus module's collapsed 「高级」 card (消息总线, 卡住的消息) last.
 import { useSettingsCard } from "../../lib/settingsDrafts";
-import { useRef, useState } from "react";
+import { useRef, useState, Fragment } from "react";
 import { useArchivedAgents } from "../../lib/useArchivedAgents";
 import { ArrowLeftRight, FolderKanban, User } from "lucide-react";
 import type { AgentSecurity, AgentSecurityPatch, DomainKey } from "../../../../shared/ipc";
 import { useI18n, type MessageKey } from "../../i18n";
 import { closeMenu, openMenuFrom } from "../../lib/contextMenu";
-import { addGrant, addLink, BOUNDARY_FEATURE, DEFAULT_MAX_EXTERNAL, DEFAULT_MAX_LINKS, domainLabel, domainOptions, EXTERNAL_GRANTS_FEATURE, grantedProjects, grantsFor, removeGrant, removeLink, type ListError } from "../../lib/agentSecurity";
-import { grantPickerOptions, linkPickerOptions, securityProjectIds } from "../../lib/securityPicker";
+import { addGrant, addLink, BOUNDARY_FEATURE, DEFAULT_MAX_EXTERNAL, DEFAULT_MAX_LINKS, domainLabel, domainOptions, EXTERNAL_GRANTS_FEATURE, grantedProjects, grantsFor, parseDomain, removeGrant, removeLink, type ListError } from "../../lib/agentSecurity";
+import { domainEntity, grantPickerOptions, linkPickerOptions, securityProjectIds } from "../../lib/securityPicker";
+import { EntityIcon } from "../EntityIcon";
 import { SearchablePickerBody, SearchableSelect } from "../SearchablePicker";
 import { useRiskAgentSecurity as useAgentSecurity, useSettingsRisk } from "../../lib/useSettingsRisk";
 import { settingsRiskText as riskText } from "../../lib/settingsRiskText";
@@ -29,16 +30,22 @@ import { AddButton, ArmedRemove, Button, EmptyState, ErrorNote, ListFilter, Load
 import { useTargetFeatures, useTargetHostId, useTargetHostLabel, useTargetSelect, useTargetSidebar } from "../../lib/targetHost";
 import { projectIcon } from "../../lib/projectIcons";
 import { useProjectIcons } from "../../lib/projectIconSync";
+import { entityIconSlot } from "../../lib/entityIcon";
 import { useUiPrefs } from "../../lib/prefs";
 import { ProjectBadge } from "../ProjectBadge";
+import { EntityMention } from "../EntityIcon";
 
+/** A link end: the project's / agent's own icon (components/EntityIcon; owner 2026-11-24), a generic glyph only when unknown. */
 function DomainName({ domain }: { domain: DomainKey }) {
   const sidebar = useTargetSidebar();
+  const hostId = useTargetHostId();
   const { label, kind, known } = domainLabel(domain, sidebar);
+  const parsed = parseDomain(domain);
   const Icon = kind === "project" ? FolderKanban : User;
+  const project = parsed?.kind === "project" ? sidebar?.projects?.projects.find(p => p.project_id === parsed.id) : undefined;
   return (
     <span className={`flex min-w-0 items-center gap-1.5 ${known ? "" : "text-subtle"}`} title={domain}>
-      <Icon size={13} strokeWidth={1.75} className="shrink-0 text-subtle" />
+      {known && parsed ? <EntityIcon entity={domainEntity(parsed.kind, parsed.id, label, hostId, project?.presentation)} /> : <Icon size={13} strokeWidth={1.75} className="shrink-0 text-subtle" />}
       <span className="truncate">{label}</span>
     </span>
   );
@@ -117,7 +124,7 @@ function ProjectGrants({ projectId, security, patch, saving, showProject }: { pr
           <span className="ml-auto">
             <SettingsGroup agents="now" source="host"><SearchableSelect value="" options={picker.options} onChange={picker.pick}
               label={t("security.external.add")} triggerText={`+ ${t("security.external.add")}`} placeholder={t("security.picker.search")} emptyLabel={t("security.picker.empty")}
-              disabled={saving || picker.options.length === 0} triggerClassName="press rounded-md px-2 py-1 text-xs text-accent hover:bg-hover disabled:opacity-40" /></SettingsGroup>
+              disabled={saving || picker.options.length === 0} triggerClassName="press inline-flex items-center gap-1 whitespace-nowrap rounded-md px-2 py-1 text-xs text-accent hover:bg-hover disabled:opacity-40" /></SettingsGroup>
           </span>
         )}
       </div>
@@ -131,7 +138,7 @@ function ProjectGrants({ projectId, security, patch, saving, showProject }: { pr
             <SettingsGroup navigation agents="none" source="local"><button disabled={!s} onClick={() => void select(g.agent)} className="min-w-0 truncate text-left text-sm enabled:hover:underline" title={g.agent}>
               {s?.displayName ?? g.agent}
             </button></SettingsGroup>
-            <span className="shrink-0 text-xs text-subtle">· {s ? where : t("security.unknownAgent")}</span>
+            <span className="shrink-0 text-xs text-subtle">· {s ? <EntityMention entity={pid ? { kind: "project", id: pid, hostId } : null}>{where}</EntityMention> : t("security.unknownAgent")}</span>
             <span className="ml-auto" />
             <SettingsGroup agents="now" source="host"><ArmedRemove title={t("security.external.remove")} disabled={saving} onRemove={() => void patch({ externalAgents: removeGrant(grants, projectId, g.agent) })} /></SettingsGroup>
           </div>
@@ -176,7 +183,7 @@ function LinksEditor({ security, patch, saving }: { security: AgentSecurity; pat
   const draft = useRef({ a, b, hostId }); draft.current = { a, b, hostId };
   const gate = useSettingsRisk([security, a, b, domainOptions(sidebar)]);
   const { projectOrder } = useUiPrefs();
-  const selectOptions = linkPickerOptions(sidebar, securityProjectIds(sidebar, projectOrder ?? [], hostId), t("security.domain.project"), t("security.independent"));
+  const selectOptions = linkPickerOptions(sidebar, securityProjectIds(sidebar, projectOrder ?? [], hostId), t("security.domain.project"), t("security.independent"), hostId);
   const max = security.maxLinks ?? DEFAULT_MAX_LINKS;
   const [filter, setFilter] = useState("");
   const shown = security.links.filter((link) => matchesFilter(filter, domainLabel(link[0], sidebar).label, domainLabel(link[1], sidebar).label));
@@ -230,11 +237,12 @@ function ExternalEntry({ security, host }: { security: AgentSecurity; host: bool
   const openSettings = useApp((s) => s.openSettings);
   const grants = security.externalAgents ?? [];
   const all = [...(sidebar?.active ?? []), ...(sidebar?.retired ?? [])];
-  const first = grants.slice(0, 3).map((g) => all.find((s) => s.cutexSessionId === g.agent)?.displayName ?? g.agent).join(" · ");
+  // Icons on the names the summary shows (the first three).
+  const first = grants.slice(0, 3).map((g, i) => { const name = all.find((s) => s.cutexSessionId === g.agent)?.displayName; return <Fragment key={g.agent}>{i > 0 && " · "}<EntityMention entity={name ? { kind: "agent", id: g.agent, name } : null}>{name ?? g.agent}</EntityMention></Fragment>; });
   return (
     <Section id={settingsAnchorId("external")} title={t("security.external")} hint={t("security.external.hint")}>
       {host && <p className="border-b border-border py-2 text-xs text-warn">{t("security.hostModeNote")}</p>}
-      <SubPageRow effect={{ agents: "now", source: "host" }} title={t("security.external.total", { n: grants.length })} summary={first || t("security.external.none")} onOpen={() => openSettings("collab", { sub: "external" })} />
+      <SubPageRow effect={{ agents: "now", source: "host" }} title={t("security.external.total", { n: grants.length })} summary={first.length ? first : t("security.external.none")} onOpen={() => openSettings("collab", { sub: "external" })} />
     </Section>
   );
 }
@@ -261,16 +269,22 @@ function ExternalGrantsSection({ security, patch, saving, host }: { security: Ag
   const shown = listed.filter((id) => matchesFilter(filter, projects.find((p) => p.project_id === id)?.presentation.display_name ?? id,
     ...grantsFor(grants, id).map((g) => everyone.find((s) => s.cutexSessionId === g.agent)?.displayName ?? g.agent)));
   const activeProjects = securityProjectIds(sidebar, projectOrder ?? [], hostId).flatMap(id => projects.filter(p => p.project_id === id && (p.lifecycle ?? "active") === "active"));
-  const pick = (el: HTMLElement) =>
+  const icons = useProjectIcons();
+  const pick = (el: HTMLElement) => {
+    // One icon slot for the menu (the widest text icon), so the project names line up.
+    const entities = activeProjects.map((p) => domainEntity("project", p.project_id, p.presentation.display_name, hostId, p.presentation));
+    const slot = entityIconSlot(entities, icons);
     openMenuFrom(
       el,
-      activeProjects.map((p) => {
+      activeProjects.map((p, i) => {
         const picker = menuFor(p.project_id);
+        const icon = <EntityIcon entity={entities[i]!} slot={slot} />;
         return picker.options.length > 0
-          ? { label: p.presentation.display_name, flyout: <SearchablePickerBody options={picker.options} placeholder={t("security.picker.search")} emptyLabel={t("security.picker.empty")} onPick={id => { closeMenu(); picker.pick(id); }} />, onSelect: () => {} }
-          : { label: p.presentation.display_name, hint: t("security.external.noCandidates"), disabled: true, onSelect: () => {} };
+          ? { label: p.presentation.display_name, icon, flyout: <SearchablePickerBody options={picker.options} placeholder={t("security.picker.search")} emptyLabel={t("security.picker.empty")} onPick={id => { closeMenu(); picker.pick(id); }} />, onSelect: () => {} }
+          : { label: p.presentation.display_name, icon, hint: t("security.external.noCandidates"), disabled: true, onSelect: () => {} };
       }),
     );
+  };
   return (
     <Section
       id={settingsAnchorId("external")}
@@ -389,11 +403,12 @@ function LinksEntry({ security, host }: { security: AgentSecurity; host: boolean
   const { t } = useI18n();
   const sidebar = useTargetSidebar();
   const openSettings = useApp((s) => s.openSettings);
-  const first = security.links.slice(0, 3).map(([a, b]) => `${domainLabel(a, sidebar).label} ⇄ ${domainLabel(b, sidebar).label}`).join(" · ");
+  const hostId = useTargetHostId();
+  const first = security.links.slice(0, 3).map(([a, b], i) => <Fragment key={`${a}\n${b}`}>{i > 0 && " · "}<DomainMention domain={a} sidebar={sidebar} hostId={hostId} /> ⇄ <DomainMention domain={b} sidebar={sidebar} hostId={hostId} /></Fragment>);
   return (
     <Section id={settingsAnchorId("links")} title={t("security.links")} hint={t("security.links.hint")}>
       {host && <p className="border-b border-border py-2 text-xs text-warn">{t("security.hostModeNote")}</p>}
-      <SubPageRow effect={{ agents: "now", source: "host" }} title={t("security.links.count", { n: security.links.length })} summary={first || t("security.links.none")} onOpen={() => openSettings("collab", { sub: "links" })} />
+      <SubPageRow effect={{ agents: "now", source: "host" }} title={t("security.links.count", { n: security.links.length })} summary={first.length ? first : t("security.links.none")} onOpen={() => openSettings("collab", { sub: "links" })} />
     </Section>
   );
 }
@@ -442,4 +457,11 @@ export function CollabLinksSubPage() {
       </Section>
     </>
   );
+}
+
+/** A domain (project / independent agent) in a summary sentence: its name after its icon, plain when unknown. */
+function DomainMention({ domain, sidebar, hostId }: { domain: DomainKey; sidebar: Parameters<typeof domainLabel>[1]; hostId: string }) {
+  const d = parseDomain(domain);
+  const { label, known } = domainLabel(domain, sidebar);
+  return <EntityMention entity={!d || !known ? null : d.kind === "project" ? { kind: "project", id: d.id, hostId } : { kind: "agent", id: d.id, name: label }}>{label}</EntityMention>;
 }

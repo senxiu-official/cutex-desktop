@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
-import { ArrowUpDown, Check, Download, ExternalLink, FileText, FolderOpen, LayoutList, MoreHorizontal, Pin, RefreshCw, Rows3, Search, X } from "lucide-react";
+import { RowMoreButton } from "../../components/RowMoreButton";
+import { ArrowUpDown, Check, Download, ExternalLink, FileText, FolderOpen, LayoutList, Pin, RefreshCw, Rows3, Search, X } from "lucide-react";
 import { useI18n, type MessageKey } from "../../i18n";
 import { sidebarOf, useApp } from "../../store";
 import { rowsOf } from "../../lib/viewHost";
@@ -18,6 +19,8 @@ import { chooseDownloadFolder, defaultDownloadFolder, dismissCopy, openDownloadF
 import type { DownloadFolder } from "../../../../shared/remoteCopyRequests";
 import { cancelCopy, copyCaps, copyMenu, downloadAgain, keepCopy, openCopy, openOriginal, openRefusedTitle, removeCopy, revealCopy } from "./menu";
 import { COPY_SORTS, SORT_DESC_FIRST, copyDate, filterCopies, pickSort, copyLocation, placeOf, placeOptions, setCopyView, sortCopies, useCopyView, type CopySort, type CopyView, type PlaceNames } from "./view";
+import { EntityMention } from "../../components/EntityIcon";
+import type { EntityRef } from "../../lib/entityIcon";
 
 /** Host labels and project names as the app knows them now (placeOf falls back to what the copy saved). */
 function usePlaceNames(): PlaceNames {
@@ -102,7 +105,7 @@ export function CopyPage() {
         <input value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === "Escape" && text) { e.stopPropagation(); setText(""); } }} placeholder={t("remote-copies.filter")} aria-label={t("remote-copies.filter")} className="min-w-0 flex-1 bg-transparent text-sm outline-none" data-copy-filter />
         {text && <button type="button" onClick={() => setText("")} aria-label={t("remote-copies.clearFilter")} className="shrink-0 rounded text-subtle hover:text-foreground"><X size={13} /></button>}
       </label>
-      {places.length > 1 && <Select<string> width="w-36" label={t("remote-copies.place")} value={placeShown} onChange={setPlace} options={[{ value: "", label: t("remote-copies.allPlaces") }, ...places]} />}
+      {places.length > 1 && <Select<string> width="w-36" label={t("remote-copies.place")} value={placeShown} onChange={setPlace} options={[{ value: "", label: t("remote-copies.allPlaces") }, ...places.map((p) => ({ ...p, entity: placeEntity(p.value) }))]} />}
       {prefs.view === "cards" && <Button size="sm" variant="ghost" onClick={(e) => sortMenu(e.currentTarget)} aria-label={t("remote-copies.sort")} title={t("remote-copies.sort")} data-copy-sort><ArrowUpDown size={14} data-icon="inline-start" />{t(`remote-copies.sort.${prefs.sort}`)}</Button>}
       <Segmented<CopyView> label={t("remote-copies.view")} value={prefs.view} onChange={(view) => setCopyView({ view })} options={[{ value: "cards", label: t("remote-copies.view.cards"), icon: <Rows3 size={13} /> }, { value: "list", label: t("remote-copies.view.list"), icon: <LayoutList size={13} /> }]} />
     </div>}
@@ -199,7 +202,7 @@ function CopyList({ copies, names, sort, desc }: { copies: RemoteCopy[]; names: 
     },
     {
       key: "host", header: t("remote-copies.col.place"), width: "9rem", sortable: true,
-      cell: (c) => { const p = placeOf(c, names); const label = p.project ? `${p.host} · ${p.project}` : p.host; return <span className="block truncate text-xs text-muted" title={label}>{label}</span>; },
+      cell: (c) => { const p = placeOf(c, names); const label = p.project ? `${p.host} · ${p.project}` : p.host; const scope = c.source.scope; return <span className="block truncate text-xs text-muted" title={label}>{p.project !== null && scope?.kind === "project" ? <>{p.host} · <EntityMention entity={{ kind: "project", id: scope.id, hostId: c.source.hostId }}>{p.project}</EntityMention></> : label}</span>; },
     },
     { key: "size", header: t("remote-copies.col.size"), width: "5rem", align: "right", sortable: true, cell: (c) => <span className="text-xs tabular-nums text-muted">{formatSize(c.size)}</span> },
     { key: "date", header: <span title={t("remote-copies.col.dateHint")}>{t("remote-copies.col.date")}</span>, width: "8.5rem", sortable: true, cell: (c) => <span className="block truncate text-xs tabular-nums text-muted" title={new Date(copyDate(c)).toLocaleString()}>{date(copyDate(c))}</span> },
@@ -216,7 +219,7 @@ function CopyList({ copies, names, sort, desc }: { copies: RemoteCopy[]; names: 
         return <span className="inline-flex items-center justify-end gap-0.5">
           <button type="button" className={iconBtn} disabled={!caps.openable} onClick={() => openCopy(c)} aria-label={t("remote-copies.open")} title={openRefusedTitle(caps, t) ?? t("remote-copies.open")}><ExternalLink size={14} /></button>
           <button type="button" className={iconBtn} disabled={!caps.local} onClick={() => revealCopy(c)} aria-label={t("remote-copies.reveal")} title={t("remote-copies.reveal")}><FolderOpen size={14} /></button>
-          <button type="button" className={iconBtn} onClick={(e) => openMenuFrom(e.currentTarget, menu(c))} aria-label={t("remote-copies.more")} title={t("remote-copies.more")} data-copy-more><MoreHorizontal size={14} /></button>
+          <RowMoreButton label={t("remote-copies.more")} onOpen={(e) => openMenuFrom(e.currentTarget, menu(c))} data-copy-more="" />
         </span>;
       },
     },
@@ -241,4 +244,11 @@ function CopyList({ copies, names, sort, desc }: { copies: RemoteCopy[]; names: 
       })}
     />
   </div>;
+}
+
+/** A place filter value `project:<host>|<id>` (view.placeOf) as its project. */
+function placeEntity(value: string): EntityRef | null {
+  if (!value.startsWith("project:")) return null;
+  const [hostId, id] = value.slice("project:".length).split("|") as [string, string | undefined];
+  return id ? { kind: "project", id, hostId } : null;
 }

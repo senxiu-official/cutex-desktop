@@ -259,7 +259,7 @@ describe("owner-admission-held-v1 delivery", () => {
   it.each(["edit", "discard"])("timeout → owner %s does not resurrect on a late held acknowledgement", async action => {
     await begin(); await store.getState().submit("owner input", "auto");
     const id = rows()[0]!.id; timeout(id);
-    expect(rows()).toMatchObject([{ state: "failed", error: expect.stringContaining("没发出去") }]);
+    expect(rows()).toMatchObject([{ state: "failed", error: expect.stringContaining("未发送") }]);
     if (action === "edit") store.getState().editSend("a1", id, "local");
     else store.getState().discardSend("a1", id, "local");
     event("held", { ...held, clientUserMessageId: id });

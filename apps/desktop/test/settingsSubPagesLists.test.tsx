@@ -40,6 +40,9 @@ vi.mock("../src/renderer/src/components/TypedRuleConfirmation", () => ({ TypedRu
 import { ApprovalRuleAuditAll, ApprovalRulesAll, ApprovalRulesSettings } from "../src/renderer/src/modules/approvals/ApprovalRules";
 import { BrowserSitePermissionSettings, BrowserSitesSubPage } from "../src/renderer/src/modules/browser/BrowserSettings";
 
+// The store double is too thin for the avatar stack (agent looks, Profile pictures): icons are stubbed.
+vi.mock("../src/renderer/src/components/EntityIcon", () => import("./helpers/entityIconStub"));
+
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let root: Root, box: HTMLDivElement;
 beforeEach(() => { fx.next = null; fx.rules = []; fx.audit = []; fx.open.mockReset(); box = document.createElement("div"); document.body.append(box); root = createRoot(box); });

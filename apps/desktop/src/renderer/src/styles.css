@@ -96,7 +96,8 @@
   --fg-muted: #5f6066;
   --fg-subtle: #6a6b71;
   --border: #e3e3e6;
-  --accent: #3b82f6;
+  /* 强调色 (Settings → 外观; lib/accent): a pick sets --accent-light / --accent-dark inline on <html>. */
+  --accent: var(--accent-light, #1861d2);
   --bubble: #f0f0f2;
   --peer: #eef4ff;
   --warn: #d97706;
@@ -109,6 +110,9 @@
   --win: #f1f1f3;
   --hover: rgba(20, 20, 30, 0.06);
   --card-border: rgba(20, 20, 30, 0.07);
+  /* 浏览器身份 tab tints (design browser-profiles v3 §2): colour per identity, mixed into the tab at these strengths. */
+  --identity-teal: #0d9488; --identity-violet: #7c3aed; --identity-orange: #c2410c; --identity-indigo: #4f46e5; --identity-pink: #db2777; --identity-slate: #475569;
+  --identity-tint: 9%; --identity-tint-hover: 15%; --identity-tint-active: 20%;
   color-scheme: light;
 }
 
@@ -150,7 +154,8 @@
     --fg-muted: #a4a4aa;
     --fg-subtle: #86868d;
     --border: #2c2c2f;
-    --accent: #60a5fa;
+    --accent: var(--accent-dark, #79acff);
+    --on-accent: var(--on-accent-dark, #0f1115);
     --bubble: #262628;
     --peer: #1f2a3a;
     --warn: #f59e0b;
@@ -163,6 +168,8 @@
     --win: #0e0e0f;
     --hover: rgba(255, 255, 255, 0.06);
     --card-border: rgba(255, 255, 255, 0.06);
+    --identity-teal: #2dd4bf; --identity-violet: #a78bfa; --identity-orange: #fb923c; --identity-indigo: #818cf8; --identity-pink: #f472b6; --identity-slate: #94a3b8;
+    --identity-tint: 14%; --identity-tint-hover: 20%; --identity-tint-active: 26%;
     color-scheme: dark;
   }
 }
@@ -175,7 +182,8 @@
   --fg-muted: #a4a4aa;
   --fg-subtle: #86868d;
   --border: #2c2c2f;
-  --accent: #60a5fa;
+  --accent: var(--accent-dark, #79acff);
+  --on-accent: var(--on-accent-dark, #0f1115);
   --bubble: #262628;
   --peer: #1f2a3a;
   --warn: #f59e0b;
@@ -188,6 +196,8 @@
   --win: #0e0e0f;
   --hover: rgba(255, 255, 255, 0.06);
   --card-border: rgba(255, 255, 255, 0.06);
+  --identity-teal: #2dd4bf; --identity-violet: #a78bfa; --identity-orange: #fb923c; --identity-indigo: #818cf8; --identity-pink: #f472b6; --identity-slate: #94a3b8;
+  --identity-tint: 14%; --identity-tint-hover: 20%; --identity-tint-active: 26%;
   color-scheme: dark;
 }
 
@@ -406,7 +416,7 @@
   --pressed: color-mix(in oklab, var(--fg) 14%, transparent);
   --accent-soft: color-mix(in oklab, var(--accent) 12%, transparent);
   --selected: var(--accent-soft);
-  --on-accent: #ffffff;
+  --on-accent: var(--on-accent-light, #ffffff);
   /* 需要你: only as dots, numbers, thin edges and soft fills. */
   --attention: var(--warn);
   --attention-soft: color-mix(in oklab, var(--attention) 16%, transparent);
@@ -2201,9 +2211,15 @@ nav[data-sidebar-roster="roster"]:not([data-stick-off]) [data-stick="project"] {
    stacks trail the rows by a frame (at 100% / 125% Chrome keeps a list with see-through contents on the main thread
    to keep LCD text). The card's own opaque colour painted with the scrolled contents (background-attachment: local)
    lets Chrome composite it and keep LCD text; will-change: scroll-position would turn the text grayscale (review
-   2026-11-18). An acrylic card is see-through: no opaque colour there, so it keeps its LCD text where Chrome can. */
+   2026-11-18). An acrylic card is see-through: no opaque colour there, so Chrome did not give that list a layer of its
+   own and scrolled it by re-rastering it (DevTools: "raster-inducing scroll") while the titles' animations moved their
+   own layers on the compositor — out of step with the rows whenever the raster fell behind: on Linux (owner 2026-11-24,
+   Hostb, 145%, acrylic) the titles trailed the rows by up to a flick's distance, the rows showing above them, or the
+   bottom stack flashed at the top. There the list is promoted (will-change: scroll-position): rows and titles move in
+   the same compositor frame; its text is grayscale, as text on a see-through card mostly is anyway. */
 nav[data-sidebar-roster="roster"][data-stick-js]:not([data-stick-off]) { background: var(--bg) local; }
 :root[data-card-material="acrylic"]:not([data-edge-to-edge]) nav[data-sidebar-roster="roster"][data-stick-js] { background: none; }
+:root[data-card-material="acrylic"]:not([data-edge-to-edge]) nav[data-sidebar-roster="roster"][data-stick-js]:not([data-stick-off]) { will-change: scroll-position; }
 nav[data-sidebar-roster="roster"][data-stick-js]:not([data-stick-off]) [data-stick="edge"] { position: relative; top: auto; z-index: 3; }
 /* Stacked titles paint over the 「+N」 row (z 4, components/RosterStick), which paints over titles in their place (z 3):
    a title rising out of the bottom stack slides over 「+N」 as 「+N」 slides down into its place (lib/rosterStick moreKeys). */
@@ -2281,3 +2297,12 @@ nav[data-sidebar-roster="roster"] .project-block-tint > .project-block-header[da
 .markdown-callout > :is(p, ul, ol):first-of-type { margin-top: 0; }
 .markdown-callout > :last-child { margin-bottom: 0; }
 .markdown-callout [data-callout-head] + br { display: none; }
+
+/* 浏览器身份 (design browser-profiles v3 §2): a tab of a non-default identity is tinted with its colour (--tab-tint);
+   the site's own favicon stays. Unlayered, so it wins over the tab's bg utilities; the close-confirm style never gets it. */
+.identity-tab { background: color-mix(in srgb, var(--tab-tint) var(--identity-tint), transparent); }
+.identity-tab:hover { background: color-mix(in srgb, var(--tab-tint) var(--identity-tint-hover), transparent); }
+.identity-tab[aria-selected="true"] {
+  background: color-mix(in srgb, var(--tab-tint) var(--identity-tint-active), var(--surface-2));
+  box-shadow: inset 0 -2px 0 var(--tab-tint);
+}

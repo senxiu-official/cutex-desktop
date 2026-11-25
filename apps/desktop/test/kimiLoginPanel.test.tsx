@@ -8,7 +8,7 @@ import type { KimiAccount, KimiLogin } from "../src/shared/kimiAccounts";
 
 const env = vi.hoisted(() => ({ start: vi.fn(), poll: vi.fn(), cancel: vi.fn(), open: vi.fn() }));
 vi.mock("../src/renderer/src/i18n", () => ({ useI18n: () => ({ locale: "en", t: (key: string, vars?: Record<string, unknown>) => (vars ? `${key} ${JSON.stringify(vars)}` : key) }) }));
-vi.mock("../src/renderer/src/lib/targetHost", async (importOriginal) => ({ ...(await importOriginal<object>()), useTargetHostLabel: () => "hachimi", useTargetApi: () => ({ startKimiLogin: env.start, kimiLogin: env.poll, cancelKimiLogin: env.cancel, openExternal: env.open }) }));
+vi.mock("../src/renderer/src/lib/targetHost", async (importOriginal) => ({ ...(await importOriginal<object>()), useTargetHostLabel: () => "hostc", useTargetApi: () => ({ startKimiLogin: env.start, kimiLogin: env.poll, cancelKimiLogin: env.cancel, openExternal: env.open }) }));
 const { LoginPanel } = await import("../src/renderer/src/modules/kimi-accounts/LoginPanel");
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;

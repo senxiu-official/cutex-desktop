@@ -8,6 +8,7 @@
 //   {{Agent}}  {{Agents}}          same, first letter upper-cased (sentence start, titles)
 //   {{an agent}}  {{An agent}}     en: with "a" / "an" picked for the word (zh: the bare term)
 //   {{director}} … same set for the Director role
+//   {{assistant}} … same set for a 个人助理 (personal assistant: an agent that works for the owner across projects)
 //   {{owner}} …    same set for the owner (the human the UI belongs to, as a party: 主人通知,
 //                  等待主人, requester = owner); direct address stays 「你」 / "you"
 //
@@ -25,11 +26,11 @@
 // Unknown placeholders stay as they are (test/terms.test.ts catches typos).
 import { useSyncExternalStore } from "react";
 import { APP_LOCALES, type AppLocale } from "../../../shared/locales";
-import { migrateMaidTerms } from "./termPresetMigration";
+import { migrateAssistantTerm, migrateMaidTerms } from "./termPresetMigration";
 
 export type TermLocale = AppLocale;
-export type TermId = "agent" | "subagent" | "parentagent" | "director" | "operator" | "owner" | "shelf";
-export const TERM_IDS: readonly TermId[] = ["agent", "subagent", "parentagent", "director", "operator", "owner", "shelf"];
+export type TermId = "agent" | "subagent" | "parentagent" | "director" | "operator" | "assistant" | "owner" | "shelf";
+export const TERM_IDS: readonly TermId[] = ["agent", "subagent", "parentagent", "director", "operator", "assistant", "owner", "shelf"];
 
 /** The Shelf's word: the same in every language until the owner names it (canvas principles §6). */
 const SHELF: TermForms = { one: "Shelf", many: "Shelf" };
@@ -45,7 +46,7 @@ export type TermSet = Record<TermId, TermForms>;
 const TW_TERMS: TermSet = {
   agent: { one: "智慧體", many: "智慧體" }, subagent: { one: "子智慧體", many: "子智慧體" },
   parentagent: { one: "父智慧體", many: "父智慧體" }, director: { one: "主管", many: "主管" },
-  operator: { one: "副主管", many: "副主管" }, owner: { one: "主人", many: "主人" }, shelf: SHELF,
+  operator: { one: "副主管", many: "副主管" }, assistant: { one: "個人助理", many: "個人助理" }, owner: { one: "主人", many: "主人" }, shelf: SHELF,
 };
 const HK_TERMS: TermSet = { ...TW_TERMS, agent: { one: "智能體", many: "智能體" },
   subagent: { one: "子智能體", many: "子智能體" }, parentagent: { one: "父智能體", many: "父智能體" } };
@@ -54,18 +55,18 @@ export const DEFAULT_TERMS: Record<TermLocale, TermSet> = {
   "zh-Hant-TW": TW_TERMS,
   "zh-Hant-HK": HK_TERMS,
   "zh-Hant-MO": { ...HK_TERMS },
-  "zh-CN": { agent: { one: "智能体", many: "智能体" }, subagent: { one: "子智能体", many: "子智能体" }, parentagent: { one: "父智能体", many: "父智能体" }, director: { one: "主管", many: "主管" }, operator: { one: "副主管", many: "副主管" }, owner: { one: "主人", many: "主人" }, shelf: SHELF },
-  en: { agent: { one: "agent", many: "agents" }, subagent: { one: "subagent", many: "subagents" }, parentagent: { one: "parent agent", many: "parent agents" }, director: { one: "director", many: "directors" }, operator: { one: "operator", many: "operators" }, owner: { one: "owner", many: "owners" }, shelf: SHELF },
-  "zh-Hant-CN": { agent: { one: "智能體", many: "智能體" }, subagent: { one: "子智能體", many: "子智能體" }, parentagent: { one: "父智能體", many: "父智能體" }, director: { one: "主管", many: "主管" }, operator: { one: "副主管", many: "副主管" }, owner: { one: "主人", many: "主人" }, shelf: SHELF },
-  "en-AU": { agent: { one: "agent", many: "agents" }, subagent: { one: "subagent", many: "subagents" }, parentagent: { one: "parent agent", many: "parent agents" }, director: { one: "director", many: "directors" }, operator: { one: "operator", many: "operators" }, owner: { one: "owner", many: "owners" }, shelf: SHELF },
-  "ru-RU": { agent: { one: "агент", many: "агенты" }, subagent: { one: "субагент", many: "субагенты" }, parentagent: { one: "родительский агент", many: "родительские агенты" }, director: { one: "директор", many: "директоры" }, operator: { one: "заместитель директора", many: "заместители директора" }, owner: { one: "владелец", many: "владельцы" }, shelf: SHELF },
-  "fr-FR": { agent: { one: "agent", many: "agents" }, subagent: { one: "sous-agent", many: "sous-agents" }, parentagent: { one: "agent parent", many: "agents parents" }, director: { one: "directeur", many: "directeurs" }, operator: { one: "directeur adjoint", many: "directeurs adjoints" }, owner: { one: "propriétaire", many: "propriétaires" }, shelf: SHELF },
-  "es-ES": { agent: { one: "agente", many: "agentes" }, subagent: { one: "subagente", many: "subagentes" }, parentagent: { one: "agente padre", many: "agentes padre" }, director: { one: "director", many: "directores" }, operator: { one: "director adjunto", many: "directores adjuntos" }, owner: { one: "propietario", many: "propietarios" }, shelf: SHELF },
-  "pt-BR": { agent: { one: "agente", many: "agentes" }, subagent: { one: "subagente", many: "subagentes" }, parentagent: { one: "agente pai", many: "agentes pai" }, director: { one: "diretor", many: "diretores" }, operator: { one: "diretor adjunto", many: "diretores adjuntos" }, owner: { one: "proprietário", many: "proprietários" }, shelf: SHELF },
-  "it-IT": { agent: { one: "agente", many: "agenti" }, subagent: { one: "sottoagente", many: "sottoagenti" }, parentagent: { one: "agente padre", many: "agenti padre" }, director: { one: "direttore", many: "direttori" }, operator: { one: "vicedirettore", many: "vicedirettori" }, owner: { one: "proprietario", many: "proprietari" }, shelf: SHELF },
-  "de-DE": { agent: { one: "Agent", many: "Agenten" }, subagent: { one: "Sub-Agent", many: "Sub-Agenten" }, parentagent: { one: "übergeordneter Agent", many: "übergeordnete Agenten" }, director: { one: "Leiter", many: "Leiter" }, operator: { one: "stellvertretender Leiter", many: "stellvertretende Leiter" }, owner: { one: "Besitzer", many: "Besitzer" }, shelf: SHELF },
-  "ja-JP": { agent: { one: "エージェント", many: "エージェント" }, subagent: { one: "サブエージェント", many: "サブエージェント" }, parentagent: { one: "親エージェント", many: "親エージェント" }, director: { one: "ディレクター", many: "ディレクター" }, operator: { one: "副ディレクター", many: "副ディレクター" }, owner: { one: "オーナー", many: "オーナー" }, shelf: SHELF },
-  "ko-KR": { agent: { one: "에이전트", many: "에이전트" }, subagent: { one: "하위 에이전트", many: "하위 에이전트" }, parentagent: { one: "상위 에이전트", many: "상위 에이전트" }, director: { one: "디렉터", many: "디렉터" }, operator: { one: "부디렉터", many: "부디렉터" }, owner: { one: "소유자", many: "소유자" }, shelf: SHELF },
+  "zh-CN": { agent: { one: "智能体", many: "智能体" }, subagent: { one: "子智能体", many: "子智能体" }, parentagent: { one: "父智能体", many: "父智能体" }, director: { one: "主管", many: "主管" }, operator: { one: "副主管", many: "副主管" }, assistant: { one: "个人助理", many: "个人助理" }, owner: { one: "主人", many: "主人" }, shelf: SHELF },
+  en: { agent: { one: "agent", many: "agents" }, subagent: { one: "subagent", many: "subagents" }, parentagent: { one: "parent agent", many: "parent agents" }, director: { one: "director", many: "directors" }, operator: { one: "operator", many: "operators" }, assistant: { one: "personal assistant", many: "personal assistants" }, owner: { one: "owner", many: "owners" }, shelf: SHELF },
+  "zh-Hant-CN": { agent: { one: "智能體", many: "智能體" }, subagent: { one: "子智能體", many: "子智能體" }, parentagent: { one: "父智能體", many: "父智能體" }, director: { one: "主管", many: "主管" }, operator: { one: "副主管", many: "副主管" }, assistant: { one: "個人助理", many: "個人助理" }, owner: { one: "主人", many: "主人" }, shelf: SHELF },
+  "en-AU": { agent: { one: "agent", many: "agents" }, subagent: { one: "subagent", many: "subagents" }, parentagent: { one: "parent agent", many: "parent agents" }, director: { one: "director", many: "directors" }, operator: { one: "operator", many: "operators" }, assistant: { one: "personal assistant", many: "personal assistants" }, owner: { one: "owner", many: "owners" }, shelf: SHELF },
+  "ru-RU": { agent: { one: "агент", many: "агенты" }, subagent: { one: "субагент", many: "субагенты" }, parentagent: { one: "родительский агент", many: "родительские агенты" }, director: { one: "директор", many: "директоры" }, operator: { one: "заместитель директора", many: "заместители директора" }, assistant: { one: "личный помощник", many: "личные помощники" }, owner: { one: "владелец", many: "владельцы" }, shelf: SHELF },
+  "fr-FR": { agent: { one: "agent", many: "agents" }, subagent: { one: "sous-agent", many: "sous-agents" }, parentagent: { one: "agent parent", many: "agents parents" }, director: { one: "directeur", many: "directeurs" }, operator: { one: "directeur adjoint", many: "directeurs adjoints" }, assistant: { one: "assistant personnel", many: "assistants personnels" }, owner: { one: "propriétaire", many: "propriétaires" }, shelf: SHELF },
+  "es-ES": { agent: { one: "agente", many: "agentes" }, subagent: { one: "subagente", many: "subagentes" }, parentagent: { one: "agente padre", many: "agentes padre" }, director: { one: "director", many: "directores" }, operator: { one: "director adjunto", many: "directores adjuntos" }, assistant: { one: "asistente personal", many: "asistentes personales" }, owner: { one: "propietario", many: "propietarios" }, shelf: SHELF },
+  "pt-BR": { agent: { one: "agente", many: "agentes" }, subagent: { one: "subagente", many: "subagentes" }, parentagent: { one: "agente pai", many: "agentes pai" }, director: { one: "diretor", many: "diretores" }, operator: { one: "diretor adjunto", many: "diretores adjuntos" }, assistant: { one: "assistente pessoal", many: "assistentes pessoais" }, owner: { one: "proprietário", many: "proprietários" }, shelf: SHELF },
+  "it-IT": { agent: { one: "agente", many: "agenti" }, subagent: { one: "sottoagente", many: "sottoagenti" }, parentagent: { one: "agente padre", many: "agenti padre" }, director: { one: "direttore", many: "direttori" }, operator: { one: "vicedirettore", many: "vicedirettori" }, assistant: { one: "assistente personale", many: "assistenti personali" }, owner: { one: "proprietario", many: "proprietari" }, shelf: SHELF },
+  "de-DE": { agent: { one: "Agent", many: "Agenten" }, subagent: { one: "Sub-Agent", many: "Sub-Agenten" }, parentagent: { one: "übergeordneter Agent", many: "übergeordnete Agenten" }, director: { one: "Leiter", many: "Leiter" }, operator: { one: "stellvertretender Leiter", many: "stellvertretende Leiter" }, assistant: { one: "persönlicher Assistent", many: "persönliche Assistenten" }, owner: { one: "Besitzer", many: "Besitzer" }, shelf: SHELF },
+  "ja-JP": { agent: { one: "エージェント", many: "エージェント" }, subagent: { one: "サブエージェント", many: "サブエージェント" }, parentagent: { one: "親エージェント", many: "親エージェント" }, director: { one: "ディレクター", many: "ディレクター" }, operator: { one: "副ディレクター", many: "副ディレクター" }, assistant: { one: "パーソナルアシスタント", many: "パーソナルアシスタント" }, owner: { one: "オーナー", many: "オーナー" }, shelf: SHELF },
+  "ko-KR": { agent: { one: "에이전트", many: "에이전트" }, subagent: { one: "하위 에이전트", many: "하위 에이전트" }, parentagent: { one: "상위 에이전트", many: "상위 에이전트" }, director: { one: "디렉터", many: "디렉터" }, operator: { one: "부디렉터", many: "부디렉터" }, assistant: { one: "개인 비서", many: "개인 비서" }, owner: { one: "소유자", many: "소유자" }, shelf: SHELF },
 };
 
 /** Saved forms: absent/empty = default. Role sidebar labels: absent = derived default, empty = hidden. */
@@ -101,9 +102,12 @@ export function resolveTerms(overrides: TermOverrides, locale: TermLocale): Term
 }
 
 /** Sidebar-only labels; full role terms continue to name the role everywhere else. */
-export type SidebarRole = "director" | "operator";
+export type SidebarRole = "director" | "operator" | "assistant";
+export const SIDEBAR_ROLES: readonly SidebarRole[] = ["director", "operator", "assistant"];
 const ROLE_SHORT_LABELS: Record<SidebarRole, Readonly<Record<string, string>>> = {
   director: { "Chief Maid": "Chief" }, operator: { "Deputy Maid": "Deputy" },
+  // The chip beside a name is short: 「助理」 / "assistant" (the full term names the role everywhere else).
+  assistant: { "个人助理": "助理", "個人助理": "助理", "personal assistant": "assistant" },
 };
 export function sidebarRoleDefault(terms: TermSet, role: SidebarRole): string {
   return ROLE_SHORT_LABELS[role][terms[role].one] ?? terms[role].one;
@@ -141,7 +145,7 @@ function clean(v: string | undefined): string | null {
 }
 
 const TOKEN = /\{\{(an? |An? )?([A-Za-z]+)\}\}/g;
-const FORMS: Record<string, [TermId, keyof TermForms]> = { agent: ["agent", "one"], agents: ["agent", "many"], subagent: ["subagent", "one"], subagents: ["subagent", "many"], parentagent: ["parentagent", "one"], parentagents: ["parentagent", "many"], director: ["director", "one"], directors: ["director", "many"], operator: ["operator", "one"], operators: ["operator", "many"], owner: ["owner", "one"], owners: ["owner", "many"], shelf: ["shelf", "one"], shelves: ["shelf", "many"] };
+const FORMS: Record<string, [TermId, keyof TermForms]> = { agent: ["agent", "one"], agents: ["agent", "many"], subagent: ["subagent", "one"], subagents: ["subagent", "many"], parentagent: ["parentagent", "one"], parentagents: ["parentagent", "many"], director: ["director", "one"], directors: ["director", "many"], operator: ["operator", "one"], operators: ["operator", "many"], assistant: ["assistant", "one"], assistants: ["assistant", "many"], owner: ["owner", "one"], owners: ["owner", "many"], shelf: ["shelf", "one"], shelves: ["shelf", "many"] };
 
 const upperFirst = (s: string) => (s ? s[0]!.toLocaleUpperCase() + s.slice(1) : s);
 const article = (word: string) => (/^[aeiou]/i.test(word) ? "an" : "a");
@@ -191,12 +195,12 @@ export function splitTerms(template: string, terms: TermSet, locale: TermLocale)
   return out;
 }
 
-/** Daemon-supplied Chinese text (cutex writes the default words: 智能体 / 子智能体 / 主管 / 主人) in
+/** Daemon-supplied Chinese text (cutex writes the default words: 个人助理 / 智能体 / 子智能体 / 主管 / 主人) in
  *  the owner's terms. Other languages and default terms come back unchanged. */
 export function retermDaemonText(text: string, terms: TermSet, locale: TermLocale): string {
   if (!isZhLocale(locale) || !text) return text;
   const defaults = DEFAULT_TERMS["zh-CN"];
-  const ids: TermId[] = ["subagent", "agent", "operator", "director", "owner"];
+  const ids: TermId[] = ["assistant", "subagent", "agent", "operator", "director", "owner"];
   const swaps = ids.filter((id) => terms[id].one !== defaults[id].one);
   if (!swaps.length) return text;
   const pattern = new RegExp(ids.map((id) => defaults[id].one).join("|"), "g");
@@ -224,7 +228,7 @@ function load(): TermOverrides {
   try {
     const raw = JSON.parse(localStorage.getItem(KEY) ?? "{}") as unknown;
     const parsed = parseOverrides(raw);
-    const migrated = migrateMaidTerms(parsed);
+    const migrated = migrateAssistantTerm(migrateMaidTerms(parsed));
     if (migrated !== parsed) {
       try { localStorage.setItem(KEY, JSON.stringify(migrated)); } catch { /* Memory still uses the migrated terms. */ }
     }
@@ -244,7 +248,7 @@ export function parseOverrides(raw: unknown): TermOverrides {
     for (const id of TERM_IDS) {
       const forms = (byTerm as Record<string, unknown>)[id];
       if (!forms || typeof forms !== "object") continue;
-      if (id === "director" || id === "operator") {
+      if ((SIDEBAR_ROLES as readonly string[]).includes(id)) {
         const sidebar = (forms as Record<string, unknown>).sidebar;
         if (typeof sidebar === "string") ((out[locale] ??= {})[id] ??= {}).sidebar = sidebar.trim().slice(0, TERM_MAX);
       }

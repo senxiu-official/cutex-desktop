@@ -7,7 +7,7 @@ import { contrastRatio } from "../src/renderer/src/modules/terminal/xtermTheme";
 const samples: Record<string, { language: HighlightOptions["language"]; code: string }> = {
   powershell: { language: "powershell", code: 'ssh -o BatchMode=yes -o ForwardAgent=no -L 127.0.0.1:53122:127.0.0.1:24270 -- "D:/Work/report.md"' },
   bash: { language: "bash", code: "printf '%s\\n' 'deploy' && ssh -o BatchMode=yes -- workstation 'cutex management client-token issue'" },
-  json: { language: "json", code: '{"host":"hachimi-lan","enabled":true,"count":3,"path":"D:/Work/report.md"}' },
+  json: { language: "json", code: '{"host":"hostc-lan","enabled":true,"count":3,"path":"D:/Work/report.md"}' },
 };
 
 const highlighter = createCodePlugin({ themes: ["github-light", "github-dark"] });

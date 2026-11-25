@@ -23,6 +23,7 @@ import { services } from "../app";
 import type { SideBodyProps } from "../slots";
 import { KIND, type ViewState } from "./model";
 import { focusedProject } from "./open";
+import { projectEntity } from "../../lib/entityIcon";
 
 /** The page id in the pin key (`project-view:<projectId>`). */
 export const PAGE_ID = "project-view";
@@ -158,7 +159,7 @@ function pinCandidates(): PagePinCandidate[] {
   const s = useApp.getState();
   const hostIds = (s.hosts?.hosts ?? [{ id: "local" }]).map((h) => h.id).filter((id) => hostData(s, id)?.daemon.kind === "connected");
   return hostIds.flatMap((hostId) =>
-    (sidebarOf(s, hostId)?.projects?.projects ?? []).map((p) => ({ hostId, arg: p.project_id, title: (p.presentation.display_name || p.project_id).slice(0, 200) })),
+    (sidebarOf(s, hostId)?.projects?.projects ?? []).map((p) => ({ hostId, arg: p.project_id, title: (p.presentation.display_name || p.project_id).slice(0, 200), entity: projectEntity(hostId, p) })),
   );
 }
 

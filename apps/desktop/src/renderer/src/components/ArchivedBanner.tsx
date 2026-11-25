@@ -56,7 +56,7 @@ export function ArchivedBanner({ session }: { session: SessionResource }) {
           <button
             disabled={busy}
             onClick={() => void restore(true)}
-            className="flex items-center gap-1 rounded-md bg-accent px-3 py-1 text-xs font-medium text-white hover:bg-accent/90 disabled:opacity-50"
+            className="flex items-center gap-1 rounded-md bg-accent px-3 py-1 text-xs font-medium text-on-accent hover:bg-accent/90 disabled:opacity-50"
           >
             <ArchiveRestore size={13} />
             {busy ? t("archive.banner.restoring") : t(project ? "archive.banner.restoreWithProject" : "archive.banner.restore")}

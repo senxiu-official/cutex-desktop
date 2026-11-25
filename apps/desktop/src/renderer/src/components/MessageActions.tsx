@@ -116,8 +116,13 @@ function ArmedConfirm({ icon, title, label, onConfirm, onDone }: { icon: ReactNo
 /** One 「⋯」 menu row; `run` is what selecting it does. */
 type MoreAction = { value: string; label: string; icon?: ReactNode; disabled?: boolean; title?: string; run(): void };
 
-/** The floating action bar (design 040 step 10): an e2 pill. */
-const BAR = "inline-flex h-7 items-center rounded-ctl bg-background p-0.5 shadow-e2 transition-opacity";
+/**
+ * The floating action bar (design 040 step 10): an e2 pill. It shows and hides at once, with no opacity fade: while a
+ * fade runs, Chromium composites the bar, and the next row's text that its shadow reaches is drawn in another layer
+ * for those frames. At a fractional scale (1.875) that text visibly flickered as the pointer went over the message
+ * (owner 2026-11-26, a delegation-result row under a reply).
+ */
+const BAR = "inline-flex h-7 items-center rounded-ctl bg-background p-0.5 shadow-e2";
 /** Hover / keyboard focus of the message (`group`) shows the bar. */
 const ON_HOVER = "opacity-0 group-hover:opacity-100 focus-within:opacity-100";
 

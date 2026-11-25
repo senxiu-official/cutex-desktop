@@ -3,7 +3,8 @@
 // desk window (portals, listeners, focus, selection, rAF, viewport, media queries, observers, realm checks).
 // A file may keep a direct use only through OWNER_WINDOW_ALLOW below, with the reason it is truly global, and
 // with its exact count per category (a new use fails; a removed one asks to lower the count).
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -57,7 +58,9 @@ export const OWNER_WINDOW_ALLOW: Record<string, Allowed> = {
   "lib/planCache.ts": { reason: "saves on the main document's pagehide (the renderer's lifetime)", uses: { winListener: 1 } },
   "lib/introAppearance.ts": { reason: "localStorage `storage` events (written by another renderer process) are one per renderer", uses: { winListener: 1 } },
   "lib/turnErrorBanner.ts": { reason: "localStorage `storage` events (written by another renderer process) are one per renderer", uses: { winListener: 2 } },
+  "lib/accent.ts": { reason: "the 强调色 follows localStorage `storage` events in the board / big-alert windows, one per renderer", uses: { winListener: 2 } },
   "lib/storedFonts.ts": { reason: "localStorage `storage` events (written by another renderer process) are one per renderer", uses: { winListener: 1 } },
+  "modules/projects/recentProjects.ts": { reason: "localStorage `storage` events (written by another renderer process) are one per renderer", uses: { winListener: 1 } },
   "lib/directorHeadwear.ts": { reason: "the seasonal headwear re-checks the date when the app (the main document) is shown again; one shared check for every avatar", uses: { docListener: 2 } },
   "lib/motion.ts": { reason: `start-up motion hold of the main document (two frames after its first paint); ${OS_PREFERENCE}`, uses: { raf: 2, matchMedia: 1 } },
   "lib/dropMorph.ts": { reason: OS_PREFERENCE, uses: { matchMedia: 1 } },
@@ -98,18 +101,26 @@ function sources(dir: string): string[] {
   });
 }
 
-export function scanRenderer(): Record<string, Partial<Record<Category, number>>> {
+export async function scanRenderer(): Promise<Record<string, Partial<Record<Category, number>>>> {
   const found: Record<string, Partial<Record<Category, number>>> = {};
-  for (const file of sources(root)) {
-    const uses = countUses(readFileSync(file, "utf8"));
-    if (Object.keys(uses).length) found[relative(root, file).split(sep).join("/")] = uses;
+  const files = sources(root);
+  const batchSize = 32;
+  for (let start = 0; start < files.length; start += batchSize) {
+    // Overlap slow opens without queuing reads for the entire renderer at once.
+    const batch = await Promise.all(files.slice(start, start + batchSize).map(async (file) => ({
+      file,
+      uses: countUses(await readFile(file, "utf8")),
+    })));
+    for (const { file, uses } of batch) {
+      if (Object.keys(uses).length) found[relative(root, file).split(sep).join("/")] = uses;
+    }
   }
   return found;
 }
 
 describe("owner window guard (multi-window P2 + P3)", () => {
-  it("finds no direct window / document use outside the allow-list, and the allow-list is exact", () => {
-    const found = scanRenderer();
+  it("finds no direct window / document use outside the allow-list, and the allow-list is exact", async () => {
+    const found = await scanRenderer();
     const problems: string[] = [];
     for (const [file, uses] of Object.entries(found)) {
       const allowed = OWNER_WINDOW_ALLOW[file]?.uses ?? {};

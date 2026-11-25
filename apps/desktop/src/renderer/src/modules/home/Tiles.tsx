@@ -26,6 +26,7 @@ import { openFailedText, openTileAction } from "./open";
 import { gradientOf, tileParts } from "./tile";
 import { CountBadge, Tag } from "../../components/Tag";
 import { WorkerBadge } from "../../components/WorkerBadge";
+import { EntityIcon } from "../../components/EntityIcon";
 
 
 function Icon({ bg, size, children }: { bg: string; size: number; children: ReactNode }) {
@@ -319,7 +320,7 @@ export async function pickerMenu(target: PinTarget, t: ReturnType<typeof useI18n
   const agentLabels = { top: t("agentPicker.top"), independent: t("agentPicker.independent"), archived: t("agentPicker.archived"), chats: t("agentPicker.chats") };
   const agentOptions = hostIds.flatMap((hostId) => {
     const sidebar = sidebarOf(s, hostId);
-    const rows = sidebarPickerRows(sidebar, { hostLabel: multi ? label(hostId) : undefined, keyOf: (id) => pinKey(hostId, id) });
+    const rows = sidebarPickerRows(sidebar, { hostId, hostLabel: multi ? label(hostId) : undefined, keyOf: (id) => pinKey(hostId, id) });
     return agentPickerOptions(rows, agentLabels, { top: hostId === selectedHost ? [s.selectedId && pinKey(hostId, s.selectedId)] : [], rank: pickerProjectRank(sidebar, projectOrder, hostId) });
   });
   // The selected agent's host first, so its 当前 row leads the list.
@@ -362,7 +363,7 @@ export async function pickerMenu(target: PinTarget, t: ReturnType<typeof useI18n
           const items = kind
             .candidates!()
             .slice(0, 40)
-            .map((c) => entry({ hostId: c.hostId, kind: "page", key: pagePinKey(kind.id, c.arg), title: c.title.slice(0, 200) }, c.title, <LayoutDashboard size={14} />));
+            .map((c) => entry({ hostId: c.hostId, kind: "page", key: pagePinKey(kind.id, c.arg), title: c.title.slice(0, 200) }, c.title, c.entity ? <EntityIcon entity={c.entity} /> : <LayoutDashboard size={14} />));
           return { label: t(kind.titleKey as MessageKey), icon: <LayoutDashboard size={14} />, submenu: items.length ? items : none, onSelect: () => {} };
         })
     : [];

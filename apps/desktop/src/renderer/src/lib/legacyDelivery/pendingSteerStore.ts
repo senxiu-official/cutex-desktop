@@ -1,5 +1,5 @@
 // LEGACY(input-ledger-v1): frozen delivery inference for older hosts.
-// Delete only when EVERY host advertises input-ledger-v1 (including hachimi).
+// Delete only when EVERY host advertises input-ledger-v1 (including hostc).
 // Pending inserts (steers the native has not read yet, lib/pendingSteers) survive a desktop restart
 // (owner 2026-10-21). cutex keeps no record of a steer once it handed it to the native — there is no
 // steered-not-yet-read list in the bootstrap / queue and no way to cancel one — so the desktop is the

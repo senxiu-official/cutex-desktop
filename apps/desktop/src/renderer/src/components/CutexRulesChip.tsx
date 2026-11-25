@@ -275,7 +275,7 @@ export const CutexRulesPanel = memo(function CutexRulesPanel({ hostId, api, sess
             data-rule-switch={kind}
             className={`relative h-[18px] w-[30px] shrink-0 rounded-full border transition-colors disabled:opacity-40 ${on ? "border-accent bg-accent" : "border-border bg-surface-2"}`}
           >
-            <span className={`absolute top-px size-3.5 rounded-full bg-white shadow-e1 transition-[left] ${on ? "left-[13px]" : "left-px"}`} />
+            <span className={`absolute top-px size-3.5 rounded-full shadow-e1 transition-[left] ${on ? "left-[13px] bg-on-accent" : "left-px bg-white"}`} />
           </button>
         </div>
         {isAsking && asking && (

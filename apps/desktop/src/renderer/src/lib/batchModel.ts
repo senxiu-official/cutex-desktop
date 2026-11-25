@@ -12,7 +12,9 @@
 import { create } from "zustand";
 import type { SessionResource } from "@cutex-desktop/protocol";
 import type { CatalogModel, ModelOption } from "../../../shared/ipc";
-import { hostApi, sidebarOf, useApp } from "../store";
+import { agentState, featuresOf, hostApi, sidebarOf, useApp } from "../store";
+import { usesInputLedger } from "./deliveryMode";
+import { turnRunning } from "./effortNextTurn";
 import { modelOf, profileOf, runtimeOf } from "./agentList";
 import type { AgentRuntime } from "./agentFeatures";
 
@@ -36,7 +38,8 @@ export interface BatchAgent {
   runtime: AgentRuntime;
   /** The app-server is connected: the change goes to the live thread. */
   online: boolean;
-  /** A turn is running: the change applies when it ends. */
+  /** A turn is running: the change applies when it ends. As in the composer (lib/effortNextTurn): the ledger delivery
+   *  (turn / finishing) on ledger hosts, the runtime's active turn on older hosts. */
   busy: boolean;
   threadId: string | null;
   model: string | null;
@@ -63,8 +66,9 @@ export interface BatchRow extends BatchAgent {
 
 const text = (v: unknown): string | null => (typeof v === "string" && v.trim() ? v.trim() : null);
 
-/** One agent as the batch sees it (live thread settings first while online, else what cutex stored). */
-export function batchAgent(s: SessionResource, projectId: string | null): BatchAgent {
+/** One agent as the batch sees it (live thread settings first while online, else what cutex stored). `running`: the
+ *  host's running rule (scopeAgents); absent = the runtime's active turn. */
+export function batchAgent(s: SessionResource, projectId: string | null, running?: boolean): BatchAgent {
   const live = s.runtime?.threadSettings as { model?: unknown; effort?: unknown } | null | undefined;
   const online = s.runtime?.appServerConnected === true;
   return {
@@ -74,7 +78,7 @@ export function batchAgent(s: SessionResource, projectId: string | null): BatchA
     profile: profileOf(s),
     runtime: runtimeOf(s),
     online,
-    busy: !!s.runtime?.activeTurnId,
+    busy: running ?? !!s.runtime?.activeTurnId,
     threadId: s.native?.threadId ?? null,
     model: (online ? text(live?.model) : null) ?? modelOf(s) ?? text(s.launchBinding?.model),
     effort: (online ? text(live?.effort) : null) ?? text(s.runtimeDefaults?.reasoningEffort) ?? text(s.launchBinding?.reasoningEffort),
@@ -229,12 +233,20 @@ export function closeBatchModel(): void {
 }
 
 /** The agents of the open scope on its host (active, not archived). */
+/** Whether `s` has a running turn by the composer's rule: ledger hosts read the delivery (a stale activeTurnId of a held /
+ *  starting agent is not running; finishing without one is), older hosts — and a ledger session whose delivery is not
+ *  read yet — the runtime's active turn. The dialog reads the listed agents' ledgers (watchInputs). */
+export function runningOn(app: ReturnType<typeof useApp.getState>, hostId: string, s: SessionResource): boolean {
+  const ledger = usesInputLedger([...(featuresOf(app, hostId) ?? [])]);
+  return turnRunning(ledger, agentState(app.inputs ?? {}, hostId, s.cutexSessionId)?.delivery, !!s.runtime?.activeTurnId);
+}
+
 export function scopeAgents(scope: BatchModelScope, app = useApp.getState()): BatchAgent[] {
   const sidebar = sidebarOf(app, scope.hostId);
   if (!sidebar) return [];
   return sidebar.active
     .filter((s) => s.lifecycle !== "retired")
-    .map((s) => batchAgent(s, (sidebar.hostRows[s.cutexSessionId]?.projectId as string | null | undefined) ?? null))
+    .map((s) => batchAgent(s, (sidebar.hostRows[s.cutexSessionId]?.projectId as string | null | undefined) ?? null, runningOn(app, scope.hostId, s)))
     .filter((a) => inScope(a, scope));
 }
 

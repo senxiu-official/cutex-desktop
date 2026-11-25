@@ -20,6 +20,7 @@ import { CleanupTable } from "./CleanupTable";
 import { secondsSince } from "./cleanup";
 import { CLEANUP_ACTION, CLEANUP_ACTION_DANGER, cleanupAge } from "./cleanupText";
 import type { StaleDelegationsState } from "./useCleanup";
+import { EntityMention } from "../../components/EntityIcon";
 
 export function StaleDelegationsTable({ state, minAge, nameOf }: { state: StaleDelegationsState; minAge: number; nameOf(id: string): string }) {
   const { t } = useI18n();
@@ -49,7 +50,7 @@ export function StaleDelegationsTable({ state, minAge, nameOf }: { state: StaleD
             return {
               what: d.title,
               whatTitle: d.title,
-              who: `${from(d)} → ${to(d)}`,
+              who: <><EntityMention entity={d.requester.kind !== "owner" && requesterSession(d.requester) ? { kind: "agent", id: requesterSession(d.requester)!, name: from(d) } : null}>{from(d)}</EntityMention> → <EntityMention entity={d.target ? { kind: "agent", id: d.target, name: to(d) } : null}>{to(d)}</EntityMention></>,
               whoTitle: [requesterSession(d.requester), d.target].filter(Boolean).join(" → "),
               age: cleanupAge(secondsSince(d.updatedAt, Date.now()), t),
               state: state.refusals[d.askId] ? <span className="text-warn-text">{t("agent-bus.cleanup.refused")}</span> : statusWord(delegationStatus(d, state.ctxOf(d)), to(d)),

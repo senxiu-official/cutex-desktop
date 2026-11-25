@@ -25,6 +25,8 @@ import { ViewBody } from "./View";
 import { ViewActions } from "./ViewActions";
 import { Tag } from "../../components/Tag";
 import { btn } from "../../components/Button";
+import { EntitySelect } from "../../components/EntitySelect";
+import { EntityMention } from "../../components/EntityIcon";
 
 const PAGE = 100;
 const SELECT = "rounded-md border border-border bg-background px-1.5 py-0.5 text-caption/[inherit] outline-none focus:border-accent";
@@ -63,7 +65,7 @@ function Meta({ hostId, a, now }: { hostId: string; a: ArtifactSummary; now: num
   return (
     <span className="flex min-w-0 items-center gap-1 text-caption/[inherit] text-subtle">
       <span className={`min-w-0 truncate ${p.kind === "auto" && p.attribution === "ambiguous" ? "text-warn" : ""}`} title={producerLabel(p, t)}>
-        {producerLabel(p, t)}
+        <EntityMention entity={p.kind === "agent" && p.sessionId ? { kind: "agent", id: p.sessionId, name: producerLabel(p, t) } : null}>{producerLabel(p, t)}</EntityMention>
       </span>
       <span className="shrink-0">·</span>
       <span className="shrink-0" title={formatAbsolute(seconds(a.updatedAt))}>
@@ -406,15 +408,10 @@ function LibraryPanel({ hostId, scope, state, setState, visible, open, emptyKey 
               </option>
             ))}
           </select>
-          <select value={state.producer} onChange={(e) => set({ producer: e.target.value })} aria-label={t("artifacts.src.producer")} className={`${SELECT} max-w-36`}>
-            <option value="">{t("artifacts.producerAll")}</option>
-            {producers.map((p) => (
-              <option key={p.key} value={p.key}>
-                {p.kind === "auto" ? t("artifacts.producerAuto") : p.kind === "owner" ? t("artifacts.producer.owner") : p.name}
-              </option>
-            ))}
-            {state.producer && !producers.some((p) => p.key === state.producer) && <option value={state.producer}>{state.producer.replace(/^agent:/, "")}</option>}
-          </select>
+          <EntitySelect value={state.producer} onChange={(v) => set({ producer: v })} label={t("artifacts.src.producer")} className={`flex w-36 max-w-36 items-center justify-between gap-1 ${SELECT}`}
+            options={[{ value: "", label: t("artifacts.producerAll") },
+              ...producers.map((p) => ({ value: p.key, label: p.kind === "auto" ? t("artifacts.producerAuto") : p.kind === "owner" ? t("artifacts.producer.owner") : p.name, entity: p.kind === "agent" ? { kind: "agent" as const, id: p.key.replace(/^agent:/, ""), name: p.name } : null })),
+              ...(state.producer && !producers.some((p) => p.key === state.producer) ? [{ value: state.producer, label: state.producer.replace(/^agent:/, "") }] : [])]} />
           <select value={state.archived} onChange={(e) => set({ archived: e.target.value as ArchivedFilter })} aria-label={t("artifacts.archived.label")} className={SELECT}>
             {(["false", "true", "all"] as const).map((v) => (
               <option key={v} value={v}>

@@ -27,7 +27,7 @@ vi.mock("../src/main/ssh", () => ({
   },
   openTemporaryTunnel: vi.fn(async (target: { destination: string }) => {
     ssh.temporary.push(target.destination);
-    return { port: target.destination === "hachimi-lan" ? 41001 : 41002, close: vi.fn() };
+    return { port: target.destination === "hostc-lan" ? 41001 : 41002, close: vi.fn() };
   }),
   resolveSshHost: vi.fn(async () => null),
   runSsh: vi.fn(),
@@ -40,7 +40,7 @@ const ID = "ssh-hachimi1";
 
 function harness(identity: string | null = "HOST-H") {
   const file: HostsFile = emptyHostsFile();
-  file.hosts.push({ id: ID, label: "hachimi", target: "hachimi-lan", targets: ["hachimi-lan", "hachimi-direct"], daemonHostId: identity, remotePort: 24270, cutexPath: "cutex", tokenId: "ct_1", createdAt: "", lastConnectedAt: null, autoConnect: false, color: "#f97316", platform: "linux" });
+  file.hosts.push({ id: ID, label: "hostc", target: "hostc-lan", targets: ["hostc-lan", "hostc-direct"], daemonHostId: identity, remotePort: 24270, cutexPath: "cutex", tokenId: "ct_1", createdAt: "", lastConnectedAt: null, autoConnect: false, color: "#f97316", platform: "linux" });
   const published: HostsState[] = [];
   const daemon = {
     currentState: { kind: "connecting", baseUrl: "" } as any,
@@ -73,7 +73,7 @@ const flush = async () => {
   for (let index = 0; index < 12; index++) await Promise.resolve();
 };
 
-async function connect(manager: HostManager, target = "hachimi-direct") {
+async function connect(manager: HostManager, target = "hostc-direct") {
   await manager.connectHost(ID, true);
   const conn = manager.connection(ID)!;
   const tunnel = ssh.tunnels.at(-1)!;
@@ -94,10 +94,10 @@ describe("HostManager multi-address identity checks", () => {
     client.host.mockResolvedValue({ hostId: "HOST-H", platform: "linux" });
     const h = harness();
     const { tunnel } = await connect(h.manager);
-    expect(tunnel.options.targets.map((target: { destination: string }) => target.destination)).toEqual(["hachimi-lan", "hachimi-direct"]);
-    expect(h.daemon.useEndpoint).toHaveBeenCalledWith(expect.objectContaining({ baseUrl: "http://127.0.0.1:40001", configPath: "ssh:hachimi-direct" }), { remote: true });
+    expect(tunnel.options.targets.map((target: { destination: string }) => target.destination)).toEqual(["hostc-lan", "hostc-direct"]);
+    expect(h.daemon.useEndpoint).toHaveBeenCalledWith(expect.objectContaining({ baseUrl: "http://127.0.0.1:40001", configPath: "ssh:hostc-direct" }), { remote: true });
     expect(tunnel.rejectReady).not.toHaveBeenCalled();
-    expect((await h.manager.hosts()).hosts.find((host) => host.id === ID)?.conn?.tunnel?.target).toBe("hachimi-direct");
+    expect((await h.manager.hosts()).hosts.find((host) => host.id === ID)?.conn?.tunnel?.target).toBe("hostc-direct");
   });
 
   it("refuses a different cutex hostId before exposing the endpoint", async () => {
@@ -105,14 +105,14 @@ describe("HostManager multi-address identity checks", () => {
     const h = harness();
     const { tunnel } = await connect(h.manager);
     expect(h.daemon.useEndpoint).not.toHaveBeenCalled();
-    expect(h.daemon.suspend).toHaveBeenCalledWith(expect.objectContaining({ kind: "error", baseUrl: "ssh://hachimi-direct" }), { remote: true });
+    expect(h.daemon.suspend).toHaveBeenCalledWith(expect.objectContaining({ kind: "error", baseUrl: "ssh://hostc-direct" }), { remote: true });
     expect(tunnel.rejectReady).toHaveBeenCalledWith(expect.objectContaining({ code: "hostMismatch", detail: expect.stringContaining("HOST-OTHER") }));
   });
 
   it("persists the first confirmed identity and applies it to later addresses", async () => {
     client.host.mockResolvedValue({ hostId: "HOST-FIRST", platform: "linux" });
     const h = harness(null);
-    await connect(h.manager, "hachimi-lan");
+    await connect(h.manager, "hostc-lan");
     expect(h.file.hosts[0]?.daemonHostId).toBe("HOST-FIRST");
     expect(h.daemon.useEndpoint).toHaveBeenCalledTimes(1);
   });
@@ -120,10 +120,10 @@ describe("HostManager multi-address identity checks", () => {
   it("keeps the legacy target field pointing at the first edited address", async () => {
     const h = harness();
     await h.manager.connectHost(ID, true);
-    const result = await h.manager.updateSshHost(ID, { targets: ["hachimi-direct", "hachimi-direct", "hachimi-lan"] });
+    const result = await h.manager.updateSshHost(ID, { targets: ["hostc-direct", "hostc-direct", "hostc-lan"] });
     expect(result.ok).toBe(true);
-    expect(h.file.hosts[0]).toMatchObject({ target: "hachimi-direct", targets: ["hachimi-direct", "hachimi-lan"] });
-    expect(ssh.tunnels.at(-1)?.options.targets.map((target: { destination: string }) => target.destination)).toEqual(["hachimi-direct", "hachimi-lan"]);
+    expect(h.file.hosts[0]).toMatchObject({ target: "hostc-direct", targets: ["hostc-direct", "hostc-lan"] });
+    expect(ssh.tunnels.at(-1)?.options.targets.map((target: { destination: string }) => target.destination)).toEqual(["hostc-direct", "hostc-lan"]);
   });
 
   describe("a better route's check before traffic moves", () => {
@@ -136,10 +136,10 @@ describe("HostManager multi-address identity checks", () => {
     it("accepts only the confirmed identity, over the candidate's own port", async () => {
       client.host.mockResolvedValue({ hostId: "HOST-H", platform: "linux" });
       const { verify } = await verifyOf();
-      expect(await verify(45001, "hachimi-lan")).toBeNull();
+      expect(await verify(45001, "hostc-lan")).toBeNull();
       expect(client.host.mock.calls.at(-1)![0]).toMatchObject({ baseUrl: "http://127.0.0.1:45001", token: "secret" });
       client.host.mockResolvedValue({ hostId: "HOST-OTHER", platform: "linux" });
-      expect(await verify(45001, "hachimi-lan")).toMatchObject({ code: "hostMismatch" });
+      expect(await verify(45001, "hostc-lan")).toMatchObject({ code: "hostMismatch" });
     });
 
     it("refuses when the token is rejected, the daemon does not answer, or no identity is confirmed", async () => {
@@ -147,14 +147,14 @@ describe("HostManager multi-address identity checks", () => {
       const { verify } = await verifyOf();
       const { CutexApiError } = await import("@cutex-desktop/cutex-client");
       client.host.mockRejectedValue(new (CutexApiError as any)(401));
-      expect(await verify(45001, "hachimi-lan")).toMatchObject({ code: "tokenRejected" });
+      expect(await verify(45001, "hostc-lan")).toMatchObject({ code: "tokenRejected" });
       client.host.mockRejectedValue(new Error("no answer"));
-      expect(await verify(45001, "hachimi-lan")).toMatchObject({ code: "remoteDaemon" });
+      expect(await verify(45001, "hostc-lan")).toMatchObject({ code: "remoteDaemon" });
 
       client.host.mockRejectedValue(new Error("never connected"));
       const unconfirmed = await verifyOf(null);
       client.host.mockResolvedValue({ hostId: "HOST-ANY", platform: "linux" });
-      expect(await unconfirmed.verify(45001, "hachimi-lan")).toMatchObject({ code: "remoteDaemon" });
+      expect(await unconfirmed.verify(45001, "hostc-lan")).toMatchObject({ code: "remoteDaemon" });
     });
 
     it("moves the streams when the tunnel reports a switch; the endpoint stays", async () => {
@@ -168,7 +168,7 @@ describe("HostManager multi-address identity checks", () => {
 
     it("single-address hosts do not probe", async () => {
       const h = harness();
-      h.file.hosts[0]!.targets = ["hachimi-lan"];
+      h.file.hosts[0]!.targets = ["hostc-lan"];
       await h.manager.connectHost(ID, true);
       expect(ssh.tunnels.at(-1)!.options.verifyRoute).toBeUndefined();
     });
@@ -177,12 +177,12 @@ describe("HostManager multi-address identity checks", () => {
   it("stores a Unicode address in its xn-- form; a typed Unicode copy of a stored address is no change", async () => {
     const h = harness();
     await h.manager.connectHost(ID, true);
-    const saved = await h.manager.updateSshHost(ID, { targets: ["hachimi-lan", "remote-work.例子.test"] });
+    const saved = await h.manager.updateSshHost(ID, { targets: ["hostc-lan", "remote-work.例子.test"] });
     expect(saved.ok).toBe(true);
-    expect(h.file.hosts[0]!.targets).toEqual(["hachimi-lan", "remote-work.xn--fsqu00a.test"]);
+    expect(h.file.hosts[0]!.targets).toEqual(["hostc-lan", "remote-work.xn--fsqu00a.test"]);
     const tunnels = ssh.tunnels.length;
-    await h.manager.updateSshHost(ID, { targets: ["hachimi-lan", "remote-work.xn--fsqu00a.test"] });
-    await h.manager.updateSshHost(ID, { targets: ["hachimi-lan", "remote-work.例子.test"] });
+    await h.manager.updateSshHost(ID, { targets: ["hostc-lan", "remote-work.xn--fsqu00a.test"] });
+    await h.manager.updateSshHost(ID, { targets: ["hostc-lan", "remote-work.例子.test"] });
     expect(ssh.tunnels.length).toBe(tunnels);
     expect(ssh.tunnels.at(-1)!.options.targets[1].destination).toBe("remote-work.xn--fsqu00a.test");
   });
@@ -192,6 +192,6 @@ describe("HostManager multi-address identity checks", () => {
     const h = harness();
     const result = await h.manager.testHost(ID);
     expect(result).toMatchObject({ ok: true, hostId: "HOST-H" });
-    expect(ssh.temporary).toEqual(["hachimi-lan", "hachimi-direct"]);
+    expect(ssh.temporary).toEqual(["hostc-lan", "hostc-direct"]);
   });
 });

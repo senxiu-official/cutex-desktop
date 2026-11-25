@@ -12,6 +12,7 @@ import { agentFeaturesOf, lacks } from "../../lib/agentFeatures";
 import { formatElapsed } from "../../lib/agentAttention";
 import { isArchived } from "../../lib/archivedAgent";
 import { useComposerDraft } from "../../lib/composerDrafts";
+import { changedEnd, undoKeyOf, useHistoryBeforeInput } from "../../lib/draftUndo";
 import { useHostAccess } from "../../lib/hostAccess";
 import { agentRetraction, retractNotify } from "../../lib/notifyEvents";
 import { hasUnlandedTurn, outboxAt, visibleQueue } from "../../lib/legacyDelivery/outbox";
@@ -246,7 +247,22 @@ export function SideAgentConversation({ sessionId, hostId, name, resource }: { s
 /** The 「接下来」 queue panel and a plain input: Enter sends (steers into a running turn; queues for agents without steering). */
 function SideComposer({ sessionId, hostId, name, view, resource }: { sessionId: string; hostId: string; name: string; view: SessionView; resource: SessionResource | undefined }) {
   const { t } = useI18n();
-  const { text, setText } = useComposerDraft(hostId, sessionId);
+  const { text, setText, endDraftHistory, undoDraft, redoDraft, endDraftComposition } = useComposerDraft(hostId, sessionId);
+  // The same draft history as the main composer (one draft per agent): Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y and the edit
+  // menu's 撤销 / 重做 travel it; the caret goes where the text changed.
+  const input = useRef<HTMLTextAreaElement>(null);
+  const caretAfterTravel = useRef<number | null>(null);
+  const travel = (redo: boolean) => {
+    const restored = redo ? redoDraft() : undoDraft();
+    if (restored && restored.text !== text) caretAfterTravel.current = changedEnd(text, restored.text);
+  };
+  useHistoryBeforeInput(input, travel);
+  useLayoutEffect(() => {
+    const at = caretAfterTravel.current;
+    if (at === null || !input.current) return;
+    caretAfterTravel.current = null;
+    input.current.setSelectionRange(at, at);
+  }, [text]);
   const outbox = useApp((s) => agentState(s.outbox, hostId, sessionId));
   const queueHidden = useApp((s) => agentState(s.queueHidden, hostId, sessionId));
   const pendingSteers = useApp((s) => agentState(s.pendingSteers, hostId, sessionId));
@@ -265,8 +281,9 @@ function SideComposer({ sessionId, hostId, name, view, resource }: { sessionId: 
   const send = () => {
     const value = text;
     if (!value.trim()) return;
-    // Only the text: images / skills picked in the main composer stay in the draft there.
-    setText("");
+    // Only the text: images / skills picked in the main composer stay in the draft there. A send ends the undo history.
+    setText("", { history: "none" });
+    endDraftHistory();
     setError(null);
     void app().submit(value, sendBusy && noSteer ? "queue" : "auto", [], { sessionId, hostId }).catch(report);
   };
@@ -305,10 +322,18 @@ function SideComposer({ sessionId, hostId, name, view, resource }: { sessionId: 
       {error && <p className="px-1 pb-1 text-caption/[inherit] text-danger">{error}</p>}
       <div className="flex items-end gap-1.5 rounded-xl border border-border bg-surface px-2 py-1.5 focus-within:border-accent/60">
         <textarea
+          ref={input}
           value={text}
           rows={1}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => setText(e.target.value, { history: "typing", composing: (e.nativeEvent as InputEvent).isComposing })}
+          onCompositionEnd={endDraftComposition}
           onKeyDown={(e) => {
+            const undoKey = isImeComposing(e) ? null : undoKeyOf(e);
+            if (undoKey) {
+              e.preventDefault();
+              travel(undoKey === "redo");
+              return;
+            }
             if (e.key === "Enter" && !e.shiftKey && !isImeComposing(e)) {
               e.preventDefault();
               send();
@@ -327,7 +352,7 @@ function SideComposer({ sessionId, hostId, name, view, resource }: { sessionId: 
           disabled={!text.trim()}
           title={t("conversation.agent.send")}
           aria-label={t("conversation.agent.send")}
-          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-accent text-white hover:bg-accent/85 disabled:bg-surface-2 disabled:text-subtle"
+          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-accent text-on-accent hover:bg-accent/85 disabled:bg-surface-2 disabled:text-subtle"
         >
           <ArrowUp size={14} />
         </button>

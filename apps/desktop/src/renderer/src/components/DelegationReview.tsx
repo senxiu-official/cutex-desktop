@@ -80,7 +80,7 @@ function CapabilityReviewActions({ d, host, variant }: { d: AskSummary; host: st
   const base = dense ? "rounded px-1.5 text-caption/[inherit] leading-5" : "rounded-md px-2 py-0.5 text-xs";
   const buttons = (
     <>
-      <button type="button" disabled={!!busy} onClick={(e) => void run("approve", e)} title={t("delegation.review.approveHint")} className={`${base} whitespace-nowrap bg-accent font-medium text-white hover:opacity-90 disabled:opacity-50`} data-review="approve">
+      <button type="button" disabled={!!busy} onClick={(e) => void run("approve", e)} title={t("delegation.review.approveHint")} className={`${base} whitespace-nowrap bg-accent font-medium text-on-accent hover:opacity-90 disabled:opacity-50`} data-review="approve">
         {t("delegation.review.approve")}
       </button>
       <button type="button" disabled={!!busy} onClick={(e) => void run("deny", e)} title={t("delegation.review.denyHint")} className={`${base} whitespace-nowrap border border-border text-muted hover:bg-surface-2 hover:text-danger disabled:opacity-50`} data-review="deny">

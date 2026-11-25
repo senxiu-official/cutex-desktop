@@ -10,6 +10,7 @@ import { ownerNeedReason } from "./ownerNotify";
 import { rowKey, type AgentRow } from "./sidebar";
 import type { TurnMark, TurnMarks } from "./turnUnread";
 import { compareNames } from "./rosterOrder";
+import type { AgentSignal } from "./agentSignal";
 
 /**
  * Why an agent needs the owner: `confirm` a pending approval of a command / file change (native
@@ -83,12 +84,8 @@ export function needsYouByAgent(input: NeedsYouInput): Map<string, NeedsYou> {
   return out;
 }
 
-/**
- * One display state per agent, most urgent first: needs-you (amber), running (ring + elapsed), error
- * (runtime error, or the last turn failed and wasn't seen), done (a finished turn not seen yet),
- * offline (grey), idle (nothing shown), unknown (not confirmed yet: dimmed, 「连接中」).
- */
-export type AgentSignal = "needsYou" | "running" | "error" | "done" | "offline" | "idle" | "unknown";
+/** The type lives in ./agentSignal (no imports); re-exported here for existing callers. */
+export type { AgentSignal };
 
 export function agentSignal(row: Pick<AgentRow, "status">, needs: NeedsYou | undefined, mark: TurnMark | undefined): AgentSignal {
   if (row.status === "needsInput" || (needs?.count ?? 0) > 0) return "needsYou";

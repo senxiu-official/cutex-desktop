@@ -12,6 +12,8 @@ import { SERVICES_PROJECT_SCOPE_FEATURE } from "../../../shared/servicesSettings
 import { claimCandidates, scopePatch, type ClaimCandidate } from "../lib/projectServices";
 import { useHostData } from "../lib/useHostScope";
 import { ArmedButton } from "./ArmedButton";
+import { EntityMention } from "./EntityIcon";
+import { tNodes } from "../lib/textNodes";
 
 const SHAPE = "shrink-0 rounded-md px-2 py-0.5 text-caption/[inherit]";
 const IDLE = "border border-border text-muted hover:bg-hover hover:text-foreground disabled:opacity-50";
@@ -52,7 +54,7 @@ export function ServiceClaimStrip({ hostId, projectId, formerDirectors, classNam
             <span className="min-w-0 flex-1">
               <span className="block truncate text-foreground">{c.service.displayName || c.service.slug}</span>
               <span className="block truncate text-caption/[inherit] text-subtle">
-                {c.service.ownerCutexSessionId ? t("services.owner", { name: nameOf(c.service.ownerCutexSessionId) ?? "" }) + " · " : ""}
+                {c.service.ownerCutexSessionId ? <>{tNodes(t, "services.owner", { name: <EntityMention entity={{ kind: "agent", id: c.service.ownerCutexSessionId, name: nameOf(c.service.ownerCutexSessionId) ?? "" }}>{nameOf(c.service.ownerCutexSessionId) ?? ""}</EntityMention> })} · </> : ""}
                 {t(`services.claim.reason.${c.reason}` as MessageKey)}
               </span>
             </span>

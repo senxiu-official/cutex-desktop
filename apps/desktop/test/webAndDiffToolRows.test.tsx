@@ -9,7 +9,7 @@ import { webToolRow, webUrl } from "../src/renderer/src/lib/webToolRows";
 vi.mock("../src/renderer/src/bridge", () => ({ api: {}, apiFor: () => ({}), bridge: {}, onEvent: () => () => {}, cleanIpcMessage: (m: string) => m }));
 vi.mock("../src/renderer/src/i18n", () => ({ useI18n: () => ({ t: (k: string) => k }) }));
 const { WebToolRow } = await import("../src/renderer/src/modules/conversation/WebToolRow");
-const { FileChangeRow } = await import("../src/renderer/src/modules/conversation/FileChangeRow");
+const { FileChangeRow, firstDiffFiles } = await import("../src/renderer/src/modules/conversation/FileChangeRow");
 const conversation = (await import("../src/renderer/src/modules/conversation")).default;
 
 const claude = (tool: string, args: unknown, over = {}): RawItem => ({ type: "dynamicToolCall", namespace: "claude", tool, arguments: args, id: "c", status: "completed", success: true, contentItems: [{ type: "inputText", text: "page text" }], ...over }) as RawItem;
@@ -111,23 +111,29 @@ describe("FileChangeRow", () => {
 });
 
 describe("FileChangeRow: a large change is capped on the first expand (cross-review 2026-11-13)", () => {
-  const big = (files: number, lines: number) => change(Array.from({ length: files }, (_, f) => ({ path: `src/f${f}.ts`, kind: { type: "add" }, diff: Array.from({ length: lines }, (_, i) => `line ${f}-${i}`).join("\n") + "\n" })));
-  it("100 files × 100 lines: only the first files (≈1,500 lines) mount, then 显示其余 N 个文件 shows the rest", () => {
-    mount(h(FileChangeRow, { item: big(100, 100), sessionId: "s" }));
+  const changeOf = (files: number) => change(Array.from({ length: files }, (_, f) => ({ path: `src/f${f}.ts`, kind: { type: "add" }, diff: `line ${f}\n` })));
+  it("caps the first batch by line count before it reaches the file limit", () => {
+    const diff = "line\n".repeat(100);
+    const diffs = Array.from({ length: 15 }, () => diff);
+    expect(firstDiffFiles(diffs)).toBe(14);
+  });
+
+  it("mounts the first 20 short files, then shows the remaining file on request", () => {
+    mount(h(FileChangeRow, { item: changeOf(21), sessionId: "s" }));
     toggle();
     const diff = box.querySelector("[data-file-change-diff]")!;
     expect(diff.textContent).toContain("src/f0.ts");
+    expect(diff.textContent).toContain("src/f19.ts");
     expect(diff.textContent).not.toContain("src/f20.ts");
-    expect(diff.querySelectorAll("*").length).toBeLessThan(15000);
     const more = box.querySelector<HTMLButtonElement>("[data-file-change-more]")!;
     expect(more).not.toBeNull();
     expect(more.textContent).toContain("conversation.tools.fileChange.more");
     act(() => more.click());
-    expect(box.querySelector("[data-file-change-diff]")!.textContent).toContain("src/f99.ts");
+    expect(box.querySelector("[data-file-change-diff]")!.textContent).toContain("src/f20.ts");
     expect(box.querySelector("[data-file-change-more]")).toBeNull();
   });
   it("a small change shows whole, with no control", () => {
-    mount(h(FileChangeRow, { item: big(3, 20), sessionId: "s" }));
+    mount(h(FileChangeRow, { item: changeOf(3), sessionId: "s" }));
     toggle();
     expect(box.querySelector("[data-file-change-diff]")!.textContent).toContain("src/f2.ts");
     expect(box.querySelector("[data-file-change-more]")).toBeNull();

@@ -78,7 +78,7 @@ export function PlanCard({ sessionId, text, streaming, actionable }: { sessionId
           <button onClick={decide} className={btn({ size: "sm" })} title={t("plan.stayHint")}>
             {t("plan.stay")}
           </button>
-          <button onClick={() => void implement()} className="rounded-md bg-accent px-2.5 py-1 text-xs text-white" title={t("plan.implementHint")}>
+          <button onClick={() => void implement()} className="rounded-md bg-accent px-2.5 py-1 text-xs text-on-accent" title={t("plan.implementHint")}>
             {t("plan.implement")}
           </button>
         </div>

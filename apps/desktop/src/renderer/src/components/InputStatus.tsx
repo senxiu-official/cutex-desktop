@@ -41,7 +41,7 @@ export interface NextUpOverride {
 }
 
 /** Registered words of a failed action (the raw code goes to the details panel and the log, never the toast). */
-const ACTION_FAILED = { zh: "没能完成，这一行还在；「查看详情」/「查看原因」里有原因", en: "Could not complete; the row stays. “View details” / “View reason” has the cause" } as const;
+const ACTION_FAILED = { zh: "未能完成，这一行还在；「查看详情」/「查看原因」里有原因", en: "Could not complete; the row stays. “View details” / “View reason” has the cause" } as const;
 
 const TONE: Record<string, string> = { neutral: "", warn: "text-warn-text", danger: "text-danger-text" };
 const BUTTON = "press h-5 shrink-0 rounded px-1 hover:bg-surface-2 disabled:cursor-default disabled:opacity-50 disabled:hover:bg-transparent";
@@ -56,9 +56,14 @@ export function useClearedUnknown(record: InputRecord, sessionId: string, hostId
  * The status of one input, from the Next Up registry only (lib/inputLedger/nextUpRegistry): the state's label, fixed
  * add-ons, and its registered buttons — each working now or grey with a registered reason. Shared by Next Up rows and
  * the timeline. `timeline`: a timeline row already says it arrived, so a read / plain accepted record is silent.
+ * `history`: a note whose body the conversation already shows (received / carried rows). History shows only what
+ * happened (owner rule, feedback-history-shows-only-past): no waiting word, 已等 timer or action — the receipt may
+ * come after the body (Claude confirms carried notes at the end of the turn), and 放弃 there cannot take back what
+ * the model already read. A past outcome (unconfirmed / failed / unknown) keeps its word and hover lines, no buttons.
+ * Never reads the body's presence as a receipt: the state stays the host's.
  */
-export function InputStatus({ record, sessionId, hostId, readOnly = false, timeline = false, ctx: given, handlers, override, buttonsClassName }: {
-  record: InputRecord; sessionId: string; hostId?: string; readOnly?: boolean; timeline?: boolean;
+export function InputStatus({ record, sessionId, hostId, readOnly = false, timeline = false, history = false, ctx: given, handlers, override, buttonsClassName }: {
+  record: InputRecord; sessionId: string; hostId?: string; readOnly?: boolean; timeline?: boolean; history?: boolean;
   /** Wraps the buttons (a row shows them on hover); the label and add-ons always show. */
   buttonsClassName?: string;
   ctx?: NextUpContext; handlers?: Partial<Record<NextUpEffectId, (event: React.MouseEvent) => unknown>>; override?: NextUpOverride;
@@ -67,9 +72,10 @@ export function InputStatus({ record, sessionId, hostId, readOnly = false, timel
   const lang: Lang = langOf(locale);
   const convHost = useConvHost();
   const host = hostId ?? convHost;
-  const live = !!record.stalled || record.reason === "resultCoalescing";
-  const now = useNow(live);
   const projection = projectNextUp(record);
+  const pastOutcome = projection.kind === "state" && (projection.state === "unconfirmed" || projection.state === "failed" || projection.state === "unknown");
+  const live = !history && (!!record.stalled || record.reason === "resultCoalescing");
+  const now = useNow(live);
   // An unrecognised status stays state 14 with its own buttons: no countdown / hold / grant overlay may turn it into another state.
   const unknownRow = projection.kind === "state" && !!projection.unknown;
   const overlay: NextUpOverride | undefined = unknownRow ? undefined : override;
@@ -108,8 +114,8 @@ export function InputStatus({ record, sessionId, hostId, readOnly = false, timel
   }, [unknownCode, record.inputId]);
 
   // Read in / left Next Up, or plain accepted on the timeline: nothing to show but a screen-reader word.
-  if (projection.kind === "hidden" || (timeline && record.state === "accepted" && record.surface !== "pendingNotes" && !record.stalled)) {
-    const word = record.state === "accepted" ? "accepted" : record.state;
+  if (projection.kind === "hidden" || (history && !pastOutcome) || (timeline && record.state === "accepted" && record.surface !== "pendingNotes" && !record.stalled)) {
+    const word = record.state === "waiting" && record.reason ? record.reason : record.state;
     return <span className="sr-only" data-testid="input-status" data-state={record.state} data-input-id={record.inputId}>{t(`inputLedger.record.${word}` as MessageKey)}</span>;
   }
   if (cleared) return null;
@@ -129,7 +135,7 @@ export function InputStatus({ record, sessionId, hostId, readOnly = false, timel
     ...given,
     disposing: disposing || !!given?.disposing,
   };
-  const buttons = timeline && state !== "unconfirmed" && state !== "failed" && state !== "unknown"
+  const buttons = history ? [] : timeline && state !== "unconfirmed" && state !== "failed" && state !== "unknown"
     ? rowButtons(shown, record, ctx).filter(b => b.enabled && b.effect !== "viewDelegation") // the timeline keeps only working actions
     : rowButtons(shown, record, ctx);
   const tell = (text: { zh: string; en: string } | null, tone: "error" | "info" = "info") => { if (text) useApp.getState().notify(text[lang], tone, { hostId: host, sessionId }); };
@@ -189,7 +195,7 @@ export function InputStatus({ record, sessionId, hostId, readOnly = false, timel
     refresh: () => app().refreshInputs(sessionId, host),
     viewDetails: () => setDetails(open => !open),
     viewReason: () => setDetails(open => !open),
-    clearNotice: () => { if (!addTombstone(tombstoneKey(host, sessionId, rowIdentity(record), unknownWhat(record)))) tell({ zh: "没能保存，这条提示还会显示", en: "Could not save; this notice still shows" }, "error"); },
+    clearNotice: () => { if (!addTombstone(tombstoneKey(host, sessionId, rowIdentity(record), unknownWhat(record)))) tell({ zh: "未能保存，这条提示还会显示", en: "Could not save; this notice still shows" }, "error"); },
     moveToComposer: async () => {
       const result = await app().dismissInput(sessionId, record.inputId, host);
       if (result.ok && ownerDraft) app().insertIntoComposer(sessionId, ownerDraft.text, "append", ownerDraft.extra.length ? ownerDraft.extra : undefined, host);
@@ -210,7 +216,7 @@ export function InputStatus({ record, sessionId, hostId, readOnly = false, timel
     finally { busy.current = false; setPending(null); }
   };
   const minutes = stalledMinutes(record, now);
-  const coalescing = record.reason === "resultCoalescing" ? Date.parse(record.deadline ?? "") : NaN;
+  const coalescing = !history && record.reason === "resultCoalescing" ? Date.parse(record.deadline ?? "") : NaN;
   const variant = overlay?.variant;
   const label = t(stateLabelKey(state, variant) as MessageKey, { time: overlay?.time ?? "" });
   // Registry 1.6: ⓘ only on passiveNote, afterWork timed, unconfirmed and needsAction.
@@ -225,12 +231,13 @@ export function InputStatus({ record, sessionId, hostId, readOnly = false, timel
     {!silentLabel && info && <span className="inline-flex shrink-0 cursor-help text-subtle" data-tip={info + detailLines} aria-label={info + detailLines} role="img" data-testid="next-up-info"><Info aria-hidden className="size-3" /></span>}
     {overlay?.addOn}
     {Number.isFinite(coalescing) && <span className="shrink-0 tabular-nums" data-testid="next-up-coalescing">{fill(NEXT_UP_DETAILS.coalescing[lang], { n: Math.max(0, Math.ceil((coalescing - now) / 1000)) })}</span>}
-    {record.stalled && <span className="shrink-0 truncate text-warn-text" data-testid="next-up-stalled">{fill(NEXT_UP_DETAILS.stalled[lang], { n: minutes })}</span>}
+    {record.stalled && !history && <span className="shrink-0 truncate text-warn-text" data-testid="next-up-stalled">{fill(NEXT_UP_DETAILS.stalled[lang], { n: minutes })}</span>}
     {(() => {
       // 允许发送 on a note both paused by you and held at an old send point: say that this click lifts only your pause.
       const extraTip = (effect: NextUpEffectId) => effect === "releaseHold" && releaseLiftsPauseOnly(record) ? t("noteDelivery.release.pauseOnly") : undefined;
       const tipFor = (effect: NextUpEffectId) => effect === "interruptSend" && sendsTogether > INTERRUPT_SEND_MAX ? t("interruptSend.tooMany", { max: INTERRUPT_SEND_MAX })
         : effect === "interruptSend" && sendsTogether > 1 ? t("interruptSend.manyTip", { n: sendsTogether })
+        : effect === "interruptSend" ? t("interruptSend.oneTip")
         : effect === "retry" && manyOn ? batchRetryTip(t, record) : undefined;
       const list = buttons.map(button => <EffectButton key={button.effect} button={button} lang={lang} pending={pending} onRun={run} extraTip={extraTip(button.effect)} tipOverride={tipFor(button.effect)} anchor={button.effect === "viewDetails" || button.effect === "viewReason" ? detailsAnchor : undefined} />);
       return buttonsClassName && list.length ? <span className={buttonsClassName} data-next-up-buttons="">{list}</span> : list;

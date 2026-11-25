@@ -34,5 +34,9 @@ export function noteDeliveryRecords(id: string, now: number, revision: number): 
     base("note-paused-stale", { preview: "weekly ops summary", surface: "nextUp", reason: "staleHeld", actions: ["releaseHold", "dismiss"], createdAt: iso(3 * 3600_000), since: iso(3 * 3600_000),
       details: { staleReleaseAllowed: true, ownerHold: true, releaseEffect: "removeOwnerPauseOnly",
         deliveryDiagnostics: { stage: "bus", since: iso(3 * 3600_000), sinceEvidence: "durableQueue", lastAttemptAt: null, lastAttemptKind: null, lastError: null, waitingFor: "ownerResume", blockedByInputId: null } } }),
+    // Owner 2026-11-23 (delegation-347359): a note the turn already read (its body is the x31v2 row of turn-3 in eva's
+    // history) whose receipt has not come yet and whose record went stale — the history row must show no 已等 / 放弃.
+    ...(id === "eva" ? [base("note-in-history", { preview: "release notes 草稿放在 docs/release-notes.md 了", surface: "timeline", state: "accepted", reason: null,
+      turnId: "turn-3", timelineItemId: "x31v2", createdAt: iso(176 * 60_000), since: iso(174 * 60_000), stalled: { reason: "noProgress", since: iso(174 * 60_000) }, actions: ["dismiss", "retry"] })] : []),
   ];
 }

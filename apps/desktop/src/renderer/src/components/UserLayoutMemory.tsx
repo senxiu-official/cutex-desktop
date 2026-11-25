@@ -85,7 +85,7 @@ export function UserLayoutMigration() {
       <p id="layout-migration-title" className="mb-5 text-sm leading-relaxed">{t("layoutMemory.migrate", { host: s.memoryHost?.label ?? "" })}</p>
       <div className="flex flex-wrap justify-end gap-2">
         <Button disabled={busy} onClick={() => void resolve(true)}>{t("layoutMemory.merge")}</Button>
-        <button ref={primary} disabled={busy} onClick={() => void resolve(false)} className="rounded-md bg-accent px-3 py-1.5 text-xs text-white">{t("layoutMemory.useRemote", { host: s.memoryHost?.label ?? "" })}</button>
+        <button ref={primary} disabled={busy} onClick={() => void resolve(false)} className="rounded-md bg-accent px-3 py-1.5 text-xs text-on-accent">{t("layoutMemory.useRemote", { host: s.memoryHost?.label ?? "" })}</button>
       </div>
     </div>
   </div>;

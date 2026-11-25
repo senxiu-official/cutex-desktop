@@ -172,7 +172,7 @@ export const en: Record<keyof typeof zhCN, string> = {
   "peers.effect.incomingStopped": "stopped; the result is not sent back",
   "peers.deleted": "Deleted the pairing with {label}",
   "peers.readOnlyLink": "This host only accepts these changes over a loopback connection (loopback_only), and the desktop does not reach it over loopback, so this page is read-only. Change it on that host, or connect over SSH.",
-  "peers.retryWrites": "Try again",
+  "peers.retryWrites": "Retry",
   "peers.refusal.self_peer": "That is this host's own address; a host cannot pair with itself",
   "peers.refusal.peer_exists": "A pairing with this host already exists",
   "peers.refusal.label_taken": "Another pairing already uses this name; pick another one",

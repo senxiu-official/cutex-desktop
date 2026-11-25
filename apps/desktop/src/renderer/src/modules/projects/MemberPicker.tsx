@@ -21,6 +21,8 @@ import { Avatar } from "../../components/Avatar";
 import type { AgentRow } from "../../lib/sidebar";
 import { Tag } from "../../components/Tag";
 import { useOwnerWindow } from "../../lib/ownerContext";
+import { EntityMention } from "../../components/EntityIcon";
+import { tNodes } from "../../lib/textNodes";
 
 export type PickerMode = "add" | "director";
 
@@ -70,6 +72,7 @@ function PickRow({
   onMove(el: HTMLElement, delta: 1 | -1): void;
 }) {
   const { t } = useI18n();
+  const hostId = useTargetHostId();
   const modelName = useModelName();
   const s = c.row.session;
   const runtime = runtimeOf(s);
@@ -155,7 +158,7 @@ function PickRow({
           blocked ? <span className="text-accent">{t("projects.picker.currentDirector")}</span> : null
         ) : c.projectId ? (
           <span className="text-warn" title={why}>
-            {t("projects.picker.inProject", { project: c.projectName ?? c.projectId })}
+            {tNodes(t, "projects.picker.inProject", { project: <EntityMention entity={{ kind: "project", id: c.projectId, hostId }}>{c.projectName ?? c.projectId}</EntityMention> })}
           </span>
         ) : (
           <span className="text-subtle">{t("projects.picker.independent")}</span>
@@ -376,7 +379,7 @@ export function MemberPicker({
           <button onClick={onClose} className="rounded-md px-3 py-1 text-xs text-muted hover:bg-surface-2 hover:text-foreground">
             {t("projects.picker.cancel")}
           </button>
-          <button disabled={chosen.length === 0 || busy} onClick={() => void confirm()} className="rounded-md bg-accent px-3 py-1 text-xs font-medium text-white hover:bg-accent/90 disabled:opacity-40">
+          <button disabled={chosen.length === 0 || busy} onClick={() => void confirm()} className="rounded-md bg-accent px-3 py-1 text-xs font-medium text-on-accent hover:bg-accent/90 disabled:opacity-40">
             {mode === "add" ? t("projects.picker.add", { count: chosen.length }) : t("projects.picker.confirmDirector")}
           </button>
         </footer>

@@ -3,7 +3,7 @@
 // shows its reason with 重试. `look: "grant"` is the Maid 行's 「交给 Maid ▾」: picking hands the tab over (the caller
 // asks for the grant confirmation first); the plain look only selects.
 import { isImeComposing } from "../../lib/ime";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Check, ChevronDown, Hand, Search } from "lucide-react";
 import type { BrowserAgentView } from "../../../../shared/browser";
@@ -14,6 +14,8 @@ import { LOCAL_HOST_ID } from "../../../../shared/hosts";
 import { pickerGroups, recentGrants, type PickerAgent } from "./agentPicker";
 import { isQuickChat } from "../../lib/sidebar";
 import { useOwnerWindow } from "../../lib/ownerContext";
+import { EntityIcon, EntityMention } from "../../components/EntityIcon";
+import { useStaggeredCount } from "../../lib/useStagger";
 
 interface Props {
   hostId: string;
@@ -30,11 +32,13 @@ interface Props {
   look?: "select" | "grant";
   label?: string;
   title?: string;
+  /** A note above the list (浏览器身份: whose logins go with the tab). */
+  note?: ReactNode;
 }
 
 const WIDTH = 288;
 
-export function BrowserAgentPicker({ hostId, agents, selected, onSelect, onOpen, disabled, loading, placeholder, error, look = "select", label, title }: Props) {
+export function BrowserAgentPicker({ hostId, agents, selected, onSelect, onOpen, disabled, loading, placeholder, error, look = "select", label, title, note }: Props) {
   const win = useOwnerWindow();
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
@@ -54,6 +58,8 @@ export function BrowserAgentPicker({ hostId, agents, selected, onSelect, onOpen,
     return { ...agent, projectId, projectName: projectId ? (row?.projectName || summary?.presentation.display_name || projectId) : null, ...(!projectId && session && isQuickChat(session, row) ? { quickChat: true } : {}) };
   }), [agents, sidebar]);
   const groups = useMemo(() => pickerGroups(rows, { query, current, recent }), [rows, query, current, recent]);
+  // Hundreds of agents: avatars past the first rows mount in steps (lib/useStagger); none while closed.
+  const icons = useStaggeredCount(open ? groups.reduce((n, group) => n + group.agents.length, 0) : 0);
   const flat = useMemo(() => groups.flatMap(group => group.agents), [groups]);
   const hiddenChats = query.trim() ? 0 : rows.filter(row => row.quickChat && !flat.includes(row)).length;
   const chosen = agents.find(agent => agent.sessionId === selected);
@@ -115,6 +121,7 @@ export function BrowserAgentPicker({ hostId, agents, selected, onSelect, onOpen,
         ? `press-solid flex h-6 min-w-0 shrink items-center gap-1 rounded-ctl px-2 text-meta font-medium transition-colors focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-40 ${open ? "bg-accent text-on-accent" : "bg-accent-soft text-accent enabled:hover:bg-accent enabled:hover:text-on-accent"}`
         : "press flex max-w-36 min-w-0 items-center gap-1 rounded border border-border bg-background px-1.5 py-1 text-xs text-foreground enabled:hover:bg-hover focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-40"}>
       {look === "grant" && <Hand size={12} aria-hidden className="shrink-0" />}
+      {look !== "grant" && chosen && <EntityIcon entity={{ kind: "agent", id: chosen.sessionId, name: chosen.name }} />}
       <span className={`truncate ${chosen || look === "grant" ? "" : "text-subtle"}`}>{look === "grant" ? label : (chosen?.name ?? placeholder)}</span>
       <ChevronDown size={11} className={`shrink-0 ${look === "grant" ? "" : "text-subtle"}`} />
     </button>
@@ -128,18 +135,20 @@ export function BrowserAgentPicker({ hostId, agents, selected, onSelect, onOpen,
             placeholder={t("browser.owner.pickerSearch")} aria-label={t("browser.owner.pickerSearch")}
             className="h-6 min-w-0 flex-1 bg-transparent text-xs text-foreground outline-none placeholder:text-subtle" />
         </div>
+        {note}
         <div ref={list} id="browser-agent-picker-list" role="listbox" aria-label={t("browser.owner.select")} className="float-scroll min-h-0 flex-1 overflow-y-auto p-1">
           {error && <div role="alert" className="px-2.5 py-2 text-xs text-danger">
             <p>{error}</p><button type="button" data-browser-agent-retry="" disabled={loading} aria-busy={loading || undefined} className="press mt-2 rounded-sm underline disabled:cursor-default disabled:no-underline disabled:opacity-50" onClick={onOpen}>{t("browser.refusal.retry")}</button>
           </div>}
           {!error && !flat.length && !hiddenChats && <p role="status" className="px-2.5 py-2 text-xs text-subtle">{t(agents.length ? "browser.owner.pickerNoMatch" : loading ? "browser.owner.loadingAgents" : "browser.owner.noAgents")}</p>}
           {groups.map(group => <div key={group.key} role="group" aria-label={groupLabel(group.kind, group.label) ?? undefined}>
-            <div className="truncate px-2.5 pt-1.5 pb-0.5 text-caption/[inherit] text-subtle">{groupLabel(group.kind, group.label)}</div>
+            <div className="truncate px-2.5 pt-1.5 pb-0.5 text-caption/[inherit] text-subtle">{group.kind === "project" ? <EntityMention entity={{ kind: "project", id: group.key.slice("project:".length), hostId }}>{groupLabel(group.kind, group.label)}</EntityMention> : groupLabel(group.kind, group.label)}</div>
             {group.agents.map(agent => {
               const i = index++;
               return <div key={agent.sessionId} id={`browser-agent-option-${i}`} data-picker-index={i} role="option" aria-selected={agent.sessionId === selected}
                 onMouseEnter={() => setCursor(i)} onMouseDown={event => event.preventDefault()} onClick={() => pick(agent)}
                 className={`press flex cursor-default items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs ${i === cursor ? "bg-surface-2" : ""}`}>
+                {i < icons ? <EntityIcon entity={{ kind: "agent", id: agent.sessionId, name: agent.name }} /> : <span className="h-4 w-4 shrink-0" aria-hidden />}
                 <span className="min-w-0 flex-1 truncate text-foreground" title={agent.name}>{agent.name}</span>
                 {agent.sessionId === current && <span className="shrink-0 text-caption/[inherit] text-subtle">{t("browser.owner.pickerCurrent")}</span>}
                 {group.kind === "top" && agent.projectName && <span className="max-w-24 shrink-0 truncate text-caption/[inherit] text-subtle">{agent.projectName}</span>}

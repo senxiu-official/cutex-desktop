@@ -3,7 +3,7 @@
 // google-chrome over the DevTools protocol — plain Node 22+ (global fetch / WebSocket), no puppeteer or
 // playwright. Start the preview first (apps/desktop: `npm run preview:web -- --port 5241`), then e.g.
 //
-//   node scripts/shot.mjs --url 'http://127.0.0.1:5241/?desktop' --out /home/ema/cutex-dev/shots/0.2-x/desk.jpg
+//   node scripts/shot.mjs --url 'http://127.0.0.1:5241/?desktop' --out /home/user/cutex-dev/shots/0.2-x/desk.jpg
 //   node scripts/shot.mjs --url 'http://127.0.0.1:5241/?desktop' --theme dark --locale en --size 1280x800 \
 //     --wait-for '[data-desk-surface]' --eval 'document.querySelector("[data-running-agents]") !== null' --out a.jpg
 //

@@ -142,7 +142,7 @@ describe("window-local composer drafts", () => {
     expect(store.stats().bytes).toBeLessThanOrEqual(10_000);
     store.clear(b);
     store.clear(c);
-    expect(store.stats()).toEqual({ entries: 0, bytes: 0, generations: 0 });
+    expect(store.stats()).toEqual({ entries: 0, bytes: 0, generations: 0, histories: 0, historyBytes: 0 });
   });
 
   it("prunes drafts and pending acquisitions of removed hosts", () => {
@@ -173,6 +173,6 @@ describe("window-local composer drafts", () => {
       pending.setText("late");
       expect(store.read(key).text).toBe("");
     }
-    expect(store.stats()).toEqual({ entries: 0, bytes: 0, generations: 0 });
+    expect(store.stats()).toEqual({ entries: 0, bytes: 0, generations: 0, histories: 0, historyBytes: 0 });
   });
 });

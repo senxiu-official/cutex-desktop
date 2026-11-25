@@ -1,0 +1,50 @@
+// 查找旧任务 page (owner 2026-11-26). 回合 = turn (project copy terms).
+export const zhCN = {
+  "session-search.title": "查找旧任务",
+  "session-search.description": "在一个页面里查找旧任务：筛选、预览，再打开到那一回合",
+  "session-search.query": "要查找的文字",
+  "session-search.search": "查找",
+  "session-search.allHosts": "全部主机",
+  "session-search.allProjects": "全部项目",
+  "session-search.noProject": "独立{{agent}}",
+  "session-search.projectHint": "只筛选已找到的结果：主机的搜索还不能按项目查找",
+  "session-search.allAgents": "全部{{agent}}",
+  "session-search.searchAgents": "查找{{agent}}",
+  "session-search.noAgents": "没有{{agent}}",
+  "session-search.anyTime": "任何时间",
+  "session-search.timeUnavailable": "主机的搜索还不能按时间筛选",
+  "session-search.allKinds": "全部类型",
+  "session-search.kindUnavailable": "主机的搜索只查每个回合的第一条输入和最后一条回复，还分不出消息、委托和结果",
+  "session-search.byTime": "按时间",
+  "session-search.byAgent": "按{{agent}}",
+  "session-search.layout": "结果排列",
+  "session-search.count": "{n} 条结果",
+  "session-search.start": "输入文字，按 Enter 查找",
+  "session-search.noHosts": "当前视图里没有能查找旧任务的主机",
+  "session-search.pick": "选一条结果，在这里预览",
+  "session-search.loading": "正在读取这一回合…",
+  "session-search.failed": "读不到这一回合：{error}",
+  "session-search.missing": "这一回合已经不在了",
+  "session-search.excerptOnly": "这台主机不能预览整个回合，下面是搜索给出的摘录",
+  "session-search.cut": "这一回合较长，只显示了前面的部分",
+  "session-search.input": "输入",
+  "session-search.reply": "回复",
+  "session-search.open": "打开对话",
+  "session-search.openHint": "打开对话，停在这一回合（Enter）",
+  "session-search.startedAt": "{time} 开始",
+  "session-search.keys": "↑↓ 选择 · Enter 打开 · Esc 回到查找框",
+  "session-search.results": "查找结果",
+  "session-search.from": "开始日期",
+  "session-search.to": "结束日期",
+  "session-search.orderPartial": "按回合时间排列已找到的结果；继续查找可能还会补进更新的",
+  "session-search.matched.userMessage": "在输入里找到",
+  "session-search.matched.agentMessage": "在回复里找到",
+  "session-search.matched.delegationBrief": "在委托说明里找到",
+  "session-search.matched.delegationResult": "在委托结果里找到",
+};
+
+declare module "../i18nCatalog" {
+  interface ModuleMessages extends Messages {}
+}
+type Messages = typeof zhCN;
+declare module "../i18nCatalog" { interface ModuleZhHantMessages extends Record<keyof typeof zhCN, string> {} }

@@ -31,4 +31,13 @@ describe("countKey", () => {
     }
     expect(en["users.summary.peers.one"]).toBe("1 linked host");
   });
+  it("fixes the English singulars of 项目 (no more “1 members” on a project row)", () => {
+    for (const key of ["projects.members", "projects.memoryCount", "projects.archiveConfirmMembers"] as const) {
+      const one = countKey(key, { n: 1 }, en, en) as keyof typeof en;
+      expect(one).toBe(`${key}.one`);
+      expect(fill(en[one], 1)).not.toMatch(/1 (members|memory files)|member(s)/);
+      expect(fill(zhCN[one], 1)).toBe(fill(zhCN[key], 1));
+    }
+    expect(en["projects.members.one"]).toBe("1 member");
+  });
 });

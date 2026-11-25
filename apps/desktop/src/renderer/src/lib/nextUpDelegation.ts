@@ -4,7 +4,7 @@ import { continuationTrailing } from "./continuationWait";
 import type { DelegationStatus } from "./delegations";
 import { NEXT_UP_DELEGATION_WAITS } from "./inputLedger/nextUpRegistry";
 
-/** The status a 接下来 row shows: 续接已达上限 (not registered there) reads as plain 等待中 — its hover still explains
+/** The status a 接下来 row shows: 自动继续已到期 (not registered there) reads as plain 等待中 — its hover still explains
  *  the limit (the hint follows the wait's own state). Every other status is unchanged. */
 export function nextUpDelegationStatus(status: DelegationStatus): DelegationStatus {
   return status.key === "continuationLimited" ? { ...status, key: "continuationWait", tone: "muted" } : status;

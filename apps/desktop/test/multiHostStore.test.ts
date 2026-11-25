@@ -556,6 +556,24 @@ describe("host-keyed pins (one-time migration)", () => {
   });
 });
 
+describe("允许 iPad 访问 (services-remote-access-v1) through cutex/services/changed", () => {
+  const svc = (slug: string, remoteAccess?: boolean) => ({ slug, displayName: slug, runtime: "managed", health: "reachable", createdAt: "2026-11-23T04:00:00Z", ownerCutexSessionId: "a1", ...(remoteAccess === undefined ? {} : { remoteAccess }) });
+  it("an updated event sets that host's row only (each host on its own)", async () => {
+    mock.responses.set("local:services", () => ({ services: [svc("board")] }));
+    mock.responses.set(`${WORKSTATION}:services`, () => ({ services: [svc("board")] }));
+    await start();
+    expect(store.getState().services?.[0]?.remoteAccess).toBeUndefined();
+    transport.host(WORKSTATION, cutex("cutex.host", "cutex/services/changed", { reason: "updated", slug: "board", service: svc("board", true) }));
+    await settle();
+    expect(store.getState().byHost[WORKSTATION]!.services?.[0]?.remoteAccess).toBe(true);
+    expect(store.getState().services?.[0]?.remoteAccess).toBeUndefined();
+    // Closed by cutex (a new registrant): the next updated event carries false.
+    transport.host(WORKSTATION, cutex("cutex.host", "cutex/services/changed", { reason: "updated", slug: "board", service: svc("board", false) }));
+    await settle();
+    expect(store.getState().byHost[WORKSTATION]!.services?.[0]?.remoteAccess).toBe(false);
+  });
+});
+
 describe("owner rotation events (cutex/ownerRotation/updated)", () => {
   it("are kept under the host they came from; only the shown host's own event reloads its sidebar", async () => {
     mock.responses.set("capabilities", () => ({ featureList: [...FEATURES, "owner-rotation"], cutexBuild: { version: "0.1.0", release: "r219", commit: null, builtAt: null, profile: "release", channel: "main" } }));

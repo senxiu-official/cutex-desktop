@@ -78,6 +78,7 @@ import { bindingLabel, keyVar } from "../lib/keybindings";
 import { InfoMark } from "./InfoMark";
 import { isElement } from "../lib/ownerWindow";
 import { PRESS_ICON } from "./Button";
+import { EntityIcon } from "./EntityIcon";
 
 /** Quiet pass: a control in its default state shows on hover / keyboard focus of the header. */
 /** Status items that show on hover / focus of the header only (在线 when idle, the bell when plain on). */
@@ -330,7 +331,7 @@ function AgentActions({ paneId, session, hostId, info, folded, compactServices, 
         item,
         label: t("convHeader.item.project", { name: projectName }),
         entries: [
-          projectId && { label: t("titlebar.openProject", { name: projectName }), onSelect: () => appServices.ui.openPage("projects.page", { project: projectId, ...hostPageParam(hostId) }) },
+          projectId && { label: t("titlebar.openProject", { name: projectName }), icon: <EntityIcon entity={{ kind: "project", id: projectId, hostId }} />, onSelect: () => appServices.ui.openPage("projects.page", { project: projectId, ...hostPageParam(hostId) }) },
           {
             label: t(projectId ? (starred ? "titlebar.unstar" : "titlebar.star") : starred ? "titlebar.unstarIndependent" : "titlebar.starIndependent"),
             icon: <Star size={14} className={starred ? "fill-warn text-warn" : ""} />,
@@ -512,7 +513,7 @@ function PaneControls({ paneId, hostId, sessionId, focused, maxed, rows, session
       if (entries.length) entries.push("separator");
       // 暂停智能体 / 继续智能体 (agent-pause) right in ⋯, not only in the agent's submenu.
       if (session.lifecycle !== "retired" && agentPauseSupported(useApp.getState(), hostId)) entries.push(agentPauseItem(hostId, session.cutexSessionId, t));
-      entries.push({ label: session.displayName, submenu: agentMenu(session, t, hostId), onSelect: () => {} });
+      entries.push({ label: session.displayName, icon: <EntityIcon entity={{ kind: "agent", id: session.cutexSessionId, name: session.displayName }} />, submenu: agentMenu(session, t, hostId), onSelect: () => {} });
     }
     // Design 006 v1: the last row opens Settings → 会话 (its foretell outlines this conversation).
     if (entries.length) entries.push("separator");

@@ -649,7 +649,7 @@ function LegacyQueuePanel({
               {t("steer.pending")}
             </span>
             {waiting.some(p => (p.state ?? "waiting") === "waiting") && (
-              <button onClick={onInterruptSendSteers} title={effectWord("interruptSend", lang).tip} className="press rounded-md px-1.5 py-0.5 text-xs text-danger hover:bg-danger/10">
+              <button onClick={onInterruptSendSteers} title={t("interruptSend.oneTip")} className="press rounded-md px-1.5 py-0.5 text-xs text-danger hover:bg-danger/10">
                 {effectWord("interruptSend", lang).label}
               </button>
             )}

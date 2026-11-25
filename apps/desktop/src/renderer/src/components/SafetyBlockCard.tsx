@@ -20,6 +20,8 @@ import { rowsOf } from "../lib/viewHost";
 import { ClampBox } from "./ClampBox";
 import { SystemAvatar } from "./SystemAvatar";
 import { Tag } from "./Tag";
+import { EntityMention } from "./EntityIcon";
+import { tNodes } from "../lib/textNodes";
 
 const REFUSALS: Record<string, MessageKey> = {
   session_offline: "safetyBlock.error.offline",
@@ -89,7 +91,7 @@ export function SafetyBlockCard({ record: r, block, hostId }: { record: OwnerNot
       <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs">
         <SystemAvatar kind="cutex" size={open ? 16 : 14} />
         <span className={open ? "font-medium text-foreground" : "text-muted"}>{t("system.cutex")}</span>
-        <span className="min-w-0 truncate text-muted">{t("ownerNotify.aboutAgent", { name: agentName })}</span>
+        <span className="min-w-0 truncate text-muted">{tNodes(t, "ownerNotify.aboutAgent", { name: <EntityMention entity={{ kind: "agent", id: r.agentId, name: agentName }}>{agentName}</EntityMention> })}</span>
         {open ? (
           <Tag tone="attention">{t("safetyBlock.badge")}</Tag>
         ) : (
@@ -127,7 +129,7 @@ export function SafetyBlockCard({ record: r, block, hostId }: { record: OwnerNot
               data-note-reply=""
               onClick={() => void decide("grant")}
               disabled={!!busy}
-              className="flex items-center gap-1 rounded-lg bg-accent px-2.5 py-1 text-xs text-white hover:bg-accent/90 disabled:opacity-50"
+              className="flex items-center gap-1 rounded-lg bg-accent px-2.5 py-1 text-xs text-on-accent hover:bg-accent/90 disabled:opacity-50"
             >
               <Check size={13} />
               {busy === "grant" ? t("safetyBlock.granting") : t("safetyBlock.grant")}

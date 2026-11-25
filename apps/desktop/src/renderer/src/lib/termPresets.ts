@@ -29,6 +29,8 @@ const MAID: Partial<Record<TermId, TermForms>> = {
   parentagent: { one: "Mentor Maid", many: "Mentor Maids" },
   director: { one: "Chief Maid", many: "Chief Maids" },
   operator: { one: "Deputy Maid", many: "Deputy Maids" },
+  // 个人助理: the maid who attends the master personally (owner 2026-11-26; draft wording).
+  assistant: { one: "Lady's Maid", many: "Lady's Maids" },
   owner: { one: "Master", many: "Masters" },
 };
 // Chinese has no plural: the Maid words are kept as written.

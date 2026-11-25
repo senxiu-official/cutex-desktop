@@ -4,7 +4,8 @@ import { lazyPage } from "../../lib/lazyPage";
 
 // Loaded on first open (lib/lazyPage).
 const ArchivePage = lazyPage(() => import("../../components/settings/AppSettings").then((m) => m.ArchivePage));
-const ArchivedSubPage = lazyPage(() => import("../../components/settings/AppSettings").then((m) => m.ArchivedSubPage));
+// 已归档的智能体 (owner 2026-11-24): filters, batch restore / delete and figures (./ArchivedManager).
+const ArchivedSubPage = lazyPage(() => import("./ArchivedManager").then((m) => m.ArchivedManagerPage));
 
 export default defineModule({
   id: "archive",

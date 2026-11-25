@@ -16,6 +16,7 @@ import type { ProfileItem, ProfileModelsView } from "../../../../shared/ipc";
 import type { DraftImage } from "../../../../shared/input";
 import { BUILTIN_THREAD_DEFAULTS, readNewThreadDefaults, type ClaudeLaunchMode, type LaunchOverrides, type LaunchPermissions } from "../../../../shared/launch";
 import { useEnglishCatalog, useI18n, type MessageKey } from "../../i18n";
+import { bridge } from "../../bridge";
 import { zhCN } from "../../i18n/zh-CN";
 import { appendToken } from "../../lib/composerTools";
 import { useImagePickBlocked } from "../../lib/remoteMode";
@@ -28,7 +29,8 @@ import { cachedProfile, cachedProfileList, loadProfileList } from "../../lib/pro
 import { useOrderedProfiles } from "../../lib/profileOrder";
 import { useUiPrefs } from "../../lib/prefs";
 import { boundSkills, paletteQuery, parseSlash, rankEntries, type PaletteEntry } from "../../lib/slashCommands";
-import { composerKeyAction } from "../../lib/sendKeys";
+import { composerKeyAction, isMultilineDraft } from "../../lib/sendKeys";
+import { displayKey } from "../../lib/shortcuts";
 import { QUICK_CHAT_PROFILE_FEATURE } from "../../lib/profileCreate";
 import { featuresOf, hostApi, useApp } from "../../store";
 import { TargetHostContext, useTargetHostId } from "../../lib/targetHost";
@@ -118,7 +120,7 @@ function PendingChatBody({ target }: { target: CreateHost }) {
   const hostId = pending?.sessionId ? (pending.hostId ?? target.hostId) : target.hostId;
   const api = hostApi(hostId);
   const retry = useApp((s) => s.retryPendingChat);
-  const { sendKeys } = useUiPrefs();
+  const { sendKeys, multilineEnterNewline } = useUiPrefs();
   const [text, setText] = useState("");
   const [portraitSelected, setPortraitSelected] = useState(!!pending?.profile);
   const [images, setImages] = useState<DraftImage[]>([]);
@@ -417,7 +419,7 @@ function PendingChatBody({ target }: { target: CreateHost }) {
     const action = composerKeyAction(
       sendKeys,
       { key: e.key, ctrl: e.ctrlKey || e.metaKey, shift: e.shiftKey, alt: e.altKey },
-      { busy: false, hasContent: !!text.trim() || images.length > 0, pendingSteers: 0, collapsedSelection: el.selectionStart === el.selectionEnd },
+      { busy: false, hasContent: !!text.trim() || images.length > 0, pendingSteers: 0, collapsedSelection: el.selectionStart === el.selectionEnd, multilineNewline: multilineEnterNewline && isMultilineDraft(text) },
     );
     if (action === "send" || action === "steer" || action === "queue" || action === "interruptSend") {
       e.preventDefault();
@@ -543,6 +545,8 @@ function PendingChatBody({ target }: { target: CreateHost }) {
             }}
             attachments={<LaunchAttachments images={images} hostId={hostId} onRemove={(id) => setImages((previous) => previous.filter((image) => image.id !== id))} />}
             textarea={{ ref: textarea, autoFocus: true, value: text, onChange: (e) => setText(e.target.value), onKeyDown, onPaste, placeholder: t("chat.preparingPlaceholder") }}
+            // 「多行时 Enter 换行」 in effect: the hint line names the key, as in the conversation composer.
+            hint={multilineEnterNewline && isMultilineDraft(text) ? t("composer.multilineHint.idle", { key: displayKey("Ctrl+Enter", bridge.platform === "darwin") }) : undefined}
             label={t("composer.send")} disabled={!hasContent || runtimeBlocked} onSubmit={send} />
         </div>
 

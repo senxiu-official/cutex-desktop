@@ -3,7 +3,7 @@ export const zhCN = {
   "subagents.timeline.send": "发给",
   "subagents.timeline.followup": "追加任务给",
   "subagents.timeline.wait": "等待",
-  "subagents.timeline.interrupt": "打断",
+  "subagents.timeline.interrupt": "中断",
   "subagents.timeline.close": "关闭",
   "subagents.timeline.resume": "恢复",
   "subagents.timeline.list": "列出{{subagent}}",
@@ -25,6 +25,8 @@ export const zhCN = {
   "subagents.recentTitle": "最近完成的{{subagent}}",
   "subagents.recent.background": "后台运行，没有过程记录",
   "subagents.background": "后台",
+  "subagents.deniedUnattended": "后台工具调用已跳过：需要批准",
+  "subagents.deniedUnattendedHint": "这个后台{{subagent}}调用的工具需要批准，当时没有人能批准，所以已拒绝；它的状态不变",
   "subagents.stop": "停止",
   "subagents.stop.title": "停止后台{{subagent}}「{name}」（不影响当前回合）",
   "subagents.stopAgain": "再次左键点击停止以确认",
@@ -38,9 +40,9 @@ export const zhCN = {
   "subagents.stopOutcome.refused": "停止被拒绝（{reason}）",
   "subagents.stopOutcome.unknown": "停止结果未确认",
   "subagents.stopOutcome.noReason": "未说明原因",
-  "subagents.stopOutcome.acceptedHint": "停止请求已被接下；还没确认这个{{subagent}}已经停下。",
+  "subagents.stopOutcome.acceptedHint": "停止请求已被接收；还没确认这个{{subagent}}已经停止。",
   "subagents.stopOutcome.refusedHint": "停止请求没有被接受，这个{{subagent}}仍在运行。",
-  "subagents.stopOutcome.unknownHint": "停止请求已发出，但读不到结果：这个{{subagent}}可能仍在运行。可以再停止一次。",
+  "subagents.stopOutcome.unknownHint": "停止请求已发送，但读不到结果：这个{{subagent}}可能仍在运行。可以再停止一次。",
 } as const;
 
 // Adds these keys to MessageKey (modules/i18nCatalog.ts collects the dictionary itself).

@@ -24,6 +24,8 @@ export interface AgentMentionInputProps extends Omit<HTMLAttributes<HTMLDivEleme
   onSelect?(caret: number): void;
   onKeyDown?(event: KeyboardEvent<HTMLElement>): void;
   onPaste?(event: ClipboardEvent<HTMLElement>): void;
+  /** Undo / redo goes to the caller's history (the composer's whole-draft one) instead of this input's own text history. */
+  onHistory?(redo: boolean): void;
   placeholder?: string;
   /** The conversation's host: profile chips name their profile from this host's list. */
   hostId?: string | null;
@@ -39,7 +41,7 @@ interface ChipPortal { host: HTMLElement; token: ComposerMentionToken }
 
 /** Used for drafts containing canonical agent links or explicit profile/model references. The parent keeps ordinary drafts in a textarea. */
 export const AgentMentionInput = forwardRef<AgentMentionInputHandle, AgentMentionInputProps>(function AgentMentionInput(
-  { value, onChange, onSelect, onKeyDown, onPaste, placeholder, hostId, className, style, ...attributes }, ref,
+  { value, onChange, onSelect, onKeyDown, onPaste, onHistory, placeholder, hostId, className, style, ...attributes }, ref,
 ) {
   const element = useRef<HTMLDivElement>(null);
   const current = useRef(value);
@@ -47,8 +49,8 @@ export const AgentMentionInput = forwardRef<AgentMentionInputHandle, AgentMentio
   const composing = useRef(false);
   const before = useRef<Snapshot | null>(null);
   const past = useRef<Snapshot[]>([]), future = useRef<Snapshot[]>([]);
-  const callbacks = useRef({ onChange, onSelect, onKeyDown, onPaste });
-  callbacks.current = { onChange, onSelect, onKeyDown, onPaste };
+  const callbacks = useRef({ onChange, onSelect, onKeyDown, onPaste, onHistory });
+  callbacks.current = { onChange, onSelect, onKeyDown, onPaste, onHistory };
   const [portals, setPortals] = useState<ChipPortal[]>([]);
 
   // React owns only chip contents via portals. Browser edits never mutate a React-owned text subtree.
@@ -164,7 +166,9 @@ export const AgentMentionInput = forwardRef<AgentMentionInputHandle, AgentMentio
     const beforeInput = (event: InputEvent) => {
       if (event.isComposing || composing.current) return;
       if (event.inputType === "historyUndo" || event.inputType === "historyRedo") {
-        event.preventDefault(); history(event.inputType === "historyRedo");
+        event.preventDefault();
+        if (callbacks.current.onHistory) callbacks.current.onHistory(event.inputType === "historyRedo");
+        else history(event.inputType === "historyRedo");
       } else if (event.inputType === "insertParagraph" || event.inputType === "insertLineBreak") {
         event.preventDefault(); replaceSelection("\n");
       } else if (event.inputType === "deleteContentBackward" || event.inputType === "deleteContentForward") {
@@ -200,7 +204,10 @@ export const AgentMentionInput = forwardRef<AgentMentionInputHandle, AgentMentio
     if (event.defaultPrevented) return;
     const command = (event.ctrlKey || event.metaKey) && !event.altKey;
     if (command && (event.key.toLowerCase() === "z" || event.key.toLowerCase() === "y")) {
-      event.preventDefault(); history(event.key.toLowerCase() === "y" || event.shiftKey); return;
+      event.preventDefault();
+      if (callbacks.current.onHistory) callbacks.current.onHistory(event.key.toLowerCase() === "y" || event.shiftKey);
+      else history(event.key.toLowerCase() === "y" || event.shiftKey);
+      return;
     }
     if (event.key === "Enter") { event.preventDefault(); replaceSelection("\n"); return; }
     const range = selection();

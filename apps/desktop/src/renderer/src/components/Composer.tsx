@@ -1,5 +1,6 @@
 import { usesInputLedger } from "../lib/deliveryMode";
 import { deliveryBusy } from "../lib/inputLedger/nextUp";
+import { effortAppliesNextTurn, isEffortChange, turnRunning } from "../lib/effortNextTurn";
 import { ConversationModelControls } from "./ConversationModelControls";
 import { ProfileSwitch } from "./ProfileSwitch";
 import { cachedProfileList, loadProfileList } from "../lib/profileSnapshot";
@@ -17,8 +18,8 @@ import { AgentPausedSection, AgentPausedSendHint } from "./AgentPauseParts";
 import { useAgentPause } from "../lib/agentPause";
 import { mentionText, parseDraggedPaths, WORKSPACE_PATHS_MIME } from "../lib/workspaceDrag";
 import { DROP_TINT, dropTint } from "../lib/dropTint";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, useId, type ClipboardEvent, type DragEvent, type KeyboardEvent, type ReactNode } from "react";
-import { ArrowUp, CircleAlert, Clock, Eye, EyeOff, Info, Square, X } from "lucide-react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useId, type ClipboardEvent, type DragEvent, type KeyboardEvent, type ReactNode } from "react";
+import { ArrowUp, CircleAlert, Clock, Eye, EyeOff, Info, Square, WandSparkles, X } from "lucide-react";
 import type { AdmissionNextStep, QueueItem } from "@cutex-desktop/protocol";
 import type { SkillMetadata, SkillsListResponse } from "@cutex-desktop/protocol/codex/v2";
 import type { ExtraInput, ModelOption, ProfileItem } from "../../../shared/ipc";
@@ -31,6 +32,7 @@ import { imageFileToDataUrl } from "../lib/images";
 import { useP2Access } from "../lib/p2Access";
 import { senderLabel } from "../lib/systemSenders";
 import { useComposerDraft } from "../lib/composerDrafts";
+import { changedEnd, undoKeyOf, useHistoryBeforeInput } from "../lib/draftUndo";
 import { candidateIndex, composerCandidateKey, mentionPathsFor, startMentionSearch, type MentionResults } from "../lib/composerMentions";
 import { agentMentionCandidates, agentMentionInsert, mentionRecentKey } from "../lib/composerAgentMentions";
 import { recentAgentPicks, rememberAgentPick } from "../lib/agentPickerOptions";
@@ -62,14 +64,21 @@ import { agentFeaturesOf, changesSettingsLive, CLAUDE_SESSION_SKILLS_CAPABILITY,
 import { useObservedModel } from "../lib/observedModelView";
 import { answeringModelShown, shownContext, shownEffort, shownModelName } from "../lib/composerShown";
 import { structuralErrorText } from "../lib/structuralGateView";
-import { boundSkills, insertMention, mentionAt, paletteQuery, parseSlash, rankEntries, runSlash, SLASH_COMMANDS, slashSpec, slashUnavailable, type PaletteEntry, type SlashContext } from "../lib/slashCommands";
+import { boundSkills, skillToken, insertMention, mentionAt, paletteQuery, parseSlash, rankEntries, runSlash, SLASH_COMMANDS, slashSpec, slashUnavailable, type PaletteEntry, type SlashContext } from "../lib/slashCommands";
 import { anyOverlayOpen } from "../lib/openOverlays";
 import { sideLayersActive } from "../lib/sideLayoutStore";
 import { openChanges, openSide } from "../lib/sideOpen";
 import { SIDE_CHAT_COMPONENT } from "../lib/sideKinds";
 import { useConversationEsc } from "../lib/useConversationEsc";
+import { PromptEnhancePanel } from "./PromptEnhancePanel";
+import { usePromptEnhance } from "../lib/usePromptEnhance";
+import { FEATURE_PROFILES_FEATURE } from "../../../shared/featureProfiles";
+import { hostRoute, insertUndoable, promptEnhanceKey, rewriteRoute, usePromptEnhancePrefs } from "../lib/promptEnhance";
+import { TEXT_REWRITE_FEATURE } from "../../../shared/textRewrite";
+import { useBindingLabel, withKey } from "../lib/useKeybindings";
 import { pausedSection } from "../lib/queuePause";
-import { composerKeyAction, strategyFor } from "../lib/sendKeys";
+import { composerKeyAction, isMultilineDraft, multilineHint, strategyFor } from "../lib/sendKeys";
+import { displayKey } from "../lib/shortcuts";
 import { draftSteerPlan, hasImageInput, IMAGE_INPUT_STEERING_FEATURE, imageSteerMode } from "../lib/imageSteer";
 import { queueActionNotice } from "../lib/queueSteer";
 import { orderedEntries, type TimelineState } from "../lib/timeline";
@@ -537,6 +546,7 @@ export function Composer({
   const ledgerMode = usesInputLedger([...features]);
   const ledger = useApp(s => agentState(s.inputs, hostId, sessionId));
   const busy = ledgerMode ? deliveryBusy(ledger?.delivery) : legacyBusy;
+  const running = turnRunning(ledgerMode, ledger?.delivery, legacyBusy);
   const approvalRulesFeature = features.has(APPROVAL_AUTO_RULES_FEATURE);
   const runtimeGeneration = useApp((s) => viewOf(s, hostId, sessionId)?.runtimeGeneration ?? 0);
   const uiSignal = useApp((s) => s.uiSignal);
@@ -553,14 +563,27 @@ export function Composer({
     if (text) notifyHere(text, "error");
   };
   const signalHere = (target: string, arg?: string) => useApp.getState().signal(target, arg, here);
-  const { text, setText, images, setImages, pickedSkills, setPickedSkills, clearDraft, captureDraft } = useComposerDraft(hostId, sessionId);
-  const { sendKeys, delegationSteerKeys, queueSectionStrip, queuePanelFold } = useUiPrefs();
+  const { text, setText, images, setImages, pickedSkills, setPickedSkills, clearDraft, captureDraft, undoDraft, redoDraft, groupDraft, markDraftStep, endDraftHistory, endDraftComposition } = useComposerDraft(hostId, sessionId);
+  // Set only while the owner's own input (typing, IME) is being applied: that text change coalesces into undo bursts;
+  // every other text change (picks, inserts, commands) is an undo step of its own (lib/composerDrafts).
+  const typing = useRef<{ composing: boolean } | null>(null);
+  const typed = (apply: () => void, composing = false) => {
+    typing.current = { composing };
+    try { apply(); } finally { typing.current = null; }
+  };
+  const { sendKeys, delegationSteerKeys, queueSectionStrip, queuePanelFold, multilineEnterNewline } = useUiPrefs();
   // The running turn handles a delegation (agent-asks): hint, guarded shortcuts, send menu.
   const runningDelegation = useDelegationTurn(timeline);
   // Idle on purpose: the handler ended its turn with delegation_await (say so, never a plain idle or working look).
   const awaitingAsk = useAwaitingDelegation(sessionId);
   const delegation = busy && (!ledgerMode || (ledger?.delivery?.turn?.kind === "ask" && ledger.delivery.turn.askId === runningDelegation?.askId)) ? runningDelegation : null;
   const guardKeys = { delegation: !!delegation, allowSteerKeys: delegationSteerKeys };
+  // 「多行时 Enter 换行」 (lib/sendKeys): on, and the draft already has a line break.
+  const multilineNewline = multilineEnterNewline && isMultilineDraft(text);
+  const ctrlEnter = displayKey("Ctrl+Enter", bridge.platform === "darwin");
+  const multilineHintText = t(`composer.multilineHint.${multilineHint(sendKeys, busy, !!delegation && !delegationSteerKeys)}` as MessageKey, { key: ctrlEnter });
+  // The send button's key: Enter, or Ctrl/Cmd+Enter in a multi-line draft — none where the button queues and no key does.
+  const sendButtonKey = !multilineNewline ? "Enter" : !busy || (sendKeys === "cli" && !delegation) ? ctrlEnter : null;
   const joinIntent = delegationJoinIntent(delegation, timeline?.activeTurnId, runtimeGeneration, features);
   const canJoin = features.has(OWNER_JOIN_FEATURE) && !!joinIntent;
   const pendingSteers = useApp((s) => agentState(s.pendingSteers, hostId, sessionId));
@@ -755,6 +778,8 @@ export function Composer({
   const modelItems: (Pick<ModelOption, "model" | "displayName" | "description"> & { primary?: boolean; tag?: string })[] =
     models ? (claudeList ? claudePickerItems(models.map((m) => withCurrent(m, m.model)), currentModel, t) : models) : [];
   const claudeAgent = !!session && runtimeOf(session) === "claude";
+  // Claude r56: a change during a running turn — the effort applies from the next turn (lib/effortNextTurn).
+  const effortNextTurn = effortAppliesNextTurn(claudeAgent ? "claude" : null, running) ? t("composer.effort.nextTurn") : undefined;
   // Fast mode where the model offers a Fast tier and the choice survives restarts: Codex through cutex
   // `session-fast-mode`, Claude through its adapter (`fastMode`: Claude Code fast mode, kept per thread).
   const fastTier = (claudeAgent ? claudeFastMode(agent) : fastFeature) ? (modelInfo?.fastTier ?? null) : null;
@@ -878,7 +903,7 @@ export function Composer({
     at: mention && !paletteOpen && mentionDismissed !== mention.start ? mention : null,
     text, caret, hostId, sessionId, currentProfile: profile ?? null,
     runtime: session ? runtimeOf(session) : null, features, enabled: !paletteOpen,
-    onChange: (value, at) => { setText(value); setCaret(at); },
+    onChange: (value, at) => { setText(value, typing.current ? { history: "typing", composing: typing.current.composing } : undefined); setCaret(at); },
     focusAt: at => { profileMentionFocus.current = at; },
   });
   useLayoutEffect(() => {
@@ -1014,13 +1039,58 @@ export function Composer({
       setCaret(el.value.length);
     });
 
+  // ---------- 提示词增强 (lib/usePromptEnhance.ts; host feature text-rewrite-v1, Settings → 输入区) ----------
+  const enhancePrefs = usePromptEnhancePrefs();
+  const enhanceFeatureProfiles = features.has(FEATURE_PROFILES_FEATURE);
+  const enhanceOn = enhancePrefs.enabled && features.has(TEXT_REWRITE_FEATURE);
+  const enhanceKey = useBindingLabel("promptEnhance");
+  const enhanceApi = useCallback(() => hostApi(hostId), [hostId]);
+  const enhanceRoute = useCallback(() => rewriteRoute(hostRoute(hostId), sessionId, enhanceFeatureProfiles), [hostId, sessionId, enhanceFeatureProfiles]);
+  const enhance = usePromptEnhance(enhanceApi, enhanceRoute, `${hostId}|${sessionId}`);
+  const enhanceLabel = t("promptEnhance.title");
+  /** The button keeps the input's selection: it is what gets rewritten. */
+  const keepSelection = (e: React.MouseEvent) => e.preventDefault();
+  /** The selection when it holds text, else the whole draft. */
+  const startEnhance = () => {
+    const el = textarea.current;
+    enhance.start(text, el?.selectionStart, el?.selectionEnd);
+  };
+  /** Again: the same part when the draft still has it there, else the whole draft. */
+  const retryEnhance = () => {
+    const target = enhance.state.phase === "idle" ? null : enhance.state.target;
+    if (target && text.slice(target.start, target.end) === target.text) enhance.start(text, target.start, target.end);
+    else enhance.start(text, null, null);
+  };
+  /** Into the draft as one undo step: the textarea's own editing (Ctrl+Z restores), the rich input's history. */
+  const adoptEnhance = () => {
+    const shown = enhance.state;
+    if (shown.phase !== "done") return;
+    const next = enhance.adopt(text);
+    if (!next) return;
+    const el = textarea.current;
+    // The adopted rewrite is one undo step (it arrives through the textarea as input).
+    markDraftStep();
+    if (!useRichInput && el && "tagName" in el && insertUndoable(el, shown.target.start, shown.target.end, shown.rewrittenText, next.text)) {
+      setCaret(next.caret);
+      return;
+    }
+    setText(next.text);
+    setCaret(next.caret);
+    win.requestAnimationFrame(() => {
+      textarea.current?.focus();
+      textarea.current?.setSelectionRange(next.caret, next.caret);
+    });
+  };
+
   /** Put `$name` in the draft and bind it as a skill input (palette: replaces the `/query`; "+": appends). */
   const pickSkill = (skill: SkillMetadata, mode: "replace" | "append") => {
-    const token = `$${skill.name} `;
-    setPickedSkills((prev) => [...prev, { name: skill.name, path: skill.path }]);
-    if (mode === "replace") return setText(token);
-    setText((prev) => appendToken(prev, token));
-    focusEnd();
+    const token = skillToken(skill.name);
+    groupDraft(() => {
+      setPickedSkills((prev) => [...prev, { name: skill.name, path: skill.path }]);
+      if (mode === "replace") setText(token);
+      else setText((prev) => appendToken(prev, token));
+    });
+    if (mode !== "replace") focusEnd();
   };
 
   const pickPalette = (index: number, viaTab = false) => {
@@ -1032,7 +1102,8 @@ export function Composer({
       setText(`/${spec.id} `);
       return;
     }
-    setText("");
+    setText("", { history: "none" });
+    endDraftHistory();
     void run(spec.id, "");
   };
 
@@ -1101,8 +1172,21 @@ export function Composer({
     if (files.some((f) => f.type.startsWith("image/"))) {
       e.preventDefault();
       void addImageFiles(files);
+      return;
     }
+    markDraftStep();
   };
+
+  /** Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y (and the edit menu's 撤销 / 重做): one step of the whole draft, the caret where it changed. */
+  const travelDraft = (redo: boolean) => {
+    const before = text;
+    const restored = redo ? redoDraft() : undoDraft();
+    if (!restored || restored.text === before) return;
+    const at = changedEnd(before, restored.text);
+    setCaret(at);
+    profileMentionFocus.current = at;
+  };
+  useHistoryBeforeInput(textarea as React.RefObject<HTMLElement | null>, travelDraft, !useRichInput);
   const onDrop = (e: DragEvent<HTMLDivElement>) => {
     setDragOver(false);
     // Rows of the 文件 explorer: their paths as mentions (lib/workspaceDrag).
@@ -1139,7 +1223,7 @@ export function Composer({
       turnId: busy ? (timeline?.activeTurnId ?? null) : null,
       pendingSteers: steersWaiting,
       delegation: !!delegation,
-      blocked: !!panel || popupCount > 0 || (timeline?.pending.size ?? 0) > 0,
+      blocked: !!panel || popupCount > 0 || (timeline?.pending.size ?? 0) > 0 || (enhanceOn && enhance.active),
       focused,
     },
     {
@@ -1196,7 +1280,8 @@ export function Composer({
     const command = images.length === 0 ? parseSlash(trimmed) : null;
     if (command) {
       enterDecision?.("command");
-      setText("");
+      setText("", { history: "none" });
+      endDraftHistory();
       await run(command.id, command.args);
       return;
     }
@@ -1256,6 +1341,15 @@ export function Composer({
     };
     const candidate = composerCandidateKey({ key: e.key, shift: e.shiftKey, isComposing: isImeComposing(e) }, popupCount, selected);
     if (candidate === "composing") { report("ime-confirm"); return; }
+    const undoKey = undoKeyOf(e);
+    if (undoKey) {
+      // The draft's own history (text, attachments, skills); the native one would miss everything but typed text.
+      e.preventDefault();
+      travelDraft(undoKey === "redo");
+      return;
+    }
+    const enhanceKeyAction = promptEnhanceKey(e, enhanceOn, enhance.state.phase);
+    if (enhanceKeyAction === "start") { e.preventDefault(); startEnhance(); return; }
     if (profileMention.open && (e.key === "Escape" || (profileMention.cascade && e.key === " "))) {
       e.preventDefault();
       profileMention.exit(e.key === " ");
@@ -1287,6 +1381,14 @@ export function Composer({
         return;
       }
     }
+    // 提示词增强 shown: Esc cancels it (the request too); Enter adopts the answer, and does not send while one is coming.
+    if (enhanceKeyAction) {
+      e.preventDefault();
+      if (e.key === "Enter") report("unhandled");
+      if (enhanceKeyAction === "cancel") enhance.cancel();
+      else if (enhanceKeyAction === "adopt") adoptEnhance();
+      return;
+    }
     // A right-side layer in front (maximised / full screen / narrow drawer) takes this Esc first (App).
     if (e.key === "Escape" && (panel || anyOverlayOpen() || sideLayersActive())) return;
     const el = textarea.current;
@@ -1294,9 +1396,9 @@ export function Composer({
     const keyAction = composerKeyAction(
       sendKeys,
       { key: e.key, ctrl: e.ctrlKey || e.metaKey, shift: e.shiftKey, alt: e.altKey },
-      { busy, hasContent: !!text.trim() || images.length > 0, pendingSteers: steersWaiting, collapsedSelection: el.selectionStart === el.selectionEnd },
+      { busy, hasContent: !!text.trim() || images.length > 0, pendingSteers: steersWaiting, collapsedSelection: el.selectionStart === el.selectionEnd, multilineNewline },
     );
-    if (!keyAction) { report(e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey ? "newline" : "unhandled"); return; }
+    if (!keyAction) { report((e.shiftKey || multilineNewline) && !e.ctrlKey && !e.metaKey && !e.altKey ? "newline" : "unhandled"); return; }
     const action = delegationKeyAction(keyAction, guardKeys);
     e.preventDefault();
     if (action === "interrupt") { report("dispatched"); void interruptWithFeedback(t, sessionId, hostId); }
@@ -1519,6 +1621,7 @@ export function Composer({
           </div>}
           {agentPause && hasContent && <AgentPausedSendHint hostId={hostId} sessionId={sessionId} send={() => send("send")} />}
           {noSteerHintShown({ busy: busyLook, noSteer, hasContent, delegation: !!delegation, paused: !!agentPause }) && <NoSteerSendHint />}
+          {enhanceOn && <PromptEnhancePanel state={enhance.state} hostId={hostId} adoptKey="Enter" onAdopt={adoptEnhance} onCancel={enhance.cancel} onRetry={retryEnhance} />}
           <div className="relative flex items-end gap-2">
             {delegation && !hasContent && <DelegationTurnOverlay turn={delegation} />}
             {awaiting && !hasContent && <DelegationAwaitLine d={awaiting} draft={false} />}
@@ -1527,7 +1630,9 @@ export function Composer({
               ref={textarea as React.Ref<AgentMentionInputHandle>}
               value={text}
               hostId={hostId}
-              onChange={profileMention.change}
+              onChange={(value, at) => typed(() => profileMention.change(value, at))}
+              onHistory={travelDraft}
+              onCompositionEnd={endDraftComposition}
               onSelect={setCaret}
               onKeyDown={onKeyDown}
               onPaste={onPaste}
@@ -1551,9 +1656,11 @@ export function Composer({
               ref={textarea as React.Ref<HTMLTextAreaElement>}
               value={text}
               onChange={(e) => {
-                profileMention.change(e.target.value, e.target.selectionStart);
+                const { value, selectionStart } = e.target;
+                typed(() => profileMention.change(value, selectionStart), (e.nativeEvent as InputEvent).isComposing);
               }}
               onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
+              onCompositionEnd={endDraftComposition}
               onKeyDown={onKeyDown}
               onPaste={onPaste}
               rows={2}
@@ -1588,9 +1695,9 @@ export function Composer({
             <button
               onClick={() => void send(busy && sendKeys === "cli" ? (delegation && !delegationSteerKeys ? "queue" : "steer") : "send")}
               disabled={!hasContent || sending}
-              data-tip={`${delegation ? t("delegationTurn.choice.queue") : busy ? (sendKeys === "cli" && !noSteer ? t("composer.steerSend") : t("composer.queueSend")) : t("composer.send")} · Enter`}
+              data-tip={`${delegation ? t("delegationTurn.choice.queue") : busy ? (sendKeys === "cli" && !noSteer ? t("composer.steerSend") : t("composer.queueSend")) : t("composer.send")}${sendButtonKey ? ` · ${sendButtonKey}` : ""}`}
               aria-label={delegation ? t("delegationTurn.choice.queue") : busy ? (sendKeys === "cli" && !noSteer ? t("composer.steerSend") : t("composer.queueSend")) : t("composer.send")}
-              className="press-solid mb-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-accent text-white transition-colors hover:bg-accent/85 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:bg-surface-2 disabled:text-subtle"
+              className="press-solid mb-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-accent text-on-accent transition-colors hover:bg-accent/85 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:bg-surface-2 disabled:text-subtle"
             >
               <ArrowUp size={15} strokeWidth={2.25} />
             </button>
@@ -1642,6 +1749,17 @@ export function Composer({
           }}
           onManage={(tab) => useApp.getState().openSettings(tab)}
         />
+        {enhanceOn && (
+          <button type="button" data-testid="prompt-enhance-button"
+            onMouseDown={keepSelection}
+            onClick={startEnhance}
+            disabled={enhance.state.phase === "running"}
+            aria-label={enhanceLabel}
+            data-tip={withKey(t(hasContent ? "promptEnhance.buttonHint" : "promptEnhance.buttonEmpty"), enhanceKey)}
+            className="press flex items-center rounded-md px-1.5 py-0.5 text-xs text-muted hover:bg-surface-2 hover:text-foreground disabled:opacity-40">
+            <WandSparkles size={14} strokeWidth={1.75} className="block" />
+          </button>
+        )}
         {isAcpAgent(agent) ? null : claudeModes ? (
           <Menu<ClaudeMode>
             title={t("composer.permissionTitle")}
@@ -1716,14 +1834,16 @@ export function Composer({
               </span>,
               // No alias / model id lines (owner 2026-11-18); a different answering model is the one exception.
               triggerTitle: [runtimeDown ? `${t("composer.modelTitle")} · ${t("composer.model.offline")}` : t("composer.modelTitle"), observedShown ? t("composer.model.observed", { model: observedShown }) : null].filter(Boolean).join("\n"),
-              note: runtimeDown ? t("composer.model.offline") : observedShown ? t("composer.model.observed", { model: observedShown }) : undefined,
+              note: runtimeDown ? t("composer.model.offline") : [observedShown ? t("composer.model.observed", { model: observedShown }) : null, effortNextTurn].filter(Boolean).join(" · ") || undefined,
               onOpen: () => void loadModels(true, sessionId, hostId),
               onSelect: model => void updateSettings({ model }, sessionId, hostId),
               openSignal: sig("model"),
             }}
             effort={{
               effort: effortShown.level, none: effortShown.none, skipped: effortShown.skipped, efforts, claude: claudeAgent,
-              onChange: effort => void updateSettings({ effort }, sessionId, hostId),
+              // A running Claude turn keeps its effort: said in the panel and once more after the change.
+              onChange: effort => { if (isEffortChange(effort, currentEffort)) void updateSettings({ effort }, sessionId, hostId).then(ok => { if (ok && effortNextTurn) notifyHere(effortNextTurn, "info"); }); },
+              nextTurn: effortNextTurn,
               offline: runtimeDown ? t("composer.model.offline") : undefined,
               empty: effortsEmpty === "none" ? t("composer.effort.noneOffered") : effortsEmpty === "unlisted" ? t("composer.effort.unlisted") : undefined,
               onOpen: effortsEmpty === "unlisted" && !runtimeDown ? () => void loadModels(true, sessionId, hostId) : undefined,
@@ -1734,6 +1854,10 @@ export function Composer({
       {/* A reserved status line outside the input and toolbar. Notices neither cover other
           conversation controls nor change the input's geometry when they appear or disappear. */}
       <div className="flex h-5 min-w-0 items-center justify-end" data-testid="composer-notice-slot">
+        {/* 「多行时 Enter 换行」 in effect: what Ctrl/Cmd+Enter does now and how to queue (a notice takes the line first). */}
+        {multilineNewline && !(shownNotice && meantHere(shownNotice.agent, here, focused)) && (
+          <span className="min-w-0 truncate text-xs text-subtle" data-testid="composer-multiline-hint">{multilineHintText}</span>
+        )}
         {shownNotice && meantHere(shownNotice.agent, here, focused) && (
           // The one toast face (040 §2.1), sized to the reserved line: an error leads with a danger icon, not a red box.
           <div role="status" data-tip={shownNotice.text} data-tip-overflow="" data-tone={shownNotice.tone === "error" ? "error" : undefined}

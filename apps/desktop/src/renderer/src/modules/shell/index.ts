@@ -106,7 +106,7 @@ export default defineModule({
         hintKey: "settings.pageHint.access",
         subPages: {
           peers: { titleKey: "shell.access.sub.peers", hintKey: "shell.access.sub.peersHint", Page: PeersSubPage, anchors: ["peers.access", "peers-settings", "peers-pair", "peers-list", "users.peers", "users-peers"] },
-          advanced: { titleKey: "shell.access.sub.advanced", hintKey: "shell.access.sub.advancedHint", Page: AdvancedSubPage, anchors: ["hostInfo", "hostRights", "diagnostics", "remote-access.listen", "remote-access.cors"] },
+          advanced: { titleKey: "shell.access.sub.advanced", hintKey: "shell.access.sub.advancedHint", Page: AdvancedSubPage, anchors: ["hostInfo", "hostRights", "diagnostics", "remote-access.listen", "remote-access.cors", "heavyRead"] },
           devices: { titleKey: "shell.access.sub.devices", Page: DevicesSubPage, anchors: ["users-all-devices"] },
         },
         Page: AccessPage,

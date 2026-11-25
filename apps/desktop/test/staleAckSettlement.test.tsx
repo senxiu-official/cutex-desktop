@@ -22,6 +22,9 @@ import { noteHostAccess } from "../src/renderer/src/lib/hostAccess";
 import { settlementFixture } from "../src/renderer/src/modules/agent-bus/settlementFixture";
 import { MESSAGE_SETTLEMENT_FEATURE, STALE_ACK_SETTLEMENT_FEATURE, readMessageSettlement } from "../src/shared/messageSettlement";
 
+// The store double is too thin for the avatar stack (agent looks, Profile pictures): icons are stubbed.
+vi.mock("../src/renderer/src/components/EntityIcon", () => import("./helpers/entityIconStub"));
+
 let root: ReturnType<typeof createRoot>, node: HTMLDivElement, session: string;
 let serial = 0;
 let rows: { messageId: string; body: string; settlement?: MessageSettlement }[];

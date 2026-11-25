@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { DEFAULT_BROWSER_IDENTITY_ID } from "../../shared/browserIdentity";
 import { browserPartition, type BrowserPool } from "./attachPolicy";
 
 export interface BrowserGuestHandle {
@@ -16,6 +17,7 @@ export interface BrowserGuestRecord {
   readonly tabKey: string;
   readonly partition: string;
   readonly pool: BrowserPool;
+  readonly identityId?: string;
   readonly pageGeneration: number;
   readonly status: BrowserGuestStatus;
 }
@@ -54,21 +56,24 @@ export class BrowserRegistry<G extends BrowserGuestHandle = BrowserGuestHandle> 
     this.retireHost(hostId, "host_removed");
   }
   hostIds(): string[] { return [...this.hosts.keys()]; }
-  ensure(hostId: string, tabKey: string, pool: BrowserPool = "owner"): BrowserGuestRecord {
+  ensure(hostId: string, tabKey: string, pool: BrowserPool = "owner", identityId?: string): BrowserGuestRecord {
     const epoch = this.hosts.get(hostId);
     if (!epoch || typeof tabKey !== "string" || !tabKey || tabKey.length > 256 || /[\x00-\x1f\x7f]/.test(tabKey))
       throw new Error("Unregistered host or invalid browser instance");
-    const partition = browserPartition(hostId, pool);
     const old = this.getByTab(hostId, tabKey);
     if (old) {
       if (old.pool !== pool) throw new Error("Browser instance pool cannot change");
+      if (identityId !== undefined && old.identityId !== identityId) throw new Error("Browser instance partition cannot change");
       return old;
     }
+    const ownerIdentity = pool === "owner" ? identityId ?? DEFAULT_BROWSER_IDENTITY_ID : undefined;
+    const partition = browserPartition(hostId, pool, ownerIdentity ?? identityId);
     const guestId = this.options.newGuestId?.() ?? `browser-${randomBytes(16).toString("hex")}`;
     if (typeof guestId !== "string" || !/^[a-zA-Z0-9_-]{16,128}$/.test(guestId) || this.issued.has(guestId))
       throw new Error("Guest identity allocator failed");
     this.issued.add(guestId);
-    const record = Object.freeze({ guestId, hostId, epoch, tabKey, partition, pool, pageGeneration: 0, status: "unmounted" as const });
+    const record = Object.freeze({ guestId, hostId, epoch, tabKey, partition, pool,
+      ...(ownerIdentity ? { identityId: ownerIdentity } : {}), pageGeneration: 0, status: "unmounted" as const });
     this.entries.set(guestId, { record });
     let byInstance = this.instances.get(hostId);
     if (!byInstance) this.instances.set(hostId, byInstance = new Map());

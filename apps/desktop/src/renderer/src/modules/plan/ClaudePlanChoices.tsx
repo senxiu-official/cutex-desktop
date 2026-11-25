@@ -64,7 +64,7 @@ export function ClaudePlanChoices({ sessionId, current, onDecided }: { sessionId
     <div className="mt-3 border-t border-border pt-2.5" data-testid="claude-plan-choices">
       <div className="mb-1.5 text-xs text-subtle">{t("plan.question")}</div>
       <div className="flex flex-col gap-1">
-        <button disabled={busy} onClick={() => void implement("acceptEdits")} title={t("plan.claude.acceptEditsHint")} className={`${button} bg-accent text-white`}>
+        <button disabled={busy} onClick={() => void implement("acceptEdits")} title={t("plan.claude.acceptEditsHint")} className={`${button} bg-accent text-on-accent`}>
           <span className="mr-1.5 opacity-70">1</span>{t("plan.claude.acceptEdits")}
         </button>
         <button disabled={busy} onClick={() => void implement("default")} title={t("plan.claude.manualHint")} className={`${button} bg-surface-2 text-foreground hover:bg-surface-2/70`}>
@@ -98,7 +98,7 @@ export function ClaudePlanChoices({ sessionId, current, onDecided }: { sessionId
             />
             <div className="flex justify-end gap-1.5">
               <button onClick={() => setFeedback(null)} className="rounded-md px-2 py-0.5 text-xs text-muted hover:text-foreground">{t("plan.claude.feedbackCancel")}</button>
-              <button onClick={() => void keepPlanning()} className="rounded-md bg-accent px-2 py-0.5 text-xs text-white">
+              <button onClick={() => void keepPlanning()} className="rounded-md bg-accent px-2 py-0.5 text-xs text-on-accent">
                 {feedback.trim() ? t("plan.claude.feedbackSend") : t("plan.stay")}
               </button>
             </div>

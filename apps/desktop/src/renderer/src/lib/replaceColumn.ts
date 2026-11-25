@@ -7,6 +7,8 @@ import { conversationPanes, paneBinding } from "./paneLayout";
 import { usePanes } from "./paneStore";
 import { sidebarOf, useApp } from "../store";
 import { replaceWith } from "./workspaces";
+import { createElement } from "react";
+import { EntityIcon } from "../components/EntityIcon";
 
 /** How many agents the pick lists (the sidebar has the rest). */
 export const REPLACE_LIST_MAX = 40;
@@ -31,7 +33,7 @@ export function replaceColumnEntry(paneId: string, hostId: string, t: T): MenuEn
     label: t("columnPick.menu"),
     disabled: list.length === 0,
     title: list.length === 0 ? t("columnPick.none") : undefined,
-    submenu: list.map((a) => ({ label: a.name, onSelect: () => replaceWith(hostId, a.sessionId, paneId) })),
+    submenu: list.map((a) => ({ label: a.name, icon: createElement(EntityIcon, { entity: { kind: "agent", id: a.sessionId, name: a.name } }), onSelect: () => replaceWith(hostId, a.sessionId, paneId) })),
     onSelect: () => {},
   };
 }

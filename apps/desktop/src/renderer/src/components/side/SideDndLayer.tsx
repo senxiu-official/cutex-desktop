@@ -73,7 +73,7 @@ function SideDndView() {
             style={{ ...(zone.tone === "warn" ? dropTint("var(--warn,#d97706)", 12) : dropTint("var(--accent)", 13)), left: zone.left + (zone.float ? 0 : 4), top: zone.top + (zone.float ? 0 : 4), width: Math.max(0, zone.width - (zone.float ? 0 : 8)), height: Math.max(0, zone.height - (zone.float ? 0 : 8)), borderRadius: zone.round }}
           >
             <span
-              className={`max-w-[90%] truncate rounded-full px-2.5 py-[3px] text-xs whitespace-nowrap text-white shadow-e2 ${zone.tone === "warn" ? "bg-[var(--warn,#d97706)]" : "bg-accent"} ${zone.float ? "absolute top-1/2 max-w-none -translate-y-1/2" : ""}`}
+              className={`max-w-[90%] truncate rounded-full px-2.5 py-[3px] text-xs whitespace-nowrap shadow-e2 ${zone.tone === "warn" ? "bg-[var(--warn,#d97706)] text-white" : "bg-accent text-on-accent"} ${zone.float ? "absolute top-1/2 max-w-none -translate-y-1/2" : ""}`}
               style={zone.float === "left" ? { right: "calc(100% + 8px)" } : zone.float === "right" ? { left: "calc(100% + 8px)" } : undefined}
             >
               {zone.text}

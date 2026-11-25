@@ -25,6 +25,7 @@ import { useApp } from "../store";
 import { StatusAvatar } from "./AgentStatus";
 import { btn } from "./Button";
 import { CountBadge, Tag } from "./Tag";
+import { EntityIcon } from "./EntityIcon";
 
 const LEAVE_MS = 240;
 
@@ -149,7 +150,7 @@ export function NowSection({ attention, focus, height, notice }: { attention: At
         const row = byKey.get(card.key);
         if (!row) return [];
         const label = card.chip ? signalLabel(t, card.chip.signal, needs.get(card.key)) : null;
-        return [{ label: label ? `${row.name} · ${label}` : row.name, onSelect: () => activate(card) }];
+        return [{ label: label ? `${row.name} · ${label}` : row.name, icon: <EntityIcon entity={{ kind: "agent", id: row.id, name: row.name }} />, onSelect: () => activate(card) }];
       }),
       { owner: "sidebar.nowRest" },
     );

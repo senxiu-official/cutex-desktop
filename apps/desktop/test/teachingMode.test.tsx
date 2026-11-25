@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
-// 教学模式 P1 (docs/design/teaching-mode.md): callout quotes as cards and 「解释这段」 on selected Markdown text, both only
-// with the per-device switch on; off = the plain quote and the native selection menu, exactly as before.
+// 教学模式 P1 (docs/design/teaching-mode.md): callout quotes as cards with the per-device switch on (off = the plain quote),
+// and 「解释这段」 on selected Markdown text — since the owner's 2026-11-25 decision a general feature, switch on or off
+// (test/selectAnnotate.test.tsx covers the other surfaces and 批注追问).
 import { act, createElement as h } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -12,13 +13,14 @@ const fx = vi.hoisted(() => ({
   sideOpen: vi.fn((..._args: unknown[]) => ({ status: "opened" })),
   showsHost: vi.fn((..._args: unknown[]) => true),
   openAgent: vi.fn((..._args: unknown[]) => {}),
+  notice: vi.fn((..._args: unknown[]) => {}),
 }));
 vi.mock("../src/renderer/src/bridge", () => ({ api: { openExternal: () => Promise.resolve() }, apiFor: () => ({}), bridge: { on: () => () => {} }, onEvent: () => () => {}, cleanIpcMessage: (m: string) => m }));
 vi.mock("../src/renderer/src/i18n", async (original) => ({ ...(await original<object>()), useI18n: () => ({ t: (key: string) => key, locale: "en" }) }));
 vi.mock("../src/renderer/src/modules/react", async (original) => ({ ...(await original<object>()), useSlot: () => [], useModuleEnabled: () => false, useModulePref: (_m: string, _k: string, d: unknown) => [d, () => {}], useModuleStatuses: () => new Map() }));
 vi.mock("../src/renderer/src/lib/contextMenu", async (original) => ({ ...(await original<object>()), openMenuAt: (...args: unknown[]) => fx.menu(...args) }));
 vi.mock("../src/renderer/src/lib/refActions", async (original) => ({ ...(await original<object>()), refActionEntries: (...args: unknown[]) => fx.actions(...args) }));
-vi.mock("../src/renderer/src/modules/app", () => ({ services: { side: { open: (...args: unknown[]) => fx.sideOpen(...args) }, refs: {} } }));
+vi.mock("../src/renderer/src/modules/app", () => ({ services: { side: { open: (...args: unknown[]) => fx.sideOpen(...args) }, refs: {}, ui: { notice: (...args: unknown[]) => fx.notice(...args) } } }));
 vi.mock("../src/renderer/src/lib/sideServices", () => ({ sideShowsHost: (...args: unknown[]) => fx.showsHost(...args), sideOpen: vi.fn() }));
 vi.mock("../src/renderer/src/lib/hostLists", async (original) => ({ ...(await original<object>()), openHostAgent: (...args: unknown[]) => fx.openAgent(...args) }));
 
@@ -112,10 +114,16 @@ describe("解释这段 on selected text", () => {
     return event;
   }
 
-  it("switch off: the native menu (nothing prevented, no renderer menu)", async () => {
+  it("switch off: the same menu (select-to-ask no longer depends on the teaching switch)", async () => {
+    const event = await rightClickSelection(h("div", { "data-turn-id": "turn-7" }, h(Markdown, { text: "Borrowing lets you read without owning." })));
+    expect(event.defaultPrevented).toBe(true);
+    expect(fx.actions.mock.calls[0]![0]).toMatchObject({ kind: "selection", params: { turnId: "turn-7" } });
+    expect(fx.menu).toHaveBeenCalledOnce();
+  });
+  it("no module action: the native menu (nothing prevented, no renderer menu)", async () => {
+    fx.actions.mockReturnValue([]);
     const event = await rightClickSelection(h("div", { "data-turn-id": "turn-7" }, h(Markdown, { text: "Borrowing lets you read without owning." })));
     expect(event.defaultPrevented).toBe(false);
-    expect(fx.actions).not.toHaveBeenCalled();
     expect(fx.menu).not.toHaveBeenCalled();
   });
 
@@ -164,11 +172,19 @@ describe("the side chat's 解释这段 action", () => {
     expect(options).toEqual({ focus: true, binding: { kind: "agent", hostId: "local", sessionId: "a" } });
   });
 
-  it("another host's agent (not in the side column): opens that agent instead", async () => {
+  it("another host's agent (not in the side column): that agent is opened first, then the side chat asks", async () => {
+    fx.showsHost.mockReturnValueOnce(false).mockReturnValue(true);
+    await action.run({ hostId: "remote", kind: "selection", key: "a:1", title: "x", params: { sessionId: "a", text: "x", turnId: "t2" } });
+    expect(fx.openAgent).toHaveBeenCalledWith("remote", "a");
+    expect(fx.sideOpen).toHaveBeenCalledWith("side-chat.chat", expect.objectContaining({ turnId: "t2" }), { focus: true, binding: { kind: "agent", hostId: "remote", sessionId: "a" } });
+  });
+
+  it("its host still not shown after opening: a notice says why, nothing opens", async () => {
     fx.showsHost.mockReturnValue(false);
+    fx.notice.mockClear();
     await action.run({ hostId: "remote", kind: "selection", key: "a:1", title: "x", params: { sessionId: "a", text: "x" } });
     expect(fx.sideOpen).not.toHaveBeenCalled();
-    expect(fx.openAgent).toHaveBeenCalledWith("remote", "a");
+    expect(fx.notice).toHaveBeenCalledWith(expect.any(String), "error");
   });
 });
 

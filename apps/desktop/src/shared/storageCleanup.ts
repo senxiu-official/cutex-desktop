@@ -1,6 +1,8 @@
 /** Management v2 storage-cleanup. The daemon owns discovery, admission and deletion. */
 export const STORAGE_CLEANUP_FEATURE = "storage-cleanup";
-export type StorageCleanupAction = "orphan-homes" | "retired-homes" | "old-backups" | "old-logs" | "vacuum";
+export type StorageCleanupAction = "orphan-homes" | "retired-homes" | "old-backups" | "old-logs" | "vacuum" | "stock-tmp";
+/** Inventory store of Native shell temp dirs (runtime/stock-tmp): a host that lists it also takes the stock-tmp cleanup. */
+export const STOCK_TMP_STORE = "stock-tmp";
 export interface StorageCleanupPreviewRequest {
   action: StorageCleanupAction;
   /** Root-relative paths, checked against action allowlists by the daemon. */

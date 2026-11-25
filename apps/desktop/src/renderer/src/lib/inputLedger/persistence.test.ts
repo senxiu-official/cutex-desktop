@@ -16,9 +16,9 @@ function draft(inputId: string, hostId = "eva"): LedgerOwnerOutbox {
 describe("O0 crash recovery", () => {
   it("preserves separate writers and hosts and removes only the authoritative id", () => {
     const target = memory();
-    for (const item of [draft("a"), draft("b"), draft("a", "hachimi")]) expect(persistLedgerOutbox(item, target)).toBe(true);
+    for (const item of [draft("a"), draft("b"), draft("a", "hostc")]) expect(persistLedgerOutbox(item, target)).toBe(true);
     acknowledgeLedgerOutbox("eva", "s", "a", target);
-    expect(loadLedgerOutbox(target).map(e => [e.hostId, e.inputId, e.phase])).toEqual([["eva", "b", "unconfirmed"], ["hachimi", "a", "unconfirmed"]]);
+    expect(loadLedgerOutbox(target).map(e => [e.hostId, e.inputId, e.phase])).toEqual([["eva", "b", "unconfirmed"], ["hostc", "a", "unconfirmed"]]);
   });
   it("ignores malformed entries without erasing a valid draft", () => {
     const target = memory();
@@ -38,17 +38,17 @@ describe("054 one-time migration", () => {
   it("recovers missing steers without resend, uses CAS dismiss and preserves legacy hosts", async () => {
     const target = memory();
     const source = { "eva\ns": { at: 1, steers: [{ id: "missing", text: "Do not lose this", extra: [{ type: "text", text: "attachment" }] }] },
-      "hachimi\ns": { at: 2, steers: [{ id: "old-host", text: "keep" }] } };
+      "hostc\ns": { at: 2, steers: [{ id: "old-host", text: "keep" }] } };
     target.setItem("cutex-desktop.pendingSteers.v1", JSON.stringify(source));
-    target.setItem("cutex-desktop.hiddenRows", JSON.stringify(["note:eva/bus", "ask:hachimi/legacy", "ask:eva/other-session"]));
+    target.setItem("cutex-desktop.hiddenRows", JSON.stringify(["note:eva/bus", "ask:hostc/legacy", "ask:eva/other-session"]));
     const bus = record("bus", { kind: "agentMessage", state: "uncertain", actions: ["dismiss"], rev: 7 });
     const api = { inputGet: vi.fn(async () => ({ ledgerEpoch: "e", stateRevision: 4, records: [bus], missing: ["missing", "other-session"] })), inputDismiss: vi.fn(async () => ({})) };
     const result = await migrateLegacyDelivery("eva", "s", api, target);
     expect(result.recovered[0]?.text).toBe("Do not lose this");
     expect(loadLedgerOutbox(target)[0]?.text).toBe("Do not lose this");
     expect(api.inputDismiss).toHaveBeenCalledExactlyOnceWith("s", "bus", 7);
-    expect(JSON.parse(target.getItem("cutex-desktop.pendingSteers.v1")!)).toEqual({ "hachimi\ns": source["hachimi\ns"] });
-    expect(JSON.parse(target.getItem("cutex-desktop.hiddenRows")!)).toEqual(["ask:hachimi/legacy", "ask:eva/other-session"]);
+    expect(JSON.parse(target.getItem("cutex-desktop.pendingSteers.v1")!)).toEqual({ "hostc\ns": source["hostc\ns"] });
+    expect(JSON.parse(target.getItem("cutex-desktop.hiddenRows")!)).toEqual(["ask:hostc/legacy", "ask:eva/other-session"]);
     await migrateLegacyDelivery("eva", "s", api, target);
     expect(api.inputGet).toHaveBeenCalledTimes(1);
   });

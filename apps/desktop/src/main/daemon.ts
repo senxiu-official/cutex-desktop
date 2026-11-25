@@ -1,13 +1,18 @@
 import { aliasFieldsOf } from "../shared/modelResolution";
+import { jobListExtras } from "../shared/jobList";
+import { INTERACTION_HISTORY_FEATURE, INTERACTION_PAGE_LIMIT, INTERACTION_TURN_CHUNK, hasInteractionHistory, type InteractionHistoryRequest } from "../shared/interactionHistory";
+import type { InteractionHistoryPage } from "@cutex-desktop/protocol";
 import { currentImageCache } from "./imageCache";
 import { portraitThemeFeatures, prepareProfilePortraitPatch, ProfilePortraitThemeError, PROFILE_PORTRAIT_THEME_32_FEATURE, type ProfilePortraitThemeProblem } from "../shared/profilePortraitThemes";
 import { isPortraitThemeKey } from "../shared/portraitDefaults";
-import type { ProfilePatchResult } from "../shared/ipc";
+import type { ProfilePatchResult, AskIdLookup, AskIdLookupHit, JobListParams } from "../shared/ipc";
 import { daemonFetch } from "./daemonFetch";
 import { collectOwnerPages, ownerPageQuery } from "./ownerStorePages";
 import { NOTIFICATION_PAGES_FEATURE, type ApprovalPage, type OwnerStorePageQuery } from "../shared/notificationPaging";
 import { BACKGROUND_WORK_METHOD, BackgroundWorkProjection, backgroundWorkChange } from "../shared/backgroundWork";
-import { readDelegationUpgrade, executeDelegationUpgrade, projectDelegationApproval } from "../shared/delegationUpgradeAdapter";
+import { CLAUDE_DIAGNOSTICS_METHOD, claudeDiagnosticsChange } from "../shared/claudeDiagnostics";
+import { readDelegationUpgrade, executeDelegationUpgrade, projectDelegationApproval, readContinuationResume, readContinuationApprovals, decideContinuation } from "../shared/delegationUpgradeAdapter";
+import { checkLifecycleRequest, controlOutcome, runControlRequest, writeErrorOutcome, type RunControlWrite, type WriteOutcome } from "../shared/projectBatchOutcome";
 import { SidebarReadCache, SidebarRefresh } from "./sidebarReadCache";
 import { SessionDeltaCatalog } from "./sessionDeltaCatalog";
 import { retryableHostBusy, retryableSteerPreflight, withHostBusyRetry, withSteerPreflightRetry } from "../shared/queueSteerRetry";
@@ -37,6 +42,8 @@ import { appWindows } from "./appWindows";
 import { downloadFilename, downloadFilters } from "../shared/downloadFilename";
 import { createHash, randomUUID } from "node:crypto";
 import { promoteDoneOf, QUICK_CHAT_PROMOTE_FEATURE, QUICK_CHAT_PROMOTE_FLAG, validPromoteRequest, validPromoteTarget, type PromoteRequest, type PromoteResult } from "../shared/quickChatPromote";
+import { pinnedModelWire } from "../shared/pinnedModel";
+import { runtimeUnreachableWire } from "../shared/runtimeUnreachable";
 import { creatorPathsWire, reapproveFailureWire, validReapproveTarget, withoutCreatorPathsDetail, type ReapprovePathsResult } from "../shared/creatorPaths";
 import { FORMAL_RENAME_FEATURE, FORMAL_RENAME_FLAG, holderIds, restoreNameWire, nameHistoryPath, validRenameRequest, validRenameTarget, type FormalRenameRequest, type FormalRenameResult, type NameHistoryEvent, type NameHistoryPage } from "../shared/agentRename";
 import type { HostProxyPatch } from "../shared/proxy";
@@ -48,9 +55,16 @@ import { EVENT_MEDIA_BLOBS_FEATURE, MAX_EVENT_MEDIA_BYTES, mediaRecord, parseCut
 import type { HistoryMediaExpected, HistoryMediaPayload, ImageActionInput, ImageActionResult } from "../shared/ipc";
 import { RecentFeedTraffic, submitHttpTraceBuffer } from "./sendDiagnostics";
 import { notesApi, sideApi } from "./notesSideApi";
+import { sessionSearchApi } from "./sessionSearchApi";
+import { personalAssistantsApi } from "./personalAssistantsApi";
+import type { PaAgendaQuery, PaCalendarClear, PaCalendarImport, PaCancelInput, PaConfirmInput, PaCreateInput, PaNotesQuery, PaOwnerRequestsQuery, PaRequestsQuery, PaTemplateConfirmInput, PaTemplateStopInput, PaUpdateInput } from "../shared/personalAssistants";
+import type { SessionSearchQuery } from "../shared/sessionSearch";
 import type { ExportReply, ImportReply } from "./profileTransfer";
 import { remoteJobsApi } from "./remoteJobsApi";
 import { followPanEvents, panApi } from "./panApi";
+import { TextRewrites, type RewriteOwner } from "./textRewrite";
+import type { TextRewriteRequest } from "../shared/textRewrite";
+import { featureProfileCreateBody, featureProfilePatchBody, isFeatureProfileId, parseFeatureProfileList, parseFeatureProfileReply, type FeatureProfile, type FeatureProfileCreate, type FeatureProfileListView, type FeatureProfilePatch } from "../shared/featureProfiles";
 import { BAIDU_PAN_FEATURE, type PanAppInput, type PanDownloadAction, type PanDownloadRequest } from "../shared/baiduPan";
 import type { InboundMailInput, MarkExternalInput, NciVerificationInput } from "../shared/remoteJobs";
 import type { NoteCreate, NotesQuery, NoteUpdate } from "../shared/notes";
@@ -153,6 +167,8 @@ import { windowsSandboxReadinessOf } from "../shared/windowsSandbox";
 import { localDaemonSetup, readHostOwner, type HostOwner } from "../shared/hosts";
 import { isValidTokenId } from "../shared/hosts";
 import { SERVICES_WORKERS_FEATURE, SERVICES_WORKERS_FLAG, servicesSettingsPatch } from "../shared/servicesSettings";
+import { historyQuery, SERVICE_SLUG, settingsBody, type ServiceNotificationHistoryQuery } from "../shared/serviceNotificationQueries";
+import type { ServiceNotificationConfiguration, ServiceNotificationPage, ServiceNotificationSettings } from "../shared/serviceNotifications";
 import type { ClaudeRepinDone, ClaudeRepinResult, ClaudeRuntimeView } from "../shared/claudeRepin";
 import type { AgentSecurityPatch, ApprovalDecision, ApprovalDecisionOrigin, ApprovalDecisionResult, ApprovalRecord, CutexRefusal, RuntimePackageRun, RuntimePackageRunResult, RuntimePackagesView, MutationResult, ProfileCreateBody, ProfilePreset, NotificationLevel, ProfileAccountView, ServiceView, ServicesList, ServicesSettings, ServicesSettingsPatch, ProfileLogin, TerminalSummary, ProjectMemoryMutation, ProjectMemoryView, ProjectMutationOperation, BackgroundTerminal, CapabilitiesView, CatalogModelPatch, GlobalSettings, ProfileDetail, ProfileItem, ProfileModelsView, ProfilePatch, UserInstructions, AgentHarnessPreview, ClaudeCodeSources, ClaudePermissionRules, ClaudeSkillsImportList, ClaudeSkillsImportResult, SessionSandboxExtras, SessionSandboxExtrasPatch, FsDir, FsFile, GitStatus, UsageDimension, UsagePrices, UsageReport, UsageSourceFilter, WorkspaceScope, DaemonState, DesktopApi, DaemonEvents, ModelOption, QuotaConfigView, QuotaGauge, ServerRequestReply, SidebarSnapshot, DirectorRotation, DirectorRotationResult, DirectorRotationStart, StuckBusDiscardRequest, StuckBusDiscardResult, StuckBusView } from "../shared/ipc";
 
@@ -321,6 +337,27 @@ export class DaemonService implements DaemonApi {
   sideInterrupt(sessionId: string, chatId: string) { return sideApi(this.requireClient()).sideInterrupt(sessionId, chatId); }
   sideRespond(sessionId: string, chatId: string, requestId: string | number, reply: SideReply) { return sideApi(this.requireClient()).sideRespond(sessionId, chatId, requestId, reply); }
   sideClose(sessionId: string, chatId: string) { return sideApi(this.requireClient()).sideClose(sessionId, chatId); }
+  sessionSearch(query: SessionSearchQuery) { return sessionSearchApi(this.requireClient()).sessionSearch(query); }
+  sessionSearchTurn(sessionId: string, turnId: string) { return sessionSearchApi(this.requireClient()).sessionSearchTurn(sessionId, turnId); }
+  paList(query?: { cursor?: string | null; limit?: number }) { return personalAssistantsApi(this.requireClient()).paList(query); }
+  paGet(id: string) { return personalAssistantsApi(this.requireClient()).paGet(id); }
+  paCreate(input: PaCreateInput) { return personalAssistantsApi(this.requireClient()).paCreate(input); }
+  paUpdate(id: string, input: PaUpdateInput) { return personalAssistantsApi(this.requireClient()).paUpdate(id, input); }
+  paAgenda(id: string, query?: PaAgendaQuery) { return personalAssistantsApi(this.requireClient()).paAgenda(id, query); }
+  paAudit(id: string, query?: { cursor?: number | null; limit?: number }) { return personalAssistantsApi(this.requireClient()).paAudit(id, query); }
+  paRequests(id: string, query?: PaRequestsQuery) { return personalAssistantsApi(this.requireClient()).paRequests(id, query); }
+  paRequest(id: string, requestId: string) { return personalAssistantsApi(this.requireClient()).paRequest(id, requestId); }
+  paConfirm(id: string, requestId: string, input: PaConfirmInput) { return personalAssistantsApi(this.requireClient()).paConfirm(id, requestId, input); }
+  paCancel(id: string, requestId: string, input: PaCancelInput) { return personalAssistantsApi(this.requireClient()).paCancel(id, requestId, input); }
+  paOwnerRequests(query: PaOwnerRequestsQuery) { return personalAssistantsApi(this.requireClient()).paOwnerRequests(query); }
+  paNotes(id: string, query?: PaNotesQuery) { return personalAssistantsApi(this.requireClient()).paNotes(id, query); }
+  paTemplates(id: string, query?: { cursor?: string | null; limit?: number }) { return personalAssistantsApi(this.requireClient()).paTemplates(id, query); }
+  paTemplateConfirm(id: string, key: string | null, input: PaTemplateConfirmInput) { return personalAssistantsApi(this.requireClient()).paTemplateConfirm(id, key, input); }
+  paTemplateStop(id: string, key: string, how: "pause" | "cancel", input: PaTemplateStopInput) { return personalAssistantsApi(this.requireClient()).paTemplateStop(id, key, how, input); }
+  paTemplateRuns(id: string, key: string, query?: { cursor?: string | null; limit?: number }) { return personalAssistantsApi(this.requireClient()).paTemplateRuns(id, key, query); }
+  paCalendar(id: string) { return personalAssistantsApi(this.requireClient()).paCalendar(id); }
+  paCalendarImport(id: string, input: PaCalendarImport) { return personalAssistantsApi(this.requireClient()).paCalendarImport(id, input); }
+  paCalendarClear(id: string, input: PaCalendarClear) { return personalAssistantsApi(this.requireClient()).paCalendarClear(id, input); }
   private backgroundWork = new BackgroundWorkProjection();
   /** Authority events seen during a list read, released as soon as that read settles. */
   private approvalReads = new Set<{ client: CutexClient; changes: Map<string, ApprovalRecord> }>();
@@ -335,6 +372,8 @@ export class DaemonService implements DaemonApi {
   private sessionDeltaProjectsVersion = -1;
   private projectsCache = new SidebarReadCache<ProjectsResponse>();
   private operatorsCache = new SidebarReadCache<Awaited<ReturnType<typeof readProjectOperators>>>();
+  /** The Operator rosters were read once for this client and access: later sidebar reads wait for them. */
+  private operatorsSettled = false;
   private capabilitiesCache = new SidebarReadCache<CapabilitiesView | null>();
   private capabilitiesRevision = 0;
   private accessRevision = 0;
@@ -476,6 +515,7 @@ export class DaemonService implements DaemonApi {
   }
 
   private teardown(): void {
+    this.textRewrites.cancelAll();
     this.resetSessionDeltas();
     this.client?.dispose?.();
     this.mediaResyncSeen.clear();
@@ -490,6 +530,7 @@ export class DaemonService implements DaemonApi {
     this.retiredCache = new SidebarReadCache<SessionList>();
     this.projectsCache = new SidebarReadCache<ProjectsResponse>();
     this.operatorsCache = new SidebarReadCache<Awaited<ReturnType<typeof readProjectOperators>>>();
+    this.operatorsSettled = false;
     this.capabilitiesCache = new SidebarReadCache<CapabilitiesView | null>();
     this.restricted = false;
     this.hiddenRefused = false;
@@ -961,6 +1002,7 @@ export class DaemonService implements DaemonApi {
     this.backgroundWork = new BackgroundWorkProjection();
     this.sidebarRefresh = new SidebarRefresh<SidebarSnapshot>(2000);
     this.invalidateSidebarParts();
+    this.operatorsSettled = false;
     this.invalidateCapabilities();
     this.hiddenRefused = false;
     this.restricted = true;
@@ -972,6 +1014,7 @@ export class DaemonService implements DaemonApi {
     this.liveDeltasClient = null;
     this.mediaRefsClient = null;
     this.boundedBusClient = null;
+    this.interactionHistoryClient = null;
   }
 
   private invalidateSidebarEvent(envelope: EventEnvelope): void {
@@ -984,6 +1027,12 @@ export class DaemonService implements DaemonApi {
     if (method === BACKGROUND_WORK_METHOD) {
       const change = backgroundWorkChange(envelope.cutex?.params);
       if (change) this.backgroundWork.record(change);
+      return;
+    }
+    // claude-runtime-diagnostics-v1: the same non-durable status channel; patches rows, never invalidates reads.
+    if (method === CLAUDE_DIAGNOSTICS_METHOD) {
+      const change = claudeDiagnosticsChange(envelope.cutex?.params);
+      if (change) this.backgroundWork.recordClaudeDiagnostics(change);
       return;
     }
     // Only what changes who this connection is or may see. Per-user preferences (cutex/users/me/…, e.g. the
@@ -1037,27 +1086,47 @@ export class DaemonService implements DaemonApi {
       }
     }
     const projectsCache = this.projectsCache, operatorsCache = this.operatorsCache;
-    const [active, retired, projects, hostRows] = await Promise.all([
-      catalogValue ? { sessions: catalogValue.active, claudeRuntime: catalogValue.claudeRuntime } : this.activeSessions(client),
-      catalogValue ? { sessions: catalogValue.retired }
-        : !this.archivedWanted ? { sessions: [], pending: true as const }
-        : retiredCache.read(() => client.sessions("retired", { background: true })).catch(() => ({ sessions: [], failed: true as const })),
-      projectsCache.read(() => client.projects({ background: true })).catch((error: unknown): ProjectsResponse | null => {
-        if (error instanceof CutexApiError) return null;
-        throw error;
-      }),
-      // users: `/v2/host/sessions` is owner-only; another user's rows (name, project) come from its
-      // filtered summary instead, so the sidebar still groups its agents by project.
-      catalogValue ? catalogValue.hostRows : this.allHostRows(client).catch((error: unknown) => (error instanceof CutexApiError && error.status === 403 ? this.summaryHostRows(client) : {})),
-    ]);
-    // session-claude-runtime: the release for new Claude sessions, read with the agents' pins.
-    const projectOperators = projects ? await operatorsCache.read(async () => {
+    const projectsRead = projectsCache.read(() => client.projects({ background: true })).catch((error: unknown): ProjectsResponse | null => {
+      if (error instanceof CutexApiError) return null;
+      throw error;
+    });
+    // Operator rosters start as soon as the projects are known, alongside the other sidebar reads.
+    const operatorsRead = projectsRead.then(projects => projects ? operatorsCache.read(async () => {
       const roster = await readProjectOperators(projects.projects, id => client.project(id, { background: true }));
       // Failed projections must be tried again, without retaining the old role.
       if (projects.projects.some(p => Number.isSafeInteger(p.operator_count) && p.operator_count! >= 0 && !Object.hasOwn(roster ?? {}, p.project_id)))
         operatorsCache.invalidate();
       return roster;
-    }) : undefined;
+    }) : undefined);
+    operatorsRead.catch(() => { /* The sidebar read reports a failed projects read itself. */ });
+    const [active, retired, projects, hostRows] = await Promise.all([
+      catalogValue ? { sessions: catalogValue.active, claudeRuntime: catalogValue.claudeRuntime } : this.activeSessions(client),
+      catalogValue ? { sessions: catalogValue.retired }
+        : !this.archivedWanted ? { sessions: [], pending: true as const }
+        : retiredCache.read(() => client.sessions("retired", { background: true })).catch(() => ({ sessions: [], failed: true as const })),
+      projectsRead,
+      // users: `/v2/host/sessions` is owner-only; another user's rows (name, project) come from its
+      // filtered summary instead, so the sidebar still groups its agents by project.
+      catalogValue ? catalogValue.hostRows : this.allHostRows(client).catch((error: unknown) => (error instanceof CutexApiError && error.status === 403 ? this.summaryHostRows(client) : {})),
+    ]);
+    // The host's first sidebar does not wait for the projects' Operator rosters (one workspace read per project
+    // with Operators; perf audit 2026-11-24 #5): it shows without them (Operator unknown, as for an older host) and
+    // is read again once they are in. Later reads wait for them as before, so a replaced Operator never shows stale.
+    const fetchesOperators = !!projects?.projects.some(p => Number.isSafeInteger(p.operator_count) && p.operator_count! > 0);
+    let projectOperators: Awaited<typeof operatorsRead>;
+    if (this.operatorsSettled || !fetchesOperators) {
+      projectOperators = await operatorsRead;
+      if (this.operatorsCache === operatorsCache) this.operatorsSettled = true;
+    } else {
+      // Projects without Operators are known to have none (no read); the others stay unknown until read.
+      projectOperators = Object.fromEntries(projects!.projects.filter(p => p.operator_count === 0).map(p => [p.project_id, [] as string[]]));
+      void operatorsRead.then(() => {
+        if (this.client !== client || this.operatorsCache !== operatorsCache) return;
+        this.operatorsSettled = true;
+        this.sidebarRefresh.invalidateNow();
+        this.emit("sidebarChanged", { reason: "project_operators" });
+      }, () => { /* Unsettled: the next read tries again. */ });
+    }
     const claudeRuntime = active.claudeRuntime;
     const archivedPending = catalogValue ? catalogValue.archivedPending === undefined ? undefined : { count: catalogValue.archivedPending }
       : "pending" in retired ? { count: null } : undefined;
@@ -1095,6 +1164,8 @@ export class DaemonService implements DaemonApi {
       },
       hostRow: id => client.hostSession(id, options),
       retired: async () => (await client.sessions("retired", options)).sessions,
+      // A whole-catalog reread (project / Agent Management events, status gaps) walks these pages, not every row.
+      pagedResources: batch,
     }, (loaded, total) => this.sidebarProgress(catalog, loaded, total));
     if (this.archivedWanted) catalog.wantArchived();
     this.sessionDeltas = catalog;
@@ -1153,6 +1224,7 @@ export class DaemonService implements DaemonApi {
   private mediaRefsClient: CutexClient | null = null;
   /** The client whose host offers bootstrap-bounded-bus (`bus=bounded` and bus-messages pages go only to it). */
   private boundedBusClient: CutexClient | null = null;
+  private interactionHistoryClient: CutexClient | null = null;
 
   private mediaRefs(client: CutexClient): boolean {
     return this.mediaRefsClient === client;
@@ -1170,6 +1242,16 @@ export class DaemonService implements DaemonApi {
     const client = this.requireClient();
     if (this.boundedBusClient !== client) return null;
     return client.busMessages(sessionId, { direction: query.direction, cursor: query.cursor, limit: query.limit, turnIds: query.turnIds, itemIds: query.itemIds });
+  }
+
+  /** session-interaction-history-v1: a page of saved answered questions / approvals; null on a host without it. */
+  async interactionHistoryPage(sessionId: string, request: InteractionHistoryRequest): Promise<InteractionHistoryPage | null> {
+    const client = this.requireClient();
+    if (this.interactionHistoryClient !== client) return null;
+    const turnIds = Array.isArray(request?.turnIds) ? request.turnIds.filter((id): id is string => typeof id === "string" && id.length > 0).slice(0, INTERACTION_TURN_CHUNK) : undefined;
+    const limit = typeof request?.limit === "number" && Number.isInteger(request.limit) ? Math.min(Math.max(request.limit, 1), INTERACTION_PAGE_LIMIT) : undefined;
+    const cursor = typeof request?.cursor === "string" && request.cursor ? request.cursor : undefined;
+    return client.sessionInteractionHistory(sessionId, { limit, cursor, turnIds: turnIds?.length ? turnIds : undefined });
   }
 
   /** An image of a `media=ref` history (`cutex-media:<session>/<sha256>`); null when the host no longer has it. */
@@ -1562,6 +1644,9 @@ export class DaemonService implements DaemonApi {
       caps = { ...caps, featureList: [...(caps.featureList ?? []), QUICK_CHAT_PROMOTE_FEATURE] };
     if (caps?.features?.[SERVICES_WORKERS_FLAG] === true && !caps.featureList?.includes(SERVICES_WORKERS_FEATURE))
       caps = { ...caps, featureList: [...(caps.featureList ?? []), SERVICES_WORKERS_FEATURE] };
+    // session-interaction-history-v1 is also `features.sessionInteractionHistoryV1`: the renderer gates on the kebab name.
+    if (hasInteractionHistory(caps) && !caps?.featureList?.includes(INTERACTION_HISTORY_FEATURE))
+      caps = { ...caps!, featureList: [...(caps?.featureList ?? []), INTERACTION_HISTORY_FEATURE] };
     // 百度网盘 contract v1 names the capability `baiduPan` in features; the desktop gates on the kebab name.
     if (caps?.features?.baiduPan === true && !caps.featureList?.includes(BAIDU_PAN_FEATURE))
       caps = { ...caps, featureList: [...(caps.featureList ?? []), BAIDU_PAN_FEATURE] };
@@ -1575,6 +1660,7 @@ export class DaemonService implements DaemonApi {
       this.restricted = !userAccessOf(caps).isOwner;
       if (this.sessionDeltas && !this.supportsSessionDeltas(caps)) this.resetSessionDeltas();
       this.boundedBusClient = caps?.featureList?.includes(BOUNDED_BUS_FEATURE) ? client : null;
+      this.interactionHistoryClient = hasInteractionHistory(caps) ? client : null;
       this.mediaRefsClient = caps?.featureList?.some(feature => feature === HISTORY_MEDIA_REFS || feature === EVENT_MEDIA_BLOBS_FEATURE || feature === "eventMediaBlobs") || caps?.eventMediaBlobs === true ? client : null;
     }
     return caps;
@@ -2328,6 +2414,18 @@ export class DaemonService implements DaemonApi {
   delegationUpgradeAction(projectId: string, action: import("../shared/delegationUpgradePreview").UpgradeAction) {
     return executeDelegationUpgrade(this.requireClient(),projectId,action);
   }
+  /** 允许继续 on a delegation card (owner 2026-11-25): one node's permission and revision, read-only. */
+  delegationContinuationResume(projectId: string | null, askId: string) {
+    return readContinuationResume(this.requireClient(), projectId, askId);
+  }
+  /** r296 continuation approvals (approvals page, card): validated pending records; [] on older hosts. */
+  delegationContinuationApprovals(projectId: string | null) {
+    return readContinuationApprovals(this.requireClient(), projectId);
+  }
+  /** r296 owner decision on a continuation approval; re-reads it and writes only on an exact CAS match. */
+  delegationContinuationDecision(projectId: string | null, request: import("../shared/delegationUpgradePreview").ContinuationDecisionRequest) {
+    return decideContinuation(this.requireClient(), projectId, request);
+  }
   async delegationUpgradeApproval(approvalId: string) {
     return projectDelegationApproval(await this.requireClient().delegationApproval(approvalId));
   }
@@ -2437,6 +2535,30 @@ export class DaemonService implements DaemonApi {
   cancelRuntimePrunePlan() {
     for (const read of this.prunePlanReads) read.abort(new Error("runtime prune plan read cancelled"));
     this.prunePlanReads.clear();
+  }
+
+  // 提示词增强 (main/textRewrite.ts): one-shot, cancellable by requestId.
+  private readonly textRewrites = new TextRewrites();
+  /** `owner`: the asking renderer (main/index.ts passes event.sender); its reload / crash / close cancels the call. */
+  textRewrite(request: TextRewriteRequest, owner?: RewriteOwner) { return this.textRewrites.run(this.requireClient(), request, owner); }
+  cancelTextRewrite(requestId: string) { this.textRewrites.cancel(requestId); }
+
+  // 功能 Profile (shared/featureProfiles.ts): bodies rebuilt from known fields; only the parsed view goes back (no key).
+  async featureProfiles(): Promise<FeatureProfileListView> {
+    return parseFeatureProfileList(await this.requireClient().request<unknown>("GET", "/v2/feature-profiles"));
+  }
+  async createFeatureProfile(input: FeatureProfileCreate): Promise<FeatureProfile> {
+    const body = featureProfileCreateBody(input);
+    return parseFeatureProfileReply(await this.requireClient().request<unknown>("POST", "/v2/feature-profiles", { body }));
+  }
+  async patchFeatureProfile(id: string, patch: FeatureProfilePatch): Promise<FeatureProfile> {
+    if (!isFeatureProfileId(id)) throw new Error("invalid feature profile id");
+    const body = featureProfilePatchBody(patch);
+    return parseFeatureProfileReply(await this.requireClient().request<unknown>("PATCH", `/v2/feature-profiles/${encodeURIComponent(id)}`, { body }));
+  }
+  async deleteFeatureProfile(id: string): Promise<void> {
+    if (!isFeatureProfileId(id)) throw new Error("invalid feature profile id");
+    await this.requireClient().request<unknown>("DELETE", `/v2/feature-profiles/${encodeURIComponent(id)}`);
   }
 
   pruneRuntimes(ids: string[]) { return this.requireClient().pruneRuntimes(ids); }
@@ -2743,6 +2865,10 @@ export class DaemonService implements DaemonApi {
       peers: _peers,
       // proxy-modes: through patchProxySettings (the view carries read-only fields; owner credential only).
       proxy: _proxy,
+      // r295 heavy-read slots: only heavyReadConcurrency is writable.
+      heavyReadConcurrencyDefault: _heavyReadDefault,
+      heavyReadConcurrencyActive: _heavyReadActive,
+      heavyReadConcurrencyOptions: _heavyReadOptions,
       ...rest
     } = patch;
     return this.requireClient().request<GlobalSettings & { restartRequired: string[] }>("PATCH", "/v2/settings", { body: rest });
@@ -2868,6 +2994,20 @@ export class DaemonService implements DaemonApi {
     return { url: r.url, localUrl: r.localUrl };
   }
 
+  async serviceNotificationSettings(slug: string): Promise<ServiceNotificationConfiguration> {
+    if (!SERVICE_SLUG.test(slug)) throw new Error("bad service slug");
+    return this.requireClient().request<ServiceNotificationConfiguration>("GET", `/v2/services/${slug}/notification-settings`);
+  }
+
+  async setServiceNotificationSettings(slug: string, settings: ServiceNotificationSettings): Promise<ServiceNotificationConfiguration> {
+    if (!SERVICE_SLUG.test(slug)) throw new Error("bad service slug");
+    return this.requireClient().request<ServiceNotificationConfiguration>("PUT", `/v2/services/${slug}/notification-settings`, { body: settingsBody(settings) });
+  }
+
+  async serviceNotificationHistory(query: ServiceNotificationHistoryQuery): Promise<ServiceNotificationPage> {
+    return this.requireClient().request<ServiceNotificationPage>("GET", "/v2/service-notifications", { query: historyQuery(query ?? {}) });
+  }
+
   async serviceLogs(slug: string, tail = 300): Promise<{ text: string }> {
     const r = await this.requireClient().request<{ text: string }>("GET", `/v2/services/${encodeURIComponent(slug)}/logs`, { query: { tail: String(tail) } });
     return { text: r.text };
@@ -2979,7 +3119,8 @@ export class DaemonService implements DaemonApi {
     if (!(SESSION_ACTION_METHODS as readonly string[]).includes(method)) throw new Error(`method not allowed: ${method}`);
     if (method === "cutex/session/defaults/update") checkDefaultsPatch(params);
     const client = this.requireClient();
-    try { return await client.cutex<unknown>(sessionId, method, params); }
+    // A defaults save is never sent twice (Z5: the owner reviews a choice against one revision; no transport retry).
+    try { return await (method === "cutex/session/defaults/update" ? client.cutex<unknown>(sessionId, method, params, { retryable: false }) : client.cutex<unknown>(sessionId, method, params)); }
     catch (error) {
       // Restore refused because its own name is someone else's now: the renderer offers 改名 (shared/agentRename).
       const nameBlocked = method === "cutex/session/restore" ? restoreNameWire(error) : null;
@@ -2987,6 +3128,12 @@ export class DaemonService implements DaemonApi {
       // A child agent whose folders changed since creation: the renderer offers 重新批准文件夹 (shared/creatorPaths).
       const pathsChanged = creatorPathsWire(error);
       if (pathsChanged) throw new Error(pathsChanged);
+      // An old agent whose saved model / effort is no longer offered: the renderer offers 更换模型 (shared/pinnedModel).
+      const pinned = pinnedModelWire(error);
+      if (pinned) throw new Error(pinned);
+      // r295: the runtime could not be reached (classified by cutex): a fixed message, the renderer words it.
+      const unreachable = method === "cutex/runtime/online" ? runtimeUnreachableWire(error) : null;
+      if (unreachable) throw new Error(unreachable);
       if (["cutex/session/delete", "cutex/runtime/online", "cutex/session/retire"].includes(method)) {
         const wire = hostBusyActionWire(error);
         if (wire) {
@@ -3161,6 +3308,33 @@ export class DaemonService implements DaemonApi {
     finally { if (this.client === client) { this.invalidateSidebarParts(); this.noteSidebarWrite(); } }
   }
 
+  /**
+   * 项目 table batch (archive / restore): the same mutation, answered with what it proves instead of a throw, so a lost
+   * reply is `unknown` and not a refusal (shared/projectBatchOutcome).
+   */
+  async projectLifecycle(projectId: string, expected: { authorityEpoch: number; projectRevision: number }, kind: "archive" | "restore"): Promise<WriteOutcome> {
+    // Only archive / restore, checked here: never another project mutation through this path. Nothing sent: refused.
+    let checked: ReturnType<typeof checkLifecycleRequest>;
+    try { checked = checkLifecycleRequest(projectId, expected, kind); } catch { return { outcome: "refused", code: "bad_request" }; }
+    try { await this.projectMutation(checked.projectId, checked.expected, { kind: checked.kind }); return { outcome: "done" }; }
+    catch (e) { return writeErrorOutcome(e); }
+  }
+
+  /** The project's run control alone (`GET /v2/projects/{id}/run-control`), without the delegation snapshot's session lists. */
+  projectBatchRunControl(projectId: string) { return this.requireClient().projectRunControl(projectId); }
+
+  /** 项目 table batch pause / resume: one control request (epoch CAS on cutex), answered with what its receipt proves. */
+  async projectBatchControl(projectId: string, action: RunControlWrite): Promise<WriteOutcome> {
+    // Built here from the checked payload: a whole-project pause after the current 回合, or lifting the pause just read.
+    let request: ReturnType<typeof runControlRequest>;
+    try { request = runControlRequest(projectId, action); } catch { return { outcome: "refused", code: "bad_request" }; }
+    const client = this.requireClient();
+    try {
+      const raw = await client.delegationControl(request);
+      return controlOutcome(raw, request.body.actionId, request.kind === "pause" ? "project.pause" : "project.resume");
+    } catch (e) { return writeErrorOutcome(e); }
+  }
+
   async projectPresentation(projectId: string, expected: { authorityEpoch: number; presentationRevision: number }, presentation: ProjectPresentationUpdate) {
     const client = this.requireClient();
     try { return await client.request<unknown>("POST", "/v2/agent-management/project-presentation", {
@@ -3276,6 +3450,11 @@ export class DaemonService implements DaemonApi {
     return this.requireClient().ask<AskDetail>(askId);
   }
 
+  /** cutex r296 `asks-short-id-lookup-v1` (sidebar id search): delegations whose id starts / ends with `idPrefix`. */
+  askIdLookup(idPrefix: string, limit?: number): Promise<AskIdLookup | null> {
+    return this.requireClient().askShortIdLookup<AskIdLookupHit>(idPrefix, limit, { background: true });
+  }
+
   askAnswer(askId: string, cursor?: number): Promise<AskAnswerPage | null> {
     return this.requireClient().askAnswer<AskAnswerPage>(askId, cursor);
   }
@@ -3299,12 +3478,15 @@ export class DaemonService implements DaemonApi {
     }
   }
 
-  jobs(params: { query?: string; cursor?: string | null; limit?: number }): Promise<JobResult<JobListPage>> {
+  jobs(params: JobListParams): Promise<JobResult<JobListPage>> {
     const body: Record<string, unknown> = { query: typeof params?.query === "string" ? params.query.slice(0, 256) : "" };
     if (typeof params?.cursor === "string" && params.cursor.length <= 160) body.cursor = params.cursor;
     if (typeof params?.limit === "number" && Number.isFinite(params.limit)) body.limit = Math.max(1, Math.min(50, Math.floor(params.limit)));
-    return this.jobCall<{ data?: JobRow[]; nextCursor?: string | null }>("POST", "/v2/job-service/management-query", body).then((r) =>
-      r.ok ? { ok: true, value: { data: Array.isArray(r.value?.data) ? r.value.data : [], nextCursor: r.value?.nextCursor ?? null } } : r,
+    // r296 (the renderer sends these only to a Job Service with `activeList`; an older one refuses unknown keys).
+    if (params?.activeOnly === true) body.activeOnly = true;
+    if (params?.includeWaiters === true) body.includeWaiters = true;
+    return this.jobCall<{ data?: JobRow[]; nextCursor?: string | null; activeCounts?: unknown; waitersAvailable?: unknown; retention?: unknown }>("POST", "/v2/job-service/management-query", body).then((r) =>
+      r.ok ? { ok: true, value: { data: Array.isArray(r.value?.data) ? r.value.data : [], nextCursor: r.value?.nextCursor ?? null, ...jobListExtras(r.value) } } : r,
     );
   }
 
@@ -3342,9 +3524,11 @@ export class DaemonService implements DaemonApi {
     return this.jobCall("POST", "/v2/job-service/close-follow-up", { jobId, expectedRevision, reason: reason.trim().slice(0, 300) }, client);
   }
 
-  jobOutput(jobId: string, stream: JobStream, offset: number): Promise<JobResult<JobOutputPage>> {
+  jobOutput(jobId: string, stream: JobStream, offset: number | "tail"): Promise<JobResult<JobOutputPage>> {
     if (typeof jobId !== "string" || !/^[A-Za-z0-9._:-]{1,160}$/.test(jobId)) throw new Error("bad job id");
     if (stream !== "stdout" && stream !== "stderr") throw new Error("bad stream");
+    // r296 readOutputTail: the newest retained page (tail and a numeric offset are exclusive).
+    if (offset === "tail") return this.jobCall<JobOutputPage>("POST", "/v2/job-service/output", { jobId, stream, tail: true, maxBytes: 8192 });
     if (!Number.isSafeInteger(offset) || offset < 0) throw new Error("bad offset");
     return this.jobCall<JobOutputPage>("POST", "/v2/job-service/output", { jobId, stream, offset, maxBytes: 8192 });
   }
@@ -4532,3 +4716,4 @@ export class DaemonService implements DaemonApi {
     return r.filePath;
   }
 }
+

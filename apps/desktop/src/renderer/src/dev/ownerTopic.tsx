@@ -15,7 +15,7 @@ const T = {
   backend: <span className={`${CHIP} border border-dashed border-warn/60 text-warn-text`}>需后端</span>,
 };
 
-type HostId = "host-a" | "host-b" | "hachimi" | "lab-gpu";
+type HostId = "host-a" | "host-b" | "hostc" | "lab-gpu";
 interface MockHost {
   id: HostId;
   os: string;
@@ -28,7 +28,7 @@ interface MockHost {
 const HOSTS: MockHost[] = [
   { id: "host-a", os: "Windows", self: true, owner: { name: "Sam", fp: "9f3a 61c2 0b7e d415", you: true, source: "首次本机认领", when: "2026-09-12" }, rights: "完全控制", via: "本机" },
   { id: "host-b", os: "Linux", owner: { name: "Sam", fp: "9f3a 61c2 0b7e d415", you: true, source: "首次本机认领", when: "2026-09-20" }, rights: "完全控制", via: "SSH：sam@host-b" },
-  { id: "hachimi", os: "Linux", owner: { name: "ema", fp: "41d0 9c8a 77e2 03bf", source: "首次本机认领", when: "2026-10-02" }, rights: "完全控制", via: "SSH：ema@hachimi" },
+  { id: "hostc", os: "Linux", owner: { name: "ema", fp: "41d0 9c8a 77e2 03bf", source: "首次本机认领", when: "2026-10-02" }, rights: "完全控制", via: "SSH：ema@hostc" },
   { id: "lab-gpu", os: "Linux", owner: null, rights: "按授权", via: "设备令牌" },
 ];
 
@@ -181,11 +181,11 @@ function HostB({ host, setHost }: { host: HostId; setHost(h: HostId): void }) {
             <span className="text-xs text-subtle">所有者 · 本机</span>
           </div>
         )}
-        {h.id === "hachimi" && (
+        {h.id === "hostc" && (
           <div className="-mx-4 flex items-center gap-3 border-b border-border px-4 py-2.5 last:border-b-0">
             <Avatar name="Sam" you />
             <span className="flex flex-1 items-center gap-1.5 text-sm">Sam{T.you}</span>
-            <span className="text-xs text-subtle">经 SSH 登录 ema@hachimi · 今天 17:10</span>
+            <span className="text-xs text-subtle">经 SSH 登录 ema@hostc · 今天 17:10</span>
           </div>
         )}
         {h.id === "host-a" && (
@@ -242,7 +242,7 @@ const NAV = ["你", "设备", "主机", "所有者", "网络代理"] as const;
 export function OwnerTopic() {
   const q = new URLSearchParams(location.search);
   const [variant, setVariant] = useState<"a" | "b" | "c">((q.get("v") as "a" | "b" | "c" | null) ?? "a");
-  const [host, setHost] = useState<HostId>((q.get("h") as HostId | null) ?? "hachimi");
+  const [host, setHost] = useState<HostId>((q.get("h") as HostId | null) ?? "hostc");
   const open = (h: HostId) => (setHost(h), setVariant("b"));
   return (
     <>

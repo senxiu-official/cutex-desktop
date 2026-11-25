@@ -4,7 +4,8 @@
 // needs-you state). No backend of its own: there is no cutex event log, so every row is derived.
 import type { AskSummary, ServiceView } from "../../../../shared/ipc";
 import type { AgentSignal } from "../../lib/agentAttention";
-import { delegationBucket, requesterName, requesterSession } from "../../lib/delegations";
+import { delegationBucket, delegationStatus, requesterName, requesterSession, type DelegationStatusKey } from "../../lib/delegations";
+import { OWNER_APPROVAL_STEP, rowStep, type ActivityStep } from "../../lib/activityStep";
 import { isStreamGroup, type StreamGroup } from "./stream";
 import { share } from "../../lib/structuralShare";
 import { placeRoster, rosterTier } from "../../lib/rosterTiers";
@@ -219,13 +220,18 @@ export type ActivityItem = {
   open: ActivityTarget;
 } & (
   | { what: "delegate"; to: string; toName: string | null; title: string }
-  | { what: "complete"; from: string | null; fromName: string | null; title: string; failed: boolean }
+  /** `ended`: closed without an answer or a failure (its status key, e.g. rejected); null for an answer / failure. */
+  | { what: "complete"; from: string | null; fromName: string | null; title: string; failed: boolean; ended: DelegationStatusKey | null }
   | { what: "note"; text: string }
   | { what: "plan"; done: number; total: number; step: string | null }
   | { what: "artifact"; name: string }
   | { what: "service"; name: string }
-  | { what: "needsDelegation"; title: string; reason: NeedsReason }
-  | { what: "needsAgent"; error: boolean; text: string | null }
+  /** `step`: the host's current blocker and next step (r295 Z3); absent on older hosts (the reason phrase stays). */
+  | { what: "needsDelegation"; title: string; reason: NeedsReason; step?: ActivityStep }
+  /** An open delegation the host says is stuck without needing the owner (quota, sign-in, paused, busy …): its current row. */
+  | { what: "blocked"; title: string; step: ActivityStep }
+  /** `step`: an owner approval of the agent (Summary need `ownerApproval`) → the host's 审批 page. */
+  | { what: "needsAgent"; error: boolean; text: string | null; step?: ActivityStep }
 );
 
 /** A plan update seen on the host feed (live.ts). */
@@ -255,6 +261,8 @@ export interface AgentNeed {
   error: boolean;
   /** The error / the reason text shown after the name. */
   text: string | null;
+  /** One of its needs is an owner approval. */
+  approval?: boolean;
 }
 
 export interface ActivityInput {
@@ -265,6 +273,11 @@ export interface ActivityInput {
   artifacts: readonly ArtifactEvent[];
   services: readonly ServiceView[];
   needs: readonly AgentNeed[];
+  /**
+   * The host sends r295 Z3 `activityLink` (its delegation rows carry it; the same release links Summary needs). The
+   * desktop builds 需要你 from its own records, not Summary needs: without this an owner approval keeps its old row.
+   */
+  activityLinks?: boolean;
 }
 
 export const ACTIVITY_LIMIT = 200;
@@ -301,20 +314,28 @@ export function deriveActivity(input: ActivityInput): ActivityItem[] {
     const fromName = requesterName(a.requester);
     const dlg: ActivityTarget = { kind: "delegation", askId: a.askId, title: a.title };
     add({ id: `delegate:${a.askId}`, kind: "delegate", what: "delegate", at: ms(a.createdAt), actor: from, actorName: fromName, to: a.target, toName: a.targetName ?? null, title: a.title, open: dlg });
+    // 完成 only for an answer; a failed attempt is 未能完成; any other closure (an approval rejected — cutex closes it as
+    // completed with execution rejected —, an interruption …) says how it ended by its status word, never 完成了.
     const failed = a.execution === "failed";
-    const answered = a.execution === "answered" || failed || a.closed === "completed" || a.closed === "accepted";
-    if (answered && a.closed !== "cancelled" && a.closed !== "abandoned") {
+    const answered = a.execution === "answered";
+    const ended = !answered && !failed && (a.closed === "completed" || a.closed === "accepted") ? delegationStatus(a).key : null;
+    if ((answered || failed || ended) && a.closed !== "cancelled" && a.closed !== "abandoned") {
       const at = ms(a.attempt?.endedAt ?? null) || ms(a.closedAt) || ms(a.updatedAt);
-      add({ id: `complete:${a.askId}`, kind: "complete", what: "complete", at, actor: a.target, actorName: a.targetName ?? null, from, fromName, title: a.title, failed, open: dlg });
+      add({ id: `complete:${a.askId}`, kind: "complete", what: "complete", at, actor: a.target, actorName: a.targetName ?? null, from, fromName, title: a.title, failed, ended, open: dlg });
     }
     for (const note of a.attempt?.progress ?? []) {
       add({ id: `note:${a.askId}:${note.at}`, kind: "progress", what: "note", at: ms(note.at), actor: a.target, actorName: a.targetName ?? null, text: note.text, open: dlg });
     }
+    // The current blocker (r295 Z3) shows only on the delegation's current row, never on its history above.
+    const step = a.closed ? null : rowStep(a);
     if (delegationBucket(a) === "needsYou") {
       const reason = needsReason(a);
       const actor = reason === "review" ? from : a.target;
       const at = ms(a.holdSince ?? null) || ms(a.attempt?.endedAt ?? null) || ms(a.updatedAt);
-      add({ id: `needs:${a.askId}`, kind: "needsYou", what: "needsDelegation", at, actor, actorName: reason === "review" ? fromName : (a.targetName ?? null), title: a.title, reason, open: dlg });
+      add({ id: `needs:${a.askId}`, kind: "needsYou", what: "needsDelegation", at, actor, actorName: reason === "review" ? fromName : (a.targetName ?? null), title: a.title, reason, ...(step ? { step } : {}), open: dlg });
+    } else if (step && delegationBucket(a) !== "done") {
+      const at = ms(a.holdSince ?? null) || ms(a.updatedAt);
+      add({ id: `blocked:${a.askId}`, kind: "progress", what: "blocked", at, actor: a.target, actorName: a.targetName ?? null, title: a.title, step, open: dlg });
     }
   }
   for (const p of input.plans) {
@@ -330,7 +351,7 @@ export function deriveActivity(input: ActivityInput): ActivityItem[] {
   }
   for (const n of input.needs) {
     if (!members.has(n.sessionId)) continue;
-    add({ id: `needs:agent:${n.sessionId}`, kind: "needsYou", what: "needsAgent", at: n.at, actor: n.sessionId, error: n.error, text: n.text, open: { kind: "agent", sessionId: n.sessionId } });
+    add({ id: `needs:agent:${n.sessionId}`, kind: "needsYou", what: "needsAgent", at: n.at, actor: n.sessionId, error: n.error, text: n.text, ...(input.activityLinks && n.approval && !n.error ? { step: OWNER_APPROVAL_STEP } : {}), open: { kind: "agent", sessionId: n.sessionId } });
   }
   const order = (k: ActivityKind) => ACTIVITY_KINDS.indexOf(k);
   return [...out.values()].sort((a, b) => b.at - a.at || order(a.kind) - order(b.kind) || a.id.localeCompare(b.id)).slice(0, ACTIVITY_LIMIT);

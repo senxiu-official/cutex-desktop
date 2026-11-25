@@ -52,6 +52,8 @@ import { useModelOverloadRetry } from "../lib/modelOverloadRetryView";
 import { realAgentName, realNameTip } from "../lib/agentAlias";
 import { Tag } from "./Tag";
 import { dataFlags, useSizeFlags, widthBelow } from "../lib/sizeFlags";
+import { EntityMention } from "./EntityIcon";
+import { useStaggeredCount } from "../lib/useStagger";
 import "./agentListLayout.css";
 
 /** `detach`: 移出项目 (project page only, `members`). */
@@ -201,6 +203,7 @@ function StatusCell({ p, live }: { p: Progress | undefined; live: AgentRow | und
 
 function Row({
   row,
+  profileIcon,
   live,
   preview,
   last,
@@ -216,6 +219,8 @@ function Row({
   menu,
 }: {
   row: AgentRow;
+  /** The Profile column shows the Profile's face (later rows of a long list get it a few frames after the list). */
+  profileIcon: boolean;
   live: AgentRow | undefined;
   preview: ActivityPreview | undefined;
   last: number;
@@ -294,7 +299,7 @@ function Row({
       </div>
       <div className="min-w-0 text-xs leading-snug">
         <div className="truncate text-muted" title={profile ?? undefined}>
-          {profile ?? "—"}
+          {profile ? <EntityMention entity={profileIcon && profileOf(session) ? { kind: "profile", ref: profileOf(session)!, hostId } : null}>{profile}</EntityMention> : "—"}
         </div>
         {model && (
           <div className="truncate text-caption/[inherit] text-subtle" title={rawIdTitle(model, modelShown) ?? model}>
@@ -411,6 +416,8 @@ export function AgentList({
     return filterSortAgents([...base, ...kept], { query, sort, runtime }, lastOf);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, group, archived, progress, live, query, sort, runtime, activity]);
+  // Hundreds of agents: Profile faces past the first rows mount in steps (lib/useStagger).
+  const profileIcons = useStaggeredCount(rows.length);
 
   const selectable = (id: string) => {
     const p = progressOf(id);
@@ -582,10 +589,11 @@ export function AgentList({
         {rows.length === 0 ? (
           <p className="px-4 py-8 text-center text-sm text-subtle">{base.length === 0 ? t(`agents.empty.${tab}`) : t("agents.noMatch")}</p>
         ) : (
-          rows.map((row) => (
+          rows.map((row, i) => (
             <Row
               key={row.id}
               row={row}
+              profileIcon={i < profileIcons}
               live={live.get(row.id)}
               preview={activity[row.id]}
               last={lastOf(row)}
@@ -629,7 +637,7 @@ export function AgentList({
         )}
         {members && tab !== "archived" && bulkButton("detach", "text-muted hover:bg-surface-2 hover:text-danger", t("agents.detach", { count: detachCount }), detachCount === 0 || busy)}
         {bulkButton(secondary, "text-muted hover:bg-surface-2 hover:text-foreground", t(ACTION_LABEL[secondary], { count: chosen.length }), chosen.length === 0 || busy)}
-        {bulkButton(primary, "bg-accent font-medium text-white hover:bg-accent/90", t(ACTION_LABEL[primary], { count: chosen.length }), chosen.length === 0 || busy)}
+        {bulkButton(primary, "bg-accent font-medium text-on-accent hover:bg-accent/90", t(ACTION_LABEL[primary], { count: chosen.length }), chosen.length === 0 || busy)}
       </div>
     </div>
     </AttentionContext.Provider>

@@ -14,7 +14,7 @@ import { useProjectIcons } from "../lib/projectIconSync";
 import { assignSection, memberKey, sectionOf, setSectionCollapsed, splitBySection, summarizeSection, visibleInSection, type SidebarSection } from "../lib/sidebarSections";
 import { sectionMenu } from "../lib/sectionMenus";
 import { hostKey } from "../lib/hostKeys";
-import { SidebarHostsContext, useScopedAttention, useScopedSidebar, useSidebarHosts, type HostSidebarState, type SidebarHosts } from "../lib/scopedSidebarView";
+import { SidebarHostsContext, sidebarHostsKey, useScopedAttention, useScopedSidebar, useSidebarHosts, type HostSidebarState, type SidebarHosts } from "../lib/scopedSidebarView";
 import { sidebarMark, type HostLook } from "../lib/hostScope";
 import { setHostConnected } from "../lib/useHostScope";
 import { api } from "../bridge";
@@ -67,6 +67,12 @@ import { realAgentName } from "../lib/agentAlias";
 import { dataFlags, useSizeFlags, widthBelow } from "../lib/sizeFlags";
 import { InfoMark } from "./InfoMark";
 import { share } from "../lib/structuralShare";
+import { DirFilterButton, DirFilterRow, OldTaskSearch } from "./SidebarSessionSearch";
+import { IdLookupResults } from "./SidebarIdLookup";
+import { useIdLookup } from "../lib/useIdLookup";
+import { dropStaleTaskSearch, refreshDirFilter, setSearchHosts, useSessionSearch } from "../lib/sessionSearchStore";
+import { useSessionSearchHosts } from "../lib/useSessionSearchHosts";
+import { hostEpoch } from "../../../shared/hosts";
 
 /** Footer narrower than 12rem (content box): the identity button shows only its avatar. */
 const FOOTER_SIZES = { tight: widthBelow(12) } as const;
@@ -924,6 +930,8 @@ function PrimaryNav({ area }: { area: NavArea }) {
 
 /** What a right-click / press in the sidebar can return the focus to (lib/customize opener). */
 const FOCUSABLE = "button, a[href], input, [tabindex]:not([tabindex='-1'])";
+const EMPTY_IDS: ReadonlySet<string> = new Set();
+const NO_CWDS: string[] = [];
 
 export function Sidebar() {
   const { t } = useI18n();
@@ -939,17 +947,45 @@ export function Sidebar() {
   const selectedKey = useApp((s) => (s.view.kind === "conversation" && s.selectedId ? hostKey(s.selectedHost ?? s.hosts?.active ?? "local", s.selectedId) : null));
   const [query, setQuery] = useState("");
   const hostIds = scope.ids;
+  // Session search (harness C3, components/SidebarSessionSearch): the connected hosts of the scope that can filter by
+  // 工作目录 and look up old work. Without one, the search below stays name / preview only.
+  const { hosts: searchHosts, epochs: epochsKey } = useSessionSearchHosts(scoped, scope.multi);
+  const dir = useSessionSearch((s) => s.dir);
+  const dirResult = useSessionSearch((s) => s.dirResult);
+  const archived = useSessionSearch((s) => s.archived);
+  const [dirOpen, setDirOpen] = useState(false);
+  // Only these hosts are asked (in scope, online, capable); a queued request for another is dropped before it is sent.
+  useEffect(() => setSearchHosts(searchHosts.capable.map((h) => h.id)), [searchHosts]);
+  // Old-task results belong to the scope, each connection, the directory filter, the text and 已归档: a change drops
+  // them (late replies and 继续查找 too).
+  const searchScopeKey = JSON.stringify([hostIds, epochsKey, dir, query.trim(), archived]);
+  useEffect(() => dropStaleTaskSearch(searchScopeKey), [searchScopeKey]);
+  // The filter's connection changed (reconnected, or its host came back into scope): its ids are read again. While its
+  // host is out of scope / offline the filter is suspended (not applied, the old-task search ignores it).
+  useEffect(() => {
+    if (dir) refreshDirFilter(hostEpoch(useApp.getState().hosts, dir.hostId));
+  }, [epochsKey, dir]);
+  const dirOn = !!dir && searchHosts.capable.some((h) => h.id === dir.hostId);
+  // While the first page is read nothing matches yet (the row says 正在筛选…).
+  const dirIds = dirOn ? (dirResult?.ids ?? EMPTY_IDS) : null;
+  const inDir = (r: AgentRow) => !dirIds || ((r.hostId ?? scope.focus) === dir!.hostId && dirIds.has(r.id));
   // Re-read on every prefs change (useUiPrefs re-renders): host-keyed lists over the scope's hosts.
   const projectOrder = useMemo(() => hostListKeys("projectOrder", hostIds), [prefs, hostIds]); // eslint-disable-line react-hooks/exhaustive-deps
   const starredKeys = useMemo(() => new Set(hostListKeys("starredProjects", hostIds)), [prefs, hostIds]); // eslint-disable-line react-hooks/exhaustive-deps
   const [dragged, setDragged] = useState<string | null>(null);
   const dropStore = useMemo(createDropStore, []);
-  const searching = query.trim() !== "";
+  const searching = query.trim() !== "" || dirOn;
+  // An id typed into the search (「#47c47e」): looked up on the hosts in view (lib/useIdLookup).
+  const idLookup = useIdLookup(query, scoped);
   // Not the whole `activity` (a streamed token refreshes it every frame; perf baseline H1): last-activity
   // times to the minute for the layout (idle fold, offline order), the preview texts only while searching.
   const times = useApp((s) => activityTimesOf(s.activity));
   const activity = useApp((s) => (searching ? s.activity : null));
-  const hostsCtx = useMemo<SidebarHosts>(() => ({ marks: scope.showHostMarks, localMarks: prefs.hostMarkLocal, focus: scope.focus, look: (id) => scope.host(id ?? scope.focus), stateOf: scoped.stateOf }), [scope, scoped.stateOf, prefs.hostMarkLocal]);
+  // Rebuilt only when what rows show of the hosts changes: every host-list notification (a tunnel retry, a build read)
+  // makes a new `scope`, and a new value re-renders every visible row (perf 2026-11-26).
+  const hostsKey = sidebarHostsKey(scope);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- `hostsKey` stands for what rows read of `scope`
+  const hostsCtx = useMemo<SidebarHosts>(() => ({ marks: scope.showHostMarks, localMarks: prefs.hostMarkLocal, focus: scope.focus, look: (id) => scope.host(id ?? scope.focus), stateOf: scoped.stateOf }), [hostsKey, scoped.stateOf, prefs.hostMarkLocal]);
   // Hosts of the scope with nothing to list (not reached yet this run): a header with their status.
   // A host of the scope without rows: loading, or live with nothing to list. One that cannot be reached is not in the
   // 花名册 (owner 2026-11-17): its 连不上 · 重连 is in the footer switcher (IdentityMenu).
@@ -961,14 +997,16 @@ export function Sidebar() {
   const previewOf = (r: AgentRow) => (own(r) ? activity?.[r.id] : undefined);
 
   const groups = useMemo(() => {
-    const ordered = orderGroups(model.groups, projectOrder);
+    const all = orderGroups(model.groups, projectOrder);
+    // The 工作目录 filter first (that host's agents under the directory), then the text.
+    const ordered = dirIds ? all.flatMap((g) => { const online = g.online.filter(inDir), offline = g.offline.filter(inDir); return online.length + offline.length > 0 ? [{ ...g, online, offline }] : []; }) : all;
     const q = query.trim().toLowerCase();
     if (!q) return ordered;
     const match = (r: AgentRow) =>
       r.name.toLowerCase().includes(q) || realAgentName(r.session).toLowerCase().includes(q) || (previewOf(r)?.text.toLowerCase().includes(q) ?? false);
     // A project whose 本机备注 matches is listed whole.
     return searchGroups(ordered, q, match, (g) => groupRemark(prefs.projectRemarks, g, scope.focus));
-  }, [model.groups, projectOrder, query, activity, prefs.projectRemarks, scope.focus]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [model.groups, projectOrder, query, activity, prefs.projectRemarks, scope.focus, dirIds, dir]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Freshly created agents not opened yet (lib/freshAgents): full rows with a 「新」 marker.
   // Opening clears it (the marker goes), but the row keeps its place while it stays open: the list
@@ -1116,9 +1154,10 @@ export function Sidebar() {
   }, [dropStore]);
   const chats = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return model.chats;
-    return model.chats.filter((r) => r.name.toLowerCase().includes(q) || realAgentName(r.session).toLowerCase().includes(q) || (previewOf(r)?.text.toLowerCase().includes(q) ?? false));
-  }, [model.chats, query, activity]); // eslint-disable-line react-hooks/exhaustive-deps
+    const base = dirIds ? model.chats.filter(inDir) : model.chats;
+    if (!q) return base;
+    return base.filter((r) => r.name.toLowerCase().includes(q) || realAgentName(r.session).toLowerCase().includes(q) || (previewOf(r)?.text.toLowerCase().includes(q) ?? false));
+  }, [model.chats, query, activity, dirIds, dir]); // eslint-disable-line react-hooks/exhaustive-deps
   // No project flyout pops up (and an open one closes) while a project is dragged.
   // users: a pending device sees nothing on its focus host until the host owner assigns it.
   const focusAccess = useHostAccess(useApp((s) => s.hosts?.active ?? "local"));
@@ -1142,6 +1181,27 @@ export function Sidebar() {
   const searchField = (placeholder: string, className: string) => (
     <input ref={searchRef} data-sidebar-search="" value={query} onChange={(e) => setQuery(e.target.value)} placeholder={placeholder} aria-label={placeholder} className={className} />
   );
+  // 工作目录 (session-search-v1 hosts only): the toggle beside the field, the row under it while open or set.
+  const searchable = searchHosts.capable.length > 0;
+  const showDirRow = searchable && (dirOpen || !!dir);
+  // The directories offered in the row (each host's agents'), worked out only while the row shows and the roster changes.
+  const cwdsByHost = useMemo(() => {
+    const byHost = new Map<string, string[]>();
+    if (!showDirRow) return byHost;
+    const sets = new Map<string, Set<string>>();
+    for (const r of [...model.groups.flatMap((g) => [...g.online, ...g.offline]), ...model.chats]) {
+      if (!r.session.cwd) continue;
+      const h = r.hostId ?? scope.focus;
+      let set = sets.get(h);
+      if (!set) sets.set(h, (set = new Set()));
+      set.add(r.session.cwd);
+    }
+    for (const [h, set] of sets) byHost.set(h, [...set].sort());
+    return byHost;
+  }, [showDirRow, model, scope.focus]);
+  const cwdsOf = useCallback((hostId: string) => cwdsByHost.get(hostId) ?? NO_CWDS, [cwdsByHost]);
+  const dirButton = searchable ? <DirFilterButton open={dirOpen || !!dir} onToggle={() => setDirOpen((v) => !v)} /> : null;
+  const dirRow = showDirRow ? <DirFilterRow hosts={searchHosts} cwdsOf={cwdsOf} focus={scope.focus} onClose={() => setDirOpen(false)} /> : null;
   // Ctrl / middle click on a row opens it beside the current one (design 040 §2.1: the how-to is this ⓘ, not each row's tip).
   const besideInfo = <InfoMark text={t("pane.openBesideHint", { key: newInstanceKey() })} className="order-last" />;
   // The full sidebar's body: docked when expanded, the popped overlay while hidden (components/SidebarPeek).
@@ -1157,14 +1217,18 @@ export function Sidebar() {
               <span className="text-caption text-subtle tabular-nums">{attention.rows.length}</span>
               {besideInfo}
               {searchField(t("sidebar.all.filter"), "ml-1 h-6 min-w-0 flex-1 rounded-ctl border border-border bg-background px-2 text-meta outline-none placeholder:text-subtle focus:border-accent")}
+              {dirButton}
             </div>
+            {dirRow}
           </>
         ) : (
           <>
             <div className="flex items-center gap-1 p-2">
               {searchField(t("sidebar.search"), "min-w-0 flex-1 rounded-md border border-border bg-background px-2.5 py-1 text-ui/[inherit] outline-none placeholder:text-subtle focus:border-accent")}
+              {dirButton}
               {besideInfo}
             </div>
+            {dirRow}
             {/* The abnormal-shutdown notice (dismissable); the entries are in the window bar (sidebar v5, design 040 §4.1). */}
             <RestoreBanner compact />
           </>
@@ -1180,8 +1244,11 @@ export function Sidebar() {
         <div className="relative flex min-h-0 flex-1 flex-col pt-1 pb-2" data-roster-box="">
         <nav ref={roving} data-sidebar-roster={nowAll ? "all" : "roster"} data-stick-off={searching ? "" : undefined} data-system-rows={prefs.systemRows} data-separation={prefs.projectSeparation} data-roster-held={hold ? "" : undefined} {...presence.bind} className="flex-1 overflow-y-auto px-1.5" style={prefs.rowPreview === "off" && !nowAll ? undefined : ({ "--avatar-col": nowAll ? "20px" : "32px" } as CSSProperties)} onContextMenu={contextMenu(() => [...hostStopIdleEntries(t, <Power size={14} />), ...sidebarMenuTail(t)])}>
           <SidebarLoadProgress />
+          {idLookup && <IdLookupResults lookOf={(id) => scope.host(id) ?? undefined} multi={scope.multi} />}
+          {/* An id written as one (#…, ask-…) is not text to look for in old turns. */}
+          {searchable && !idLookup?.explicit && <OldTaskSearch query={query} hosts={searchHosts} lookOf={(id) => scope.host(id) ?? undefined} scopeKey={searchScopeKey} />}
           {groups.length === 0 && chats.length === 0 && hostOnly.length === 0 ? (
-            <p className="px-2 py-6 text-center text-sm text-subtle" data-roster-empty={unreachableOnly ? "unreachable" : ""}>{focusAccess.pending ? t("users.access.pendingEmpty") : unreachableOnly ? t("sidebar.unreachableOnly") : t("sidebar.empty")}</p>
+            <p className="px-2 py-6 text-center text-sm text-subtle" data-roster-empty={unreachableOnly ? "unreachable" : searching ? "noMatch" : ""}>{focusAccess.pending ? t("users.access.pendingEmpty") : unreachableOnly ? t("sidebar.unreachableOnly") : searching ? t("sidebar.noMatch") : t("sidebar.empty")}</p>
           ) : (
             <>
               {ungrouped ? (

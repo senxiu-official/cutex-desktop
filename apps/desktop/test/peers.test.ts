@@ -223,7 +223,7 @@ describe("delegations with peers", () => {
   });
 
   it("finds the far end of incoming and outgoing delegations", () => {
-    expect(peerSideOf(base({ requester: peerRequester }))).toEqual({ side: "requester", peerId: PEER_ID, label: "workstation-lab", name: "proj-research @ workstation-lab" });
+    expect(peerSideOf(base({ requester: peerRequester }))).toEqual({ side: "requester", peerId: PEER_ID, label: "workstation-lab", name: "proj-research @ workstation-lab", instanceId: null });
     const mirror = base({ requester: { kind: "agent", cutexSessionId: "lead" }, target: "cutex.4be81f", remote: { peerId: PEER_ID, label: "workstation-lab", targetName: "proj-worker", syncState: "synced" } });
     expect(peerSideOf(mirror)?.name).toBe("proj-worker @ workstation-lab");
     expect(peerSideOf(base({}))).toBeNull();

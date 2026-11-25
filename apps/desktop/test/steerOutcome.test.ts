@@ -85,7 +85,7 @@ describe("plain wording", () => {
       }
     }
     expect(zh(queueInsertLabel(f({ checking: false })))).toBe("不确定这条插话有没有插进去");
-    expect(zh("queue.insert.unsureHint")).toContain("「再发一次」");
+    expect(zh("queue.insert.unsureHint")).toContain("「重新发送」");
     expect(zh("queue.insert.unsureHint")).toContain("「已送达」");
   });
 

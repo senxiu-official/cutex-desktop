@@ -11,10 +11,15 @@
 // 手动标记结果… in the row menu when the job's host has job-external (MarkExternalDialog).
 // 结束跟进 (state surfaces S7) in the row menu of every job the Job Service may still track; the status cell's hover
 // explains 结果未确认 / 已结束跟进 / a local (this device only) mark.
+// r296 phase 1 (cutex docs/development/r296-desktop-jobs-spec.md), per host by its Job Service's `humanOperations`:
+// `activeList` — the toolbar's 运行中 N · 排队 M are the host's own totals (whole host, not the filter or the pages), the
+// active list finds a job submitted long ago that still runs, and 等它的委托 lists each waiting delegation (#tag → its
+// detail, which leads to its card); a waiting state the host could not read says so, never 「无人等待」. With the nci
+// module on and job-external, a plain line says when Gadi was last verified and when the next check is.
 import { useEffect, useMemo, useState } from "react";
+import { RowMoreButton } from "../../components/RowMoreButton";
 import { useArchivedAgents } from "../../lib/useArchivedAgents";
 import type { SidebarSnapshot } from "../../../../shared/ipc";
-import { MoreHorizontal } from "lucide-react";
 import { useModuleEnabled } from "../react";
 import type { JobRow } from "../../../../shared/ipc";
 import { useI18n, type MessageKey } from "../../i18n";
@@ -28,7 +33,9 @@ import { JOB_EXTERNAL_FEATURE } from "../../../../shared/remoteJobs";
 import { MarkExternalDialog } from "./MarkExternalDialog";
 import { componentUsable, JOB_SERVICE_COMPONENT } from "../../lib/componentCard";
 import { componentUsableNow, useComponentStore } from "../../lib/componentStore";
-import { openJobOutput, refreshAllJobs, refreshHostJobs, useHostJobs, useJobs } from "../../lib/jobStore";
+import { openJobOutput, refreshActiveJobs, refreshAllJobs, refreshHostJobs, useHostJobs, useJobs } from "../../lib/jobStore";
+import { JobWaiters } from "../../components/JobParts";
+import { NciCheckLine } from "./NciCheckLine";
 import { useListHosts } from "../../lib/hostLists";
 import { hostKey, type HostKey } from "../../lib/hostScope";
 import { useAllJobs } from "../../lib/jobsView";
@@ -158,10 +165,34 @@ function JobList({ preset, presetScope }: { preset?: string; presetScope?: Scope
     return () => clearInterval(timer);
   }, [otherIds, othersRunning]);
 
+  // Other hosts: their newest page plus (r296 activeList) their active list, one row per job.
+  const otherRows = (hostId: string) => {
+    const h = hostJobs[hostId];
+    const rows = new Map((h?.rows ?? []).map((j) => [j.jobId, j]));
+    for (const j of h?.activeRows ?? []) if (!rows.has(j.jobId) || (rows.get(j.jobId)!.revision ?? 0) <= (j.revision ?? 0)) rows.set(j.jobId, j);
+    return [...rows.values()];
+  };
   const all: Row[] = [
     ...(focusServed ? Object.values(byId).map((j) => ({ ...j, hostId: hosts.focus, key: hostKey(hosts.focus, j.jobId) })) : []),
-    ...others.flatMap((hostId) => (hostJobs[hostId]?.rows ?? []).map((j) => ({ ...j, hostId, key: hostKey(hostId, j.jobId) }))),
+    ...others.flatMap((hostId) => otherRows(hostId).map((j) => ({ ...j, hostId, key: hostKey(hostId, j.jobId) }))),
   ].map((j) => ({ ...j, projectId: projectOf(j.hostId, j.sessionId) }));
+  // r296: the hosts' own totals (only hosts that send them; others are left out and said so).
+  const focusCounts = useJobs((s) => s.activeCounts);
+  const focusWaiters = useJobs((s) => s.waitersAvailable);
+  const activeCursor = useJobs((s) => s.activeCursor);
+  const countsOf = (hostId: string) => (hostId === hosts.focus ? focusCounts : hostJobs[hostId]?.activeCounts) ?? null;
+  const waitersOf = (hostId: string) => (hostId === hosts.focus ? focusWaiters : hostJobs[hostId]?.waitersAvailable) ?? null;
+  const focusRetention = useJobs((s) => s.retention);
+  const retentionOf = (hostId: string) => (hostId === hosts.focus ? focusRetention : hostJobs[hostId]?.retention) ?? null;
+  const retained = served.flatMap((d) => { const r = retentionOf(d.hostId); return r ? [{ hostId: d.hostId, ...r }] : []; });
+  const keepLimit = retained.find((r) => r.hostId === hosts.focus)?.limit ?? retained[0]?.limit ?? null;
+  const full = retained.filter((r) => r.records >= r.limit);
+  const maintenance = served.flatMap((d) => {
+    const m = components[d.hostId]?.list?.components.find((c) => c.name === JOB_SERVICE_COMPONENT)?.maintenance;
+    return m && m.state !== "verified" ? [{ hostId: d.hostId, ...m }] : [];
+  });
+  const counted = served.filter((d) => countsOf(d.hostId));
+  const totals = counted.reduce((acc, d) => ({ running: acc.running + countsOf(d.hostId)!.running, queued: acc.queued + countsOf(d.hostId)!.queued }), { running: 0, queued: 0 });
   const agentOf = (j: Pick<Row, "hostId" | "sessionId">) => hostKey(j.hostId, j.sessionId);
   const agentKeys = [...new Set([...all.map(agentOf), ...(agent ? [agent] : [])])];
   const agentNames = new Map(all.map((j) => [agentOf(j), j.agentName]));
@@ -187,7 +218,9 @@ function JobList({ preset, presetScope }: { preset?: string; presetScope?: Scope
   const filtered = all
     .filter((j) => !agent || agentOf(j) === agent)
     .filter((j) => !q || `${j.jobId} ${j.actionId} ${j.command ?? ""} ${j.cwd ?? ""} ${j.remoteId ?? ""} ${j.remoteName ?? ""} ${j.agentName ?? who(j.hostId, j.sessionId).name}`.toLowerCase().includes(q));
-  const count = (s: Scope) => filtered.filter((j) => jobStatus(j).group === s).length;
+  const hostTotals = !q && !agent && counted.length > 0 && counted.length === served.length;
+  const count = (s: Scope) =>
+    hostTotals && s !== "done" ? (s === "active" ? totals.running : totals.queued) : filtered.filter((j) => jobStatus(j).group === s).length;
   const rows = sortJobs(filtered.filter((j) => jobStatus(j).group === scope)) as Row[];
   const icons = useProjectIcons();
   const groups = served.flatMap((d) => {
@@ -220,12 +253,16 @@ function JobList({ preset, presetScope }: { preset?: string; presetScope?: Scope
   const loaded = allIds !== null || others.some((id) => hostJobs[id]);
   const otherError = others.map((id) => hostJobs[id]?.error).find((e) => !!e);
 
+  // 等它的委托 (r296 includeWaiters) in 进行中 / 排队, when a host answered about waiters: inline in the job cell (a
+  // column of its own leaves the command no room in the side panel).
+  const waitersShown = scope !== "done" && served.some((d) => waitersOf(d.hostId) !== null);
   const columns: Column<Row>[] = [
     {
       key: "status",
       header: t("table.status"),
       // 已结束 has the long words (已结束跟进 · 进程可能仍在运行); a cut word is whole in the hover.
-      width: scope === "done" ? (hosts.marks ? "11rem" : "10rem") : hosts.marks ? "9rem" : "8rem",
+      // Narrow enough that 作业 keeps room in the side panel (a <col> cannot clamp to a percentage).
+      width: scope === "done" ? (hosts.marks ? "9rem" : "8rem") : hosts.marks ? "7.5rem" : "6.5rem",
       cell: (j) => (
         <span className={`flex min-w-0 items-center gap-1.5 ${hosts.stale.has(j.hostId) ? "opacity-50" : ""}`}>
           <RowHost host={hosts.look(j.hostId)} show={hosts.marks} />
@@ -246,6 +283,7 @@ function JobList({ preset, presetScope }: { preset?: string; presetScope?: Scope
           >
             {jobTitle(j)}
           </button>
+          {waitersShown && <JobWaiters job={j} hostId={j.hostId} available={waitersOf(j.hostId)} inline />}
           {j.command && j.actionId && <span className="min-w-0 shrink truncate text-xs text-subtle">{j.actionId}</span>}
           {nciOn && <ExternalTags job={j} />}
         </div>
@@ -254,7 +292,7 @@ function JobList({ preset, presetScope }: { preset?: string; presetScope?: Scope
     {
       key: "agent",
       header: t("jobs.col.agent"),
-      width: "9rem",
+      width: "7rem",
       cell: (j) => {
         const w = who(j.hostId, j.sessionId, j.agentName);
         return (
@@ -265,8 +303,8 @@ function JobList({ preset, presetScope }: { preset?: string; presetScope?: Scope
         );
       },
     },
-    { key: "started", header: t("jobs.col.started"), width: "5.5rem", cell: (j) => <Started at={j.createdAt} /> },
-    { key: "time", header: t(scope === "done" ? "jobs.col.duration" : "jobs.col.elapsed"), width: "4.5rem", align: "right", cell: (j) => <Time job={j} /> },
+    { key: "started", header: t("jobs.col.started"), width: "5rem", cell: (j) => <Started at={j.createdAt} /> },
+    { key: "time", header: t(scope === "done" ? "jobs.col.duration" : "jobs.col.elapsed"), width: "3.75rem", align: "right", cell: (j) => <Time job={j} /> },
     {
       key: "exit",
       header: t("jobs.col.exit"),
@@ -279,9 +317,7 @@ function JobList({ preset, presetScope }: { preset?: string; presetScope?: Scope
       header: "",
       width: "2rem",
       cell: (j) => (
-        <button onClick={(e) => openMenuFrom(e.currentTarget, menu(j))} aria-label={t("jobs.more")} className="press-icon rounded p-0.5 text-subtle opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 hover:bg-surface-2 hover:text-foreground focus-visible:opacity-100">
-          <MoreHorizontal size={14} />
-        </button>
+        <RowMoreButton label={t("jobs.more")} onOpen={(e) => openMenuFrom(e.currentTarget, menu(j))} />
       ),
     },
   ];
@@ -294,11 +330,43 @@ function JobList({ preset, presetScope }: { preset?: string; presetScope?: Scope
         <SearchableSelect value={agent} label={t("delegations.allAgents")} width="w-48" options={agentOptions} placeholder={pickerLabels.search} emptyLabel={pickerLabels.empty} hiddenNote={pickerLabels.hiddenNote} onChange={setAgent} />
         <Segmented<Scope> value={scope} onChange={setScope} options={SCOPES.map((s) => ({ value: s, label: `${t(`jobs.scope.${s}` as MessageKey)} ${count(s)}` }))} />
       </PageToolbar>
+      {counted.length > 0 && (
+        <p className="mb-1 flex flex-wrap items-center gap-x-3 px-1 text-xs text-muted" data-jobs-totals="">
+          <span title={t("jobs.totals.hint")}>{t("jobs.totals", { running: totals.running, queued: totals.queued })}</span>
+          {counted.length < served.length && <span className="text-subtle">{t("jobs.totals.partial")}</span>}
+          {keepLimit !== null && !full.length && <span className="text-subtle" title={t("jobs.retention.hint")} data-jobs-retention="">{t("jobs.retention", { limit: keepLimit })}</span>}
+        </p>
+      )}
+      {full.map((r) => (
+        <p key={r.hostId} className="mb-1 flex items-center gap-1.5 px-1 text-xs text-warn-text" title={t("jobs.retention.hint")} data-jobs-retention-full="">
+          {hosts.multi && hosts.look(r.hostId) && <HostMark host={hosts.look(r.hostId)!} />}
+          {t("jobs.retention.full", { records: r.records, limit: r.limit })}
+        </p>
+      ))}
+      {maintenance.map((m) => (
+        <p key={m.hostId} className={`mb-1 flex items-center gap-1.5 px-1 text-xs ${m.state === "needsAttention" ? "text-warn-text" : "text-muted"}`} title={t("jobs.maintenance.versions", { running: m.runningVersion ?? "—", selected: m.selectedVersion ?? "—" })} data-jobs-maintenance={m.state}>
+          {hosts.multi && hosts.look(m.hostId) && <HostMark host={hosts.look(m.hostId)!} />}
+          {t(m.state === "waiting" || m.state === "handoffRequired" || m.state === "needsAttention" ? `jobs.maintenance.${m.state}` : "jobs.maintenance.other", { version: m.selectedVersion ?? "", state: m.state })}
+        </p>
+      ))}
+      {nciOn && focusServed && external(hosts.focus) && <NciCheckLine />}
       {hosts.multi && <MissingHosts hosts={hosts.missing} />}
       {(focusServed ? error && allIds === null : !!otherError && !loaded) && <p className="py-2 text-sm text-subtle">{t("jobs.unavailableDetail", { error: (focusServed ? error : otherError)?.message || (focusServed ? error : otherError)?.code || "" })}</p>}
       {!error && !loaded && <p className="text-sm text-subtle">{t("delegations.loading")}</p>}
       {loaded && rows.length === 0 && <p className="py-2 text-sm text-subtle">{t(`jobs.none.${scope}` as MessageKey)}</p>}
-      {rows.length > 0 && <DataTable columns={shown} groups={groups} rowKey={(j) => j.key} foldPrefix="jobs" onRowContextMenu={(e, j) => contextMenu(() => menu(j))(e)} />}
+      {rows.length > 0 && (
+        // A very narrow Shelf scrolls sideways rather than squeezing 作业 to nothing.
+        <div className="overflow-x-auto" data-jobs-table="">
+          <div className="min-w-[32rem]">
+            <DataTable columns={shown} groups={groups} rowKey={(j) => j.key} foldPrefix="jobs" onRowContextMenu={(e, j) => contextMenu(() => menu(j))(e)} />
+          </div>
+        </div>
+      )}
+      {focusServed && activeCursor && scope !== "done" && (
+        <button onClick={() => void refreshActiveJobs(true)} className="press mt-2 rounded-sm px-2 text-xs text-accent hover:underline" data-jobs-active-more="">
+          {t("jobs.loadMoreActive")}
+        </button>
+      )}
       {focusServed && nextCursor && scope === "done" && (
         <button onClick={() => void refreshAllJobs(true)} disabled={loading} aria-busy={loading || undefined} className="press mt-2 rounded-sm px-2 text-xs text-accent enabled:hover:underline disabled:cursor-default disabled:opacity-50">
           {loading ? t("delegations.loading") : t("jobs.loadMore")}

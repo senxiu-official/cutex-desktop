@@ -63,7 +63,7 @@ function session(a: Agent): SessionResource {
     hostId: "HOST-A",
     displayName: a.name,
     threadName: null,
-    cwd: `/home/ema/cutex-dev/${a.name}`,
+    cwd: `/home/user/cutex-dev/${a.name}`,
     profile: "omega",
     configuredProfile: "omega",
     launchedProfile: "omega",
@@ -111,7 +111,7 @@ function sidebar(snapshot: SidebarSnapshot): SidebarSnapshot {
       ...snapshot.projects,
       projects: [
         ...snapshot.projects.projects,
-        { project_id: PROJECT, workspace_root: "/home/ema/cutex-dev", authority_epoch: directorVacant ? 9 : 8, director_cutex_session_id: directorVacant ? null : "pv-dir", presentation: { display_name: "cutex-dev", badge_label: "CX", color: "blue" }, active_member_count: AGENTS.length, lifecycle: "active" },
+        { project_id: PROJECT, workspace_root: "/home/user/cutex-dev", authority_epoch: directorVacant ? 9 : 8, director_cutex_session_id: directorVacant ? null : "pv-dir", presentation: { display_name: "cutex-dev", badge_label: "CX", color: "blue" }, active_member_count: AGENTS.length, lifecycle: "active" },
       ],
     },
     hostRows: { ...snapshot.hostRows, ...Object.fromEntries(AGENTS.map((a) => [a.id, hostRow(a.id)])) },
@@ -211,11 +211,14 @@ const TEMPLATES: Tpl[] = [
   ["background.started", "pv-rh", "cargo build --release -p cutex-server", null, { status: "running" }],
 ];
 
+/** Rows of delegations the delegations mock has (?projectview): their current blocker shows on the newest one (r295 Z3). */
+const ASK_OF: Record<string, string> = { "ownerDeviceAdded 提示": "ask-pv-2", "重跑 shelf 的视觉对比": "ask-pv-11", "导出 Waveline 的崩溃日志": "ask-pv-12", "把 r250 升到 r251": "ask-pv-13" };
+
 const nullRefs = (): ProjectEvent["refs"] => ({ askId: null, jobId: null, artifactId: null, workflowRunId: null, approvalId: null, notificationId: null });
 
 function makeRow(seq: number, at: number, [kind, agent, title, detail, extra]: Tpl): ProjectEvent {
   const refs = nullRefs();
-  if (kind.startsWith("ask.")) refs.askId = `ask-mock-${seq % 7}`;
+  if (kind.startsWith("ask.")) refs.askId = (title && ASK_OF[title]) || `ask-mock-${seq % 7}`;
   if (kind.startsWith("approval.")) refs.approvalId = `appr-mock-${seq % 5}`;
   if (kind === "artifact.published") refs.artifactId = "art-mock-notes";
   if (kind === "ownerNotify.created") refs.notificationId = `on-mock-${seq}`;
@@ -250,6 +253,9 @@ function seedRows(): void {
     if (i === 40) out.push(makeRow(++seq, at - 60_000, ["journal.gap", null, null, null]));
     out.push(makeRow(++seq, at, TEMPLATES[i % TEMPLATES.length]!));
   }
+  out.push(makeRow(++seq, now - 420_000, ["ask.created", "pv-dir", "导出 Waveline 的崩溃日志", "→ mobile-work", { status: "queued" }]));
+  out.push(makeRow(++seq, now - 300_000, ["ask.created", "pv-dir", "重跑 shelf 的视觉对比", "→ shelf-model", { status: "queued" }]));
+  out.push(makeRow(++seq, now - 240_000, ["ask.created", "pv-dir", "把 r250 升到 r251", "→ updater", { status: "running" }]));
   if (ownerActivityScene) {
     out.push(makeRow(++seq, now - 180_000, ["turn.completed", "pv-shm", "完成委托中的布局迁移检查", "检查完成，报告已发布。", { turnOrigin: "external", durationMs: 83_000, toolCalls: 12 }]));
     out.push(makeRow(++seq, now - 120_000, ["turn.completed", "pv-dir", "整理项目说明", "项目说明已经更新。", { durationMs: 28_000, toolCalls: 4 }]));
@@ -369,8 +375,9 @@ export const mock: ModuleMock = {
     startStream(core);
   },
   api: (core) => ({ ...streamApi(core), ...directorMock(core) }),
-  // 「动态」 (cutex project-events) only in this preview; ?legacy keeps the derived 最近动态.
-  ...(on ? { features: { new: ["project-events", "director-address", "director-change-notices", "director-handover", "management-start-adoption"] } } : {}),
+  // 「动态」 (cutex project-events) only in this preview; ?legacy (no features) or ?noprojectevents keeps the derived 最近动态.
+  // ?noprojectevents: a host with delegations but without the project log (the derived 最近动态 with its delegation rows).
+  ...(on ? { features: { new: [...(new URLSearchParams(location.search).has("noprojectevents") ? [] : ["project-events"]), "director-address", "director-change-notices", "director-handover", "management-start-adoption"] } } : {}),
 };
 
 function directorMock(core: MockCore): Partial<DesktopApi> {

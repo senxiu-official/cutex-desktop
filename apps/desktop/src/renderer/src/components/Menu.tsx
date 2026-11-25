@@ -1,5 +1,5 @@
 import { isImeComposing } from "../lib/ime";
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ButtonHTMLAttributes, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useTrackOverlay } from "../lib/openOverlays";
 import { useOwnerWindow } from "../lib/ownerContext";
@@ -25,9 +25,11 @@ export function Popover({
   triggerLabel,
   focusContent = false,
   keepMounted = false,
+  triggerProps,
 }: {
   trigger: ReactNode;
-  children: (close: () => void) => ReactNode;
+  /** `dismiss`: close and put focus back on the trigger (Escape inside the panel; a select's pick). */
+  children: (close: () => void, dismiss: () => void) => ReactNode;
   align?: "left" | "right";
   onOpen?(): void;
   /** Extra key handling while open (e.g. number shortcuts); return true if handled. */
@@ -46,6 +48,8 @@ export function Popover({
   focusContent?: boolean;
   /** Retain an action's confirmation/pending state when its panel is dismissed. */
   keepMounted?: boolean;
+  /** More trigger attributes (aria-labelledby, a closed-trigger onKeyDown, data-*), e.g. components/EntitySelect. */
+  triggerProps?: Omit<ButtonHTMLAttributes<HTMLButtonElement>, "type" | "onClick" | "disabled" | "className" | "children"> & { [data: `data-${string}`]: string | undefined };
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -55,6 +59,7 @@ export function Popover({
   const layers = useMenuLayers();
   useMenuLayer(panel, layers, open);
   const close = () => setOpen(false);
+  const dismiss = () => { setOpen(false); ref.current?.querySelector<HTMLButtonElement>(":scope > button")?.focus(); };
   useTrackOverlay(open);
   const win = useOwnerWindow();
   const doc = win?.document;
@@ -143,13 +148,14 @@ export function Popover({
     style={{ ...(height ? { height, maxHeight: "calc(100dvh - 9rem)" } : { maxHeight: "min(24rem, calc(100dvh - 32px))" }), ...(fitViewport ? { position: "fixed", ...position, right: "auto", bottom: "auto", maxWidth: "calc(100vw - 32px)", minWidth: "min(14rem, calc(100vw - 32px))" } : {}) }}
     data-popover={open ? "" : undefined}
     className={`float float-scroll absolute bottom-full z-[161] mb-1.5 max-h-96 overflow-y-auto p-1 ${width} ${align === "right" ? "right-0" : "left-0"}`}
-  ><MenuLayersContext.Provider value={layers}>{children(close)}</MenuLayersContext.Provider><FloatMore n={below} list={panel} /></div> : null;
+  ><MenuLayersContext.Provider value={layers}>{children(close, dismiss)}</MenuLayersContext.Provider><FloatMore n={below} list={panel} /></div> : null;
   return (
     <div ref={ref} className="relative">
       <button
+        {...triggerProps}
         type="button"
         disabled={disabled}
-        aria-label={triggerLabel}
+        aria-label={triggerLabel ?? triggerProps?.["aria-label"]}
         aria-expanded={open}
         data-tip={triggerTitle}
         onClick={() => {

@@ -35,6 +35,7 @@ import { openSubagentThread } from "../../lib/sideOpen";
 import { convApi, convFeaturesOf, convNotify, useConvScope, useConvViewHost } from "../../lib/conversationScope";
 import { CAPSULE_DOT, CAPSULE_LINE, CAPSULE_ROW, CAPSULE_ROW_ACTION, CAPSULE_ROW_ICON, CAPSULE_ROW_MAIN, CAPSULE_ROW_META, CAPSULE_ROW_META_STATIC, capsuleRowActions } from "../../lib/capsuleRows";
 import { useUserLayoutToggle } from "../../lib/userLayoutToggle";
+import { claudeTaskApprovalKey, useClaudeTaskApprovals } from "../../lib/claudeTaskApprovals";
 
 /** A running Claude background subagent's row: opens it (main button) and stops it (停止, click twice:
  *  lib/armedConfirm). Stopping ends only this subagent; the agent hears of it from cutex ("Claude Task"). */
@@ -78,6 +79,9 @@ function SubAgentRows({ sessionId, agents }: { sessionId: string; agents: SubAge
   useStopOutcomes();
   const canStop = useApp((s) => stopsClaudeTasks(features, convFeaturesOf(conv, s)));
   const background = canStop ? backgroundClaudeRefs(timeline) : null;
+  // r295: a background Claude subagent's tool approval was declined unattended (no button: nothing to approve now).
+  const approvals = useClaudeTaskApprovals((s) => s.byKey);
+  const denied = (threadId: string) => !!approvals[claudeTaskApprovalKey(hostId, threadId)];
   const stop = async (ref: string) => {
     const taskId = claudeTaskIdOf(ref);
     if (!taskId || !timeline?.threadId) return;
@@ -101,14 +105,17 @@ function SubAgentRows({ sessionId, agents }: { sessionId: string; agents: SubAge
             </span>
             <span className="min-w-0 flex-1 truncate">
               <span className="font-medium text-foreground">{a.name}</span>
-              {(a.message || a.task) && <span className="ml-1.5 text-subtle">{a.message || a.task}</span>}
+              {denied(a.threadId) ? (
+                <span data-approval-denied="" className="ml-1.5 text-warn-text">{t("subagents.deniedUnattended")}</span>
+              ) : (a.message || a.task) && <span className="ml-1.5 text-subtle">{a.message || a.task}</span>}
             </span>
             <span className={CAPSULE_ROW_META_STATIC}>{t(starting ? "subagents.starting" : "subagents.working")}</span>
           </>
         );
-        const tip = [a.task, a.message].filter(Boolean).join("\n");
+        const deniedHint = denied(a.threadId) ? t("subagents.deniedUnattendedHint") : null;
+        const tip = [deniedHint, a.task, a.message].filter(Boolean).join("\n");
         if (background?.has(a.threadId) && !starting)
-          return <BackgroundSubAgentRow key={a.threadId} a={a} body={body} tip={subAgentTooltip(a.threadId, a)} outcome={stopOutcomeOf(sessionId, a.threadId)} onOpen={() => void openSubagentThread(a.threadId, sessionId)} onStop={() => stop(a.threadId)} />;
+          return <BackgroundSubAgentRow key={a.threadId} a={a} body={body} tip={[deniedHint, subAgentTooltip(a.threadId, a)].filter(Boolean).join("\n")} outcome={stopOutcomeOf(sessionId, a.threadId)} onOpen={() => void openSubagentThread(a.threadId, sessionId)} onStop={() => stop(a.threadId)} />;
         // A Claude task of an adapter without transcripts: status only, nothing to open.
         return !canOpenSubAgent(a.threadId, features) ? (
           <div key={a.threadId} data-capsule-row="" data-tip={[t("sub.claudeTask"), tip].filter(Boolean).join("\n")} className={CAPSULE_ROW}>

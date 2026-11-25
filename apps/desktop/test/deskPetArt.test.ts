@@ -104,14 +104,16 @@ describe("art files", () => {
   });
 
   it("caps the number of characters; other files are ignored", async () => {
-    for (let i = 0; i < DESK_PET_ART.maxCharacters + 2; i++) set(`c${String(i).padStart(2, "0")}`);
-    writeFileSync(join(art, "notes.txt"), "x");
-    const { listed, problems } = await listCharacters(art, null);
-    expect(listed.size).toBe(DESK_PET_ART.maxCharacters);
-    expect(problems.map((p) => p.code)).toEqual(["tooMany", "tooMany"]);
-    // Real files: 258 sets (1,000+ writes) and 256 of them checked one by one (~5,000 fs calls), ~1 s alone on
-    // Windows; under the full suite's load that crossed 5 s. The work, not a wait.
-  }, 30_000);
+    const originalLimit = Object.getOwnPropertyDescriptor(DESK_PET_ART, "maxCharacters")!;
+    Object.defineProperty(DESK_PET_ART, "maxCharacters", { value: 2 });
+    try {
+      for (const id of ["c0", "c1", "c2", "c3"]) set(id);
+      writeFileSync(join(art, "a-notes.txt"), "x");
+      expect(await codes()).toEqual({ ids: ["c0", "c1"], problems: ["c2/null: tooMany", "c3/null: tooMany"] });
+    } finally {
+      Object.defineProperty(DESK_PET_ART, "maxCharacters", originalLimit);
+    }
+  });
 
   it("pack art lists after the folder; the folder wins an id; a pack read is what it is", async () => {
     set("same");

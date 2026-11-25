@@ -1,5 +1,5 @@
 // LEGACY(input-ledger-v1): frozen delivery inference for older hosts.
-// Delete only when EVERY host advertises input-ledger-v1 (including hachimi).
+// Delete only when EVERY host advertises input-ledger-v1 (including hostc).
 // Shared admission order (cutex `admission-order`, docs/cutex-agent-asks.md §5.3 *Shared admission
 // order*), shown as turn groups (docs/research/queue-turn-groups-plan-20261012.md): what the agent
 // reads next, turn by turn. The current turn (while one runs) holds the owner's inserts and the

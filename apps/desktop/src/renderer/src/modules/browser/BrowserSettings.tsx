@@ -19,6 +19,9 @@ import { settingsAnchorId } from "../../lib/settingsNav";
 import { useScrollToSettingsAnchor } from "../../lib/settingsFocus";
 import { matchesFilter } from "../../lib/listFilter";
 import { BrowserDesktopLoopbackSettings } from "./BrowserDesktopLoopbackSettings";
+import { useBrowserIdentities } from "./identities";
+import { DEFAULT_BROWSER_IDENTITY_ID } from "../../../../shared/browserIdentity";
+import { BrowserIdentitiesSection, BrowserResearchSection, BrowserSearchHistorySection } from "./IdentitySettings";
 
 /** The host rows need the relay; a host without it shows 「需要升级 cutex」. */
 const HOST_PART_REQUIRES = ["browser-relay-v1"] as const;
@@ -69,9 +72,12 @@ function BrowserExternalPagesSettings() {
 /** Sites the 浏览器 page shows; 全部 is its sub-page. */
 const SITES_ON_PAGE = 5;
 
-/** Remembered per-origin site permissions: main stores them; the owner can only read and forget. `all`: the sub-page's whole list. */
-export function BrowserSitePermissionSettings({ all = false }: { all?: boolean }) {
+/** Remembered per-origin site permissions: main stores them; the owner can only read and forget. `all`: the sub-page's whole list.
+ *  浏览器身份: one site per identity (owner pool; named when not the default); `identityId`: only that identity's (its page). */
+export function BrowserSitePermissionSettings({ all = false, identityId }: { all?: boolean; identityId?: string }) {
   const { t } = useI18n();
+  const identities = useBrowserIdentities((s) => s.state?.identities);
+  const identityName = (id: string | undefined) => (id && id !== DEFAULT_BROWSER_IDENTITY_ID ? identities?.find((i) => i.id === id)?.name ?? id : null);
   const [filter, setFilter] = useState("");
   const [entries, setEntries] = useState<BrowserSitePermissionView[] | null>(null);
   const [busy, setBusy] = useState(false), [error, setError] = useState<string | null>(null);
@@ -87,26 +93,29 @@ export function BrowserSitePermissionSettings({ all = false }: { all?: boolean }
     catch (reason) { setError(browserError(reason)); }
     finally { setBusy(false); }
   }
-  const sites = new Map<string, { pool: "owner" | "agent"; origin: string; items: BrowserSitePermissionView[] }>();
+  const sites = new Map<string, { pool: "owner" | "agent"; origin: string; identity?: string; items: BrowserSitePermissionView[] }>();
+  const ofIdentity = (entry: BrowserSitePermissionView) => (entry.pool === "owner" ? entry.browserIdentityId ?? DEFAULT_BROWSER_IDENTITY_ID : undefined);
   for (const entry of entries ?? []) {
-    const id = `${entry.pool}\n${entry.origin}`;
-    if (!sites.has(id)) sites.set(id, { pool: entry.pool, origin: entry.origin, items: [] });
+    if (identityId && (entry.pool !== "owner" || ofIdentity(entry) !== identityId)) continue;
+    const identity = ofIdentity(entry);
+    const id = `${entry.pool}\n${identity ?? ""}\n${entry.origin}`;
+    if (!sites.has(id)) sites.set(id, { pool: entry.pool, origin: entry.origin, ...(identity ? { identity } : {}), items: [] });
     sites.get(id)!.items.push(entry);
   }
   const listed = [...sites.values()];
   const rows = all ? listed.filter(site => matchesFilter(filter, site.origin)) : listed.slice(0, SITES_ON_PAGE);
-  return <Section id={all ? settingsAnchorId("site-permissions-all") : settingsAnchorId("site-permissions")} title={all ? t("browser.sitePermissions.all", { n: listed.length }) : t("browser.sitePermissions.title")} hint={all ? undefined : t("browser.sitePermissions.hint")}
-    actions={sites.size > 0 ? <button type="button" data-browser-site-permissions-forget-all disabled={busy} onClick={() => void forget("all")} className="rounded text-xs text-accent hover:underline disabled:opacity-40">{t("browser.sitePermissions.forgetAll")}</button> : undefined}>
+  return <Section id={identityId ? undefined : all ? settingsAnchorId("site-permissions-all") : settingsAnchorId("site-permissions")} title={identityId ? t("browser.identity.page.permissions") : all ? t("browser.sitePermissions.all", { n: listed.length }) : t("browser.sitePermissions.title")} hint={all || identityId ? undefined : t("browser.sitePermissions.hint")}
+    actions={sites.size > 0 && !identityId ? <button type="button" data-browser-site-permissions-forget-all disabled={busy} onClick={() => void forget("all")} className="rounded text-xs text-accent hover:underline disabled:opacity-40">{t("browser.sitePermissions.forgetAll")}</button> : undefined}>
     {/* One site = one ListRow (origin, what it may use, 忘记), like every other entity list in Settings. */}
     <SettingsGroup agents="now" source="local"><div data-browser-site-permissions>
       {!entries && !error && <Loading rows={1} />}
-      {entries && sites.size === 0 && <EmptyState>{t("browser.sitePermissions.empty")}</EmptyState>}
+      {entries && sites.size === 0 && <EmptyState>{t(identityId ? "browser.identity.page.permissionsEmpty" : "browser.sitePermissions.empty")}</EmptyState>}
       {all && <div role="search" className="contents"><ListFilter count={listed.length} value={filter} onChange={setFilter} /></div>}
       {all && listed.length > 0 && rows.length === 0 && <EmptyState>{t("settings.filterNone")}</EmptyState>}
-      {rows.map(site => <ListRow key={`${site.pool} ${site.origin}`}
-        title={<span title={site.origin}>{site.origin}{site.pool === "agent" && <span className="ml-1.5 text-subtle">({t("browser.sitePermissions.agentPool")})</span>}</span>}
+      {rows.map(site => <ListRow key={`${site.pool} ${site.identity ?? ""} ${site.origin}`}
+        title={<span title={site.origin}>{site.origin}{site.pool === "agent" && <span className="ml-1.5 text-subtle">({t("browser.sitePermissions.agentPool")})</span>}{!identityId && identityName(site.identity) && <span data-site-permission-identity={site.identity} className="ml-1.5 text-subtle">({t("browser.identity.sitePermissions.tag", { name: identityName(site.identity)! })})</span>}</span>}
         detail={site.items.map(item => `${t(`browser.sitePermission.${item.permission}` as Parameters<typeof t>[0])}: ${t(item.allow ? "browser.sitePermissions.allowed" : "browser.sitePermissions.blocked")}`).join(" · ")}
-        actions={<Button disabled={busy} onClick={() => void forget({ pool: site.pool, origin: site.origin })}>{t("browser.sitePermissions.forget")}</Button>} />)}
+        actions={<Button disabled={busy} onClick={() => void forget({ pool: site.pool, origin: site.origin, ...(site.identity && site.identity !== DEFAULT_BROWSER_IDENTITY_ID ? { browserIdentityId: site.identity } : {}) })}>{t("browser.sitePermissions.forget")}</Button>} />)}
     </div></SettingsGroup>
     {!all && listed.length > SITES_ON_PAGE && <SubPageRow title={t("browser.sitePermissions.all", { n: listed.length })} onOpen={() => useApp.getState().openSettings("browser", { sub: "sites" })} />}
     {error && <p role="alert" className="text-xs text-danger">{t("browser.actionFailed", { reason: t(browserErrorKey(error)) })}</p>}
@@ -142,7 +151,7 @@ export function BrowserSettings() {
   }
   // Two parts (review 2026-10-15 UI-02): this computer's browser, then the Settings target host's
   // agent permissions (the host pages' picker; never the focus host in its place).
-  return <><SettingsDevicePart title={t("browser.part.device")} hint={t("browser.part.deviceHint")}><Section title={t("browser.settings")} hint={t("browser.owner.settingsHint")}
+  return <><SettingsDevicePart title={t("browser.part.device")} hint={t("browser.part.deviceHint")}><BrowserIdentitiesSection /><BrowserSearchHistorySection /><Section title={t("browser.settings")} hint={t("browser.owner.settingsHint")}
     actions={<ResetButton onClick={() => save(DEFAULT_BROWSER_CONTROL_SETTINGS)} title={t("browser.settingsReset")} />}>
     <BrowserCursorSettings />
     <SettingRow agents="now" source="local" label={t("browser.hiddenTarget")} hint={t("browser.hiddenTargetHint")} reset={<ResetButton disabled={settings.hiddenTarget === DEFAULT_BROWSER_CONTROL_SETTINGS.hiddenTarget} onClick={() => save({ ...settings, hiddenTarget: DEFAULT_BROWSER_CONTROL_SETTINGS.hiddenTarget })} />}>
@@ -177,7 +186,7 @@ export function BrowserSettings() {
     {error && <p role="alert" className="text-xs text-danger">{t("browser.actionFailed", { reason: t(browserErrorKey(error)) })}</p>}
     <LinkRow agents="now" source="local" label={t("browser.hold.limit")} hint={t("browser.hold.hint")} link={t("browser.hold.link")}
       onClick={() => useApp.getState().openSettings("sides", { anchor: "sides" })} />
-  </Section><BrowserExternalPagesSettings /><BrowserSitePermissionSettings /></SettingsDevicePart>
+  </Section><BrowserExternalPagesSettings /><BrowserSitePermissionSettings /><BrowserResearchSection /></SettingsDevicePart>
   <SettingsHostPart title={t("browser.desktopLoopback.title")}><BrowserDesktopLoopbackSettings /></SettingsHostPart>
   <SettingsHostPart title={t("browser.part.host")} hint={t("browser.part.hostHint")} requires={HOST_PART_REQUIRES}>
     <BrowserHostSettings /><BrowserClaimSettings />

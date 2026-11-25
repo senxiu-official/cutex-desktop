@@ -31,9 +31,9 @@
 // package so the in-app updater signs the next release with it too. On Windows cutex.exe also gets the app icon and "Cutex"
 // version strings (resedit, pure JS — the `rcedit` npm package is deprecated) instead of
 // Electron's, so Explorer and the taskbar show the dragon.
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { thirdPartyNotices } from "./third-party-notices.mjs";
@@ -94,6 +94,11 @@ cpSync(join(app, "out"), join(target, "out"), { recursive: true });
 // Main references resources/icons as ../../resources/icons from out/main (electron-vite leaves
 // resources/ in place), so ship the icon set next to out/; the source logo stays behind.
 cpSync(join(app, "resources/icons"), join(target, "resources/icons"), { recursive: true });
+// koffi, the one native dependency (saved browser passwords on Windows: Credential Manager + Windows Hello; docs/DESIGN.md
+// browser contract). The main bundle keeps `import("koffi")` external, so ship it as resources/app/node_modules: koffi's
+// JS loader (no C sources, docs or vendored headers) and the platform's prebuilt @koromix/koffi-<platform>-<arch> (the
+// .node, as published; never built here). There is no asar, so nothing needs unpacking. Only Windows loads it.
+if (process.platform === "win32") copyKoffi(target);
 // Attribution: our NOTICE + license texts, and the notices of the npm packages bundled into out/.
 cpSync(join(root, "NOTICE"), join(dest, "NOTICE"));
 cpSync(join(root, "LICENSES"), join(dest, "LICENSES"), { recursive: true });
@@ -223,4 +228,23 @@ async function stampExe(exePath, icoPath, pkg) {
   vi.outputToResourceEntries(res.entries);
   res.outputResource(exe);
   writeFileSync(exePath, Buffer.from(exe.generate()));
+}
+
+/** koffi's runtime files and the prebuilt binary of this platform into <app>/node_modules (pnpm: real paths, no links). */
+function copyKoffi(appTarget) {
+  const koffiDir = realpathSync(join(app, "node_modules", "koffi"));
+  const pkg = JSON.parse(readFileSync(join(koffiDir, "package.json"), "utf8"));
+  const pinned = JSON.parse(readFileSync(join(app, "package.json"), "utf8")).dependencies.koffi;
+  if (pkg.version !== pinned) throw new Error(`koffi ${pkg.version} is installed, apps/desktop pins ${pinned}: run pnpm install`);
+  const nativeName = `@koromix/koffi-${process.platform}-${process.arch}`;
+  const nativeDir = realpathSync(join(dirname(koffiDir), ...nativeName.split("/"))); // pnpm links optional deps beside koffi
+  const nativePkg = JSON.parse(readFileSync(join(nativeDir, "package.json"), "utf8"));
+  if (nativePkg.version !== pkg.version) throw new Error(`${nativeName} ${nativePkg.version} does not match koffi ${pkg.version}`);
+  const skip = (from, base) => {
+    const rel = relative(base, from).replace(/\\/g, "/");
+    return /^(doc|vendor)(\/|$)/.test(rel) || /\.(cc|hh|inc|def|lib)$/.test(rel) || /(^|\/)(CMakeLists\.txt|cnoke\.cjs)$/.test(rel) || rel === "src/koffi/src/abi" || rel.startsWith("src/koffi/src/abi/");
+  };
+  const modules = join(appTarget, "node_modules");
+  cpSync(koffiDir, join(modules, "koffi"), { recursive: true, filter: (from) => !skip(from, koffiDir) });
+  cpSync(nativeDir, join(modules, ...nativeName.split("/")), { recursive: true, filter: (from) => !skip(from, nativeDir) });
 }

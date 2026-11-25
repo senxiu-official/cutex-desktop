@@ -8,6 +8,7 @@
 //                  conversation header's controls and 「太窄？收起 X」 (002)
 // Plans are pure (`agentPlan`, tested in test/workspaceEffects.test.ts); the foretells read the DOM only for
 // the boxes they outline. Shell code: names no feature.
+import { newInstanceKey } from "./openModifiers";
 import { translate } from "../i18n";
 import { paneArea, shelfSideArea } from "./foretellAreas";
 import { enterShelfOnly, leaveShelfOnly, leaveShelfOnlyOf, shelfOnlyPanes, shelfOnlyPlan, useShelfOnly } from "./shelfOnly";
@@ -61,7 +62,7 @@ const nameOf = (hostId: string, sessionId: string | null): string => {
   return [...(sidebar?.active ?? []), ...(sidebar?.retired ?? [])].find((r) => r.cutexSessionId === sessionId)?.displayName ?? sessionId;
 };
 
-const besideKey = (): string => (typeof navigator !== "undefined" && navigator.platform?.startsWith("Mac") ? "⌘" : "Ctrl");
+const besideKey = (): string => newInstanceKey();
 
 // ── Agents ──────────────────────────────────────────────────────────────────────────────────────
 

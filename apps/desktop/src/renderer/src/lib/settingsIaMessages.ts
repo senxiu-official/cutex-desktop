@@ -1,7 +1,7 @@
 /** Settings information architecture; stored preference names and page ids are unchanged. */
 export const settingsIaZhCN = {
   "settings.ia.avatars": "头像与身份标记",
-  "settings.ia.avatarsHint": "本设备的默认头像显示方式。主题在下方选择；已有{{agent}}可单独设置头像。",
+  "settings.ia.avatarsHint": "桌面应用的默认头像显示方式。主题在下方选择；已有{{agent}}可单独设置头像。",
   "settings.ia.avatarLink": "头像与身份标记",
   "settings.ia.messages": "消息",
   "settings.ia.input": "输入",
@@ -14,18 +14,18 @@ export const settingsIaZhCN = {
   "settings.ia.bulkConfirm": "将修改 {hosts} 上的 {n} 个{{agent}}头像。完成后可以在这里撤销。",
   "settings.ia.bulkApply": "修改这些头像",
   "settings.ia.homeScope": "主页内容保存在主机 {host}，可在连接此主机的其他设备上使用。",
-  "settings.ia.homeLocal": "此主机暂不支持保存主页，主页内容仅保存在本设备。",
+  "settings.ia.homeLocal": "此主机暂不支持保存主页，主页内容仅保存在桌面应用里。",
   "settings.ia.emptyConfirm": "启用后，在主机 · {host} 归档空的{{agent}}或工作时会直接删除，不能从归档里恢复。",
   "settings.ia.emptyEnable": "确认启用直接删除",
   "settings.ia.emptyCancel": "取消",
-  "settings.ia.pageDataLink": "下方的页面数据保存在本设备；主机磁盘占用请查看「存储」。",
+  "settings.ia.pageDataLink": "下方的页面数据保存在桌面应用里；主机磁盘占用请查看「存储」。",
   "settings.ia.storageLink": "查看主机存储",
   "settings.ia.runtimeHint": "这里升级已有{{agent}}的运行时；主机程序更新和新{{agent}}默认使用的版本在“主机后端更新”。",
 } as const;
 
 export const settingsIaEn: Record<keyof typeof settingsIaZhCN, string> = {
   "settings.ia.avatars": "Avatars & identity marks",
-  "settings.ia.avatarsHint": "Default avatar display on this device. Choose themes below; existing {{agents}} can have individual avatars.",
+  "settings.ia.avatarsHint": "Default avatar display in the desktop app. Choose themes below; existing {{agents}} can have individual avatars.",
   "settings.ia.avatarLink": "Avatars and identity marks",
   "settings.ia.messages": "Messages",
   "settings.ia.input": "Input",
@@ -38,11 +38,11 @@ export const settingsIaEn: Record<keyof typeof settingsIaZhCN, string> = {
   "settings.ia.bulkConfirm": "Change avatars for {n} {{agents}} on {hosts}. You can undo these changes here afterwards.",
   "settings.ia.bulkApply": "Change these avatars",
   "settings.ia.homeScope": "Home content is saved on host {host} and available on other devices connected to it.",
-  "settings.ia.homeLocal": "This host does not support home storage yet; home content is saved only on this device.",
+  "settings.ia.homeLocal": "This host does not support home storage yet; home content is saved only in the desktop app.",
   "settings.ia.emptyConfirm": "When enabled, archiving an empty {{agent}} or work session on host · {host} deletes it immediately. It cannot be restored from the archive.",
   "settings.ia.emptyEnable": "Enable direct deletion",
   "settings.ia.emptyCancel": "Cancel",
-  "settings.ia.pageDataLink": "Page data below is saved on this device; see Storage for host disk usage.",
+  "settings.ia.pageDataLink": "Page data below is saved in the desktop app; see Storage for host disk usage.",
   "settings.ia.storageLink": "View host storage",
   "settings.ia.runtimeHint": "Upgrade existing {{agents}}' runtimes here. Host program updates and the default runtime for new {{agents}} are under Host backend updates.",
 };

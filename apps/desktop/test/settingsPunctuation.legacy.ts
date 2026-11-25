@@ -16,7 +16,7 @@ export const LEGACY_SECTION_HINTS: ReadonlySet<string> = new Set<string>([
   "agent-config.profiles.new.hint",
   "agent-config.quickChats.hint",
   "agent-config.quota.hint",
-  "agent-config.titles.hint",
+  "agent-config.quickChats.titles.hint",
   "appearance.launchArtHint",
   "backend-upgrade.rollback.hint",
   "browser.claim.allowsHint",

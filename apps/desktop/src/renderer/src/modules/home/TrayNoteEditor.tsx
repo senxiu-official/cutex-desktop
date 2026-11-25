@@ -119,7 +119,7 @@ function Editor({ edit }: { edit: NoteEdit }) {
             {t("tray.note.clear")}
           </button>
         )}
-        <button type="button" data-note-save="" disabled={busy || !dirty || text.length > edit.max} onClick={() => void save(text)} className="press-solid rounded-md bg-accent px-2.5 py-0.5 font-medium text-white hover:opacity-90 disabled:opacity-50">
+        <button type="button" data-note-save="" disabled={busy || !dirty || text.length > edit.max} onClick={() => void save(text)} className="press-solid rounded-md bg-accent px-2.5 py-0.5 font-medium text-on-accent hover:opacity-90 disabled:opacity-50">
           {t("tray.note.save")}
         </button>
       </div>

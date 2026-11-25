@@ -79,6 +79,8 @@ export function createMockInputLedger(scene: LedgerScene = "turn", emit: Emit = 
     if (NOTE_DELIVERY_SCENE) for (const record of noteDeliveryRecords(id, clock(), s.revision)) s.records.set(record.inputId, record);
     // ?interruptMany: three SYNTHETIC unread 插话 in the running turn (dev/mockInterruptMany).
     if (INTERRUPT_MANY_SCENE) for (const record of interruptManyRecords(id, s.delivery, clock(), s.revision)) s.records.set(record.inputId, record);
+    // A SYNTHETIC delegation status notice (ask-hf-stop was stopped) waiting for Lead; r295 hosts add who ended it (modules/delegations/mock.ts terminal notices).
+    if (id === "lead" && typeof location !== "undefined") { const record = terminalNoticeRecord(id, clock(), s.revision); s.records.set(record.inputId, record); }
     return s;
   }
   function loadCapture(id: string, trace: string, requestedLine?: number, sourceSessionId?: string) {
@@ -262,4 +264,13 @@ export function createMockInputLedger(scene: LedgerScene = "turn", emit: Emit = 
     return put(id, inputId, { state, reason: state === "uncertain" ? "outcomeUnknown" : null, surface: state === "uncertain" ? r.surface : "timeline", order: state === "uncertain" ? r.order : null, since: iso(), deadline: state === "accepted" ? new Date(clock() + 60000).toISOString() : null, actions: state === "uncertain" ? ["retry", "dismiss"] : [], evidence: state === "inContext" ? "contextPersisted" : null, turnId: state === "inContext" ? get(id).delivery.turn?.turnId ?? r.turnId ?? "synthetic-preview-turn" : r.turnId });
   }
   return { notice: INPUT_LEDGER_FIXTURE_NOTICE, scene, api, snapshot, queueSnapshot, promote, remove, submit, advance, put, setDelivery, replay, provenance: (id: string) => { get(id); return structuredClone(provenance.get(id)); } };
+}
+
+/** A SYNTHETIC `delegationStatus` record (cutex r295 terminal notice of ask-hf-stop) for the 接下来 preview. */
+function terminalNoticeRecord(id: string, now: number, revision: number): InputRecord {
+  const at = (ago: number) => new Date(now - ago).toISOString();
+  return { inputId: "status-ask-hf-stop", cutexSessionId: id, kind: "delegationStatus", sender: { kind: "cutex", id: "cutex-asks", name: "cutex", host: null, cutexSessionId: null },
+    intent: { strategy: null, deliveryMode: null, timing: "afterTurn" }, preview: "terminal@9: 跑一遍 provider 回归测试", createdAt: at(1380_000), state: "waiting", reason: "afterTurn", since: at(1380_000), deadline: null, stage: null,
+    surface: "nextUp", order: null, turnId: null, timelineItemId: null, runtimeGeneration: 1, attempt: 1, supersededBy: null, batchId: null, askId: "ask-hf-stop", remote: null, stalled: null,
+    actions: ["dismiss"], error: null, evidence: null, details: { fixture: "SYNTHETIC preview row (r295 terminal notice), not a capture" }, rev: 1, stateRevision: revision, updatedAt: at(1380_000) };
 }

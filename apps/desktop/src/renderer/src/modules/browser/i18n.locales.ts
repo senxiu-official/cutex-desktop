@@ -1,5 +1,7 @@
 import type { zhCN } from "./i18n";
+import { browserIdentityZhHantCN } from "./identityMessages";
 const zhHantCN = {
+  ...(browserIdentityZhHantCN as Record<keyof typeof import("./identityMessages").browserIdentityZhCN, string>),
   "browser.blockedNav.notice": "已攔下一次自動跳轉：{host}",
   "browser.blockedNav.open": "仍然打開",
   "browser.blockedNav.opening": "正在打開…",

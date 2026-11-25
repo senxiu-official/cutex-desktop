@@ -4,12 +4,14 @@
 // conversation chips go), side-by-side geometry (lib/workspaceRow — test/workspaceRow.test.ts —, the sidebar's automatic rail),
 // the drop rules (dropOutcome per target), ⌘K modes (agents only have side by side; rows as workspace refs),
 // 「—」 = close the pane, openBeside without chips.
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SideBinding } from "../src/renderer/src/modules/slots";
 import type { ItemId } from "../src/renderer/src/modules/types";
 import { applyOpen, emptyLayout, findPage, locate, moveToNewPage, place, placeSpec, setPageShared, shelvesOf, SINGLETON_KEY, collapseShelf, type SideLayout } from "../src/renderer/src/lib/sideLayout";
 import { convKey, fromTemplate, maxSeq, mergeShared, metaOf, parseConvKey, renumber, sharedPages, splitShared } from "../src/renderer/src/lib/convShelves";
 import { bindPane, closePaneOverlay, conversationPanes, defaultLayout, emptyWork, focusPane, joinLayout, openBeside, paneBinding, toolPartOf, MAIN_PANE, CONVERSATION_MIN_W } from "../src/renderer/src/lib/paneLayout";
+import { useApp } from "../src/renderer/src/store";
+import * as side from "../src/renderer/src/lib/sideLayoutStore";
 
 vi.mock("../src/renderer/src/bridge", () => ({ api: {}, bridge: {}, onEvent: () => () => {}, cleanIpcMessage: (m: string) => m }));
 
@@ -119,20 +121,19 @@ describe("convShelves (pure)", () => {
   });
 });
 
-// The first test of each block imports the stores afresh (vi.resetModules): slow under a full parallel run.
-describe("a Shelf per conversation (lib/sideLayoutStore)", { timeout: 20_000 }, () => {
+describe("a Shelf per conversation (lib/sideLayoutStore)", () => {
   let storage: Map<string, string>;
   beforeEach(() => {
-    vi.resetModules();
     storage = new Map();
     vi.stubGlobal("localStorage", { getItem: (k: string) => storage.get(k) ?? null, setItem: (k: string, v: string) => void storage.set(k, v), removeItem: (k: string) => void storage.delete(k) });
     if (typeof window === "undefined") vi.stubGlobal("window", { addEventListener: () => {}, removeEventListener: () => {} });
+    side.resetConvShelves();
+    side.useSide.setState(side.useSide.getInitialState(), true);
   });
+  afterEach(() => vi.unstubAllGlobals());
 
-  async function start(selected: string | null) {
-    const { useApp } = await import("../src/renderer/src/store");
-    const side = await import("../src/renderer/src/lib/sideLayoutStore");
-    useApp.setState({ selectedId: selected, selectedHost: "local" });
+  function start(selected: string | null) {
+    useApp.setState({ ...useApp.getInitialState(), selectedId: selected, selectedHost: "local" }, true);
     const stop = side.startSideStore(() => () => {});
     const openHere = (kind: string, binding: Binding, home: string, key: string | null = SINGLETON_KEY) => {
       let id = "";
@@ -146,8 +147,8 @@ describe("a Shelf per conversation (lib/sideLayoutStore)", { timeout: 20_000 }, 
     return { useApp, side, stop, openHere };
   }
 
-  it("each conversation's Shelf comes back on switch (pages, panes, page in view, collapsed); a new one starts from the default layout", async () => {
-    const { useApp, side, stop, openHere } = await start("A");
+  it("each conversation's Shelf comes back on switch (pages, panes, page in view, collapsed); a new one starts from the default layout", () => {
+    const { useApp, side, stop, openHere } = start("A");
     try {
       const files = openHere("workspace.files", follow, "files");
       const chat = openHere("side-chat.chat", { kind: "agent", hostId: "local", sessionId: "A" }, "chat");
@@ -184,8 +185,8 @@ describe("a Shelf per conversation (lib/sideLayoutStore)", { timeout: 20_000 }, 
     }
   });
 
-  it("no agent focused (the desktop): the Shelf stays as it is; the first agent with no Shelf of its own takes it", async () => {
-    const { useApp, side, stop, openHere } = await start(null);
+  it("no agent focused (the desktop): the Shelf stays as it is; the first agent with no Shelf of its own takes it", () => {
+    const { useApp, side, stop, openHere } = start(null);
     try {
       expect(side.liveConversation()).toBeNull();
       const files = openHere("workspace.files", follow, "files");
@@ -200,8 +201,8 @@ describe("a Shelf per conversation (lib/sideLayoutStore)", { timeout: 20_000 }, 
     }
   });
 
-  it("a shared page is in every conversation's Shelf — one instance that moves with the focus; unsharing makes it the focused one's own", async () => {
-    const { useApp, side, stop, openHere } = await start("A");
+  it("a shared page is in every conversation's Shelf — one instance that moves with the focus; unsharing makes it the focused one's own", () => {
+    const { useApp, side, stop, openHere } = start("A");
     try {
       openHere("workspace.files", follow, "files");
       const book = openHere("browser.tab", host, "browser", "k1");
@@ -233,7 +234,7 @@ describe("a Shelf per conversation (lib/sideLayoutStore)", { timeout: 20_000 }, 
     }
   });
 
-  it("migration v4 → v5: the global Shelf becomes the default layout and the focused conversation's own; conversation chips go; nothing is lost", async () => {
+  it("migration v4 → v5: the global Shelf becomes the default layout and the focused conversation's own; conversation chips go; nothing is lost", () => {
     let tools = open(emptyLayout(), "workspace.files", follow, "files").layout;
     const book = open(tools, "browser.tab", host, "browser", "k1");
     tools = book.layout;
@@ -243,7 +244,7 @@ describe("a Shelf per conversation (lib/sideLayoutStore)", { timeout: 20_000 }, 
     work = { ...work, chips: ["c9"], panes: { ...work.panes, c9: { tabs: ["c9"], active: "c9", at: 1, home: { at: 1 } } }, instances: { ...work.instances, c9: { kind: "core.conversation", binding: { kind: "agent", hostId: "local", sessionId: "z" }, params: {}, state: null } } };
     work = focusPane(work, MAIN_PANE, 6);
     storage.set("cutex-desktop.panes", JSON.stringify({ v: 4, layouts: { "host:local": joinLayout(work, toolPartOf(tools)) }, singleShelf: false }));
-    const { useApp, side, stop } = await start(null);
+    const { useApp, side, stop } = start(null);
     try {
       const file = JSON.parse(storage.get("cutex-desktop.panes")!);
       expect(file.v).toBe(5);

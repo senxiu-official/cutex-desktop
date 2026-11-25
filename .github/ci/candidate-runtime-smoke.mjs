@@ -150,6 +150,17 @@ try {
   const metadataPath = rel => mac ? join(rel, 'Cutex.app/Contents/Resources/app/package.json') : join(rel, 'resources/app/package.json');
   const old = JSON.parse(readFileSync(metadataPath(release), 'utf8'));
   assert(old.version === from && old.updateTestHooks !== true, 'old package identity/hooks differ');
+  const appRoot = dirname(metadataPath(release));
+  const koffiRoot = join(appRoot, 'node_modules/koffi');
+  if (win) {
+    const koffi = JSON.parse(readFileSync(join(koffiRoot, 'package.json'), 'utf8'));
+    assert(koffi.version === '3.3.8', 'Windows koffi version differs');
+    assert(existsSync(join(appRoot, 'node_modules/@koromix/koffi-win32-x64')), 'Windows koffi prebuilt missing');
+    result.koffi = { present: true, version: koffi.version, platform: 'win32-x64' };
+  } else {
+    assert(!existsSync(koffiRoot), 'non-Windows package unexpectedly includes koffi');
+    result.koffi = { present: false };
+  }
   result.fromPackage = { version: old.version, commit: old.commit, updateTestHooks: old.updateTestHooks === true };
   const executable = mac ? join(release, 'Cutex.app/Contents/MacOS/Cutex') : join(release, win ? 'cutex.exe' : 'cutex');
   const env = { ...process.env };
@@ -170,6 +181,14 @@ try {
     return state.ready === 'complete' && state.textLength > 50 ? state : null;
   });
   result.renderer = ui;
+  // Status reads availability only: never verify/enrol Hello or reveal/copy/fill a password.
+  const passwordStatus = await evaluate('cutex.browser.identities.passwordStatus()');
+  assert(typeof passwordStatus?.available === 'boolean' && typeof passwordStatus.keyLost === 'boolean'
+    && Number.isInteger(passwordStatus.unreadable) && passwordStatus.unreadable >= 0
+    && [0, 5].includes(passwordStatus.graceMinutes), 'password service status malformed');
+  assert(passwordStatus.available || ['noHello', 'noKeyring', 'unsupported'].includes(passwordStatus.reason),
+    'password service unavailable without a supported reason');
+  result.passwordStatus = passwordStatus;
   result.candidatePackage = result.fromPackage; delete result.fromPackage;
   result.runtimeState = result.before; delete result.before;
   await shot('candidate');

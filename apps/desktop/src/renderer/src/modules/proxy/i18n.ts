@@ -1,6 +1,6 @@
 export const zhCN = {
   "proxy.title": "网络代理",
-  "proxy.description": "设置本设备的桌面更新代理和所选主机的网络代理；Profile 可单独覆盖主机代理",
+  "proxy.description": "设置桌面应用的更新代理和所选主机的网络代理；Profile 可单独覆盖主机代理",
   "proxy.page": "网络代理",
   "proxy.pageHint": "两项各自独立：桌面应用连接 cutex 始终直连，不受这里影响。",
   "proxy.mode.system": "跟随系统",
@@ -21,7 +21,7 @@ export const zhCN = {
   "proxy.loopback": "127.0.0.1、localhost、::1 始终直连",
   "proxy.badUrl": "代理地址格式不对：应为 http://主机:端口（或 https / socks5）",
   "proxy.badScheme": "不支持这种代理协议：请用 http、https 或 socks5",
-  "proxy.part.device": "本设备",
+  "proxy.part.device": "桌面应用",
   "proxy.part.host": "主机",
   "proxy.update.title": "本机更新代理",
   "proxy.update.hint": "只用于这台电脑检查和下载桌面应用更新；不影响桌面应用连接 cutex",

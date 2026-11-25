@@ -4,7 +4,7 @@ import type { zhCN } from "./i18n";
 
 export const en: Record<keyof typeof zhCN, string> = {
   "proxy.title": "Network proxy",
-  "proxy.description": "Set proxies for desktop updates on this device and network requests on the selected host; profiles can override the host proxy",
+  "proxy.description": "Set proxies for the desktop app's updates and network requests on the selected host; profiles can override the host proxy",
   "proxy.page": "Network proxy",
   "proxy.pageHint": "Two separate settings: the desktop always connects to cutex directly, whatever is set here.",
   "proxy.mode.system": "Follow system",
@@ -25,7 +25,7 @@ export const en: Record<keyof typeof zhCN, string> = {
   "proxy.loopback": "127.0.0.1, localhost and ::1 always go direct",
   "proxy.badUrl": "Not a proxy URL: use http://host:port (or https / socks5)",
   "proxy.badScheme": "Unsupported proxy type: use http, https or socks5",
-  "proxy.part.device": "This device",
+  "proxy.part.device": "Desktop app",
   "proxy.part.host": "Host",
   "proxy.update.title": "Update proxy (this desktop)",
   "proxy.update.hint": "Only for checking and downloading desktop updates on this computer; the desktop's connection to cutex is not affected",

@@ -232,6 +232,14 @@ export interface ClaudeApiUsageWindow {
   estimatedCost: number | null;
 }
 
+export type ClaudeLoginDiagnostic = "loginExpired" | "loginExpiring";
+
+/** `nativeQuota.loginDiagnostic`: undefined = not sent (older host), null = nothing to say. */
+export function loginDiagnosticOf(meta: Record<string, unknown>): ClaudeLoginDiagnostic | null | undefined {
+  if (!Object.hasOwn(meta, "loginDiagnostic")) return undefined;
+  return meta.loginDiagnostic === "loginExpired" || meta.loginDiagnostic === "loginExpiring" ? meta.loginDiagnostic : null;
+}
+
 export interface ClaudeAccountQuota {
   /** `windows`: subscription 5h / 7d gauges; `apiUsage`: ledger totals of an API account. */
   kind: "windows" | "apiUsage";
@@ -243,6 +251,11 @@ export interface ClaudeAccountQuota {
   /** The stored login token expired, so cutex skipped the read (`nativeQuota.credentialsExpired`, cutex
    *  `claude-quota-stale-credentials`): not an error, Claude Code refreshes it when a session on the account runs. */
   credentialsExpired: boolean;
+  /** cutex r295 (`nativeQuota.loginDiagnostic`): the newest observation of the stored credential: expired, about to
+   *  expire, or fine (null). Absent on older hosts (then `credentialsExpired` alone speaks). */
+  loginDiagnostic?: ClaudeLoginDiagnostic | null;
+  /** When the stored credential expires / expired (Unix seconds), with `loginDiagnostic`. */
+  credentialsExpiredAt?: number | null;
   apiUsage: { today: ClaudeApiUsageWindow; last7Days: ClaudeApiUsageWindow; last30Days: ClaudeApiUsageWindow; currency: string | null } | null;
 }
 
@@ -279,6 +292,7 @@ export function claudeAccountQuota(detail: ProfileQuotaDetail | null): ClaudeAcc
     stale: meta.stale === true,
     refreshing: meta.refreshing === true,
     credentialsExpired: meta.credentialsExpired === true,
+    ...(loginDiagnosticOf(meta) !== undefined ? { loginDiagnostic: loginDiagnosticOf(meta), credentialsExpiredAt: typeof meta.credentialsExpiredAt === "number" && Number.isFinite(meta.credentialsExpiredAt) ? meta.credentialsExpiredAt : null } : {}),
     apiUsage: null,
   };
 }

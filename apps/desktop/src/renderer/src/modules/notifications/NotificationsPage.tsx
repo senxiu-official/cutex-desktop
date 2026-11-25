@@ -259,7 +259,7 @@ function MatrixCell({ on, fixed, dim, label, fixedLabel, onToggle }: { on: boole
       title={fixed ? `${label} · ${fixedLabel}` : label}
       onClick={() => !fixed && onToggle(!on)}
       className={`flex h-5 w-5 items-center justify-center rounded-md border transition-colors focus-visible:ring-2 focus-visible:ring-accent/60 focus-visible:outline-none ${
-        on ? "border-accent bg-accent text-white" : "border-border bg-background text-subtle"
+        on ? "border-accent bg-accent text-on-accent" : "border-border bg-background text-subtle"
       } ${fixed ? "cursor-default opacity-50" : "hover:border-accent/70"} ${dim && !fixed ? "opacity-45" : ""}`}
     >
       {fixed ? <Lock size={10} strokeWidth={2.5} /> : on ? <Check size={13} strokeWidth={3} /> : null}

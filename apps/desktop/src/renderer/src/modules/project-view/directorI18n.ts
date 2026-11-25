@@ -5,8 +5,7 @@ export const directorZh = {
   "project-view.directorUi.closeHistory": "关闭记录",
   "project-view.directorUi.none": "未指定",
   "project-view.directorUi.cleared": "{{Director}}已取消",
-  "project-view.directorUi.vacant":
-    "请先指定{{director}}，再接管、授权历史范围或重新发出首消息。仍可查看和丢弃待办。",
+  "project-view.directorUi.vacant": "请先指定{{director}}，再接管、授权历史范围或重新发送首消息。仍可查看和丢弃待办。",
   "project-view.directorUi.ownerOnly":
     "仅{{owner}}可决定；{{director}}不能自行接管。",
   "project-view.directorUi.resolved": "实际接管人：{name}",
@@ -26,17 +25,16 @@ export const directorZh = {
   "project-view.directorUi.unverified": "来源待确认",
   "project-view.directorUi.ownerScope": "{{owner}}已选定历史范围",
   "project-view.directorUi.accept": "接管",
-  "project-view.directorUi.adopt": "重新发出",
+  "project-view.directorUi.adopt": "重新发送",
   "project-view.directorUi.discard": "丢弃待办",
   "project-view.directorUi.confirm": "确认",
   "project-view.directorUi.cancel": "取消",
   "project-view.directorUi.confirmHandover":
     "确认让当前{{Director}}接管这项委托？",
-  "project-view.directorUi.confirmAdopt":
-    "确认按已审阅内容发出一条新的首消息？",
+  "project-view.directorUi.confirmAdopt": "确认按已审阅内容发送一条新的首消息？",
   "project-view.directorUi.confirmDiscard":
     "确认丢弃此待办？成员和历史会保留。",
-  "project-view.directorUi.unknown": "送达未知，请先核对；此处不能重新发出。",
+  "project-view.directorUi.unknown": "送达未知，请先核对；此处不能重新发送。",
   "project-view.directorUi.conflict":
     "{{Director}}或待办已变化，已刷新。请查看后重新操作。",
   "project-view.directorUi.uncertain":
@@ -54,6 +52,6 @@ export const directorZh = {
   "project-view.directorUi.state.discarded": "已丢弃",
   "project-view.directorUi.state.open": "待审核",
   "project-view.directorUi.state.deliveryUnknown": "送达未知",
-  "project-view.directorUi.state.adopted": "已重新发出",
+  "project-view.directorUi.state.adopted": "已重新发送",
   "project-view.directorUi.state.superseded": "原交接已失效",
 } as const;

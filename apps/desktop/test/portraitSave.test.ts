@@ -52,7 +52,7 @@ describe("portraitSave", () => {
   // the test timeout under a full parallel run.
   beforeAll(async () => {
     await Promise.all([import("../src/renderer/src/store"), import("../src/renderer/src/lib/prefs"), import("../src/renderer/src/lib/profileLooks"), import("../src/renderer/src/lib/portraitSave")]);
-  });
+  }, 60_000);
   beforeEach(async () => {
     localStorage.clear();
     (await import("../src/renderer/src/lib/portraitSave")).resetPortraitSaveForTest();
@@ -219,10 +219,8 @@ describe("portraitSave", () => {
     });
     expect(done.has(saveKey({ hostId: "local", seed: "q" }))).toBe(false);
   });
+  it("first-seen never assigns inherited or explicit fixed-empty sessions", async () => {
+    await seed({ sessions: [{ ...session("follow"), avatarMode: "inherit" }, { ...session("letter"), avatarMode: "fixed" }, session("legacy")] });
+    expect((await planNow()).map(save => save.seed)).toEqual(["legacy"]);
+  });
 });
-
- it("first-seen never assigns inherited or explicit fixed-empty sessions", async () => {
-   resetPortraitPacksForTest([PACK]);
-   await seed({ sessions: [{ ...session("follow"), avatarMode: "inherit" }, { ...session("letter"), avatarMode: "fixed" }, session("legacy")] });
-   expect((await planNow()).map(save => save.seed)).toEqual(["legacy"]);
- });

@@ -1,7 +1,10 @@
-// What a `[profile: "…"]` reference (lib/profileMentions) shows: the profile's name and avatar, looked up on the host of
-// the conversation it is written in (the agent's host, never the focused one). The wire keeps the ID: it stays exact
-// across renames and the receiving agent passes it straight to agent_create, which takes a name or an ID.
-// Unresolved (another host offline, a deleted profile): a short form of the reference, never a whole UUID.
+// What a `[profile: "…", name: "…"]` reference (lib/profileMentions) shows: the profile's name and avatar, looked up by
+// ID on the host of the conversation it is written in (the agent's host, never the focused one). The wire keeps the ID
+// as the reference — exact across renames, and the receiving agent passes it straight to agent_create, which takes a
+// name or an ID — and since 2026-11-24 also the name at insertion (`name`), so the agent can tell which profile is
+// meant (owner: an ID-only reference left it guessing). The chip still shows the current name by ID (a rename shows the
+// new name). Unresolved (another host offline, a deleted profile): the written name, else a short form of the
+// reference, never a whole UUID.
 import { useEffect, useState } from "react";
 import type { ProfileItem } from "../../../shared/ipc";
 import { cachedProfileList, loadProfileList } from "./profileSnapshot";

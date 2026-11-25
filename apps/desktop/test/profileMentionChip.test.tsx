@@ -79,3 +79,20 @@ it("a sent message shows the same chip, resolved on the message's host", async (
   expect(element.textContent).toBe("用 Ada 开一个");
   expect(shown().getAttribute("data-profile-mention-state")).toBe("resolved");
 });
+
+// Owner 2026-11-24: the reference carries the name at insertion; the chip still names the profile by ID.
+it("a renamed profile shows its current name, not the one written with the reference", async () => {
+  fx.lists.set("remote", { defaultProfile: null, profiles: [{ ...ada, name: "Ada II" }] });
+  await act(async () => root.render(h(ProfileMentionChip, { token: chip(profileMentionText(UUID, null, null, "Ada")), hostId: "remote" })));
+  expect(shown().textContent).toBe("Ada II");
+  expect(shown().getAttribute("data-profile-mention-state")).toBe("resolved");
+});
+it("a deleted profile falls back to the written name (not a short UUID); without one, the short UUID as before", async () => {
+  fx.lists.set("remote", { defaultProfile: null, profiles: [] });
+  await act(async () => root.render(h(ProfileMentionChip, { token: chip(profileMentionText(UUID, "claude-opus-5-5", null, "Ada")), hostId: "remote" })));
+  expect(shown().textContent).toBe("Ada · claude-opus-5-5mention.unknownProfile");
+  expect(shown().getAttribute("title")).toBe("mention.unknownProfile · Ada · claude-opus-5-5");
+  expect(shown().textContent).not.toContain(UUID.slice(0, 8));
+  await act(async () => root.render(h(ProfileMentionChip, { token: chip(profileMentionText(UUID)), hostId: "remote" })));
+  expect(shown().textContent).toBe(`${shortProfileRef(UUID)}mention.unknownProfile`);
+});

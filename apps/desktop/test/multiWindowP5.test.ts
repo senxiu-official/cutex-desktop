@@ -6,6 +6,9 @@
 // is installed, adding the desk before anything else is wired. Electron is mocked; the renderer side is in
 // multiWindowP5Renderer.test.tsx.
 import { EventEmitter } from "node:events";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BrowserWindow, IpcMainInvokeEvent } from "electron";
 import type { HostManager } from "../src/main/hosts";
@@ -13,6 +16,7 @@ import type { BrowserEvent, BrowserTabMount } from "../src/shared/browser";
 import { BROWSER_CHANNEL, DEFAULT_BROWSER_CONTROL_SETTINGS } from "../src/shared/browser";
 
 const electron = vi.hoisted(() => ({
+  userData: "",
   handlers: new Map<string, (...args: any[]) => Promise<any>>(),
   sessions: new Map<string, unknown>(),
   appListeners: new Map<string, Set<(...args: any[]) => void>>(),
@@ -65,7 +69,7 @@ vi.mock("electron", () => ({
     return value;
   } },
   app: {
-    getPath: () => "memory-only-user-data",
+    getPath: (name: string) => name === "downloads" ? "memory-only-user-data" : electron.userData,
     isPackaged: false,
     on: (name: string, fn: (...args: any[]) => void) => {
       let listeners = electron.appListeners.get(name);
@@ -140,6 +144,9 @@ let nextId = 1;
 const emitApp = (name: string, ...args: unknown[]) => { for (const listener of electron.appListeners.get(name) ?? []) listener(...args); };
 
 function fixture() {
+  const userData = mkdtempSync(join(tmpdir(), "cutex-browser-desks-"));
+  electron.userData = userData;
+  cleanup.push(() => rmSync(userData, { recursive: true, force: true }));
   const session = new SessionMock();
   electron.sessions.set("persist:browser-local", session);
   const owner = new ContentsMock(nextId++, session, "window");

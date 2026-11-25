@@ -26,13 +26,15 @@ import {
 import { btn } from "./Button";
 
 const TONE: Record<Choice["tone"], string> = {
-  primary: "bg-accent text-white",
+  primary: "bg-accent text-on-accent",
   neutral: "border border-border hover:bg-surface-2",
   danger: "border border-danger/40 text-danger hover:bg-danger/10",
 };
 
 /** Whether a new card takes the keyboard focus (false: a side agent's dock must not steal it from the main composer). */
 const TakeFocus = createContext(true);
+/** Whether cards show their keyboard hints (false: touch, the iPad conversation). */
+const KeyHints = createContext(true);
 
 function Card({ children, onKeyDown }: { children: React.ReactNode; onKeyDown?: (e: KeyboardEvent<HTMLDivElement>) => void }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -69,6 +71,7 @@ function Approval({ model, runtime, onReply }: { model: Extract<InteractionModel
     else setSelected(action.select);
   };
   const escape = model.cancelIndex === null ? null : model.choices[model.cancelIndex];
+  const keyHints = useContext(KeyHints);
   return (
     <Card onKeyDown={onKeyDown}>
       <div className="mb-2 flex items-start gap-2">
@@ -96,10 +99,10 @@ function Approval({ model, runtime, onReply }: { model: Extract<InteractionModel
           </button>
         ))}
       </div>
-      <p className="mt-2 text-caption/[inherit] text-subtle">
+      {keyHints && <p className="mt-2 text-caption/[inherit] text-subtle" data-interaction-keys>
         {t("interaction.keys")}
         {escape && ` · ${t(escape.label === "cancel" ? "interaction.escCancel" : "interaction.escDecline")}`}
-      </p>
+      </p>}
     </Card>
   );
 }
@@ -388,6 +391,7 @@ export function InteractionDock({
   pending,
   onReply,
   takeFocus = true,
+  keyHints = true,
   runtime,
   optionsV1 = false,
   draftScope,
@@ -400,6 +404,8 @@ export function InteractionDock({
   onReply: (request: PendingRequest, reply: { result: unknown } | { error: { code: number; message: string } }) => void;
   /** A new card takes the keyboard focus (default); the side agent view passes false. */
   takeFocus?: boolean;
+  /** Show the cards' keyboard hints (default); a touch client passes false. */
+  keyHints?: boolean;
 }) {
   const { t } = useI18n();
   const first = pending[0];
@@ -410,6 +416,7 @@ export function InteractionDock({
   const reply = (result: unknown) => onReply(first, { result });
   return (
     <TakeFocus.Provider value={takeFocus}>
+    <KeyHints.Provider value={keyHints}>
     <div data-gutter-anchor="dock" className="side-col side-col-composer w-full px-4 pb-2">
       {pending.length > 1 && <p className="mb-1 text-caption/[inherit] text-subtle">{t("pending.title", { count: pending.length })}</p>}
       {model.kind === "approval" && <Approval key={String(first.id)} model={model} runtime={runtime} onReply={reply} />}
@@ -429,6 +436,7 @@ export function InteractionDock({
         </Card>
       )}
     </div>
+    </KeyHints.Provider>
     </TakeFocus.Provider>
   );
 }

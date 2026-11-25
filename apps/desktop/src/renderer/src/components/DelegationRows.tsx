@@ -23,6 +23,8 @@ import { Markdown } from "./Markdown";
 import { Who } from "./Parties";
 import { PeerParty } from "./PeerParty";
 import { useUserLayoutToggle } from "../lib/userLayoutToggle";
+import { EndingBy } from "./DelegationEnding";
+import { isHandlerFailure, noticeWordKey } from "../lib/delegationTerminal";
 
 /** A verb template with the party spliced in at `{who}` (like task rows). */
 function Sentence({ k, who }: { k: MessageKey; who: React.ReactNode }) {
@@ -93,11 +95,17 @@ function ResultLine({ item, sessionId, onToggle, open }: { item: DelegationResul
       <DelegationTag askId={item.askId} onJump={() => openDelegationDetail(host, item.askId, { title: item.title })} />
       <span className="max-w-[40%] shrink-0 truncate text-foreground">{item.title}</span>
       {ownerSteered && <OwnerSteeredBadge />}
-      {item.kind === "state" && record ? (
+      {/* r295: a State item with its own notice says what that notice recorded (a failed attempt, then the closure),
+          not the record's current status. */}
+      {item.kind === "state" && item.notice ? (
+        <span className={`shrink-0 ${isHandlerFailure(item.notice) ? "text-danger" : "text-muted"}`} data-result-notice={item.notice.ref}>{t(noticeWordKey(item.notice) as MessageKey, { n: item.notice.attempt ?? "", name })}</span>
+      ) : item.kind === "state" && record ? (
         <DelegationStatusMark status={delegationStatus(record, ctxOf(record))} name={name} className="shrink-0" />
       ) : (
         !open && item.preview && <span className="min-w-0 truncate text-subtle">{item.preview.replace(/\s+/g, " ")}</span>
       )}
+      {/* r295: this item's own notice (who / what ended it or failed the attempt), the sequence on hover. */}
+      {item.kind === "state" && item.notice && <EndingBy notice={item.notice} targetName={name} />}
       {open ? <ChevronDown size={13} className="ml-auto shrink-0" /> : <ChevronRight size={13} className="ml-auto shrink-0" />}
     </button>
   );

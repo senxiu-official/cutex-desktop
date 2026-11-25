@@ -24,7 +24,7 @@ export function useAgentPicker(
   const { projectOrder } = useUiPrefs();
   const onlyKey = options.only?.join("\n");
   const options_ = useMemo(() => {
-    const rows = sidebarPickerRows(sidebar, { include: options.include, only: options.only });
+    const rows = sidebarPickerRows(sidebar, { include: options.include, only: options.only, hostId });
     const recent = recentAgentPicks(options.context, hostId);
     const all = agentPickerOptions(rows, labels, { top: [options.current, ...recent], rank: pickerProjectRank(sidebar, projectOrder ?? [], hostId) });
     if (options.include !== "all") return all;

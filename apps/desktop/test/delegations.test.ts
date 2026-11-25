@@ -73,9 +73,11 @@ describe("delegationStatus", () => {
     expect(delegationStatus(ask({ execution: "interrupted", closed: "stopped", attempt: { n: 1, interruptReason: "ownerStopped" } }))).toMatchObject({ key: "stopped" });
   });
   it("admitted work waits calmly without promising that a runtime is starting", () => {
-    expect(delegationStatus(ask({ execution: "admitted" }))).toMatchObject({ key: "starting", tone: "muted", glyph: "hollow" });
-    expect(zhCN["delegation.status.starting"]).toBe("已接收，未开始");
-    expect(en["delegation.status.starting"]).toBe("Accepted, not started");
+    // Owner 2026-11-25: 「已接收」 / "Accepted", hover 「对方已收到，还没开始」.
+    expect(delegationStatus(ask({ execution: "admitted" }))).toMatchObject({ key: "starting", tone: "muted", glyph: "hollow", hint: { key: "delegation.statusHint.starting" } });
+    expect(zhCN["delegation.status.starting"]).toBe("已接收");
+    expect(en["delegation.status.starting"]).toBe("Accepted");
+    expect(zhCN["delegation.statusHint.starting"]).toBe("对方已收到，还没开始");
   });
   it("names holds and positions", () => {
     expect(delegationStatus(ask({ execution: "queued", queuePosition: 2, hold: { reason: "targetBusy" } as never }))).toMatchObject({ key: "queuedAt", n: 2 });

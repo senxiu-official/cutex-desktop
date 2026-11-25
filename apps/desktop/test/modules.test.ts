@@ -3,6 +3,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { STATIC_SCAN } from "./staticScan";
 import { stubServices } from "./serviceStub";
 
 vi.mock("../src/renderer/src/bridge", () => ({ api: {}, bridge: {}, onEvent: () => () => {}, cleanIpcMessage: (m: string) => m }));
@@ -51,7 +52,7 @@ async function gated(features: readonly string[] | null) {
 const MOCK_REMOTE = ["management-client-tokens", "session-attachments", "fs-dir-browse"];
 
 /** The side components' derived pane kinds (v1.17, §24.4): id, single / multi, binding (agent / workspace / follow → follow, host → host). */
-const SIDE_KINDS = ["artifacts.library single follow", "artifacts.view multi host", "baidu-pan.page single host", "bookmarks.list single host", "browser.service multi host", "browser.tab multi host", "conversation.projection multi follow", "conversation.turnPeek multi host", "delegations.detail multi host", "diff.view multi follow", "notes.list single host", "notes.note multi host", "remote-copies.list single host", "side-chat.chat single follow", "status:alarms.status single follow", "status:background-terminals.status single follow", "status:delegations.status single follow", "status:goal.status single follow", "status:jobs.status single follow", "status:plan.status single follow", "status:subagents.status single follow", "subagents.thread multi follow", "terminal.pty multi follow", "workspace.changes single follow", "workspace.files single follow", "workspace.preview multi follow"];
+const SIDE_KINDS = ["artifacts.library single follow", "artifacts.view multi host", "baidu-pan.page single host", "bookmarks.list single host", "browser.history single host", "browser.service multi host", "browser.tab multi host", "conversation.projection multi follow", "conversation.turnPeek multi host", "delegations.detail multi host", "diff.view multi follow", "notes.list single host", "notes.note multi host", "remote-copies.list single host", "side-chat.chat single follow", "status:alarms.status single follow", "status:background-terminals.status single follow", "status:delegations.status single follow", "status:goal.status single follow", "status:jobs.status single follow", "status:plan.status single follow", "status:subagents.status single follow", "subagents.thread multi follow", "terminal.pty multi follow", "workspace.changes single follow", "workspace.files single follow", "workspace.preview multi follow"];
 /** The page kinds the mock install derives (`page:<main.page id>`, pages without an Aside). */
 /** v1.21: the page kinds as Shelf components: id, singleton, host, page group, title (the sidebar entry's), persist. */
 const PAGE_SIDE = [
@@ -60,11 +61,13 @@ const PAGE_SIDE = [
   "page:delegations.page singleton host page:delegations.page delegations.nav false",
   "page:delegations.treePage singleton host page:delegations.treePage pane.page false",
   "page:jobs.page singleton host page:jobs.page jobs.nav false",
+  "page:personal-assistants.page singleton host page:personal-assistants.page personal-assistants.nav false",
   "page:projects.page singleton host page:projects.page projects.nav false",
   "page:quick-chats.draft singleton host page:quick-chats.draft quick-chats.nav false",
   "page:services.page singleton host page:services.page services.nav false",
+  "page:session-search.page singleton host page:session-search.page pane.page false",
 ];
-const PAGE_KINDS = ["page:agent-config.newAgent", "page:approvals.page", "page:delegations.page", "page:delegations.treePage", "page:jobs.page", "page:projects.page", "page:quick-chats.draft", "page:services.page"];
+const PAGE_KINDS = ["page:agent-config.newAgent", "page:approvals.page", "page:delegations.page", "page:delegations.treePage", "page:jobs.page", "page:personal-assistants.page", "page:projects.page", "page:quick-chats.draft", "page:services.page", "page:session-search.page"];
 
 describe("module registry", () => {
   it("ids are valid and unique; dependencies exist and have no cycle; every module activates", async () => {
@@ -132,7 +135,7 @@ describe("module registry", () => {
     }
   });
 
-  it("every literal page link (openPage / to / target / activePages) names a registered main.page", () => {
+  it("every literal page link (openPage / to / target / activePages) names a registered main.page", STATIC_SCAN, () => {
     const ids = new Set<string>(MODULES.flatMap((m) => m.contributes?.["main.page"] ?? []).map((p) => p.id));
     const all = (dir: string): string[] => readdirSync(dir).flatMap((name) => {
       const path = join(dir, name);
@@ -479,7 +482,7 @@ describe("module import boundaries", () => {
         .snapshot("side.component")
         .map((e) => `${e.item.id} (${e.mode})`)
         .sort(),
-    ).toEqual(["artifacts.library (show)", "artifacts.view (show)", "baidu-pan.page (show)", "bookmarks.list (show)", "browser.service (show)", "browser.tab (show)", "conversation.projection (show)", "conversation.turnPeek (show)", "delegations.detail (show)", "diff.view (show)", "notes.list (show)", "notes.note (show)", "remote-copies.list (show)", "side-chat.chat (show)", "subagents.thread (show)", "terminal.pty (show)", "workspace.changes (show)", "workspace.files (show)", "workspace.preview (show)"]);
+    ).toEqual(["artifacts.library (show)", "artifacts.view (show)", "baidu-pan.page (show)", "bookmarks.list (show)", "browser.history (show)", "browser.service (show)", "browser.tab (show)", "conversation.projection (show)", "conversation.turnPeek (show)", "delegations.detail (show)", "diff.view (show)", "notes.list (show)", "notes.note (show)", "remote-copies.list (show)", "side-chat.chat (show)", "subagents.thread (show)", "terminal.pty (show)", "workspace.changes (show)", "workspace.files (show)", "workspace.preview (show)"]);
     // A referable component (toRef) needs an id refs accept as a kind (lowercase, §19.6).
     const referable = host.snapshot("side.component").filter((e) => e.item.toRef);
     expect(referable.length).toBeGreaterThan(0);
@@ -523,6 +526,7 @@ describe("module gating snapshot (mock featureLists)", () => {
     "shell.tray",
     "shell.desktop",
     "notifications.settings",
+    "service-notify.page",
     "shell.me",
     "connection.hosts",
     "shell.access",
@@ -557,8 +561,8 @@ describe("module gating snapshot (mock featureLists)", () => {
   const BASE_STATUS = ["goal.status", "plan.status", "background-terminals.status", "subagents.status"];
 
   // Sidebar entries (step 3), top list in order; the footer has ⚙ 设置.
-  const ALL_NAV = ["home.nav", "quick-chats.nav", "agent-config.newAgent", "projects.nav", "project-view.nav", "services.nav", "delegations.nav", "jobs.nav", "approvals.nav"];
-  const ALL_MAIN = ["shell.settings", "agent-config.newAgent", "delegations.page", "delegations.treePage", "jobs.page", "quick-chats.draft", "projects.page", "services.page", "approvals.page"];
+  const ALL_NAV = ["home.nav", "personal-assistants.nav", "quick-chats.nav", "agent-config.newAgent", "projects.nav", "project-view.nav", "services.nav", "delegations.nav", "jobs.nav", "approvals.nav"];
+  const ALL_MAIN = ["shell.settings", "agent-config.newAgent", "session-search.page", "delegations.page", "delegations.treePage", "jobs.page", "quick-chats.draft", "personal-assistants.page", "projects.page", "services.page", "approvals.page"];
 
   it("new cutex: every sidebar entry and page", async () => {
     const { navTop, navFooter, mainPages } = await gated([...MOCK_REMOTE, ...MOCK_BASE_FEATURES, ...MOCK_NEW_FEATURES]);
@@ -626,12 +630,13 @@ describe("module gating snapshot (mock featureLists)", () => {
   it("new cutex: every page and section", async () => {
     const { pages, sections, status } = await gated([...MOCK_REMOTE, ...MOCK_BASE_FEATURES, ...MOCK_NEW_FEATURES]);
     // Claude 账户 is a section of Profile, not a page (owner 2026-10-10): the same pages as ?legacy.
-    expect(pages).toEqual(ALL_PAGES.flatMap((p) => p === "archive.settings" ? [p, "storage.page"] : [p]));
+    // 功能 Profile (feature-profiles) after 浏览器 in 工具.
+    expect(pages).toEqual(ALL_PAGES.flatMap((p) => p === "archive.settings" ? [p, "storage.page"] : p === "browser.settings" ? [p, "feature-profiles.page"] : [p]));
     // 更新与诊断 on 通用; the capsule's own settings on 状态显示 (v1.2); 远程访问's three sections; Claude 账户 after the
     // Profile list (claude-accounts) and 从 CC Switch 导入 after it (profile-import); on 协作 轮换主管 (owner-rotation), 服务 (services-persistent-approval), 消息投递
     // and the 高级 card (消息总线 + 卡住的消息 with agent-bus-stuck-messages) last — page order is by `order`.
     // Design 006 v1: 会话 takes 宽度 / 输入区 / 留白 / 书签条 / 只看 Shelf; 桌面 the home's card; 性能记录 is on 更新与诊断.
-    expect(sections).toEqual(["shell.convWidth", "shell.composer", "shell.gutter", "bookmarks.settings", "side-chat.settings", "side-chat.summarySettings", "shell.shelfOnly", "status-capsule.settings", "workspace.viewerSettings", "artifacts.settings", "artifacts.pageData", "remote-copies.settings", "home.desktopSettings", "owner-notify.settings", "users.people", "users.devices", "users.allDevices", "remote-access.onlineDesktops", "remote-access.pairing", "peers.access", "users.peers", "remote-access.listen", "remote-access.cors", "proxy.update", "proxy.host", "claude-accounts.accounts", "kimi-accounts.accounts", "kimi-accounts.all", "profile-import.ccSwitch", "projects.rotation.settings", "approvals.rules.settings", "approvals.rules.auditAll", "approvals.rules.all", "services.persistApproval.settings", "agent-bus.delivery", "shell.queueOrder", "shell.imageBusy", "agent-bus.advanced", "runtime-packages.settings", "runtimes.installed", "perf-log.section", "about.debug", "onboarding.section", "about.knownIssues", "about.changelog", "about.links"]);
+    expect(sections).toEqual(["shell.convWidth", "shell.composer", "shell.gutter", "bookmarks.settings", "side-chat.settings", "side-chat.summarySettings", "shell.shelfOnly", "status-capsule.settings", "workspace.viewerSettings", "artifacts.settings", "artifacts.pageData", "remote-copies.settings", "home.desktopSettings", "owner-notify.settings", "service-notify.settings", "users.people", "users.devices", "users.allDevices", "remote-access.onlineDesktops", "remote-access.pairing", "peers.access", "users.peers", "remote-access.listen", "remote-access.cors", "proxy.update", "proxy.host", "claude-accounts.accounts", "kimi-accounts.accounts", "kimi-accounts.all", "profile-import.ccSwitch", "projects.rotation.settings", "approvals.rules.settings", "approvals.rules.auditAll", "approvals.rules.all", "services.persistApproval.settings", "agent-bus.delivery", "shell.queueOrder", "shell.imageBusy", "agent-bus.advanced", "runtime-packages.settings", "runtimes.installed", "feature-profiles.list", "feature-profiles.all", "perf-log.section", "about.debug", "onboarding.section", "about.knownIssues", "about.changelog", "about.links"]);
     expect(status).toEqual([...BASE_STATUS, "delegations.status", "jobs.status", "alarms.status"]);
   });
 

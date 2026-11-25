@@ -79,6 +79,9 @@ import { BrowserSettings } from "../src/renderer/src/modules/browser/BrowserSett
 import { pageDataClearEntry } from "../src/renderer/src/modules/artifacts/pageDataClear";
 import { useApp } from "../src/renderer/src/store";
 
+// The store double is too thin for the avatar stack (agent looks, Profile pictures): icons are stubbed.
+vi.mock("../src/renderer/src/components/EntityIcon", () => import("./helpers/entityIconStub"));
+
 let element: HTMLDivElement, root: Root;
 const security = (mode = "isolated") => ({ crossProjectAccess: mode, crossProjectAccessDefault: "isolated", links: [], externalAgents: [] });
 function makeApi(mode = "isolated") {

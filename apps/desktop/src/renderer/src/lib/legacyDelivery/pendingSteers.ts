@@ -1,5 +1,5 @@
 // LEGACY(input-ledger-v1): frozen delivery inference for older hosts.
-// Delete only when EVERY host advertises input-ledger-v1 (including hachimi).
+// Delete only when EVERY host advertises input-ledger-v1 (including hostc).
 // Pending steers: a message sent while a turn runs is steered into it by cutex (disposition
 // "steered"), but cute-codex only records the userMessage item at its next sampling boundary (or
 // when the turn finishes). Until then the composer's queue panel lists it as "steered, waiting".

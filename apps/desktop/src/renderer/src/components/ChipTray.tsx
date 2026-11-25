@@ -1,4 +1,5 @@
 import { isImeComposing } from "../lib/ime";
+import { newInstanceKey } from "../lib/openModifiers";
 // The window's bottom layer and its tray (canvas principles §7, owner 2026-10-21; contract 1.20; §25.4).
 // DesktopBackground: the first shown `pane.desktop` item drawn as the background of the whole window, behind
 // every card (sidebar, conversation columns, Shelves) — the gaps between the cards and the margins around them
@@ -546,7 +547,7 @@ const ChipTray = memo(function ChipTray({ placement, edge, entry, dockCount, ext
     >
       <TrayGrip vertical={vertical} menu={frameMenu} />
       {/* How the tray works by hand (design 040 §2.1: how-to text is not in the tips). */}
-      <InfoMark text={[t("pane.tray.grip"), t("pane.tray.emptyHint"), t("tray.besideTip", { key: navigator.platform?.startsWith("Mac") ? "⌘" : "Ctrl" })].join("\n")} className="hover-info self-center px-0.5" />
+      <InfoMark text={[t("pane.tray.grip"), t("pane.tray.emptyHint"), t("tray.besideTip", { key: newInstanceKey() })].join("\n")} className="hover-info self-center px-0.5" />
       {/* Nothing pinned yet: 「＋ 固定」 (the desktop's picker) and, with nothing else in it, how to pin. */}
       {Dock && dockCount === 0 && <TrayPinButton vertical={vertical} alone={extras === 0} />}
       {Dock && dockCount + extras > 0 && entry && (

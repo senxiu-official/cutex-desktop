@@ -78,7 +78,7 @@ describe("ranking and scope filtering", () => {
   const items = [
     item("agent", "cutex-dev"),
     item("agent", "听书管家"),
-    item("agent", "hachimi"),
+    item("agent", "hostc"),
     item("service", "audiobook", { title: "听书", terms: ["audiobook", "tingshu"] }),
     item("artifact", "论文阅读清单"),
     item("page", "settings", { title: "设置" }),
@@ -88,12 +88,12 @@ describe("ranking and scope filtering", () => {
   it("empty query in 全部: recents first (newest first), then each kind in base order, recents not repeated", () => {
     const recent = [
       { id: "service:audiobook", at: 20 },
-      { id: "agent:hachimi", at: 30 },
+      { id: "agent:hostc", at: 30 },
       { id: "gone:x", at: 40 },
     ];
     const sections = rankItems(items, { query: "", scope: "all", recent });
     expect(sections.map((s) => s.id)).toEqual(["recent", "agent", "artifact", "page", "shelfPage"]);
-    expect(sections[0]!.rows.map((r) => r.item.id)).toEqual(["agent:hachimi", "service:audiobook"]);
+    expect(sections[0]!.rows.map((r) => r.item.id)).toEqual(["agent:hostc", "service:audiobook"]);
     expect(sections[1]!.rows.map((r) => r.item.title)).toEqual(["cutex-dev", "听书管家"]);
   });
 

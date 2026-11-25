@@ -1,5 +1,7 @@
 import { noteOwnerMessage } from "./lib/activityFeed";
 import { BACKGROUND_WORK_METHOD, BackgroundWorkProjection, backgroundWorkChange } from "../../shared/backgroundWork";
+import { CLAUDE_DIAGNOSTICS_METHOD, claudeDiagnosticsChange, withoutClaudeDiagnostics } from "../../shared/claudeDiagnostics";
+import { runtimeUnreachableWire } from "../../shared/runtimeUnreachable";
 import { usesInputLedger, usesOwnerCarries, usesInputDisposal } from "./lib/deliveryMode";
 import { applyInputLedgerNotification, applyInputLedgerSnapshot, bootstrapSnapshot, emptyInputLedgerSession, inputGetSnapshot, inputListSnapshot, inputLedgerReconnected, inputLedgerStreamReset, queueListSnapshot, type InputLedgerSession, type InputLedgerStep, type InputLedgerFetch, type InputLedgerSnapshot } from "./lib/inputLedger/alignment";
 import type { InputAction, InputDisposeResult, InputRecord } from "@cutex-desktop/protocol";
@@ -63,12 +65,16 @@ import { loadPendingSteers, savePendingSteers } from "./lib/legacyDelivery/pendi
 import { hasClientId, confirmOutbox, consumedOutboxIds, failOutbox, flushedOutboxEntry, flushOutbox, hasUnlandedTurn, markOutboxDispatched, markOutboxWaiting, newOutboxEntry, setOutboxStage, predictPlacement, pruneHidden, reconcileOutbox, removeOutbox, retryOutbox, sendErrorText, submitLandedPaused, updateOutbox, type OutboxEntry } from "./lib/legacyDelivery/outbox";
 import { collaborationModeOf, seedThreadSettings } from "./lib/threadSettings";
 import { applyEvent, settleStaleTurns, contextUsageFromLatest, contextUsageOf, emptyTimeline, insertInteraction, isChildThreadEvent, isDockEvent, planFromLatest, planSnapshotOf, seedContextUsage, seedInteractions, seedPlan, timelineFromThreadRead, type ThreadSettingsView, type TimelineState } from "./lib/timeline";
-import { answeredRecord, elsewhereRecord, putRecord, recordsOf, requestTurnId, retainSessions, type InteractionRecord } from "./lib/interactionLog";
+import { answeredRecord, elsewhereRecord, putRecord, recordsOf, requestTurnId, retainSessions, savedRecord, type InteractionRecord } from "./lib/interactionLog";
+import { INTERACTION_HISTORY_FEATURE, INTERACTION_MAX_PAGES, INTERACTION_PAGE_LIMIT, INTERACTION_TURN_CHUNK, interactionKey } from "../../shared/interactionHistory";
+import { USER_INPUT_OPTIONS_FEATURE } from "./lib/interactions";
+import type { InteractionHistoryRecord } from "@cutex-desktop/protocol";
 import { bootPlan, dismissPlan as dismissedPlan, restorePlan as restoredPlan, nextPlan, planTurnGone, revertDropsPlan } from "./lib/planState";
 import { forgetFreshPlans, getCachedPlan, isPlanFresh, setCachedPlan } from "./lib/planCache";
 import type { LatestPlan, SessionHistory } from "@cutex-desktop/protocol";
 import { answerFailureOf } from "./lib/interactions";
-import { childStatusFromEvent, claudeTaskStatusFromEvent, forgetSubAgents, subAgentsOf } from "./lib/subagents";
+import { childStatusFromEvent, claudeTaskApprovalFromEvent, claudeTaskStatusFromEvent, forgetSubAgents, subAgentsOf } from "./lib/subagents";
+import { forgetClaudeTaskApprovals, noteClaudeTaskApproval, resetClaudeTaskApprovals } from "./lib/claudeTaskApprovals";
 import { interruptSendText, pausedSection, restorePlan } from "./lib/queuePause";
 import { OUTBOX_STUCK_MS, outboxLingerRecord } from "./lib/outboxDiagnostics";
 import { ADMISSION_ORDER_FEATURE, applyMove } from "./lib/legacyDelivery/admissionOrder";
@@ -92,6 +98,7 @@ import { startJobSync, useJobs } from "./lib/jobStore";
 import { startRuntimePackageSync } from "./lib/runtimePackageStore";
 import { hostBusyActionError } from "../../shared/hostBusyAction";
 import { CREATOR_PATHS_CODE, creatorPathsBlock, creatorPathsWire } from "../../shared/creatorPaths";
+import { pinnedModelBlock, pinnedModelWire, wireOf as pinnedModelWireOf } from "../../shared/pinnedModel";
 import { hostBusyActionKey, hostBusyActionShown, isHostBusyActionPending, runHostBusyAction } from "./lib/hostBusyActions";
 import { useAgentMessages } from "./lib/agentMessageStore";
 import { BOUNDED_BUS_FEATURE, BUS_PAGE_LIMIT, boundedBusPage, busHydrationTasks, busLinksOf, readLinkedBusMessages, type BusHydrationTask } from "./lib/boundedBus";
@@ -318,12 +325,16 @@ interface AppState {
   /** Reload a host's sidebar snapshot: the focus host's (`refreshSidebar`) or another followed host's slice. */
   refreshHostSidebar(hostId: string): Promise<void>;
   /** Open an agent; `hostId`: its host (default: the selected agent's when it is the same id, else the focus host). */
-  select(sessionId: string, hostId?: string): Promise<void>;
+  /**
+   * `keepUnread`: opened for the owner by the app (lib/services openOnItsHost), not read by them: its unread mark stays.
+   * `signal`: once aborted the selection is not made (a switch given up while the host's scope was still coming).
+   */
+  select(sessionId: string, hostId?: string, opts?: AutoOpen): Promise<void>;
   /**
    * Open an agent of any host (lists, notifications): in the scope → at once (`select` with its host);
    * outside it → 所有设备 first (RFC §10, ★ Q14), then the agent.
    */
-  openAgent(sessionId: string, hostId: string): Promise<void>;
+  openAgent(sessionId: string, hostId: string, opts?: AutoOpen): Promise<void>;
   /**
    * Read the open agent again (its view's 重新加载 after a failed load): from the host that lists it now
    * (lib/agentHostRoute; a view opened on the wrong host moves to its own), else from the same host.
@@ -362,6 +373,9 @@ interface AppState {
   /** 「不再显示」 a local pending send: a durable local mark first; false = not stored (the row stays). Never withdraws. */
   discardLedgerOutbox(sessionId: string, inputId: string, host?: string): boolean;
   refreshInputs(sessionId: string, host?: string): Promise<void>;
+  /** Keeps these sessions' input ledgers (delivery included) read and live although they are not open — e.g. while the
+   *  batch model dialog lists them. Returns the release. No-op off ledger hosts. */
+  watchInputs(sessionIds: readonly string[], host: string): () => void;
   // Next Up registry: every guard answers (lib/inputLedger/actionResult), never a silent no-op.
   interruptSendInput(sessionId: string, inputId: string, host?: string): Promise<InputActionResult>;
   holdInput(sessionId: string, inputId: string, held: boolean, host?: string): Promise<InputActionResult>;
@@ -512,6 +526,8 @@ interface AppState {
   openSettings(tab?: SettingsTab, focus?: { profile?: string; anchor?: string; create?: boolean; kimiAccount?: string; sub?: string }): void;
   /** Shows a `main.page` item (= services.ui.openPage, modules/app.ts). */
   openPage(page: ItemId, params?: PageParams): void;
+  /** The 审批 page for an approval of `hostId`: a host outside the view scope shows 所有设备 first (as a notification click). */
+  openApprovalsOn(hostId: string): void;
   /** Back to the conversation. */
   closePage(): void;
   /** Sidebar "New chat": scratch quick chat on the default profile, started and selected (human-create-session). */
@@ -810,7 +826,12 @@ let pendingActivity: Record<string, ActivityPreview> | null = null;
  * Where an open goes (multi-window P3, lib/windowRoute): true = it was handled elsewhere (the agent shows in another
  * window's column, which took the focus), so this window's selection stays.
  */
-let openRouter: ((hostId: string, sessionId: string) => boolean) | null = null;
+let openRouter: ((hostId: string, sessionId: string, opts?: AutoOpen) => boolean) | null = null;
+/** An open made by the app for the owner (lib/services openOnItsHost), not by the owner's own click. */
+export interface AutoOpen {
+  keepUnread?: boolean;
+  signal?: AbortSignal;
+}
 export function setOpenRouter(route: typeof openRouter): void {
   openRouter = route;
 }
@@ -938,6 +959,18 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
   const resetBackgroundWork = (host: string) => {
     backgroundWorkByHost.delete(host);
     sidebarReads.delete(host);
+  };
+  /** A lost connection: Claude diagnostics already on the shown rows are no longer known (r295); the reconnect read decides. */
+  const forgetShownDiagnostics = (host: string, epoch?: string) => {
+    if (host === focusHost()) {
+      const sidebar = get().sidebar;
+      const next = sidebar && withoutClaudeDiagnostics(sidebar);
+      if (next !== sidebar) set({ sidebar: next });
+      return;
+    }
+    const slice = get().byHost[host];
+    const next = slice?.sidebar && withoutClaudeDiagnostics(slice.sidebar);
+    if (slice && next !== slice.sidebar) patchSlice(host, epoch ?? slice.epoch, { sidebar: next });
   };
   // Sidebar requests can overlap during reconnect and runtime events. A late, older reply must
   // not put an already-online agent back into the offline group.
@@ -1093,9 +1126,96 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
    * the record alone; load() seeds it when the agent is opened again this run.
    */
   const putInteraction = (sessionId: string, record: InteractionRecord, host = hostOf(sessionId)) => {
-    if (!putRecord(viewKey(host, sessionId), record)) return;
+    const stored = putRecord(viewKey(host, sessionId), record);
+    if (!stored) return;
     const view = viewOn(sessionId, host);
-    if (view && insertInteraction(view.timeline, record)) patchSession(sessionId, (v) => ({ version: v.version + 1 }), host);
+    if (view && insertInteraction(view.timeline, stored)) patchSession(sessionId, (v) => ({ version: v.version + 1 }), host);
+  };
+
+  /**
+   * session-interaction-history-v1: the answered questions / approvals cutex saved for these native 回合 of the
+   * shown timeline (load: the shown window; loadOlder: the turns paged in), 50 turn ids a read, every cursor
+   * followed. Each 回合 is read once per timeline (no reads while scrolling within it; `force`: a refresh after a
+   * reply). A result applies only to the same host, agent and timeline it was asked for: a host switch, reload or
+   * revert meanwhile drops it. A failed read leaves the history as it is (the next rebuild reads again). Hosts
+   * without the feature: nothing is read; this run's live rows are all there is, as before.
+   */
+  const interactionTurnsRead = new WeakMap<TimelineState, Set<string>>();
+  /** Replies in flight, by view key + interaction identity (respond). */
+  const answeringKeys = new Set<string>();
+  const hydrateInteractions = async (sessionId: string, host: string, timeline: TimelineState, turnIds: readonly string[], force = false) => {
+    if (!featuresOn(host).has(INTERACTION_HISTORY_FEATURE)) return;
+    const scope = captureHost(host);
+    const read = interactionTurnsRead.get(timeline) ?? new Set<string>();
+    interactionTurnsRead.set(timeline, read);
+    const ids = [...new Set(turnIds)].filter((id) => typeof id === "string" && id && (force || !read.has(id)));
+    if (!ids.length) return;
+    for (const id of ids) read.add(id);
+    const current = () => scope.current() && viewOn(sessionId, host)?.timeline === timeline;
+    const daemon = apiOn(host);
+    const rows: InteractionHistoryRecord[] = [];
+    try {
+      for (let at = 0; at < ids.length; at += INTERACTION_TURN_CHUNK) {
+        const chunk = ids.slice(at, at + INTERACTION_TURN_CHUNK);
+        let cursor: string | null = null;
+        for (let pages = 0; pages < INTERACTION_MAX_PAGES; pages++) {
+          const page = await daemon.interactionHistoryPage(sessionId, { turnIds: chunk, cursor, limit: INTERACTION_PAGE_LIMIT });
+          if (!current() || !page) return;
+          if (Array.isArray(page.interactions)) rows.push(...page.interactions);
+          cursor = typeof page.nextCursor === "string" && page.nextCursor ? page.nextCursor : null;
+          if (!cursor) break;
+        }
+      }
+    } catch (error) {
+      if (current()) for (const id of ids) read.delete(id);
+      captureDebugError(error, "renderer.interactionHistory");
+      return;
+    }
+    if (!current()) return;
+    const sidebar = sidebarOn(host);
+    const agentName = (id: string) => [...(sidebar?.active ?? []), ...(sidebar?.retired ?? [])].find((s) => s.cutexSessionId === id)?.displayName ?? null;
+    const optionsV1 = featuresOn(host).has(USER_INPUT_OPTIONS_FEATURE);
+    const wanted = new Set(ids);
+    // Oldest first, so rows of one 回合 keep their order.
+    const records = rows.map((row) => savedRecord(row, optionsV1, agentName)).filter((r): r is InteractionRecord => !!r && !!r.turnId && wanted.has(r.turnId)).sort((a, b) => a.at - b.at);
+    const key = viewKey(host, sessionId);
+    let changed = false;
+    const generation = viewOn(sessionId, host)?.runtimeGeneration ?? 0;
+    const waiting = new Set([...timeline.pending.values()].map((request) => interactionKey(generation, request.id)));
+    for (const record of records) {
+      // The same request still in the dock here, or a reply to it in flight (same generation and typed id): the
+      // live row comes first; the refresh that reply schedules upgrades it. Another generation's request with the
+      // same id is a different request.
+      if (waiting.has(record.key) || answeringKeys.has(`${key}\u0000${record.key}`)) continue;
+      // Already stored (an earlier read of this agent): still put it into this timeline.
+      const stored = putRecord(key, record) ?? recordsOf(key).find((r) => r.key === record.key);
+      if (stored && insertInteraction(timeline, stored)) changed = true;
+    }
+    if (changed) patchSession(sessionId, (v) => ({ version: v.version + 1 }), host);
+  };
+
+  /**
+   * After a reply here or a resolution seen from another device, read that 回合 again so the saved record upgrades
+   * the provisional row (the native event can arrive before cutex commits it): a few bounded, delayed reads, one
+   * pending per agent 回合. No saved record: the live row stays.
+   */
+  const interactionRefreshes = new Map<string, ReturnType<typeof setTimeout>>();
+  const refreshInteractionTurn = (sessionId: string, host: string, turnId: string | null, delays: readonly number[]) => {
+    if (!turnId || !featuresOn(host).has(INTERACTION_HISTORY_FEATURE) || !delays.length) return;
+    const key = `${viewKey(host, sessionId)}\u0000${turnId}`;
+    const pending = interactionRefreshes.get(key);
+    if (pending) clearTimeout(pending);
+    const [delay, ...rest] = delays;
+    interactionRefreshes.set(key, setTimeout(() => {
+      interactionRefreshes.delete(key);
+      const view = viewOn(sessionId, host);
+      if (!view) return;
+      const before = recordsOf(viewKey(host, sessionId)).filter((r) => r.turnId === turnId && !r.saved).length;
+      void hydrateInteractions(sessionId, host, view.timeline, [turnId], true).then(() => {
+        const left = recordsOf(viewKey(host, sessionId)).filter((r) => r.turnId === turnId && !r.saved).length;
+        if (before && left && rest.length) refreshInteractionTurn(sessionId, host, turnId, rest);
+      });
+    }, delay));
   };
 
   const ledgerOn = (host: string) => usesInputLedger([...featuresOn(host)]);
@@ -1147,6 +1267,21 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
     };
   };
   const ledgerReads = new Map<string, Promise<void>>();
+  // watchInputs: at most WATCH_READS ledger reads at once across all watchers, in order; a released watcher's
+  // queued reads never start.
+  const WATCH_READS = 6;
+  const watchQueue: { id: string; host: string; dropped: () => boolean }[] = [];
+  let watchRunning = 0;
+  const pumpWatchReads = () => {
+    while (watchRunning < WATCH_READS && watchQueue.length) {
+      const task = watchQueue.shift()!;
+      if (task.dropped()) continue;
+      watchRunning++;
+      void get().refreshInputs(task.id, task.host)
+        .catch(error => captureDebugError(error, "renderer.inputLedger.watch"))
+        .finally(() => { watchRunning--; pumpWatchReads(); });
+    }
+  };
   const ledgerInterrupts = new Map<string, Promise<void>>();
   const applyLedger = (id: string, host: string, step: InputLedgerStep) => {
     const key = viewKey(host, id);
@@ -1465,7 +1600,9 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
         hostBusy = hostBusyActionError(error) !== null;
         if (starting && !hostBusy && scope.current() && viewOn(sessionId, scope.host)) {
           const paths = creatorPathsBlock(error);
-          const message = paths ? creatorPathsWire({ code: CREATOR_PATHS_CODE, details: paths })! : error instanceof Error ? error.message : String(error);
+          // A saved model / effort no longer offered keeps its typed refusal (components/PinnedModelNote).
+          const pinned = paths ? null : pinnedModelBlock(error);
+          const message = paths ? creatorPathsWire({ code: CREATOR_PATHS_CODE, details: paths })! : pinned ? pinnedModelWireOf(pinned) : error instanceof Error ? error.message : String(error);
           // A failed send-start (queued inputs) keeps its own, more specific line.
           patchSession(sessionId, (v) => (v.startErrorQueueIds?.length ? {} : { startError: message, startErrorQueueIds: undefined }), scope.host);
         }
@@ -1991,6 +2128,8 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
     seedContextUsage(timeline, contextUsageFromLatest(history?.cutexState?.latestTokenUsage));
     const older = olderFromPage(history?.page);
     seedKeptPlan(scope.host, sessionId, timeline, undefined, history?.cutexState?.latestPlan, !!older?.cursor);
+    // This run's handled-interaction rows (live and already read saved ones) go back in, as in load.
+    seedInteractions(timeline, recordsOf(viewKey(scope.host, sessionId)));
     patchSession(sessionId, (v) => ({
       loading: false,
       error: null,
@@ -2007,6 +2146,7 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
       older,
       mediaRefs: history?.mediaRefs ?? 0,
     }), scope.host);
+    if (timeline.turns.length) void hydrateInteractions(sessionId, scope.host, timeline, timeline.turns.map((t) => t.id));
   };
 
   /**
@@ -2217,6 +2357,7 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
       // this timeline and one settle read per active child decide again (lib/background useSettleSubAgents).
       const forgotten = forgetSubAgents(get().subAgentLive, get().subAgentLiveGen, subAgentsOf(timeline).keys());
       if (forgotten) set({ subAgentLive: forgotten.live, subAgentLiveGen: forgotten.seenAt });
+      forgetClaudeTaskApprovals(scope.host, subAgentsOf(timeline).keys());
       patchSession(sessionId, (v) => ({
         loading: false,
         error: null,
@@ -2238,6 +2379,8 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
       // A bounded read of an offline agent has no turn window (cutex sends the unresolved messages only):
       // the stored history's turns read theirs like a paged-in page.
       if (!boot.native && history && timeline.turns.length) void loadLinkedBusMessages(sessionId, scope.host, timeline, timeline.turns);
+      // Saved answered questions / approvals of the shown 回合 (session-interaction-history-v1), in the background.
+      if (timeline.turns.length) void hydrateInteractions(sessionId, scope.host, timeline, timeline.turns.map((t) => t.id));
       applyPendingReviewer(sessionId, agent, boot.native ? timeline : null, daemon);
       if (!ledgerOn(scope.host)) {
       settleOutbox(sessionId, bootTick, scope.host);
@@ -2324,6 +2467,7 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
     sessionHosts.clear();
     viewRefs.clear();
     const view = get().view;
+    resetClaudeTaskApprovals();
     set(() => ({
       pinned: loadPinned(),
       sidebar: null,
@@ -2582,7 +2726,7 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
     if (!sliceCurrent(hostId, epoch)) return;
     patchSlice(hostId, epoch, { daemon });
     // Its host feed restarts from the live tail on reconnect: updates in the gap are unknown.
-    if (daemon.kind !== "connected") { forgetFreshPlans(hostId); resetBackgroundWork(hostId); }
+    if (daemon.kind !== "connected") { forgetFreshPlans(hostId); resetBackgroundWork(hostId); forgetShownDiagnostics(hostId, epoch); }
     else void loadSlice(hostId, epoch);
   };
 
@@ -2824,6 +2968,7 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
         const added = prependHistory(timeline, page.native.result);
         patchSession(sessionId, (v) => ({ version: v.version + 1, mediaRefs: (v.mediaRefs ?? 0) + (page.mediaRefs ?? 0), older: olderAfterPage(v.older, page.page, added, cursor) }), host);
         if (added && !opts?.read) void loadLinkedBusMessages(sessionId, host, timeline, timeline.turns.slice(0, added));
+        if (added && !opts?.read) void hydrateInteractions(sessionId, host, timeline, timeline.turns.slice(0, added).map((t) => t.id));
       } catch (e) {
         if (current()) patchSession(sessionId, (v) => ({ older: v.older && { ...v.older, loading: false, error: e instanceof Error ? e.message : String(e) } }), host);
       }
@@ -3065,6 +3210,26 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
         await readLedger(sessionId, host, { method: "cutex/input/list", params: session.epoch && !dirty ? { sinceRevision: session.rev } : {}, generation: session.generation, reason: "reconnect" });
       } catch (error) { if (dirty && get().inputs[key]) ledgerDirty.add(key); throw error; }
     },
+    watchInputs(sessionIds, host) {
+      if (!ledgerOn(host) || sessionIds.length === 0) return () => {};
+      const ids = [...new Set(sessionIds)];
+      // Pins first (cheap: events for these sessions apply from now on); the reads go through the shared bounded queue.
+      const releases = ids.map(id => pinLedger(id, host));
+      let released = false;
+      for (const id of ids) {
+        // Already read and live because it is shown: nothing to fetch.
+        if (ledgerVisible(id, host) && get().inputs[viewKey(host, id)]?.delivery) continue;
+        watchQueue.push({ id, host, dropped: () => released });
+      }
+      pumpWatchReads();
+      return () => {
+        if (released) return;
+        released = true;
+        // Reads not started yet are dropped; one already running finishes (its answer is still current data).
+        for (let i = watchQueue.length - 1; i >= 0; i--) if (watchQueue[i]!.dropped()) watchQueue.splice(i, 1);
+        for (const release of releases) release();
+      };
+    },
     async interruptSendInput(sessionId, inputId, hostId) {
       const host = hostId ?? hostOf(sessionId);
       const session = ledgerSession(sessionId, host);
@@ -3294,6 +3459,7 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
       const results = await Promise.allSettled(terminals.map((t) => daemon.terminateBackgroundTerminal(id, threadId, t.processId)));
       return results.filter((r) => r.status === "fulfilled").length;
     },
+    openApprovalsOn,
     openPage(page, params = {}) {
       // Settings is the Settings Shelf, not a page of the main area (owner 2026-10-21).
       if (page === SETTINGS_PAGE) return void openSettingsShelf({ tab: params.tab ?? "general", ...params });
@@ -3370,7 +3536,7 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
         if (current && current !== epoch) return;
         set({ daemon });
         // The host feed restarts from the live tail on reconnect: updates in the gap are unknown.
-        if (daemon.kind !== "connected") { forgetFreshPlans(hostId); resetBackgroundWork(hostId); }
+        if (daemon.kind !== "connected") { forgetFreshPlans(hostId); resetBackgroundWork(hostId); forgetShownDiagnostics(hostId); }
         if (daemon.kind === "connected") onFocusConnected();
       });
       bridge.on("hostEvent", ({ hostId, epoch, envelope }) => {
@@ -3388,16 +3554,20 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
         }
         const sidebar = focus ? state.sidebar : slice!.sidebar;
         if (envelope.cutex) recordRuntimeStop(hostId, envelope, featuresOn(hostId));
-        if (envelope.cutex?.method === BACKGROUND_WORK_METHOD) {
+        // Status-channel snapshots (background work; Claude diagnostics, claude-runtime-diagnostics-v1): row
+        // overlays by runtime generation. They never reach the generic event path below.
+        if (envelope.cutex?.method === BACKGROUND_WORK_METHOD || envelope.cutex?.method === CLAUDE_DIAGNOSTICS_METHOD) {
           const currentEpoch = connEpochOf(state.hosts, hostId);
           if (currentEpoch && currentEpoch !== epoch) return;
           const daemon = focus ? state.daemon : slice!.daemon;
           if (daemon.kind !== "connected") return;
-          const change = backgroundWorkChange(envelope.cutex.params);
-          if (!change) return;
+          const work = envelope.cutex.method === BACKGROUND_WORK_METHOD ? backgroundWorkChange(envelope.cutex.params) : null;
+          const diagnostics = work ? null : claudeDiagnosticsChange(envelope.cutex.params);
+          if (!work && !diagnostics) return;
           const projection = backgroundWorkOn(hostId);
           if (sidebar) projection.project(sidebar); // Seed the runtime generation fence.
-          projection.record(change);
+          if (work) projection.record(work);
+          else projection.recordClaudeDiagnostics(diagnostics!);
           const next = sidebar ? projection.project(sidebar) : null;
           if (next !== sidebar) {
             if (focus) set({ sidebar: next });
@@ -3664,13 +3834,21 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
         // says it still runs, or how it ended.
         const task = claudeTaskStatusFromEvent(envelope, view.timeline);
         if (task) get().setSubAgentStatus(task.threadId, task.status, envelope.correlation.runtimeGeneration ?? view.runtimeGeneration);
+        // r295 declined-approval flag: the current runtime's updates only (an older generation's replay never sets it).
+        const approval = generation == null || currentRuntime ? claudeTaskApprovalFromEvent(envelope, view.timeline) : null;
+        if (approval) noteClaudeTaskApproval(hostId, approval.threadId, approval.denied, generation ?? 0);
         // A request this desktop saw pending, resolved without our reply in flight (respond removes
         // it from pending optimistically): answered on another device, or cancelled / timed out
         // server-side — the resolved event carries no reason. Keep a row saying what it was.
         if (envelope.native?.message.method === "serverRequest/resolved") {
           const requestId = (envelope.native.message.params as { requestId?: unknown } | undefined)?.requestId;
           const seen = requestId === undefined ? undefined : view.timeline.pending.get(String(requestId));
-          if (seen) putInteraction(sessionId, elsewhereRecord(seen, requestTurnId(view.timeline, seen), Date.now() / 1000), hostId);
+          if (seen) {
+            const turnId = requestTurnId(view.timeline, seen);
+            putInteraction(sessionId, elsewhereRecord(seen, turnId, Date.now() / 1000, envelope.correlation.runtimeGeneration ?? view.runtimeGeneration), hostId);
+            // Answered on another device: cutex may commit its saved record a moment after this event.
+            refreshInteractionTurn(sessionId, hostId, turnId, [1500, 6000]);
+          }
         }
         if (applyEvent(view.timeline, envelope, featuresOn(hostId).has(LIVE_DELTAS_FEATURE))) {
           if (view.timeline.liveDeltas) view.timeline.liveDeltas.routeHost = hostId;
@@ -3784,7 +3962,7 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
                 await performSessionAction(sessionId, "cutex/runtime/online", { openVisibleTerminal: false, expectedRuntimeGeneration: intent.generation }, hostId, busy);
               })().catch(() => {});
             } else {
-              patchSession(sessionId, { startError: creatorPathsWire(error) ?? error?.message ?? "start failed", startErrorQueueIds: failed?.queueIds }, hostId);
+              patchSession(sessionId, { startError: creatorPathsWire(error) ?? pinnedModelWire(error) ?? runtimeUnreachableWire(error) ?? error?.message ?? "start failed", startErrorQueueIds: failed?.queueIds }, hostId);
             }
           }
           // The offline-start worker can lose a race to another successful launch. Its failure
@@ -3934,13 +4112,16 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
       }
     },
 
-    async openAgent(sessionId, hostId) {
+    async openAgent(sessionId, hostId, opts) {
       // One copy per agent (multi-window P3): open in another window's column → that window and column take the focus.
-      if (openRouter?.(hostId, sessionId)) return;
+      // An app-made open (keepUnread) never jumps windows: the router only says the agent is elsewhere (lib/windowRoute).
+      if (opts ? openRouter?.(hostId, sessionId, opts) : openRouter?.(hostId, sessionId)) return;
       const hosts = get().hosts;
-      if (!hosts || hostId === focusHost() || scopeHosts(hosts).includes(hostId)) return get().select(sessionId, hostId);
+      // Without options the call is as before (select(id, host)). Given up (`signal`) before it is made: nothing.
+      const pick = () => (opts?.signal?.aborted ? Promise.resolve() : opts ? get().select(sessionId, hostId, opts) : get().select(sessionId, hostId));
+      if (!hosts || hostId === focusHost() || scopeHosts(hosts).includes(hostId)) return pick();
       await new Promise<void>((resolve) => {
-        inAllDevices(() => void get().select(sessionId, hostId).then(resolve, resolve));
+        inAllDevices(() => void pick().then(resolve, resolve));
         setTimeout(resolve, 5000);
       });
     },
@@ -3971,14 +4152,15 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
       await load(sessionId, host);
     },
 
-    async select(sessionId, hostId) {
+    async select(sessionId, hostId, opts) {
+      if (opts?.signal?.aborted) return;
       const previous = get().selectedId;
       const previousHost = get().selectedHost ?? focusHost();
       // The agent's own host: the given one (or, without one, the open agent's for the same id, else the
       // focus host) unless only another host of the scope lists this id (lib/agentHostRoute).
       const host = agentHostFor(sessionId, hostId ?? (previous === sessionId ? previousHost : focusHost()), previousHost);
       set({ view: { kind: "conversation" } });
-      markSeenOn(host, sessionId);
+      if (!opts?.keepUnread) markSeenOn(host, sessionId);
       if (previous === sessionId && previousHost === host) {
         if (ledgerDirty.has(viewKey(host, sessionId)) || !get().inputs[viewKey(host, sessionId)]) await get().refreshInputs(sessionId, host);
         return;
@@ -4069,6 +4251,10 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
       const { timeline } = view;
       const key = String(requestId);
       const request = timeline.pending.get(key);
+      // The identity of its row: the generation it is answered in, captured before sending.
+      const generation = view.runtimeGeneration;
+      const inFlight = request ? `${viewKey(host, id)}\u0000${interactionKey(generation, request.id)}` : null;
+      if (inFlight) answeringKeys.add(inFlight);
       if (request) {
         timeline.pending.delete(key);
         timeline.answering.add(key);
@@ -4078,7 +4264,11 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
         await apiOn(host).respond(id, view.runtimeGeneration, requestId, reply);
         // Timeline row: answered here. Upgrades an 已在别处处理 row that a resolved event wrote
         // while the reply was in flight but the reply landed anyway (event order is not guaranteed).
-        if (request) putInteraction(id, answeredRecord(request, reply, requestTurnId(timeline, request), Date.now() / 1000), host);
+        if (request) {
+          const turnId = requestTurnId(timeline, request);
+          putInteraction(id, answeredRecord(request, reply, turnId, Date.now() / 1000, generation), host);
+          refreshInteractionTurn(id, host, turnId, [800, 4000]);
+        }
       } catch (e) {
         // Settled elsewhere — another client (phone, second desktop) answered first, it is gone, or
         // serverRequest/resolved arrived while the reply was in flight: never put it back.
@@ -4095,11 +4285,17 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
           void load(id, host);
         }
         // Another client answered first, or the request left without our reply: keep a row saying so.
-        if ((failure === "resolved" || failure === "gone") && request) putInteraction(id, elsewhereRecord(request, requestTurnId(timeline, request), Date.now() / 1000), host);
+        if ((failure === "resolved" || failure === "gone") && request) {
+          const turnId = requestTurnId(timeline, request);
+          putInteraction(id, elsewhereRecord(request, turnId, Date.now() / 1000, generation), host);
+          // Answered by another client first: its saved record upgrades this row once cutex has committed it.
+          refreshInteractionTurn(id, host, turnId, [1500, 6000]);
+        }
         if (failure !== "retry") notifyAgent(id, host, translate(`interaction.err.${failure}`));
         else if (!resolvedMeanwhile) notifyAgent(id, host, e instanceof Error ? e.message : String(e), "error");
       } finally {
         timeline.answering.delete(key);
+        if (inFlight) answeringKeys.delete(inFlight);
       }
     },
 
@@ -4808,6 +5004,12 @@ export function featuresOf(s: HostReadSource, hostId: string | null | undefined)
 const EMPTY_FEATURES: ReadonlySet<string> = new Set();
 
 /** The host of the selected agent (the focus host when none is selected). */
+/** The agent of `hostId` the owner viewed last (this run; null = none viewed). */
+export function recentAgentOn(hostId: string): string | null {
+  const key = recentViews.find((k) => isViewOf(k, hostId));
+  return key ? viewKeyParts(key).sessionId : null;
+}
+
 export function agentHost(s: Pick<AppState, "hosts" | "selectedHost">): string {
   return s.selectedHost ?? focusOf(s);
 }

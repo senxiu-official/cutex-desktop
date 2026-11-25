@@ -6,6 +6,7 @@ const modelText = (v: unknown) => typeof v === "string" && v.trim() === v && v.l
 /**
  * The renderer may only send these through `cutex/session/defaults/update`: the Claude tool switches and
  * memoryInjection (booleans), and an offline agent's model / reasoning effort (批量换模型: text, used at its next start).
+ * `reasoningEffort` may also be null: remove a saved effort (an old agent's effort no longer offered, shared/pinnedModel).
  */
 export function checkDefaultsPatch(params: Record<string, unknown>): void {
   const patch = params.patch;
@@ -16,6 +17,7 @@ export function checkDefaultsPatch(params: Record<string, unknown>): void {
     Object.keys(patch).length > 0 &&
     Object.entries(patch).every(([k, v]) =>
       ((SESSION_DEFAULTS_KEYS as readonly string[]).includes(k) && typeof v === "boolean") ||
-      ((SESSION_DEFAULTS_MODEL_KEYS as readonly string[]).includes(k) && modelText(v)));
+      ((SESSION_DEFAULTS_MODEL_KEYS as readonly string[]).includes(k) && modelText(v)) ||
+      (k === "reasoningEffort" && v === null));
   if (!ok) throw new Error("cutex/session/defaults/update: only claudeAllowWrite / claudeAllowExec / memoryInjection / model / reasoningEffort");
 }

@@ -2,6 +2,7 @@
 import type { Json } from "../types";
 import { SERVICE_COMPONENT } from "../../lib/sideKinds";
 import { MAX_BROWSER_THUMBNAIL_URL_LENGTH } from "../../../../shared/browser";
+import { isBrowserIdentityId } from "../../../../shared/browserIdentity";
 
 export const BROWSER_TAB = "browser.tab";
 export const SERVICE_TAB = SERVICE_COMPONENT;
@@ -9,12 +10,15 @@ export const browserKindForUrl = (url: string) => url.startsWith("cutex:service/
 export const isBrowserKind = (kind: string) => kind === BROWSER_TAB || kind === SERVICE_TAB;
 export const MAX_BROWSER_URL = 2000;
 export const MAX_BROWSER_INPUT = 8000;
-export type BrowserParams = { url: string; pendingOpen?: string; tabKey?: string; agentOpened?: true; ownerTab?: true; linked?: string };
+export type BrowserParams = { url: string; pendingOpen?: string; tabKey?: string; agentOpened?: true; ownerTab?: true; linked?: string; browserIdentityId?: string };
 /** front: an agent tab the owner brought into the card's webview (otherwise agent tabs run in main's
  * background carrier). Only meaningful with agentOpened; never selects a cookie pool. */
 /** linked: a service tab opened from its agent's conversation header (lib/serviceLink): that agent's session id —
  * a label for the pane (the agent's avatar, 断开), never a permission or a cookie pool. */
-export type BrowserState = { url: string; title: string; tabKey: string; pendingOpen?: string; agentOpened?: true; newOwner?: true; front?: true; linked?: string };
+export type BrowserState = { url: string; title: string; tabKey: string; pendingOpen?: string; agentOpened?: true; newOwner?: true; front?: true; linked?: string;
+  /** 浏览器身份 a new owner tab asks main for (＋▾, 用其他身份打开…); absent = the switcher's current one. A request only:
+   *  the tab's real identity is main's (its view). Dropped once main has reserved the tab; never restored. */
+  newIdentity?: string };
 
 /** A linked agent's session id as kept in params / state (a bounded plain token), else null. */
 export function browserLinked(raw: unknown): string | null {
@@ -179,7 +183,8 @@ export function parseBrowserParams(raw: Json): BrowserParams | null {
   }
   // Only a service tab can be linked to an agent (its conversation header opened it).
   const linked = url.startsWith("cutex:service/") ? browserLinked(raw.linked) : null;
-  return linked ? { url, linked } : { url };
+  const identity = isBrowserIdentityId(raw.browserIdentityId) ? { browserIdentityId: raw.browserIdentityId } : {};
+  return linked ? { url, linked, ...identity } : { url, ...identity };
 }
 
 export function initBrowser(params: BrowserParams, previous: BrowserState | null): BrowserState {
@@ -188,7 +193,7 @@ export function initBrowser(params: BrowserParams, previous: BrowserState | null
   if (params.ownerTab && isBrowserTabKey(params.tabKey)) return { url: params.url, title: "", tabKey: params.tabKey };
   return { url: params.url, title: previous?.url === params.url ? browserTitle(previous.title) : "",
     tabKey: isBrowserTabKey(previous?.tabKey) ? previous.tabKey : crypto.randomUUID(), ...(previous?.agentOpened ? { agentOpened: true } : {}),
-    ...(!previous || previous.newOwner ? { newOwner: true as const } : {}), ...(params.linked ? { linked: params.linked } : {}) };
+    ...(!previous || previous.newOwner ? { newOwner: true as const, ...(params.browserIdentityId ? { newIdentity: params.browserIdentityId } : previous?.newIdentity ? { newIdentity: previous.newIdentity } : {}) } : {}), ...(params.linked ? { linked: params.linked } : {}) };
 }
 
 export function restoreBrowser(raw: Json, version: number): BrowserState | null {

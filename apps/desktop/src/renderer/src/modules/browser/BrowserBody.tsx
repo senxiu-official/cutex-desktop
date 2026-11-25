@@ -8,7 +8,7 @@ import { dataFlags, useSizeFlags, widthBelow } from "../../lib/sizeFlags";
 import { bridge } from "../../bridge";
 import { useI18n } from "../../i18n";
 import type { SideBodyProps } from "../slots";
-import { browserAddressText, browserAddressUrl, browserError, browserErrorKey, INVALID_ADDRESS, MAX_BROWSER_INPUT, NOT_WEB_ADDRESS, safeBrowserUrl, type BrowserState } from "./browserState";
+import { browserAddressText, browserError, browserErrorKey, INVALID_ADDRESS, MAX_BROWSER_INPUT, NOT_WEB_ADDRESS, safeBrowserUrl, type BrowserState } from "./browserState";
 import { guestLifecycle } from "./guestLifecycle";
 import { useBrowserEnabled, useBrowserView } from "./tabs";
 import { browserSitePermissionList } from "./sitePermissionText";
@@ -18,9 +18,18 @@ import { BrowserMaidRow } from "./BrowserControls";
 import { BrowserOwnerCapture } from "./BrowserOwnerCapture";
 import { createBrowserHold } from "./hold";
 import { createHoldReasons, createMediaHold, onMediaStop } from "./media";
+import { openIdentityHistory } from "./identityMenus";
+import { BGPLAY_PAUSE_DELAY_MS, bgplayApplies, bgplayMode, useBgplayOn } from "./bgplay";
 import { markUncappedHold } from "../../lib/sideKeep";
 import { reserveNewOwnerTab } from "./newOwnerTab";
-import { browserRefusalAction } from "../../../../shared/browser";
+import { currentIdentityId, useBrowserIdentities } from "./identities";
+import { classifyAddress } from "./addressInput";
+import { AddressSuggestions, NewTabPage } from "./AddressExtras";
+import { FillOfferList, PasswordKey, PasswordPromptCard } from "./PasswordParts";
+import { passwordTabKey, usePasswordUi } from "./passwordUi";
+import { BrowserIdentityChip } from "./IdentityNotes";
+import { browserIdentityPartition, DEFAULT_BROWSER_IDENTITY_ID, isBrowserIdentityId } from "../../../../shared/browserIdentity";
+import { browserRefusalAction, browserHistoryShortcut } from "../../../../shared/browser";
 import { BrowserBackgroundView } from "./BrowserBackgroundView";
 import { BROWSER_PREVIEW_BACKGROUND } from "./thumbnails";
 import { ServicePaneLink } from "../../components/ServiceLinks";
@@ -63,6 +72,17 @@ export function BrowserBody(props: SideBodyProps<BrowserState>) {
   const submitted = useRef<string | null>(null);
   const desktopLoopbackRetry = useRef<string | undefined>(undefined);
   const [fixNote, setFixNote] = useState<"browser.refusal.forced" | null>(null);
+  const searchEngine = useBrowserIdentities((s) => s.prefs.searchEngine);
+  const [altAddress, setAltAddress] = useState<string | null>(null);
+  const identitiesSupported = useBrowserIdentities((s) => s.supported);
+  const addressInput = useRef<HTMLInputElement>(null);
+  const [addressFocused, setAddressFocused] = useState(false);
+  // Saved passwords (§8–§9): main's prompt / offer for this tab; × hides it, the address bar's key shows it again.
+  const pwKey = hostId ? passwordTabKey(hostId, tabKey) : "";
+  const pwPrompt = usePasswordUi((s) => (pwKey ? s.prompts[pwKey] : undefined));
+  const pwOffer = usePasswordUi((s) => (pwKey ? s.offers[pwKey] : undefined));
+  const [pwHidden, setPwHidden] = useState<string | null>(null);
+  const pwShown = (id: string | undefined) => !!id && pwHidden !== id;
   const [address, setAddress] = useState(browserAddressText(view?.url ?? instance.state.url));
   const editing = useRef(false);
   const [error, setError] = useState<string | null>(null);
@@ -114,7 +134,27 @@ export function BrowserBody(props: SideBodyProps<BrowserState>) {
       reasons.current!.set("media", false);
     };
   }, [hostId, tabKey]);
-  useEffect(() => { media.current?.update(playing); }, [playing]);
+  // 后台播放 (D2–D7, bgplay.ts): an owner tab is held only while ticked; unticked, it pauses shortly after leaving the
+  // screen. Agent-pool and service tabs keep the older rule above (held while playing, then the grace).
+  const ticked = useBgplayOn(hostId, tabKey);
+  const mode = bgplayMode(bgplayApplies(view, instance.state.url), ticked);
+  useEffect(() => { media.current?.update(mode === "legacy" && playing); }, [playing, mode]);
+  useEffect(() => {
+    reasons.current!.set("bgplay", mode === "hold");
+    return () => void reasons.current!.set("bgplay", false);
+  }, [mode]);
+  useEffect(() => {
+    if (mode !== "pauseWhenHidden" || !playing || props.visible || !hostId || !bridge.browser) return;
+    const browser = bridge.browser;
+    const timer = setTimeout(() => void browser.forHost(hostId).pauseMedia(tabKey).catch(() => {}), BGPLAY_PAUSE_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [mode, playing, props.visible, hostId, tabKey]);
+  // The WhatsApp owner tab main watches stays mounted while watching (module whatsapp); released when off or closed.
+  const watched = !!view?.whatsAppWatch?.enabled;
+  useEffect(() => {
+    reasons.current!.set("watch", watched);
+    return () => void reasons.current!.set("watch", false);
+  }, [watched]);
   // Service view cache (viewCache.ts, owner 2026-11-18): one of the most recently seen service pages stays mounted when its
   // card leaves the screen (another page, another conversation); let go, it remembers its place in main first.
   const cacheable = instance.kind === SERVICE_TAB && !agentPool && !!hostId;
@@ -212,8 +252,8 @@ export function BrowserBody(props: SideBodyProps<BrowserState>) {
       if (pending) void api.openRefused(pending, "invalid_request").catch(() => {});
     };
     if (latest.current.instance.state.newOwner) {
-      return reserveNewOwnerTab(api, () => browserActivation.get() && browserHostCurrent(hostId, epoch), key => {
-        const state = { ...latest.current.instance.state, tabKey: key }; delete state.newOwner;
+      return reserveNewOwnerTab(api, latest.current.instance.state.newIdentity ?? currentIdentityId(), () => browserActivation.get() && browserHostCurrent(hostId, epoch), key => {
+        const state = { ...latest.current.instance.state, tabKey: key }; delete state.newOwner; delete state.newIdentity;
         latest.current.setState(state);
       }, mountFailure);
     }
@@ -225,7 +265,9 @@ export function BrowserBody(props: SideBodyProps<BrowserState>) {
       // Only the main-issued one-use blank reservation enters the DOM. Ordinary navigation is IPC;
       // neither metadata updates, hidden state nor card moves may replace this element or its src.
       const agentPool = mount.pool === "agent" || latest.current.instance.state.agentOpened;
-      const expectedPartition = agentPool ? `persist:browser-agent-${hostId}` : `persist:browser-${hostId}`;
+      // An owner tab lives in its 浏览器身份's pool (main chose it at reservation; the default one is today's pool).
+      const ownerIdentity = isBrowserIdentityId(mount.browserIdentityId) ? mount.browserIdentityId : DEFAULT_BROWSER_IDENTITY_ID;
+      const expectedPartition = agentPool ? `persist:browser-agent-${hostId}` : browserIdentityPartition(ownerIdentity, hostId);
       // Main's background carrier: no element at all; the card shows its live thumbnail.
       if (mount.carrier === "background") {
         if (mount.tabKey !== tabKey || mount.pool !== "agent" || mount.partition !== `persist:browser-agent-${hostId}`) throw new Error("Invalid browser mount reservation");
@@ -304,12 +346,17 @@ export function BrowserBody(props: SideBodyProps<BrowserState>) {
     finally { if (browserHostCurrent(hostId, epoch)) setWorking(false); }
   }
 
+  // 浏览器身份 §10: typed text that is not an address searches (the owner's engine); a bare word also offers its host.
   function navigate(): void {
     if (!address.trim()) return;
-    setFixNote(null);
-    const typed = browserAddressUrl(address);
-    if ("error" in typed) { setError(typed.error); return; }
-    const url = typed.url;
+    setFixNote(null); setAltAddress(null);
+    const typed = classifyAddress(address, searchEngine);
+    if (typed.kind === "error") { setError(typed.error); return; }
+    if (typed.kind === "search" && typed.alt) setAltAddress(typed.alt);
+    go(typed.url);
+  }
+
+  function go(url: string): void {
     ownerRecovery.current = false;
     if (!hostId || !epoch || !bridge.browser) return;
     submitted.current = url;
@@ -368,6 +415,10 @@ export function BrowserBody(props: SideBodyProps<BrowserState>) {
   // Address-bar text the renderer refused before asking main (never a main / policy refusal).
   const addressKey = reason === NOT_WEB_ADDRESS ? "browser.notWebAddress" : reason === INVALID_ADDRESS ? "browser.invalidUrl" : null;
   const blank = currentUrl === "about:blank" && !view?.loading;
+  // 浏览器身份 §10: an owner tab's blank page is the app's new tab page (its identity's top sites).
+  const tabIdentity = view?.browserIdentityId ?? (preview ? currentIdentityId() : DEFAULT_BROWSER_IDENTITY_ID);
+  const newTabPage = !!hostId && identitiesSupported && view?.pool !== "agent" && !instance.state.agentOpened && !background
+    && (preview ? currentUrl === "about:blank" : blank && hostAvailable && !!bridge.browser && !recoverable);
   function loginCurrent(): boolean {
     if (!loginAlive.current || !hostId || !epoch || !view || !browserActivation.get() || !browserHostCurrent(hostId, epoch)) return false;
     const live = browserCache.get(hostId, tabKey);
@@ -417,7 +468,14 @@ export function BrowserBody(props: SideBodyProps<BrowserState>) {
   }, t);
   return (
     <div className={`flex h-full min-h-0 flex-col bg-background${view?.control?.operating ? " ring-2 ring-inset ring-accent" : ""}`} data-browser-card data-browser-operating={view?.control?.operating || undefined} data-browser-granted={granted || undefined}
-      data-browser-pool={view?.pool} data-browser-lease-state={view?.lease?.state} data-browser-session={view?.lease?.sessionId} data-browser-held={props.held || undefined}>
+      data-browser-pool={view?.pool} data-browser-lease-state={view?.lease?.state} data-browser-session={view?.lease?.sessionId} data-browser-held={props.held || undefined}
+      onKeyDown={(event) => {
+        // Ctrl+H (⌘Y on macOS) with focus in this card's chrome (address row, …): the tab identity's 浏览历史, as main
+        // does for a key pressed in the page itself. Owner tabs only.
+        if (view?.pool === "agent" || pageService() || !browserHistoryShortcut({ type: "keyDown", key: event.key, code: event.code, control: event.ctrlKey, meta: event.metaKey, alt: event.altKey, shift: event.shiftKey }, navigator.platform.startsWith("Mac") ? "darwin" : "win32")) return;
+        event.preventDefault();
+        openIdentityHistory(tabIdentity, hostId ?? undefined);
+      }}>
       {/* Maid 行: the service's agent (a service tab in a card) and who controls the page; always there, one height. */}
       <BrowserMaidRow hostId={hostId} tabKey={tabKey} link={props.where === "card" && serviceSlugOf(currentUrl) ? <ServicePaneLink hostId={hostId} instanceId={instance.id} url={currentUrl} linked={instance.state.linked ?? null} /> : undefined} />
       {/* 地址行: back · forward · reload | address (favicon, Enter or ↵ submits) | badges · ⋯ (copy, open outside, …). */}
@@ -429,11 +487,16 @@ export function BrowserBody(props: SideBodyProps<BrowserState>) {
         ) : (
           <button type="button" className={BUTTON} title={t("browser.reload")} aria-label={t("browser.reload")} disabled={!hostAvailable || (!ready && !recoverable) || working} onClick={reload}><RotateCw size={14} /></button>
         )}
-        <div className={`ml-0.5 flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded-ctl border border-border bg-background pr-0.5 pl-2 focus-within:border-subtle ${!hostAvailable || !bridge.browser ? "opacity-60" : ""}`}>
+        <div className={`relative ml-0.5 flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded-ctl border border-border bg-background pr-0.5 pl-2 focus-within:border-subtle ${!hostAvailable || !bridge.browser ? "opacity-60" : ""}`}>
+          {view?.pool !== "agent" && <BrowserIdentityChip identityId={view?.browserIdentityId} narrow={!!addressFlags.narrow} />}
           <span className="flex size-4 shrink-0 items-center justify-center text-subtle" aria-hidden="true">
             {view?.loading ? <LoaderCircle size={13} className="animate-spin" /> : view?.favicon ? <img src={view.favicon} alt="" width={14} height={14} referrerPolicy="no-referrer" /> : <Globe size={13} />}
           </span>
-          <input value={address} onChange={(event) => setAddress(event.target.value)} onFocus={() => { editing.current = true; }} onBlur={() => { editing.current = false; }} aria-label={t("browser.address")} spellCheck={false} autoComplete="off" autoCapitalize="off" maxLength={MAX_BROWSER_INPUT} disabled={!hostAvailable || !bridge.browser} className="h-full min-w-0 flex-1 bg-transparent text-meta text-foreground outline-none" />
+          <input ref={addressInput} value={address} onChange={(event) => { setAddress(event.target.value); setAddressFocused(true); }} onFocus={() => { editing.current = true; }} onBlur={() => { editing.current = false; setAddressFocused(false); }} aria-label={t("browser.address")} spellCheck={false} autoComplete="off" autoCapitalize="off" maxLength={MAX_BROWSER_INPUT} disabled={!hostAvailable || !bridge.browser} className="h-full min-w-0 flex-1 bg-transparent text-meta text-foreground outline-none" />
+          {view?.pool !== "agent" && <AddressSuggestions input={addressInput} text={address} open={addressFocused && editing.current} identityId={tabIdentity} hostId={hostId} engine={searchEngine}
+            onPick={(url) => { setAddressFocused(false); setAltAddress(null); editing.current = false; addressInput.current?.blur(); go(url); }} onClose={() => setAddressFocused(false)} />}
+          {hostId && view?.pool !== "agent" && <PasswordKey hostId={hostId} tabKey={tabKey} open={pwShown(pwOffer?.offerId ?? pwPrompt?.promptId)}
+            onToggle={() => { const id = pwOffer?.offerId ?? pwPrompt?.promptId ?? null; setPwHidden((h) => (h === id ? null : id)); }} />}
           {view?.desktopLoopback && <span data-browser-desktop-loopback-badge title={t("browser.desktopLoopback.badgeHint")} className="flex h-5 shrink-0 items-center gap-1 rounded-chip bg-surface-2 px-1.5 text-caption text-muted"><Monitor size={11} aria-hidden="true" />{t("browser.desktopLoopback.badge")}</span>}
           {/* Enter submits; the arrow is the same for a pointer / touch. */}
           <button type="submit" data-browser-go="" title={t("browser.go")} aria-label={t("browser.go")} disabled={!hostAvailable || (!ready && !recoverable) || working || preview}
@@ -469,6 +532,11 @@ export function BrowserBody(props: SideBodyProps<BrowserState>) {
         <button type="button" className={BUTTON} aria-label={t("common.close")} title={t("common.close")}
           onClick={() => { setDismissedError(reason); setError(null); }}><X size={14} /></button>
       </div>}
+      {altAddress && <p role="status" data-browser-search-alt="" className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-1.5 text-xs text-subtle">
+        <span className="min-w-0 flex-1 truncate">{t("browser.search.altHint")}</span>
+        <button type="button" className={`${btn({ size: "sm" })} shrink-0`} disabled={working} onClick={() => { const url = altAddress; setAltAddress(null); go(url); }}>{t("browser.search.alt", { url: altAddress })}</button>
+        <button type="button" className={BUTTON} aria-label={t("common.close")} title={t("common.close")} onClick={() => setAltAddress(null)}><X size={14} /></button>
+      </p>}
       {!safeBrowserUrl(currentUrl) && <p role="status" className="shrink-0 border-b border-border px-3 py-1 text-xs text-subtle">{t("browser.longUrl")}</p>}
       <div className="relative min-h-0 flex-1">
         <div ref={host} data-browser-viewport className="absolute inset-0" style={{ visibility: !hostAvailable || crashed || invalidated ? "hidden" : "visible" }} />
@@ -479,7 +547,10 @@ export function BrowserBody(props: SideBodyProps<BrowserState>) {
           failed={() => setCaptureFailed(true)} />}
         {previewBackground && <BrowserBackgroundView hostId={BROWSER_PREVIEW_BACKGROUND.hostId} tabKey={BROWSER_PREVIEW_BACKGROUND.tabKey} title="Agent page" handover={false}
           operating agentName="Reader" onFront={() => {}} />}
-        {!previewBackground && (preview || !hostAvailable || !bridge.browser || recoverable || (blank && !background)) && (
+        {pwPrompt && pwShown(pwPrompt.promptId) && <PasswordPromptCard prompt={pwPrompt} onHide={() => setPwHidden(pwPrompt.promptId)} />}
+        {pwOffer && pwShown(pwOffer.offerId) && !background && <FillOfferList offer={pwOffer} onHide={() => setPwHidden(pwOffer.offerId)} />}
+        {newTabPage && hostId && <NewTabPage identityId={tabIdentity} hostId={hostId} onOpen={(url) => go(url)} />}
+        {!previewBackground && !newTabPage && (preview || !hostAvailable || !bridge.browser || recoverable || (blank && !background)) && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-6 text-center text-xs text-subtle">
             <Globe size={24} strokeWidth={1.4} />
             <p className="max-w-sm">{preview ? t("browser.preview") : !hostAvailable ? t("browser.noHost") : !bridge.browser ? t("browser.unavailable") : crashed ? t("browser.crashed") : recoverable ? t("browser.unavailable") : t("browser.blank")}</p>

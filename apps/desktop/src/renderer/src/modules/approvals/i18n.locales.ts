@@ -2,6 +2,13 @@
 import type { zhCN } from "./i18n";
 
 const zhHantCN: Partial<Record<keyof typeof zhCN, string>> = {
+  "approvals.workflow.unconfirmed": "上一次運行有步驟結果未確認，它們可能已經做了改動。批准重試前，先看看這些步驟。",
+  "approvals.workflow.unconfirmedLoading": "正在讀取上一次運行的步驟…",
+  "approvals.workflow.unconfirmedUnread": "未能讀取上一次運行的步驟記錄，可到「工作流」頁查看 {run}",
+  "approvals.workflow.stepUnknown": "結果未確認",
+  "approvals.workflow.stepLive": "可能仍在運行",
+  "approvals.workflow.stepAsk": "委託",
+  "approvals.workflow.stepSession": "會話",
   "approvals.kind.managed_service": "執行託管服務",
   "approvals.kind.agent_profile": "使用需批准的 Profile",
   "approvals.kind.ask_delivery": "需複核的委託",
@@ -48,7 +55,7 @@ const zhHantCN: Partial<Record<keyof typeof zhCN, string>> = {
   "approvals.rules.identity.openProject": "在專案頁更改",
   "approvals.rules.refresh": "重新整理",
   "approvals.rules.expiry": "有效期",
-  "approvals.rules.expiry.turn": "僅目前一輪",
+  "approvals.rules.expiry.turn": "僅當前回合",
   "approvals.rules.expiry.hour": "一小時",
   "approvals.rules.expiry.today": "今天",
   "approvals.rules.expiry.revoked": "直到撤銷",
@@ -87,7 +94,7 @@ const zhHantCN: Partial<Record<keyof typeof zhCN, string>> = {
   "approvals.rules.turnOff": "關掉：以後先問你",
   "approvals.rules.highShort": "高風險",
   "approvals.rules.newExpiry": "新打開的有效",
-  "approvals.rules.expiryShort.turn": "這一輪",
+  "approvals.rules.expiryShort.turn": "本回合",
   "approvals.rules.expiryShort.hour": "1 小時",
   "approvals.rules.expiryShort.today": "今天",
   "approvals.rules.expiryShort.revoked": "一直",

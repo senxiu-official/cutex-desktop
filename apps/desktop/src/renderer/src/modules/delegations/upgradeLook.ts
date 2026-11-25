@@ -21,7 +21,7 @@ export const DIALOG = "fixed inset-0 m-auto max-h-[90vh] w-[460px] max-w-[95vw] 
 export const CHOICE = "flex cursor-pointer items-center gap-2 rounded-ctl border border-border px-3 py-2 text-ui hover:bg-hover has-[:checked]:border-accent has-[:checked]:bg-accent-soft has-[:disabled]:cursor-default has-[:disabled]:opacity-50";
 /** The confirm button of a destructive dialog: solid red. Its own fill (--danger-solid), not --danger: dark --danger is a light
  *  red made for text, white on it is 2.8:1 (measured 2026-10-26). */
-export const DANGER_SOLID = "inline-flex h-7 shrink-0 items-center justify-center gap-1 rounded-ctl bg-danger-solid px-3 text-ui font-medium whitespace-nowrap text-on-accent transition-colors hover:brightness-110 active:brightness-95 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent disabled:cursor-default disabled:opacity-40";
+export const DANGER_SOLID = "inline-flex h-7 shrink-0 items-center justify-center gap-1 rounded-ctl bg-danger-solid px-3 text-ui font-medium whitespace-nowrap text-white transition-colors hover:brightness-110 active:brightness-95 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent disabled:cursor-default disabled:opacity-40";
 
 /** The glyph of a tree node, like the 委托 list's status mark (glyph + word, never colour alone). */
 export function nodeGlyph(node: UpgradeNode, continuing: boolean, limited: boolean): { glyph: StatusGlyph; tone: StatusTone } {

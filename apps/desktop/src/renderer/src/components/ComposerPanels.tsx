@@ -15,8 +15,9 @@ import { services } from "../modules/app";
 import { hostPageParam } from "../lib/targetHost";
 import { ProjectMemoryList } from "./ProjectMemory";
 import { useOwnerWindow } from "../lib/ownerContext";
+import { EntityMention } from "./EntityIcon";
 
-function Panel({ title, onClose, actions, tall, children }: { title: string; onClose(): void; actions?: ReactNode; tall?: boolean; children: ReactNode }) {
+function Panel({ title, onClose, actions, tall, children }: { title: ReactNode; onClose(): void; actions?: ReactNode; tall?: boolean; children: ReactNode }) {
   const win = useOwnerWindow();
   const { t } = useI18n();
   const ref = useRef<HTMLDivElement>(null);
@@ -129,7 +130,7 @@ export function ProjectMemoryPanel({ projectId, projectName, onClose }: { projec
   return (
     <Panel
       tall
-      title={`${t("projects.memory")} · ${projectName}`}
+      title={<>{t("projects.memory")} · <EntityMention entity={{ kind: "project", id: projectId, hostId }}>{projectName}</EntityMention></>}
       onClose={onClose}
       actions={
         <button

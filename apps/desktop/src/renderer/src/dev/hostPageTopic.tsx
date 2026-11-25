@@ -19,7 +19,7 @@ const T = {
   pending: <span className={`${CHIP} bg-warn/15 text-warn-text`}>等待分配</span>,
 };
 
-type HostId = "host-a" | "host-b" | "hachimi" | "lab-gpu";
+type HostId = "host-a" | "host-b" | "hostc" | "lab-gpu";
 interface MockHost {
   id: HostId;
   self?: boolean;
@@ -31,7 +31,7 @@ interface MockHost {
 const HOSTS: MockHost[] = [
   { id: "host-a", self: true, owner: { name: "Sam", fp: "9f3a 61c2 0b7e d415", you: true }, rights: "full", via: "本机", online: true },
   { id: "host-b", owner: { name: "Sam", fp: "9f3a 61c2 0b7e d415", you: true }, rights: "full", via: "SSH 登录 sam@host-b", online: true },
-  { id: "hachimi", owner: { name: "ema", fp: "41d0 9c8a 77e2 03bf" }, rights: "full", via: "SSH 登录 ema@hachimi", online: true },
+  { id: "hostc", owner: { name: "ema", fp: "41d0 9c8a 77e2 03bf" }, rights: "full", via: "SSH 登录 ema@hostc", online: true },
   { id: "lab-gpu", owner: { name: "Kai", fp: "07be 2f19 c3a0 5d6e" }, rights: "granted", via: "设备令牌", online: false },
 ];
 const RIGHTS = { full: "完全控制", granted: "按授权" } as const;
@@ -277,7 +277,7 @@ const PROJECTS = ["cutex", "cutex-desktop", "personas", "notes"];
 function usersOn(h: MockHost): MockUser[] {
   const laptop = (n: string, self = false): [ReactNode, string, boolean] => [<Laptop key={n} size={13} />, n, self];
   const phone = (n: string): [ReactNode, string, boolean] => [<Smartphone key={n} size={13} />, n, false];
-  if (h.id === "hachimi")
+  if (h.id === "hostc")
     return [
       { name: "ema", root: true, projects: "all", send: true, delegate: true, devices: [laptop("ema 的 ThinkPad")] },
       { name: "Mia", projects: ["cutex"], send: true, delegate: false, devices: [laptop("Mia 的 MacBook")] },
@@ -487,7 +487,7 @@ export function HostPageTopic() {
   const [variant, setVariant] = useState<"a" | "b" | "c" | "d">(q.get("v") === "a" ? "a" : q.get("v") === "b" ? "b" : q.get("v") === "c" ? "c" : "d");
   const NAV: Page[] = variant === "d" ? ["你", "主机列表", "主机", "用户", "网络代理"] : variant === "c" ? ["你", "用户", "主机", "网络代理"] : ["你", "主机", "网络代理"];
   const [page, setPage] = useState<Page>(q.get("p") === "me" ? "你" : "主机");
-  const [host, setHost] = useState<HostId>((q.get("h") as HostId | null) ?? "hachimi");
+  const [host, setHost] = useState<HostId>((q.get("h") as HostId | null) ?? "hostc");
   return (
     <>
       <ul className="my-4 list-disc space-y-0.5 rounded-xl border border-border bg-surface px-8 py-3 text-xs text-muted">

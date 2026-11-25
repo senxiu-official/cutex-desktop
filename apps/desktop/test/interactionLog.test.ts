@@ -124,8 +124,8 @@ describe("record store (this run only)", () => {
 
   it("an answered record upgrades an earlier elsewhere row for the same request", () => {
     const id = String(COMMAND.id);
-    expect(putRecord("a", elsewhereRecord(COMMAND, "t", 1))).toBe(true);
-    expect(putRecord("a", answeredRecord(COMMAND, { result: { decision: "accept" } }, "t", 2))).toBe(true);
+    expect(putRecord("a", elsewhereRecord(COMMAND, "t", 1))).not.toBeNull();
+    expect(putRecord("a", answeredRecord(COMMAND, { result: { decision: "accept" } }, "t", 2))).not.toBeNull();
     const records = recordsOf("a");
     expect(records).toHaveLength(1);
     expect(records[0]!.requestId).toBe(id);
@@ -133,8 +133,8 @@ describe("record store (this run only)", () => {
   });
 
   it("an answered record is never downgraded, and elsewhere never duplicates", () => {
-    expect(putRecord("a", answeredRecord(COMMAND, { result: { decision: "accept" } }, "t", 1))).toBe(true);
-    expect(putRecord("a", elsewhereRecord(COMMAND, "t", 2))).toBe(false);
+    expect(putRecord("a", answeredRecord(COMMAND, { result: { decision: "accept" } }, "t", 1))).not.toBeNull();
+    expect(putRecord("a", elsewhereRecord(COMMAND, "t", 2))).toBeNull();
     expect(recordsOf("a")).toHaveLength(1);
     expect(recordsOf("a")[0]!.settled.kind).toBe("answered");
   });

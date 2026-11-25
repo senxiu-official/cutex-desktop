@@ -24,9 +24,15 @@ const CORE_BASE_FEATURES: readonly string[] = [
 /** Newer cutex only (absent under `?legacy`). */
 const CORE_NEW_FEATURES: readonly string[] = [
   "session-background-work",
+  // r295 Claude launch / runtime diagnostics (data only under `?claudeDiag`: dev/mockClaudeDiagnostics).
+  "claude-runtime-diagnostics-v1",
   // r289: owner notices / safety blocks close by their own id (archived agents too; main/daemon ownerNotifyAction).
   "owner-notify-direct-v1",
   "user-layout",
+  // r295 sidebar 工作目录 filter and 查找旧任务 (GET /v2/sessions/search); `?searchlegacy` drops it on workstation.
+  "session-search-v1",
+  // r297 search v2 (order / time / project / kind / sender, turn times); `?nofeat=session-search-v2` drops it.
+  "session-search-v2",
   // design 052 「谁在用」 (GET /v2/usage/quota-attribution); `?nofeat=quota-attribution` drops it.
   "quota-attribution",
   "user-input-options-v1",
@@ -116,6 +122,7 @@ const CORE_NEW_FEATURES: readonly string[] = [
   "session-created-by",
   "session-path-reapproval",
   "guides.preferences",
+  "text-rewrite-v1",
 ];
 
 export const MOCK_BASE_FEATURES: readonly string[] = [...CORE_BASE_FEATURES, ...MODULE_MOCKS.flatMap(({ mock }) => mock.features?.base ?? [])];

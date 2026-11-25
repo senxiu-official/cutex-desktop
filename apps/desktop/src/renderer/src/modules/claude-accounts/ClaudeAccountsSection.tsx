@@ -15,7 +15,7 @@ import type { CutexRefusal } from "../../../../shared/ipc";
 import { GaugeChip } from "../../components/GaugeBar";
 import { AddButton, ArmedRemove, Button, ErrorNote, IconButton, Loading, Notice, RefreshButton, Section, SettingsGroup, TextInput, type SettingsRowDecoration } from "../../components/settings/Form";
 import { useI18n, type MessageKey } from "../../i18n";
-import { formatWhen, useClock } from "../../lib/time";
+import { formatAbsolute, formatWhen, useClock } from "../../lib/time";
 import { formatTokens } from "../../lib/usage";
 import { services } from "../app";
 import { CLAUDE_ACCOUNTS_SECTION, CLAUDE_API_ACCOUNT_ADD_ANCHOR, sortClaudeAccounts } from "../../lib/claudeAccounts";
@@ -379,10 +379,12 @@ function QuotaLine({ quota }: { quota: ClaudeAccountQuota | null | undefined }) 
   }
   const note = quotaNote(quota);
   const noteText = note ? (note.error !== undefined ? t(note.key, { error: note.error }) : t(note.key)) : "";
+  // r295 credential notes: when it expires / expired, and that Claude refreshes it (or 重新登录 on the row).
+  const noteTitle = note?.at !== undefined ? [noteText, note.at ? t("claude-accounts.loginAt", { time: formatAbsolute(note.at) }) : null, t("claude-accounts.loginHint")].filter(Boolean).join("\n") : noteText;
   const noteTone = note?.tone === "warn" ? "text-warn" : "text-subtle";
   if (!quota.gauges.length) {
     return (
-      <p className={`truncate text-xs ${noteTone}`} title={noteText}>
+      <p className={`truncate text-xs ${noteTone}`} title={noteTitle}>
         {noteText}
       </p>
     );
@@ -393,7 +395,7 @@ function QuotaLine({ quota }: { quota: ClaudeAccountQuota | null | undefined }) 
         <GaugeChip key={g.id} gauge={g} />
       ))}
       {note && (
-        <span className={`self-center truncate text-xs ${noteTone}`} title={noteText}>
+        <span className={`self-center truncate text-xs ${noteTone}`} title={noteTitle}>
           {noteText}
         </span>
       )}

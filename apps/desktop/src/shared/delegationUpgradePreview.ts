@@ -10,6 +10,14 @@ export interface UpgradeContinuation {
   state: "declared" | "waiting" | "ready" | "resuming" | "limited" | "cancelled";
   roundNumber: number; maxRounds: number; maxElapsedSeconds: number;
   waitingFor: { kind: "after"; delaySeconds: number } | { kind: "children"; children: { kind: "delegation" | "native"; id: string }[]; until: "all" | "any" } | null; nextWakeAt: string | null; limitReason: string | null; revision: number;
+  /** r296: the pending approval (only to views allowed to decide). */
+  approval?: (Omit<ContinuationApprovalRef, "allowedActions"> & { allowedActions?: ContinuationApprovalRef["allowedActions"] }) | null;
+}
+/** r296 `continuation.approval`: the CAS values of the pending approval. */
+export interface ContinuationApprovalRef {
+  id: string; revision: number; digest: string; authorityEpoch: number;
+  /** r296 ddd0f067 tree / ask-detail card; a card without it (2add91fd) allows both. */
+  allowedActions: { approve: boolean; deny: boolean };
 }
 export interface UpgradeApproval {
   id: string; state: "pending" | "approved" | "denied" | "stale" | "cancelled";
@@ -48,7 +56,7 @@ export interface UpgradeNode {
   closed: string | null; lastActivityAt: string | null;
   resumeEvidence: { kind: "none" | "newAttempt" | "restartRecovery" | "unknown" };
   continuation: UpgradeContinuation | null; routingApproval: UpgradeApproval | UpgradeCompactApproval | null;
-  allowedActions: { readAttempts: boolean; stop: boolean; stopSelf: boolean; stopJobs: boolean; declareContinuation: boolean; resumeContinuation: boolean }; revision: number;
+  allowedActions: { readAttempts: boolean; stop: boolean; stopSelf: boolean; stopJobs: boolean; declareContinuation: boolean; resumeContinuation: boolean; resumeContinuationBlockedReason?: string | null }; revision: number;
 }
 export interface RedactedAncestor {
   kind: "redactedAncestor"; placeholderId: string; labelKey: "delegation.ancestorRestricted";
@@ -129,4 +137,35 @@ export interface UpgradePreviewApi {
   delegationUpgradeApproval?(approvalId: string): Promise<UpgradeApprovalRead>;
   delegationUpgradeOperation?(actionId: string): Promise<UpgradeOperationLookup>;
   delegationRetirementReview(projectId: string, request: PermanentRetirementReviewRequest): Promise<PermanentRetirementReview>;
+}
+
+/** What a delegation card needs to offer 允许继续 (owner 2026-11-25): the tree node's own permission and CAS value. */
+export interface ContinuationResumeRead {
+  /** cutex's host id of the node (the action's nodeHostId). */
+  nodeHostId: string;
+  /** `allowedActions.resumeContinuation` (cutex decides: handler online, idle, not owner-offline, project running, …). */
+  allowed: boolean;
+  /** `continuation.revision` (expectedRevision); null when the node has no continuation record now. */
+  expectedRevision: number | null;
+  /** The project's run control is not running (a pause blocks continuing). */
+  projectPaused: boolean;
+  /** r296 `allowedActions.resumeContinuationBlockedReason` when not allowed (any string a newer host sends); null otherwise or on older hosts. */
+  blockedReason: string | null;
+  /** r296 pending approval to decide (approve / deny) with the new fields, whenever this view may decide (also while the
+   *  handler is busy / offline / paused); null on older hosts (legacy {actionId, expectedRevision}) or nothing to decide. */
+  approval: ContinuationApprovalRef | null;
+  /** The tree's limit reason and segment bounds (「已跑满 32 轮」 / 「已满 24 小时」); null when absent. */
+  limit: { reason: "rounds" | "elapsed"; maxRounds: number; maxElapsedSeconds: number } | null;
+}
+
+/** r296 continuation approval as the approvals page shows it (validated in main). */
+export interface ContinuationApprovalRead {
+  id: string; delegationId: string; projectId: string | null; revision: number; digest: string; authorityEpoch: number;
+  reason: "elapsed" | "rounds"; requestedAt: string; briefPreview: string; progressPreview: string | null;
+  allowedActions: { approve: boolean; deny: boolean };
+}
+/** r296 owner decision on a continuation approval (main re-reads the approval before writing). */
+export interface ContinuationDecisionRequest {
+  delegationId: string; approvalId: string; actionId: string; expectedRevision: number; expectedDigest: string; expectedEpoch: number;
+  decision: "approve" | "deny"; decisionNote: string | null;
 }

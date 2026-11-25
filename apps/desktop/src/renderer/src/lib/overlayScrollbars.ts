@@ -179,6 +179,48 @@ export function scrollKey(key: string): boolean {
   return key === "PageUp" || key === "PageDown" || key === "Home" || key === "End" || key === " " || key === "ArrowUp" || key === "ArrowDown" || key === "ArrowLeft" || key === "ArrowRight";
 }
 
+/**
+ * Cover checks (hit tests along a shown thumb) are reused while nothing that could lie over the bar changed (perf
+ * 2026-11-26: a thumb kept by a resting pointer re-ran up to 24 `elementsFromPoint` per frame on every DOM change and
+ * 300 ms tick). `ttl`: a result is redone at least this often (covers that appear without a DOM change the manager
+ * sees: a class flip, a fixed child of a clipped box); `settle`: results taken this soon after a change are not kept
+ * (a popover still animating in).
+ */
+export const COVER = { ttl: 1000, settle: 250 } as const;
+
+export interface CoverCheck {
+  /** The thumb part that was checked (screen px). */
+  part: Rect;
+  /** When it was checked (ms, performance.now). */
+  at: number;
+  /** Taken at least `COVER.settle` after the last change that could cover it. */
+  stable: boolean;
+}
+
+/** Whether a cover check of the same part can stand in for a new one now. */
+export function coverReusable(check: CoverCheck | null, part: Rect, now: number): boolean {
+  return !!check && check.stable && now - check.at < COVER.ttl && sameRect(check.part, part);
+}
+
+export function sameRect(a: Rect, b: Rect): boolean {
+  return a.left === b.left && a.top === b.top && a.width === b.width && a.height === b.height;
+}
+
+/**
+ * Whether a DOM change at a node can put something over `area` (a thumb, or the pointer). `chain`: from the changed
+ * node outwards, each ancestor's box, whether it clips its content, and whether it contains the scroller / point
+ * owner (`stop`). The first clipping box keeps the change's content inside it; reaching an element around the
+ * scroller (or the end) means the change may land anywhere. Fixed children of a clipped box escape it: COVER.ttl
+ * redoes the check.
+ */
+export function changeMayCover(chain: Iterable<{ clips: boolean; around: boolean; box(): Rect }>, area: Rect): boolean {
+  for (const c of chain) {
+    if (c.around) return true;
+    if (c.clips) return intersect(c.box(), area) !== null;
+  }
+  return true;
+}
+
 /** Hit-test samples along a thumb of this length (px): about one per 12 px, 3 – 24. */
 export function coverSamples(length: number): number {
   return Math.min(24, Math.max(3, Math.round(length / 12)));

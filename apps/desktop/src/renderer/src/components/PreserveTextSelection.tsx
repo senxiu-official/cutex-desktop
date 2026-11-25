@@ -9,6 +9,8 @@ interface Props {
   as?: "div" | "span";
   style?: CSSProperties;
   onContextMenu?: MouseEventHandler<HTMLElement>;
+  /** The root element too (lib/useSelectionMenu: the keyboard finds the block by it). */
+  rootRef?: (element: HTMLElement | null) => void;
 }
 
 // Reading the selection (getSelection / rangeCount / isCollapsed) makes the browser bring style up to
@@ -38,7 +40,7 @@ function selectionPossible(doc: Document): boolean {
  */
 export class PreserveTextSelection extends Component<Props> {
   private root: HTMLElement | null = null;
-  private setRoot = (element: HTMLElement | null): void => { this.root = element; };
+  private setRoot = (element: HTMLElement | null): void => { this.root = element; this.props.rootRef?.(element); };
 
   getSnapshotBeforeUpdate(previous: Props): TextSelectionSnapshot | null {
     return !Object.is(previous.revision, this.props.revision) && this.root && selectionPossible(this.root.ownerDocument)

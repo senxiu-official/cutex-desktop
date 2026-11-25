@@ -134,6 +134,16 @@ describe("abandoned delegation leaves the project card (owner 2026-10-28)", () =
     expect(next).toMatchObject({ closed: "abandoned", review: "abandoned", revision: 5, answerPreview: "kept", targetName: "Worker" });
   });
 
+  it("r295: a newer record's renewed approval reference replaces the stale one; a record without it keeps the row's", () => {
+    const old = { kind: "routing" as const, approvalId: "routing-old", projectId: "p" };
+    const base = { ...row("ask-a", 4), reviewRef: old } as AskSummary;
+    const renewed = { ...abandoned("ask-a", 5), closed: null, review: null, execution: "pendingReview", reviewRef: { kind: "routing", approvalId: "routing-new", projectId: "p" } } as unknown as AskDetail;
+    expect(store.withDetailState(base, renewed).reviewRef).toEqual({ kind: "routing", approvalId: "routing-new", projectId: "p" });
+    expect(store.withDetailState(base, { ...renewed, revision: 4 } as AskDetail).reviewRef).toEqual(old);
+    const { reviewRef: _gone, ...bare } = renewed as unknown as Record<string, unknown>;
+    expect(store.withDetailState(base, bare as unknown as AskDetail).reviewRef).toEqual(old);
+  });
+
   it("a feed restart (hostResync) of a watched host re-reads its open list", async () => {
     unwatch = store.watchDelegationHost(remote);
     await vi.waitFor(() => expect(daemon.asks).toHaveBeenCalled());

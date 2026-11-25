@@ -145,3 +145,23 @@ it("closes the first-connect snapshot/subscription gap once and fences an older 
   expect((await sidebar()).active[0]!.runtime.backgroundWork?.running).toBe(true);
   old.resolve({ sessions: [row()] }); await rejected;
 });
+
+// claude-runtime-diagnostics-v1 (r295): handled explicitly, like background work, never by the generic event path.
+it("Claude diagnostics frames patch an in-flight read without invalidating it or reading the list again", async () => {
+  await open();
+  const old = deferred();
+  f.sessions.mockImplementation((kind: string) => kind === "active" ? old.promise : Promise.resolve({ sessions: [] }));
+  const pending = sidebar();
+  await settle(); await vi.advanceTimersByTimeAsync(2000);
+  const calls = f.sessions.mock.calls.length;
+  for (let i = 0; i < 50; i++) event("cutex/session/claudeDiagnostics/changed", { cutexSessionId: "agent", runtimeGeneration: 1, claudeDiagnostics: { warnings: i % 2 ? ["mcpConnectionFailed"] : [], activeHooks: [] } });
+  event("cutex/session/claudeDiagnostics/changed", { cutexSessionId: "agent", runtimeGeneration: 0, claudeDiagnostics: null });
+  old.resolve({ sessions: [row(), row("other")] });
+  const snapshot = await pending;
+  expect(snapshot.active[0]!.runtime.claudeDiagnostics).toEqual({ warnings: ["mcpConnectionFailed"], activeHooks: [] });
+  expect(snapshot.active[0]!.runtime.backgroundWork).toEqual({ running: false });
+  expect(snapshot.active[1]!.runtime.claudeDiagnostics).toBeUndefined();
+  expect(f.sessions.mock.calls).toHaveLength(calls);
+  await vi.advanceTimersByTimeAsync(5000);
+  expect(f.sessions.mock.calls).toHaveLength(calls);
+});

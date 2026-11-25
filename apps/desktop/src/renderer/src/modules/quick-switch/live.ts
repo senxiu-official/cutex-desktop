@@ -99,7 +99,7 @@ async function openItem(ctx: ModuleContext, item: QsItem, beside: boolean): Prom
   const outcome = await runOpen(itemEffect(item, beside, failed).plan, {
     panesOpen: (kind, params, opts) => ctx.services.panes.open(kind, params, opts),
     refsOpen: (ref) => ctx.services.refs.open(ref),
-    openServiceExternal: (slug, hostId) => openServiceExternal({ slug }, hostId),
+    openServiceExternal: async (slug, hostId) => void (await openServiceExternal({ slug }, hostId)),
     openShelfPage: (pageId) => showShelfPage(pageId),
     openRef: (ref, mode, opts) => openRef(ref, mode, opts),
   });

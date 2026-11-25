@@ -28,7 +28,7 @@ function fixture() {
   const data = new Map<string, string>();
   const storage = { getItem: (key: string) => data.get(key) ?? null, setItem: (key: string, value: string) => { data.set(key, value); } };
   const refs: LinkedProfileRef[] = ["a", "b"].map((hostId) => ({ hostId, hostName: hostId.toUpperCase(), connected: true, profile: {
-    id: `profile-${hostId}`, name: `Different name ${hostId}`, providerFamily: "anthropic", avatarEtag: null, introPortraitEtag: null,
+    planLabelManual: null, id: `profile-${hostId}`, name: `Different name ${hostId}`, providerFamily: "anthropic", avatarEtag: null, introPortraitEtag: null,
     link: { secretId: "1234abcd", accountKey: "AAAAAAAAAAAAAAAAAAAAAA", basis: "manual", source: "manual" },
     appearance: { color: null, avatarThemes: null, introGreeting: null, effectiveColor: null, providerCategory: null },
     appearanceRevisions: Object.fromEntries(LOOK_FIELDS.map((field) => [field, { etag: null, updatedAt: "2030-01-01T00:00:00.000Z" }])),
@@ -38,6 +38,7 @@ function fixture() {
   let tick = 0;
   const denied = new Set<string>();
   const styled = new Set(["a", "b"]);
+  const labelled = new Set(["a", "b"]);
   const current = (ref: LinkedProfileRef) => refs.find((r) => r.hostId === ref.hostId && r.profile.id === ref.profile.id)!;
   const stamp = (ref: LinkedProfileRef, field: LookField, value: unknown, time?: string) => {
     ref.profile.appearanceRevisions ??= {};
@@ -50,13 +51,15 @@ function fixture() {
       if (value === null) images.delete(key); else images.set(key, value as string);
       if (field === "avatar") ref.profile.avatarEtag = value === null ? null : `image:${value}`;
       else ref.profile.introPortraitEtag = value === null ? null : `image:${value}`;
-    } else Object.assign(ref.profile.appearance, { [field]: value });
+    } else if (field === "planLabel") ref.profile.planLabelManual = value as string | null;
+    else Object.assign(ref.profile.appearance, { [field]: value });
     stamp(ref, field, value, time);
   };
   const transport: AppearanceTransport = {
     refs: () => refs,
     allowed: (host) => !!refs.find((r) => r.hostId === host && r.connected) && !denied.has(host),
     styled: (host) => styled.has(host),
+    labelled: (host) => labelled.has(host),
     fresh: async (ref) => structuredClone(current(ref).profile),
     image: async (ref, field) => {
       const dataUrl = images.get(`${ref.hostId}:${field}`);
@@ -65,6 +68,7 @@ function fixture() {
     write: async (ref, field, value) => {
       expect(transport.allowed(ref.hostId)).toBe(true);
       if (field === "avatarStyle") expect(styled.has(ref.hostId), `avatarStyle sent to ${ref.hostId}`).toBe(true);
+      if (field === "planLabel") expect(labelled.has(ref.hostId)).toBe(true);
       calls.push({ host: ref.hostId, field, value });
       external(refs.indexOf(current(ref)), field, value, `2040-01-01T00:00:00.${String(++tick).padStart(3, "0")}Z`);
       return structuredClone(current(ref).profile);
@@ -72,7 +76,7 @@ function fixture() {
     refresh: async () => {},
   };
   const engine = () => new ProfileLinkAppearanceSync(transport, storage);
-  return { refs, data, storage, images, calls, transport, external, denied, styled, engine };
+  return { refs, data, storage, images, calls, transport, external, denied, styled, labelled, engine };
 }
 
 describe("linked profile appearance", () => {
@@ -668,5 +672,81 @@ describe("已同步 is brief (owner 2026-10-25)", () => {
     expect(noticeShown({ ...synced, id: 902 }, 1000 + SYNCED_NOTICE_MS * 5)).toBe(true);
     for (const kind of ["pending", "error", "storageError", "newerChange"] as const) expect(noticeShown({ id: 903, kind, hosts: [], undo: true }, 10 ** 12)).toBe(true);
     expect(noticeShown(null)).toBe(false);
+  });
+});
+
+
+describe("linked manual plan label", () => {
+  it("does not clear the target's legacy plan when its manual label is already empty", async () => {
+    connection.epoch = 0;
+    const f = fixture();
+    const target = { ...f.refs[1]!.profile, planLabel: "Legacy plan", planLabelManual: null };
+    const api = { getProfile: vi.fn().mockResolvedValue(target), patchProfile: vi.fn() };
+    vi.mocked(apiFor).mockReturnValue(api as never);
+
+    await expect(profileAppearanceTransport.write({ ...f.refs[1]!, profile: target }, "planLabel", null))
+      .resolves.toMatchObject({ planLabel: "Legacy plan", planLabelManual: null });
+    expect(api.patchProfile).not.toHaveBeenCalled();
+  });
+
+  it("sends an explicit label and a clear, never an account-derived plan", async () => {
+    const f = fixture();
+    f.refs[0]!.profile.planLabel = "Account plan A";
+    f.refs[1]!.profile.planLabel = "Account plan B";
+    const sync = f.engine();
+    await sync.flush();
+    expect(f.calls).toEqual([]);
+
+    const save = async (value: string | null, when: string) => {
+      const end = sync.beginEdit(f.refs[0]!);
+      f.external(0, "planLabel", value, when);
+      await sync.saved(f.refs[0]!, { planLabel: value }, true);
+      end();
+      await sync.flush();
+    };
+    await save("团队套餐", "2031-01-01T00:00:00.000Z");
+    expect(f.refs[1]!.profile.planLabelManual).toBe("团队套餐");
+    await save(null, "2032-01-01T00:00:00.000Z");
+    expect(f.refs[1]!.profile.planLabelManual).toBeNull();
+    expect(f.calls).toEqual([
+      { host: "b", field: "planLabel", value: "团队套餐" },
+      { host: "b", field: "planLabel", value: null },
+    ]);
+    expect(f.refs[1]!.profile.planLabel).toBe("Account plan B");
+  });
+
+  it("keeps differing labels on an old baseline until the owner chooses a host", async () => {
+    const f = fixture();
+    await f.engine().flush();
+    const saved = JSON.parse(f.data.get(PROFILE_LINK_APPEARANCE_STORAGE)!);
+    for (const member of Object.values(saved.groups[IDENTITY].members) as { marks: Record<string, unknown> }[]) delete member.marks.planLabel;
+    f.storage.setItem(PROFILE_LINK_APPEARANCE_STORAGE, JSON.stringify(saved));
+    f.external(0, "planLabel", "A note", "2031-01-01T00:00:00.000Z");
+    f.external(1, "planLabel", "B note", "2031-01-01T00:00:00.000Z");
+
+    const sync = f.engine();
+    await sync.flush();
+    expect(sync.view(IDENTITY).conflict).toBe(true);
+    expect(f.calls).toEqual([]);
+    await sync.choose(IDENTITY, f.refs[0]!);
+    await sync.flush();
+    expect(f.refs[1]!.profile.planLabelManual).toBe("A note");
+    expect(f.calls).toEqual([{ host: "b", field: "planLabel", value: "A note" }]);
+  });
+
+  it("skips the label on an older host without blocking the other fields", async () => {
+    const f = fixture();
+    f.labelled.delete("b");
+    delete f.refs[1]!.profile.planLabelManual;
+    const sync = f.engine();
+    await sync.flush();
+    const end = sync.beginEdit(f.refs[0]!);
+    f.external(0, "planLabel", "Manual", "2031-01-01T00:00:00.000Z");
+    f.external(0, "color", "#123456", "2031-01-01T00:00:00.000Z");
+    await sync.saved(f.refs[0]!, { planLabel: "Manual", color: "#123456" }, true);
+    end();
+    await sync.flush();
+    expect(f.calls).toEqual([{ host: "b", field: "color", value: "#123456" }]);
+    expect(f.refs[1]!.profile.planLabelManual).toBeUndefined();
   });
 });

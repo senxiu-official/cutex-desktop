@@ -123,7 +123,7 @@ describe("hosts.json connectAs", () => {
       version: 2,
       hosts: [
         { id: "ssh-aaaa1111", target: "workstation", remotePort: 24270, cutexPath: "cutex", tokenId: "ct_1" },
-        { id: "ssh-bbbb2222", target: "ema@hachimi", connectAs: "member" },
+        { id: "ssh-bbbb2222", target: "ema@hostc", connectAs: "member" },
         { id: "ssh-cccc3333", target: "alpha", connectAs: "root" },
       ],
     });
@@ -136,7 +136,7 @@ describe("HostManager connect-as flows (ssh mocked)", () => {
   const STORED = "ssh-dddd4444";
   function harness(opts: { probe?: OwnerProbe | Error; myFingerprint?: string | null; stored?: "owner" | "member" | null } = {}) {
     const file: HostsFile = emptyHostsFile();
-    if (opts.stored !== undefined) file.hosts.push({ id: STORED, label: "hachimi", target: "ema@hachimi", remotePort: 24270, cutexPath: "cutex", tokenId: "ct_old", createdAt: "", lastConnectedAt: null, autoConnect: false, color: "#f97316", platform: "linux", ...(opts.stored ? { connectAs: opts.stored } : {}) });
+    if (opts.stored !== undefined) file.hosts.push({ id: STORED, label: "hostc", target: "ema@hostc", remotePort: 24270, cutexPath: "cutex", tokenId: "ct_old", createdAt: "", lastConnectedAt: null, autoConnect: false, color: "#f97316", platform: "linux", ...(opts.stored ? { connectAs: opts.stored } : {}) });
     const tokens = new Map<string, string>();
     const deleted: { credential: string; tokenId: string }[] = [];
     const opened: string[] = [];
@@ -174,7 +174,7 @@ describe("HostManager connect-as flows (ssh mocked)", () => {
 
   it("member: one issue with --pending, stored as member", async () => {
     const h = harness();
-    const r = okResult(await h.manager.addSshHost({ target: "ema@hachimi", connectAs: "member" }));
+    const r = okResult(await h.manager.addSshHost({ target: "ema@hostc", connectAs: "member" }));
     expect(issued()).toEqual(["member"]);
     expect(r).toMatchObject({ connectAs: "member", pending: true, userId: null });
     expect(h.host(r.hostId)?.connectAs).toBe("member");
@@ -184,7 +184,7 @@ describe("HostManager connect-as flows (ssh mocked)", () => {
 
   it("owner: today's command, stored as owner", async () => {
     const h = harness();
-    const r = okResult(await h.manager.addSshHost({ target: "ema@hachimi", connectAs: "owner" }));
+    const r = okResult(await h.manager.addSshHost({ target: "ema@hostc", connectAs: "owner" }));
     expect(issued()).toEqual(["owner"]);
     expect(r.connectAs).toBe("owner");
     expect(h.tokens.get(r.hostId)).toBe("tok-owner");
@@ -192,7 +192,7 @@ describe("HostManager connect-as flows (ssh mocked)", () => {
 
   it("auto, owner is someone else: keeps the member token", async () => {
     const h = harness({ probe: { ok: true, capability: true, owner: owner(OTHER), myFingerprint: ME } });
-    const r = okResult(await h.manager.addSshHost({ target: "ema@hachimi" }));
+    const r = okResult(await h.manager.addSshHost({ target: "ema@hostc" }));
     expect(issued()).toEqual(["member"]);
     expect(r).toMatchObject({ connectAs: "member", autoReason: "ownerIsSomeoneElse" });
     expect(h.tokens.get(r.hostId)).toBe("tok-member");
@@ -208,7 +208,7 @@ describe("HostManager connect-as flows (ssh mocked)", () => {
     ["probe error", new Error("403 forbidden"), "probeFailed"],
   ])("auto, %s: issues an owner token and revokes the member one", async (_name, probe, reason) => {
     const h = harness({ probe });
-    const r = okResult(await h.manager.addSshHost({ target: "ema@hachimi", connectAs: "auto" }));
+    const r = okResult(await h.manager.addSshHost({ target: "ema@hostc", connectAs: "auto" }));
     expect(issued()).toEqual(["member", "owner"]);
     expect(r).toMatchObject({ connectAs: "owner", autoReason: reason });
     expect(h.tokens.get(r.hostId)).toBe("tok-owner");
@@ -220,7 +220,7 @@ describe("HostManager connect-as flows (ssh mocked)", () => {
   it("auto, tunnel cannot open: owner, and the member token is revoked over the CLI", async () => {
     ssh.tunnelFails = true;
     const h = harness({ probe: { ok: true, capability: true, owner: owner(OTHER), myFingerprint: ME } });
-    const r = okResult(await h.manager.addSshHost({ target: "ema@hachimi" }));
+    const r = okResult(await h.manager.addSshHost({ target: "ema@hostc" }));
     expect(r).toMatchObject({ connectAs: "owner", autoReason: "probeFailed" });
     expect(ssh.commands.at(-1)).toBe("cutex management client-token revoke ct_member");
   });
@@ -228,7 +228,7 @@ describe("HostManager connect-as flows (ssh mocked)", () => {
   it("auto, cutex refuses --pending: today's owner token", async () => {
     ssh.issueFails = { code: 2, stderr: "error: unexpected argument '--pending' found" };
     const h = harness();
-    const r = okResult(await h.manager.addSshHost({ target: "ema@hachimi" }));
+    const r = okResult(await h.manager.addSshHost({ target: "ema@hostc" }));
     expect(issued()).toEqual(["member", "owner"]);
     expect(r).toMatchObject({ connectAs: "owner", autoReason: "probeFailed" });
   });
@@ -236,14 +236,14 @@ describe("HostManager connect-as flows (ssh mocked)", () => {
   it("auto, ssh auth fails: reported, no second try", async () => {
     ssh.issueFails = { code: 255, stderr: "user@host: Permission denied (publickey)." };
     const h = harness();
-    const r = await h.manager.addSshHost({ target: "ema@hachimi" });
+    const r = await h.manager.addSshHost({ target: "ema@hostc" });
     expect(r).toMatchObject({ ok: false, error: { code: "auth" } });
     expect(issued()).toEqual(["member"]);
   });
 
   it("refuses an unknown connectAs", async () => {
     const h = harness();
-    expect(await h.manager.addSshHost({ target: "ema@hachimi", connectAs: "root" as never })).toEqual({ ok: false, error: { code: "badInput", detail: "connectAs" } });
+    expect(await h.manager.addSshHost({ target: "ema@hostc", connectAs: "root" as never })).toEqual({ ok: false, error: { code: "badInput", detail: "connectAs" } });
   });
 
   it("re-pair keeps the stored mode (member), an old entry re-pairs as owner", async () => {

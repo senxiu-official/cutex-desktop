@@ -319,6 +319,7 @@ describe("no hard-coded handler for a registry command", () => {
     "components/settings/KeybindingsSection.tsx": "records digits as the 1…9 family",
     "modules/home/DeskSurface.tsx": "Ctrl+Z undo while arranging the desk",
     "components/AgentMentionInput.tsx": "Ctrl+Z / Ctrl+Y undo and redo inside the focused rich draft",
+    "lib/draftUndo.ts": "Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y undo and redo of the focused composer draft",
     "modules/quick-switch/model.ts": "Ctrl+N / Ctrl+P move in the open palette",
     "modules/workspace/explorer/Explorer.tsx": "the file tree's own filter / copy keys while it has focus",
   };

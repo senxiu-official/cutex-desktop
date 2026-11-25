@@ -602,6 +602,11 @@ export function ProfileEditor({ profile, item, isDefault, refusal, onChanged, on
     }
     // profile-generic-switches: cutex refuses the legacy `auto`; the 额度 section asks for a reader.
     if (quotaDirty && quotaDraftNeedsReader(quotaDraft, usesQuotaReaders(quotaDraft, features.has(PROFILE_GENERIC_SWITCHES_FEATURE)))) return (setError(t("agent-config.quota.legacyAuto")), false);
+    if ("planLabel" in body) {
+      const label = planLabelPatch(body.planLabel, detail.detail?.planLabelManual);
+      if (label === undefined) delete body.planLabel;
+      else body.planLabel = label;
+    }
     const changedLooks = cleanAppearanceChanges({ ...body,
       ...(picture !== undefined ? { avatar: picture } : {}),
       ...(hostStyle && !themeProblem ? { avatarStyle: avatarTheme } : {}),
@@ -615,11 +620,6 @@ export function ProfileEditor({ profile, item, isDefault, refusal, onChanged, on
     setAccountError(null);
     try {
       if (!body.apiKey) delete body.apiKey;
-      if ("planLabel" in body) {
-        const label = planLabelPatch(body.planLabel, detail.detail?.planLabelManual);
-        if (label === undefined) delete body.planLabel;
-        else body.planLabel = label;
-      }
       if (body.name !== undefined) {
         body.name = body.name.trim();
         if (!body.name || body.name === detail.name) delete body.name;

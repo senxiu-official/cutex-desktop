@@ -3,7 +3,7 @@
 // is; a host path (a picked file, an attachment cutex stored) is read through cutex fs-file-read
 // (lib/fileThumbnails, the cache Markdown thumbnails share) — never the local disk — when a `hostId`
 // is given and the host has it; otherwise the caller's fallback (a file chip) shows.
-import { useEffect, useReducer, useState, type ReactNode, type MouseEventHandler } from "react";
+import { useContext, useEffect, useReducer, useState, type ReactNode, type MouseEventHandler } from "react";
 import { createPortal } from "react-dom";
 import { Copy, Download, Image as ImageIcon, X } from "lucide-react";
 import { PanZoomImage, usePanZoom } from "./PanZoom";
@@ -13,6 +13,7 @@ import { useI18n } from "../i18n";
 import { MAX_IMAGE_BYTES, type ImageActionInput } from "../../../shared/ipc";
 import { fileVersion, useThumbnail } from "../lib/fileThumbnails";
 import { captureMediaAuthority, mediaKey, parseMediaRef, readHistoryMedia, useMediaAuthority } from "../lib/historyMedia";
+import { MediaLoaderContext } from "../lib/mediaLoader";
 import { HOST_FILE_READ_FEATURE } from "../lib/workspace";
 import { featuresOf, hostApi, useApp } from "../store";
 import { api } from "../bridge";
@@ -115,17 +116,20 @@ function useImageSrc(image: MessageImage, hostId: string | null | undefined, ret
   const media = blobRef ? { ...blobRef, kind: "blob" as const } : image.kind === "url" ? parseMediaRef(image.url) : null;
   const canRead = useApp((s) => !!hostId && !!path && featuresOf(s, hostId).has(HOST_FILE_READ_FEATURE));
   const canBlob = useApp((s) => !!hostId && featuresOf(s, hostId).has(EVENT_MEDIA_BLOBS_FEATURE));
-  const usable = image.kind === "blob" ? !!blob && canBlob && /^image\//.test(blob.mime) : !blobRef || canBlob;
-  const baseKey = usable && media && hostId ? mediaKey(hostId, media) : canRead && hostId && path ? JSON.stringify([hostId, "host", path, authority]) : null;
+  // A provided loader (lib/mediaLoader: the iPad) reads media / blob refs itself; it answers for the host's features.
+  const loader = useContext(MediaLoaderContext);
+  const usable = image.kind === "blob" ? !!blob && (canBlob || !!loader) && /^image\//.test(blob.mime) : !blobRef || canBlob || !!loader;
+  const own = !!loader && usable && !!media;
+  const baseKey = own ? JSON.stringify([loader.scope, media!.kind ?? "media", media!.sessionId, media!.sha256]) : usable && media && hostId ? mediaKey(hostId, media) : canRead && hostId && path ? JSON.stringify([hostId, "host", path, authority]) : null;
   const key = baseKey ? `${baseKey}|${blob ? JSON.stringify([blob.mime, blob.size]) : "legacy"}|retry:${retry}` : null;
   const expected = blob ? { mime: blob.mime, size: blob.size } : undefined;
   // A sent image is up to the send cap (MAX_IMAGE_BYTES: pastes / picks on Codex agents, and the attachment
   // r259+ desktops upload them as), not the 5 MB of a Markdown file thumbnail: a 5–8 MB screenshot read
   // with that cap came back truncated and stayed a file chip once its optimistic preview was gone.
-  const read = usable && media && hostId ? () => readHistoryMedia(hostId, media, expected) : key ? () => hostApi(hostId!).hostFile(path!, MAX_IMAGE_BYTES) : null;
+  const read = own ? () => loader.read(media!, expected) : usable && media && hostId ? () => readHistoryMedia(hostId, media, expected) : key ? () => hostApi(hostId!).hostFile(path!, MAX_IMAGE_BYTES) : null;
   // A host path may be rewritten: a copy in memory shows at once and is checked by size + mtime (no bytes) at most once a minute.
   const version = !media && key ? () => hostApi(hostId!).hostFile(path!, 1).then(fileVersion) : undefined;
-  const { ref, state } = useThumbnail(key, read, { revalidate: !media, version, hostId: hostId ?? undefined, isCurrent: hostId ? captureMediaAuthority(hostId) : undefined, maxBytes: MAX_IMAGE_BYTES });
+  const { ref, state } = useThumbnail(key, read, own ? { revalidate: false, maxBytes: MAX_IMAGE_BYTES } : { revalidate: !media, version, hostId: hostId ?? undefined, isCurrent: hostId ? captureMediaAuthority(hostId) : undefined, maxBytes: MAX_IMAGE_BYTES });
   if (image.kind === "url" && !media && !/^cutex-(media|blob):/.test(image.url)) return { ref, src: image.url, loading: false, key: image.url };
   return { ref, src: state.status === "ok" ? state.src : null, loading: !!key && (state.status === "idle" || state.status === "loading"), key };
 }
@@ -160,6 +164,8 @@ function imageMetadata(image: MessageImage): string {
  */
 export function ImageThumb({ image, hostId, title, className, imgClassName, fallback, bounds, loadingPreview, rememberSize = false }: { image: MessageImage; hostId?: string | null; title?: string; className: string; imgClassName: string; fallback: ReactNode; bounds?: ImageBounds; loadingPreview?: string; rememberSize?: boolean }) {
   const { t } = useI18n();
+  // A provided media loader (the iPad) has no host bridge: no copy / save / file actions.
+  const bridged = !useContext(MediaLoaderContext);
   const pathText = image.kind === "path" && image.delivery === "pathText";
   const [retry, setRetry] = useState(0);
   const { ref, src: loadedSrc, loading, key } = useImageSrc(image, hostId, retry);
@@ -193,7 +199,7 @@ export function ImageThumb({ image, hostId, title, className, imgClassName, fall
   };
   const save = (() => {
     const target = hostInput(image, hostId);
-    if (!target || !hostId) return undefined;
+    if (!bridged || !target || !hostId) return undefined;
     return async (current = captureMediaAuthority(hostId)) => {
       try {
         if (!current()) throw Error("media_authority_changed");
@@ -203,6 +209,7 @@ export function ImageThumb({ image, hostId, title, className, imgClassName, fall
     };
   })();
   const menu = contextMenu(() => {
+    if (!bridged) return [];
     const current = authority();
     const copyEntry = src && broken !== src ? [{ label: t("image.copy"), onSelect: async () => void (await copy(src, current)) }] : [];
     if (image.kind === "path") return [...copyEntry, ...(copyEntry.length ? ["separator" as const] : []), ...fileActions({ hostId: hostId ?? "unknown", path: image.path }, t)];
@@ -240,7 +247,7 @@ export function ImageThumb({ image, hostId, title, className, imgClassName, fall
         }} onError={() => !pending && setBroken(src)} className={imgClassName} />
       </button>
       {actionNotice && <span role="status" className="text-xs text-muted">{actionNotice}</span>}
-      {zoom && <ImageZoom key={src} src={src} dimensions={dimensions} onContextMenu={menu} onClose={() => setZoom(false)} onCopy={() => copy(src)} onSave={save && (() => void save())} />}
+      {zoom && <ImageZoom key={src} src={src} dimensions={dimensions} onContextMenu={menu} onClose={() => setZoom(false)} onCopy={bridged ? () => copy(src) : undefined} onSave={save && (() => void save())} />}
     </>
   );
 }

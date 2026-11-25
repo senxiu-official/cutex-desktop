@@ -2,7 +2,7 @@
 export const zhCN = {
   "desk.moveToWindow": "移到新窗口",
   "desk.moveToWindowHint": "在另一个窗口里打开这个会话，可以放到另一块屏幕上；关掉那个窗口，会话回到这里的托盘。",
-  "desk.moveFailed": "没能打开新窗口（最多 4 个）。",
+  "desk.moveFailed": "未能打开新窗口（最多 4 个）。",
   "desk.backToMain": "放回主窗口",
   "desk.inOtherWindow": "这个对话在另一个窗口里",
   "desk.empty": "这个窗口里没有对话。",

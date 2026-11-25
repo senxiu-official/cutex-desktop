@@ -7,8 +7,11 @@
 // surfaces in the first screen after the pinned ones until that clears; 「更多」 carries a dot while
 // a folded entry has attention (none can, as such entries surface, unless they are unavailable).
 
-/** Pinned until the owner changes the pins: 新建智能体, 快速启动, 委托, 审批 (in this order). */
-export const DEFAULT_NAV_PINS: readonly string[] = ["agent-config.newAgent", "quick-chats.nav", "delegations.nav", "approvals.nav"];
+/**
+ * Pinned until the owner changes the pins: 个人助理 (the front desk; only where a host has personal assistants), 新建智能体,
+ * 快速启动, 委托, 审批 (in this order).
+ */
+export const DEFAULT_NAV_PINS: readonly string[] = ["personal-assistants.nav", "agent-config.newAgent", "quick-chats.nav", "delegations.nav", "approvals.nav"];
 const ID = /^[A-Za-z0-9:._-]{1,200}$/;
 const MAX = 100;
 

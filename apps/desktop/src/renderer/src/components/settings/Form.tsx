@@ -27,6 +27,8 @@ import { useApp } from "../../store";
 import { Tag } from "../../components/Tag";
 import { btn } from "../Button";
 import { AgentTimingIcon } from "./AgentTimingIcon";
+import { EntitySelect } from "../EntitySelect";
+import type { EntityRef } from "../../lib/entityIcon";
 import { placeTip } from "../../lib/tips";
 import { useOwnerWindow } from "../../lib/ownerContext";
 import { ownerWindowOf } from "../../lib/ownerWindow";
@@ -127,7 +129,8 @@ export function PartSource({ picker, children }: { picker?: ReactNode; children:
 }
 
 const CHIP = "inline-flex h-[18px] shrink-0 items-center gap-1 rounded-chip px-1.5 text-caption leading-none whitespace-nowrap";
-const CHIP_TONE = { plain: "bg-surface-2 text-muted", quiet: "bg-surface-2 text-subtle", host: "bg-accent-soft text-accent", agents: "bg-attention-soft text-warn-text" } as const;
+// warn / danger: Settings → 模块 tags (modules/moduleTags.ts): a risk or a failure, explained in the same popover.
+const CHIP_TONE = { plain: "bg-surface-2 text-muted", quiet: "bg-surface-2 text-subtle", host: "bg-accent-soft text-accent", agents: "bg-attention-soft text-warn-text", warn: "bg-warn/15 text-warn-text", danger: "bg-danger/12 text-danger" } as const;
 
 /** A scope chip: a click floats a short explanation under it; an outside click or Esc closes it. */
 /** `joined`: the left half of a tag whose right half is a host picker (HostPicker `chip`), e.g. 「cutex 后端 · ● HOST-A ▾」. */
@@ -324,6 +327,21 @@ export function SettingsPage({ page, title, hint, host, link, back, children }: 
       </div>
     </div>
     <PageMetadataReportContext value={reportRows}><EffectPlacementContext value={placement}>{children}</EffectPlacementContext></PageMetadataReportContext>
+  </>;
+}
+
+/**
+ * Names the place once for a run of settings outside a SettingsPage (e.g. the 项目 page's 设置 tab): one scope chip on
+ * top, and rows / sections whose scope is that place drop their own chip; a row that also lives elsewhere (e.g. host +
+ * this device) keeps its full marker. Owner 2026-11-25: 「主机 · HOST」 on every row read as noise.
+ */
+export function ScopeBaseline({ source, children }: { source: SettingsSource; children: ReactNode }) {
+  const parent = useContext(EffectPlacementContext);
+  const hostId = useTargetHostId();
+  const scope = scopeOf({ source, hostId });
+  return <>
+    {scope && !parent.scopeStated && <div data-scope-baseline={scope} className="mb-3 flex items-center"><EffectScope scope={scope} /></div>}
+    <EffectPlacementContext value={{ ...parent, scopeBaseline: scope }}>{children}</EffectPlacementContext>
   </>;
 }
 
@@ -1023,7 +1041,7 @@ export function Segmented<T extends string>({ value, options, onChange, disabled
               refs.current[next]?.focus();
               settingsControlChanged(e.currentTarget, onChange(options[next]!.value));
             }}
-            className={`rounded-md px-2.5 py-1 text-xs whitespace-nowrap ${o.icon ? "inline-flex items-center gap-1.5" : ""} ${FOCUS} ${on ? (accent ? "bg-accent text-white shadow-sm" : "bg-raised text-foreground shadow-sm ring-1 ring-border") : "press text-muted hover:text-foreground"}`}
+            className={`rounded-md px-2.5 py-1 text-xs whitespace-nowrap ${o.icon ? "inline-flex items-center gap-1.5" : ""} ${FOCUS} ${on ? (accent ? "bg-accent text-on-accent shadow-sm" : "bg-raised text-foreground shadow-sm ring-1 ring-border") : "press text-muted hover:text-foreground"}`}
           >
             {o.icon}
             {o.label}
@@ -1035,7 +1053,8 @@ export function Segmented<T extends string>({ value, options, onChange, disabled
 }
 
 /** Raw controlled text input, for draft forms (add host, add MCP server…) that save with a button. */
-export function TextInput({ value, onChange, placeholder, mono, width = "w-64", disabled, type = "text", maxLength, label, onBlur, onKeyDown, autoFocus, search, inputRef }: { value: string; onChange(v: string): void; placeholder?: string; mono?: boolean; width?: string; disabled?: boolean; type?: "text" | "password"; maxLength?: number; label?: string; onBlur?(): void; onKeyDown?(e: React.KeyboardEvent<HTMLInputElement>): void; autoFocus?: boolean; /** A filter / search box: never an unsaved edit (lib/settingsDrafts). */ search?: boolean; /** The input (TextField; a field that is a Settings card of its own, lib/settingsDrafts). */ inputRef?: React.Ref<HTMLInputElement> }) {
+export function TextInput({ value, onChange, placeholder, mono, width = "w-64", disabled, type = "text", maxLength, label, onBlur, onKeyDown, autoFocus, search, inputRef, floatingCounter }: { value: string; onChange(v: string): void; placeholder?: string; mono?: boolean; width?: string; disabled?: boolean; type?: "text" | "password"; maxLength?: number; label?: string; onBlur?(): void; onKeyDown?(e: React.KeyboardEvent<HTMLInputElement>): void; autoFocus?: boolean; /** A filter / search box: never an unsaved edit (lib/settingsDrafts). */ search?: boolean; /** The input (TextField; a field that is a Settings card of its own, lib/settingsDrafts). */ inputRef?: React.Ref<HTMLInputElement>; /** The `maxLength` counter as a small badge on the input's top edge, shown only while focused or near / over the
+ *  limit; it never takes a line of its own, so a column of short fields stays compact (Settings → 术语, owner 2026-11-24). */ floatingCounter?: boolean }) {
   const aria = useRowA11y(label);
   const { t } = useI18n();
   const composing = useRef(false);
@@ -1072,12 +1091,25 @@ export function TextInput({ value, onChange, placeholder, mono, width = "w-64", 
       className={`${width} ${FIELD} ${mono ? "font-mono text-xs" : ""}`}
     />
   );
+  if (maxLength !== undefined && floatingCounter) {
+    const near = count !== null && count >= maxLength - FLOATING_COUNTER_NEAR;
+    return <span className="group/count relative inline-flex max-w-full">
+      {field}
+      <span id={hintId} aria-live="polite" data-floating-counter={near || tooLong ? "shown" : ""}
+        className={`pointer-events-none absolute -top-2 right-1.5 rounded bg-surface px-1 text-caption leading-4 tabular-nums ${tooLong ? "text-danger" : "text-subtle"} ${near || tooLong ? "" : "opacity-0 group-focus-within/count:opacity-100"}`}>
+        {count === null ? "…" : t("input.limitCounter", { n: count, max: maxLength })}{problem ? ` · ${problem}` : ""}
+      </span>
+    </span>;
+  }
   return maxLength === undefined ? field : <span className="inline-flex max-w-full flex-col gap-1">
     {field}<span id={hintId} className={`text-caption/[inherit] ${tooLong ? "text-danger" : "text-subtle"}`} aria-live="polite">
       {count === null ? "…" : t("input.limitCounter", { n: count, max: maxLength })}{problem ? ` · ${problem}` : ""}
     </span>
   </span>;
 }
+
+/** A floating counter shows itself this close to the limit (TextInput `floatingCounter`). */
+export const FLOATING_COUNTER_NEAR = 4;
 
 /** Raw controlled multi-line input for draft forms (one value per line: MCP args…). */
 export function TextArea({ value, onChange, placeholder, mono, width = "w-64", rows = 3, disabled, label }: { value: string; onChange(v: string): void; placeholder?: string; mono?: boolean; width?: string; rows?: number; disabled?: boolean; label?: string }) {
@@ -1101,7 +1133,7 @@ export function TextArea({ value, onChange, placeholder, mono, width = "w-64", r
  * A text setting saved on commit (Enter or blur), never per keystroke; Esc restores the saved
  * value. After a successful commit "已保存" shows briefly next to the field.
  */
-export function TextField({ value, onCommit, placeholder, mono, width = "w-64", disabled, maxLength, label }: { value: string; onCommit(v: string): Promise<unknown> | void; placeholder?: string; mono?: boolean; width?: string; disabled?: boolean; maxLength?: number; label?: string }) {
+export function TextField({ value, onCommit, placeholder, mono, width = "w-64", disabled, maxLength, label, floatingCounter }: { value: string; onCommit(v: string): Promise<unknown> | void; placeholder?: string; mono?: boolean; width?: string; disabled?: boolean; maxLength?: number; label?: string; /** TextInput `floatingCounter`. */ floatingCounter?: boolean }) {
   const { t } = useI18n();
   const [draft, setDraft] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -1143,6 +1175,7 @@ export function TextField({ value, onCommit, placeholder, mono, width = "w-64", 
         width={width}
         disabled={disabled}
         maxLength={maxLength}
+        floatingCounter={floatingCounter}
         placeholder={placeholder}
         value={draft ?? value}
         onChange={edit}
@@ -1260,7 +1293,7 @@ export function SwatchPicker<T extends string>({ value, options, onChange, label
   );
 }
 
-type SelectOption = { value: string; label: string; disabled?: boolean; group?: string };
+type SelectOption = { value: string; label: string; disabled?: boolean; group?: string; entity?: EntityRef | null; searchText?: string };
 const renderOption = (o: SelectOption) => (
   <option key={o.value} value={o.value} disabled={o.disabled}>
     {o.label}
@@ -1277,10 +1310,18 @@ function optionRuns(options: readonly SelectOption[]): { group?: string; items: 
   return runs;
 }
 
-/** Fixed-width select (`width`: a FIELD_W token, default generic); long labels truncate with a tooltip. */
-export function Select<T extends string>({ value, options, onChange, disabled, width = FIELD_W.generic, label }: { value: T; options: { value: NoInfer<T>; label: string; disabled?: boolean; group?: string }[]; onChange(v: NoInfer<T>): void; disabled?: boolean; width?: string; label?: string }) {
+/**
+ * Fixed-width select (`width`: a FIELD_W token, default generic); long labels truncate with a tooltip. Options that
+ * name a project, agent or Profile (`entity`) make it an EntitySelect, so each shows its icon (owner 2026-11-24/25);
+ * keyboard (↑ / ↓ / type-ahead on the closed trigger), labels and the changed-marker stay a select's.
+ */
+export function Select<T extends string>({ value, options, onChange, disabled, width = FIELD_W.generic, label }: { value: T; options: { value: NoInfer<T>; label: string; disabled?: boolean; group?: string; entity?: EntityRef | null; searchText?: string }[]; onChange(v: NoInfer<T>): void; disabled?: boolean; width?: string; label?: string }) {
   const aria = useRowA11y(label);
   const current = options.find((o) => o.value === value)?.label;
+  if (options.some((o) => o.entity)) {
+    return <EntitySelect value={value} options={options} disabled={disabled} width={width} label={aria["aria-label"]} labelledBy={aria["aria-labelledby"]} describedBy={aria["aria-describedby"]}
+      onChange={(next, trigger) => settingsControlChanged(trigger, onChange(next as T))} />;
+  }
   return (
     <select {...aria} value={value} disabled={disabled} title={current} data-settings-control="" onChange={(e) => settingsControlChanged(e.currentTarget, onChange(e.target.value as T))} className={`${width} truncate ${FIELD}`}>
       {/* `group`: consecutive options sharing it sit under one <optgroup>. */}
@@ -1308,7 +1349,7 @@ export function Toggle({ checked, onChange, disabled, label }: { checked: boolea
       onClick={(e) => settingsControlChanged(e.currentTarget, onChange(!checked))}
       className={`press-solid relative h-5 w-9 shrink-0 rounded-full transition-colors disabled:opacity-50 ${FOCUS} ${checked ? "bg-accent" : "bg-surface-2 ring-1 ring-border ring-inset"}`}
     >
-      <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${checked ? "left-[18px]" : "left-0.5"}`} />
+      <span className={`absolute top-0.5 h-4 w-4 rounded-full shadow transition-all ${checked ? "left-[18px] bg-on-accent" : "left-0.5 bg-white"}`} />
     </button>
   );
 }
@@ -1327,7 +1368,7 @@ export function Checkbox({ checked, onChange, disabled, label }: { checked: bool
       aria-label={label}
       disabled={disabled}
       onClick={(e) => settingsControlChanged(e.currentTarget, onChange(!checked))}
-      className={`press-solid flex h-4 w-4 shrink-0 items-center justify-center rounded border transition-colors disabled:opacity-40 ${FOCUS} ${checked ? "border-accent bg-accent text-white" : "border-border bg-background hover:border-accent/70"}`}
+      className={`press-solid flex h-4 w-4 shrink-0 items-center justify-center rounded border transition-colors disabled:opacity-40 ${FOCUS} ${checked ? "border-accent bg-accent text-on-accent" : "border-border bg-background hover:border-accent/70"}`}
     >
       {checked && <Check size={11} strokeWidth={3} />}
     </button>

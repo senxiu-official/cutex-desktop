@@ -144,10 +144,14 @@ export function formatCost(n: number, currency: string | null): string {
  * null = nothing to say.
  */
 export function quotaNote(
-  quota: Pick<ClaudeAccountQuota, "gauges" | "lastError" | "stale" | "refreshing" | "credentialsExpired">,
-): { key: MessageKey; error?: string; tone: "warn" | "muted" } | null {
+  quota: Pick<ClaudeAccountQuota, "gauges" | "lastError" | "stale" | "refreshing" | "credentialsExpired" | "loginDiagnostic" | "credentialsExpiredAt">,
+): { key: MessageKey; error?: string; tone: "warn" | "muted"; at?: number | null } | null {
   if (quota.lastError) return { key: "claude-accounts.quotaError", error: quota.lastError, tone: "warn" };
-  if (quota.credentialsExpired) return { key: "claude-accounts.quotaTokenExpired", tone: "muted" };
+  // r295: the host's newest observation of the credential wins (Claude can still refresh an expired one: muted).
+  if (quota.loginDiagnostic !== undefined) {
+    if (quota.loginDiagnostic === "loginExpired") return { key: "claude-accounts.loginExpired", tone: "muted", at: quota.credentialsExpiredAt ?? null };
+    if (quota.loginDiagnostic === "loginExpiring") return { key: "claude-accounts.loginExpiring", tone: "muted", at: quota.credentialsExpiredAt ?? null };
+  } else if (quota.credentialsExpired) return { key: "claude-accounts.quotaTokenExpired", tone: "muted" };
   if (quota.gauges.length) return quota.stale ? { key: "claude-accounts.quotaStale", tone: "warn" } : null;
   return { key: quota.refreshing ? "claude-accounts.quotaReading" : "claude-accounts.quotaNone", tone: "muted" };
 }

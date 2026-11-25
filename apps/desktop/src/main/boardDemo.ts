@@ -38,8 +38,8 @@ function ask(a: Ask, from: string, now: number): AskSummary {
   } as AskSummary;
 }
 
-function project(id: string, name: string, color: string, director: string): ProjectSummary {
-  return { project_id: id, authority_epoch: 1, director_cutex_session_id: director, presentation: { display_name: name, badge_label: name.slice(0, 2), color }, active_member_count: 0, lifecycle: "active" };
+function project(id: string, name: string, color: string, director: string, icon?: ProjectSummary["presentation"]["icon"]): ProjectSummary {
+  return { project_id: id, authority_epoch: 1, director_cutex_session_id: director, presentation: { display_name: name, badge_label: name.slice(0, 2), color, ...(icon ? { icon } : {}) }, active_member_count: 0, lifecycle: "active" };
 }
 
 function host(hostId: string, label: string, projects: ProjectSummary[], agents: Agent[], asks: Ask[], extra: Partial<BoardHostInput>, now: number): BoardHostInput {
@@ -57,7 +57,7 @@ function host(hostId: string, label: string, projects: ProjectSummary[], agents:
 
 export function demoBoardProjects(now = Date.now()): BoardProjectView[] {
   const eva = host("demo-eva", "host-a",
-    [project("p-demo-dev", "cutex-desktop", "blue", "alice"), project("p-wv", "Waveline", "green", "wv-dir"), project("p-demo", "demo-study", "red", "d2"), project("p-storm", "STORM II 美术", "cyan", "st-dir")],
+    [project("p-demo-dev", "cutex-desktop", "blue", "alice"), project("p-wv", "Waveline", "green", "wv-dir", { kind: "emoji", value: "🌊" }), project("p-demo", "demo-study", "red", "d2"), project("p-storm", "STORM II 美术", "cyan", "st-dir", { kind: "icon", value: "palette" })],
     [
       { id: "alice", name: "project-lead", project: "p-demo-dev", busy: true, doing: "合并 feat/board-window，等全量测试", ago: 12 * MIN },
       { id: "aria", name: "deputy-Aria", project: "p-demo-dev", doing: "整理 TODO 队列（the next release 之后）", ago: 38 * MIN },

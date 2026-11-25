@@ -5,7 +5,7 @@ export const zhCN = {
   "nci.page": "NCI 远程作业",
   "nci.pageHint": "让提交到 NCI Gadi 的作业出现在作业页，结束后通知提交它的{{agent}}；按下面的步骤设置。",
   "nci.unsupported": "这台主机的 cutex 没有 NCI 远程作业功能（需要较新的 Linux 版 cutex）。",
-  "nci.noVerification": "这个 cutex 版本没有 NCI 核对功能。邮件仍会收下，但作业结果要你手动标记。",
+  "nci.noVerification": "这个 cutex 版本没有 NCI 核对功能。邮件仍会接收，但作业结果要你手动标记。",
   "nci.noKeygen": "这个 cutex 版本不能在主机上生成密钥，请用第 ④ 步里的「高级：使用已有密钥文件」。",
   "nci.copy": "复制",
   "nci.copied": "已复制",

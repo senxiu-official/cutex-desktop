@@ -952,8 +952,8 @@ const DUSKS: Palette[] = [
 ];
 
 /** The dark theme's variables, for a dark palette shown on a light page (and the other way round). */
-const DARK_BASE: Record<string, string> = { "--bg": "#161616", "--surface": "#1c1c1d", "--surface-2": "#262628", "--raised": "#3a3a3e", "--fg": "#ececec", "--fg-muted": "#a4a4aa", "--fg-subtle": "#86868d", "--border": "#2c2c2f", "--accent": "#60a5fa", "--bubble": "#262628", "--peer": "#1f2a3a", "--warn": "#f59e0b", "--warn-text": "#f59e0b", "--win": "#0e0e0f", "--hover": "rgba(255, 255, 255, 0.06)", "--card-border": "rgba(255, 255, 255, 0.06)" };
-const LIGHT_BASE: Record<string, string> = { "--bg": "#ffffff", "--surface": "#f6f6f7", "--surface-2": "#ececee", "--raised": "#ffffff", "--fg": "#1d1d1f", "--fg-muted": "#5f6066", "--fg-subtle": "#6a6b71", "--border": "#e3e3e6", "--accent": "#3b82f6", "--bubble": "#f0f0f2", "--peer": "#eef4ff", "--warn": "#d97706", "--warn-text": "#9a4a06", "--win": "#f1f1f3", "--hover": "rgba(20, 20, 30, 0.06)", "--card-border": "rgba(20, 20, 30, 0.07)" };
+const DARK_BASE: Record<string, string> = { "--bg": "#161616", "--surface": "#1c1c1d", "--surface-2": "#262628", "--raised": "#3a3a3e", "--fg": "#ececec", "--fg-muted": "#a4a4aa", "--fg-subtle": "#86868d", "--border": "#2c2c2f", "--accent": "#79acff", "--bubble": "#262628", "--peer": "#1f2a3a", "--warn": "#f59e0b", "--warn-text": "#f59e0b", "--win": "#0e0e0f", "--hover": "rgba(255, 255, 255, 0.06)", "--card-border": "rgba(255, 255, 255, 0.06)" };
+const LIGHT_BASE: Record<string, string> = { "--bg": "#ffffff", "--surface": "#f6f6f7", "--surface-2": "#ececee", "--raised": "#ffffff", "--fg": "#1d1d1f", "--fg-muted": "#5f6066", "--fg-subtle": "#6a6b71", "--border": "#e3e3e6", "--accent": "#1861d2", "--bubble": "#f0f0f2", "--peer": "#eef4ff", "--warn": "#d97706", "--warn-text": "#9a4a06", "--win": "#f1f1f3", "--hover": "rgba(20, 20, 30, 0.06)", "--card-border": "rgba(20, 20, 30, 0.07)" };
 
 /** A small piece of the app (sidebar, a conversation, a settings card) under one palette. */
 function MiniApp({ p }: { p: Palette }) {

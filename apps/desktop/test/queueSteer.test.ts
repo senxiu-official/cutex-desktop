@@ -241,7 +241,7 @@ describe("queue-steer notices", () => {
     const wrapped = "Error invoking remote method 'invoke': Error: queue_steer_refused:delegationTurn";
     expect(parseQueueSteerError(wrapped)).toEqual({ kind: "delegationTurn", detail: "" });
     expect(parseQueueSteerError("queue_steer_refused:bogus")).toBeNull();
-    expect(queueSteerNotice(wrapped, zh)).toBe("委托占用中（委托回合在跑，或委托结果正在送达）：消息留在队列，等委托这一轮结束后发送");
+    expect(queueSteerNotice(wrapped, zh)).toBe("委托占用中（委托回合在跑，或委托结果正在送达）：消息留在队列，等委托回合结束后发送");
     expect(queueSteerNotice("Error: queue_steer_refused:turnConflict", zh)).toBe("回合刚变化，请再试一次");
     // The native's own words never reach the notice (queueSteerRaw: the 详情 tooltip).
     expect(queueSteerNotice("queue_steer_refused:runtimeRefused cannot steer a review turn", zh)).toBe("运行时拒绝插话；已留在队列");

@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import fs from "node:fs/promises";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, expect, it, vi } from "vitest";
 vi.mock("electron", () => ({ dialog: {} }));
 import { localFileAction, localFileOpenInfo, validatedLocalFilePath } from "../src/main/localFiles";
 import { canOpenResolvedFile, fileNameType, fileOpenKind, isAbsoluteFilePath } from "../src/shared/localFiles";
@@ -11,8 +11,21 @@ import { runFileDialogOptions, runFilePromptText } from "../src/main/localFileRu
 let root: string;
 let file: string;
 const shell = { showItemInFolder: vi.fn(), openPath: vi.fn<() => Promise<string>>() };
-beforeEach(async () => { root = await fs.realpath(await mkdtemp(join(tmpdir(), "desktop-reveal-"))); file = join(root, "file with spaces.md"); await writeFile(file, "synthetic fixture"); shell.showItemInFolder.mockReset(); shell.openPath.mockReset().mockResolvedValue(""); });
-afterEach(async () => { vi.restoreAllMocks(); await rm(root, { recursive: true, force: true }); });
+let scratch: string | undefined;
+beforeAll(async () => {
+  scratch = await mkdtemp(join(tmpdir(), "desktop-reveal-"));
+  root = await fs.realpath(scratch);
+  file = join(root, "file with spaces.md");
+  await writeFile(file, "synthetic fixture");
+});
+beforeEach(() => {
+  shell.showItemInFolder.mockReset();
+  shell.openPath.mockReset().mockResolvedValue("");
+});
+afterEach(() => { vi.restoreAllMocks(); });
+afterAll(async () => {
+  if (scratch) await rm(scratch, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+});
 
 it("reveals existing files and folders through the shell, without opening them", async () => {
   const folder = join(root, "folder"); await mkdir(folder);
@@ -54,8 +67,15 @@ it.each(["\\\\attacker\\share\\file.txt", "//attacker/share/file.txt", "\\\\?\\C
   expect(shell.showItemInFolder).not.toHaveBeenCalled();
 });
 
-it("refuses executable suffixes and shortcuts but still reveals those files and similarly named folders", async () => {
+it("classifies executable, script and shortcut suffixes as unsafe to open", () => {
   for (const suffix of ["exe", "com", "bat", "cmd", "ps1", "psm1", "vbs", "vbe", "js", "jse", "wsf", "wsh", "msi", "msp", "scr", "pif", "lnk", "url", "reg", "hta", "cpl", "jar", "appref-ms", "app", "command", "sh", "desktop", "py", "pyw", "rb", "pl", "mjs"]) {
+    const target = "payload." + suffix.toUpperCase();
+    expect(canOpenResolvedFile(target, target, process.platform, 0o644)).toBe(false);
+  }
+});
+
+it("refuses opening executable, script and shortcut files but still reveals them and similarly named folders", async () => {
+  for (const suffix of ["exe", "ps1", "lnk"]) {
     const target = join(root, `payload.${suffix.toUpperCase()}`); await writeFile(target, "synthetic fixture");
     expect(await localFileOpenInfo("local", target)).toEqual({ canOpen: false, runnable: fileNameType(target) });
     await expect(localFileAction("local", target, "open", shell)).rejects.toThrow("cannot be opened");
@@ -69,7 +89,7 @@ it("refuses executable suffixes and shortcuts but still reveals those files and 
 });
 
 it("checks the real target, so a text-looking link cannot open an executable", async () => {
-  const executable = join(root, "payload.exe"); await writeFile(executable, "synthetic executable fixture");
+  const executable = join(root, "link-target.exe"); await writeFile(executable, "synthetic executable fixture");
   // A deterministic realpath result also covers Windows without symlink privileges.
   vi.spyOn(fs, "realpath").mockResolvedValue(executable);
   expect(await localFileOpenInfo("local", file)).toEqual({ canOpen: false, runnable: "program" });
@@ -104,7 +124,7 @@ it("decides by type on macOS/Linux: a document opens whatever its mode; only a n
   expect(fileOpenKind("C:/x/a.txt", "C:/x/a.ps1", "win32", 0o644)).toBe("script");
 });
 
-it("runs a script or program only after main's dialog says 运行, and checks the file again afterwards", async () => {
+it("runs a script only after main's dialog says 运行", async () => {
   const script = join(root, "build.ps1"); await writeFile(script, "synthetic fixture");
   const confirmRun = vi.fn(async () => false);
   await localFileAction("local", script, "run", shell, confirmRun);
@@ -113,12 +133,17 @@ it("runs a script or program only after main's dialog says 运行, and checks th
   confirmRun.mockResolvedValueOnce(true);
   await localFileAction("local", script, "run", shell, confirmRun);
   expect(shell.openPath).toHaveBeenCalledExactlyOnceWith(script);
-  // Changed while the dialog was open: not run.
-  shell.openPath.mockClear();
-  confirmRun.mockImplementationOnce(async () => { await writeFile(script, "synthetic fixture, changed"); return true; });
+});
+
+it("refuses to run a script that changed while the dialog was open", async () => {
+  const script = join(root, "changed.ps1"); await writeFile(script, "synthetic fixture");
+  const confirmRun = async () => { await writeFile(script, "synthetic fixture, changed"); return true; };
   await expect(localFileAction("local", script, "run", shell, confirmRun)).rejects.toThrow("changed");
   expect(shell.openPath).not.toHaveBeenCalled();
-  // No dialog available, or a document: never run.
+});
+
+it("refuses run without a dialog, for a document, or on a remote host", async () => {
+  const script = join(root, "no-dialog.ps1"); await writeFile(script, "synthetic fixture");
   await expect(localFileAction("local", script, "run", shell)).rejects.toThrow("unavailable");
   await expect(localFileAction("local", file, "run", shell, async () => true)).rejects.toThrow("only a script or program");
   await expect(localFileAction("ssh-host", script, "run", shell, async () => true)).rejects.toThrow("remote");

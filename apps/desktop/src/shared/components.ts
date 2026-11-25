@@ -36,8 +36,26 @@ export interface ComponentStatus extends ClientComponentStatus {
   external?: ComponentExternal;
   /** The component's effective offers: signed index, manifest fallback or private kit (hosts with COMPONENT_INDEX_FEATURE). */
   index?: ComponentIndexState;
+  /** r296 job-service `detail.maintenance`: verified / waiting / handoffRequired / needsAttention (a newer state passes
+   *  through), with the selected and running versions. Absent on older hosts or a malformed detail. */
+  maintenance?: ComponentMaintenance;
   /** r270 (ae9cced9): the full Node range of the legacy `dsh.node` / `kimi.node` detail (e.g. `>=24.9.0 <25`). */
   nodeRange?: string;
+}
+
+export interface ComponentMaintenance {
+  state: string;
+  selectedVersion: string | null;
+  runningVersion: string | null;
+}
+
+/** `detail.maintenance` read tolerantly (no state string: absent). */
+export function readComponentMaintenance(component: unknown): ComponentMaintenance | undefined {
+  const o = (v: unknown) => (v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null);
+  const m = o(o(o(component)?.detail)?.maintenance);
+  const s = (v: unknown) => (typeof v === "string" && v ? v : null);
+  const state = s(m?.state);
+  return m && state ? { state, selectedVersion: s(m.selectedVersion), runningVersion: s(m.runningVersion) } : undefined;
 }
 
 export interface ComponentsList extends Omit<ClientComponentsList, "components" | "operation"> {
@@ -74,7 +92,10 @@ export function readComponentsList(value: unknown): ComponentsList {
   const byName = new Map(raw.flatMap((c) => (c && typeof c === "object" && typeof (c as { name?: unknown }).name === "string" ? [[(c as { name: string }).name, c] as const] : [])));
   return {
     ...list,
-    components: list.components.map((c) => ({ ...c, ...readR269Fields(byName.get(c.name)) })),
+    components: list.components.map((c) => {
+      const maintenance = readComponentMaintenance(byName.get(c.name));
+      return { ...c, ...readR269Fields(byName.get(c.name)), ...(maintenance ? { maintenance } : {}) };
+    }),
     operation: readComponentOperation(top.operation),
     ...("indexOperation" in top ? { indexOperation: readComponentOperation(top.indexOperation) } : {}),
   };

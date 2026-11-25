@@ -4,7 +4,7 @@ import { NOTE_BODY_LIMIT, type NoteAnchor, type NoteCreate } from "../../../../s
 import { useApp, viewOf } from "../../store";
 import { timelineFromThreadRead } from "../../lib/timeline";
 import { services } from "../app";
-import { completedSummary, sideTimeline } from "./model";
+import { completedSummary, quotedMessage, sideTimeline, type SideQuote } from "./model";
 import { isSideMessageValidationError, SideForkBlockedError } from "./errors";
 
 export interface SummaryJob {
@@ -13,7 +13,10 @@ export interface SummaryJob {
 }
 export interface SideView {
   chat: SideChat; draft: string; sending: boolean; error: string | null; summary: SummaryJob | null;
-  pendingMessage: { text: string; clientMessageId: string } | null;
+  /** The message being sent (a retry resends it as is) and the note / quote it was made from, so success clears only those. */
+  pendingMessage: { text: string; clientMessageId: string; draft?: string; quote?: SideQuote | null } | null;
+  /** 批注追问: the quoted passage sent with the draft (model.quotedMessage). */
+  quote?: SideQuote | null;
   unread: boolean; parentThreadId?: string;
 }
 export const sideKey = (hostId: string, chatId: string) => `${hostId}\0${chatId}`;
@@ -39,6 +42,11 @@ function fail(key: string, e: unknown) {
 }
 export function sideModuleActive(active: boolean) { live = active; epoch++; watches.clear(); }
 export function setSideDraft(hostId: string, chatId: string, draft: string) { patch(sideKey(hostId, chatId), { draft }); }
+/** A new quote replaces the previous one (one passage per message); null removes it. Not while a message is pending. */
+export function setSideQuote(hostId: string, chatId: string, quote: SideQuote | null) {
+  const view = useSides.getState().views[sideKey(hostId, chatId)];
+  if (view && !view.pendingMessage) patch(sideKey(hostId, chatId), { quote });
+}
 export function receiveSide(hostId: string, chat: SideChat) {
   const key = sideKey(hostId, chat.id), old = useSides.getState().views[key];
   if (old?.chat.status === "closed" || (old && chat.revision < old.chat.revision)) return;
@@ -116,16 +124,21 @@ export async function closeSideInstance(instanceId: string, hostId: string, sess
 }
 export async function sendSide(hostId: string, chatId: string): Promise<void> {
   const key = sideKey(hostId, chatId), view = useSides.getState().views[key];
-  if (!view || view.sending || (view.chat.status !== "ready" && !(view.pendingMessage && view.chat.status === "running")) || !view.draft.trim()) return;
-  const pendingMessage = view.pendingMessage ?? { text: view.draft, clientMessageId: crypto.randomUUID() };
+  if (!view || view.sending || (view.chat.status !== "ready" && !(view.pendingMessage && view.chat.status === "running")) || !(view.draft.trim() || view.quote)) return;
+  // A retry resends the same message (the composer and the quote are locked while it is pending).
+  const pendingMessage = view.pendingMessage ?? { text: quotedMessage(view.quote, view.draft), clientMessageId: crypto.randomUUID(), draft: view.draft, quote: view.quote ?? null };
+  // What this message carried: only those are cleared after it went (a newer draft / quote stays).
+  const draft = pendingMessage.draft ?? view.draft, quote = "quote" in pendingMessage ? pendingMessage.quote : view.quote;
   const token = lease(key);
   patch(key, { sending: true, error: null, pendingMessage });
   try {
-    const { chat } = await services.daemonFor(hostId).sideSend(view.chat.sessionId, chatId, pendingMessage);
+    const { chat } = await services.daemonFor(hostId).sideSend(view.chat.sessionId, chatId, { text: pendingMessage.text, clientMessageId: pendingMessage.clientMessageId });
     if (leases.get(key) !== token) return;
     receiveSide(hostId, chat);
     patch(key, { pendingMessage: null });
-    if (useSides.getState().views[key]?.draft === pendingMessage.text) patch(key, { draft: "" });
+    const now = useSides.getState().views[key];
+    if (now?.draft === draft) patch(key, { draft: "" });
+    if (quote && now?.quote === quote) patch(key, { quote: null });
     watchSide(hostId, chatId);
   } catch (e) {
     fail(key, e);

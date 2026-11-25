@@ -15,6 +15,7 @@ import "./styles.css";
 import "./motion.css";
 import { startMotion } from "./lib/motion";
 import { applyContrast, applyDarkPalette, applyLightPalette, applyTheme, loadContrast, loadDarkPalette, loadLightPalette, loadTheme } from "./lib/theme";
+import { loadAccent, setAccentVars } from "./lib/accent";
 import { bridge } from "./bridge";
 import { startProfileAccountLinks } from "./lib/profileAccountLinks";
 import { startProfileLinkAppearanceSync } from "./lib/profileLinkAppearance";
@@ -45,6 +46,7 @@ applyTheme(loadTheme());
 applyLightPalette(loadLightPalette());
 applyDarkPalette(loadDarkPalette());
 applyContrast(loadContrast());
+setAccentVars(loadAccent());
 applyAppearance();
 installCopyFeedback();
 // Looping animations (spinners, running rings) in one phase: one main-thread frame per loop, not one per element.

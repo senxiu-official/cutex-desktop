@@ -29,6 +29,8 @@ export const en: Record<keyof typeof zhCN, string> = {
   "subagents.recentTitle": "Recently finished {{subagents}}",
   "subagents.recent.background": "Ran in the background: no transcript was kept",
   "subagents.background": "background",
+  "subagents.deniedUnattended": "Background tool call skipped: needed approval",
+  "subagents.deniedUnattendedHint": "A tool this background {{subagent}} called needed approval while nobody could approve it, so it was declined; its status is unchanged",
   "subagents.stop": "Stop",
   "subagents.stop.title": "Stop the background {{subagent}} \"{name}\" (the current turn goes on)",
   "subagents.stopAgain": "Click Stop again to confirm",

@@ -16,7 +16,7 @@ export const en = {
   "delegations.upgrade.run.confirmInterrupt": "Confirm immediate interruption",
   "delegations.upgrade.run.cancel": "Cancel",
   "delegations.upgrade.run.resume": "Resume project",
-  "delegations.upgrade.run.resumeHint": "Resuming only lifts this pause. Interrupted delegations require an explicit continuation action.",
+  "delegations.upgrade.run.resumeHint": "Resuming only lifts this pause. Interrupted delegations need to be allowed to continue separately.",
   "delegations.upgrade.run.interrupted": "Interrupted delegations",
   "delegations.upgrade.run.delegationRef": "{host}/{id}",
   "delegations.upgrade.run.failed": "The action could not be completed. Refresh the project state and try again.",

@@ -55,6 +55,8 @@ describe("the reply's floating action bar", () => {
     expect(tb.className).toContain("opacity-0");
     expect(tb.className).toContain("focus-within:opacity-100");
     expect(tb.className).toContain("shadow-e2");
+    // No opacity fade: a running fade composites the bar and flickers the text of the row its shadow reaches.
+    expect(tb.className).not.toMatch(/\btransition/);
     const buttons = [...tb.querySelectorAll("button")];
     expect(buttons.map((b) => b.getAttribute("aria-label"))).toEqual(["reply.copy", "reply.fork", "gutter.more"]);
     for (const b of buttons) expect(b.tabIndex).toBe(0);
@@ -100,6 +102,7 @@ describe("the user bubble's bar", () => {
     act(() => root!.render(h(UserActions, { sessionId: "s", text: "hi", turnId: "t1", dropped: 0, canRevert: false })));
     const tb = q('[data-user-bar][role="toolbar"]');
     expect(tb.className).toContain("shadow-e2");
+    expect(tb.className).not.toMatch(/\btransition/);
     expect(tb.parentElement?.className).toContain("justify-end");
     act(() => q('[aria-label="gutter.more"]').click());
     expect(fx.menus.at(-1)!.map((e) => (e as { label: string }).label)).toEqual(["notes.addToTurn", "side-chat.open"]);

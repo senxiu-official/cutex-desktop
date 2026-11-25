@@ -235,6 +235,13 @@ export function cardName(card: SideCard): string {
 }
 
 export function pageLabel(page: SidePage): string {
+  // A fixed page (D1 「我的浏览器」): its component's own name until the owner renames it.
+  if (!page.name && page.fixedHome) {
+    for (const entry of sideRegistry().values()) {
+      const fixed = entry.item.placement.home === page.fixedHome ? entry.item.placement.fixedPage : undefined;
+      if (fixed) return translate(fixed.titleKey);
+    }
+  }
   if (!page.name && !page.cards.length && page.emptyKind) {
     const entry = sideRegistry().get(page.emptyKind);
     if (entry) return translate(entry.item.titleKey);

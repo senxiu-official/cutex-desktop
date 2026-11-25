@@ -6,6 +6,7 @@
 // nothing here is writable by the renderer, a page or an agent.
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
+import { DEFAULT_BROWSER_IDENTITY_ID as DEFAULT_ID, isBrowserIdentityId } from "../../shared/browserIdentity";
 
 interface Io { read(path: string): string; write(path: string, text: string): void }
 const defaultIo: Io = {
@@ -25,11 +26,12 @@ export function browserCertificateFingerprintHex(value: string): string | undefi
   return [...Buffer.from(value.slice(7), "base64")].map(byte => byte.toString(16).padStart(2, "0").toUpperCase()).join(":");
 }
 /** Store key: "<hostId> <https origin>" (neither part may contain a space). */
-function exceptionKey(hostId: unknown, origin: unknown): string | undefined {
-  return typeof hostId === "string" && typeof origin === "string" && HOST_ID.test(hostId) && ORIGIN.test(origin) ? `${hostId} ${origin}` : undefined;
+function exceptionKey(hostId: unknown, origin: unknown, identityId = DEFAULT_ID): string | undefined {
+  return typeof hostId === "string" && typeof origin === "string" && HOST_ID.test(hostId) && ORIGIN.test(origin) && isBrowserIdentityId(identityId)
+    ? `${identityId} ${hostId} ${origin}` : undefined;
 }
 
-/** userData/browser-certificate-exceptions.json = { "exceptions": { "<hostId> <https origin>": "sha256/…" } }; bad file = none. */
+/** Legacy `exceptions` belong to the default identity; other identities use their own keys. */
 export class BrowserCertificateExceptionStore {
   private entries: Map<string, string> | undefined;
   constructor(private readonly file: string | null, private readonly io: Io = defaultIo) {}
@@ -38,29 +40,52 @@ export class BrowserCertificateExceptionStore {
     const entries = new Map<string, string>();
     if (this.file) try {
       const parsed = JSON.parse(this.io.read(this.file)) as unknown;
-      const stored = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>).exceptions : undefined;
-      if (stored && typeof stored === "object" && !Array.isArray(stored))
-        for (const [key, fingerprint] of Object.entries(stored).slice(-BROWSER_CERTIFICATE_EXCEPTION_LIMIT)) {
-          const space = key.indexOf(" ");
-          if (space > 0 && exceptionKey(key.slice(0, space), key.slice(space + 1)) === key && isBrowserCertificateFingerprint(fingerprint)) entries.set(key, fingerprint);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        const fields = parsed as Record<string, unknown>;
+        for (const [name, withIdentity] of [["exceptions", false], ["identityExceptions", true]] as const) {
+          const stored = fields[name];
+          if (!stored || typeof stored !== "object" || Array.isArray(stored)) continue;
+          for (const [raw, fingerprint] of Object.entries(stored).slice(-BROWSER_CERTIFICATE_EXCEPTION_LIMIT)) {
+            const parts = raw.split(" ");
+            if (parts.length !== (withIdentity ? 3 : 2)) continue;
+            const [identityId, hostId, origin] = withIdentity ? parts : [DEFAULT_ID, ...parts];
+            if (withIdentity && identityId === DEFAULT_ID) continue;
+            const key = exceptionKey(hostId, origin, identityId);
+            if (key && isBrowserCertificateFingerprint(fingerprint)) entries.set(key, fingerprint);
+          }
         }
+      }
     } catch { /* Missing or malformed: no exceptions (fail closed). */ }
     return this.entries = entries;
   }
-  matches(hostId: string, origin: string, fingerprint: string): boolean {
+  matches(hostId: string, origin: string, fingerprint: string, identityId = DEFAULT_ID): boolean {
     try {
-      const key = exceptionKey(hostId, origin);
+      const key = exceptionKey(hostId, origin, identityId);
       return !!key && isBrowserCertificateFingerprint(fingerprint) && this.read().get(key) === fingerprint;
     } catch { return false; }
   }
   /** Remembers (or replaces) the one certificate the owner accepted for this origin; oldest entries fall off. */
-  set(hostId: string, origin: string, fingerprint: string): void {
-    const key = exceptionKey(hostId, origin);
+  set(hostId: string, origin: string, fingerprint: string, identityId = DEFAULT_ID): void {
+    const key = exceptionKey(hostId, origin, identityId);
     if (!key || !isBrowserCertificateFingerprint(fingerprint)) throw new Error("invalid_certificate_exception");
     const entries = new Map(this.read());
     entries.delete(key); entries.set(key, fingerprint);
     while (entries.size > BROWSER_CERTIFICATE_EXCEPTION_LIMIT) entries.delete(entries.keys().next().value!);
-    if (this.file) this.io.write(this.file, `${JSON.stringify({ exceptions: Object.fromEntries(entries) }, null, 2)}\n`);
+    this.save(entries);
+  }
+  forget(identityId?: string, hostId?: string): void {
+    const entries = new Map(this.read());
+    for (const key of entries.keys()) {
+      const [id, host] = key.split(" ");
+      if ((identityId === undefined || id === identityId) && (hostId === undefined || host === hostId)) entries.delete(key);
+    }
+    if (entries.size !== this.read().size) this.save(entries);
+  }
+  private save(entries: Map<string, string>): void {
+    const exceptions = Object.fromEntries([...entries].filter(([key]) => key.startsWith(`${DEFAULT_ID} `))
+      .map(([key, fp]) => [key.slice(DEFAULT_ID.length + 1), fp]));
+    const identityExceptions = Object.fromEntries([...entries].filter(([key]) => !key.startsWith(`${DEFAULT_ID} `)));
+    if (this.file) this.io.write(this.file, `${JSON.stringify({ exceptions, ...(Object.keys(identityExceptions).length ? { identityExceptions } : {}) }, null, 2)}\n`);
     this.entries = entries;
   }
 }

@@ -48,7 +48,7 @@ function session(id: string, name: string, over: Partial<SessionResource> = {}):
     formalAgentName: name,
     registrationClass: null,
     lifecycle: "active",
-    cwd: `/home/ema/${id}`,
+    cwd: `/home/user/${id}`,
     note: null,
     avatar: null,
     native: { threadId: `thread-${id}`, schema: null },
@@ -67,7 +67,7 @@ function sidebar(sessions: SessionResource[], rows: Record<string, { projectId?:
 }
 
 const LOCAL = sidebar(
-  [session("lead", "Hachimi"), session("quick", "Quick chat", { formalAgentName: null, registrationClass: "local_only" }), session("solo", "Solo")],
+  [session("lead", "Hostc"), session("quick", "Quick chat", { formalAgentName: null, registrationClass: "local_only" }), session("solo", "Solo")],
   { lead: { projectId: "p1" }, quick: {}, solo: {} },
   [{ id: "p1", name: "cutex-dev", director: "lead" }],
 );
@@ -96,7 +96,7 @@ describe("what one pane's header shows (pure)", () => {
   it("the agent of its own host: same session id on two hosts = two different headers", () => {
     const left = convHeaderInfo(LOCAL, "lead")!;
     const right = convHeaderInfo(REMOTE, "lead")!;
-    expect([left.session.displayName, left.director, left.project, left.cwd]).toEqual(["Hachimi", true, { id: "p1", name: "cutex-dev" }, "/home/ema/lead"]);
+    expect([left.session.displayName, left.director, left.project, left.cwd]).toEqual(["Hostc", true, { id: "p1", name: "cutex-dev" }, "/home/user/lead"]);
     expect([right.session.displayName, right.director, right.project]).toEqual(["Setting UI", false, { id: "p9", name: "Owner devices" }]);
   });
   it("a quick chat has no project chip; an independent agent gets the 独立 chip (id null); unknown agent = nothing", () => {
@@ -148,7 +148,7 @@ describe("conversation headers (rendered)", () => {
     await render([pane("main", "local", "lead", true), pane("c2", "host-a", "lead", false)]);
     const left = header("main")!;
     const right = header("c2")!;
-    expect(left.querySelector('[data-conv-item="name"]')?.textContent).toContain("Hachimi");
+    expect(left.querySelector('[data-conv-item="name"]')?.textContent).toContain("Hostc");
     expect(right.querySelector('[data-conv-item="name"]')?.textContent).toContain("Setting UI");
     // Line 1 (design 040 step 7): name, role (only the Director); on its right the start / stop button, the bell,
     // the services tag, then the pane's controls. Line 2: project + star · cwd · branch — over the whole width.
@@ -230,7 +230,7 @@ describe("conversation headers (rendered)", () => {
     expect(online.getAttribute("aria-label")).toBeTruthy();
     expect(online.getAttribute("data-tip")).toBeTruthy();
     expect(online.closest("[data-conv-left]")).not.toBeNull();
-    expect(el.querySelector('[data-conv-item="name"]')!.textContent).toContain("Hachimi");
+    expect(el.querySelector('[data-conv-item="name"]')!.textContent).toContain("Hostc");
     expect(el.querySelector('[data-conv-item="project"]')!.className).toContain("shrink-0");
     expect(el.querySelector('[data-conv-item="cwd"]')!.className).toContain("shrink-[10]");
   });
@@ -295,7 +295,7 @@ describe("the window bar", () => {
     expect([...actions.querySelectorAll("[data-show-desktop], [data-stub]")].map((e) => e.getAttribute("data-stub") ?? "show-desktop")).toEqual(["launchers", "window-controls"]);
     expect(bar.querySelector('[data-window-bar="scope"] [data-show-desktop]')).not.toBeNull();
     expect(bar.querySelector("[data-conv-item], [data-conv-header], img[alt]:not([alt=''])")).toBeNull();
-    expect(bar.textContent).not.toContain("Hachimi");
+    expect(bar.textContent).not.toContain("Hostc");
     const search = bar.querySelector<HTMLButtonElement>('[data-window-bar="search"]')!;
     expect(search.textContent).toContain("Ctrl K");
     act(() => search.click());

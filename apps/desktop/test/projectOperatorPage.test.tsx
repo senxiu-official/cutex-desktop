@@ -10,7 +10,7 @@ const fx = vi.hoisted(() => ({
   state: {} as Record<string, any>, sidebar: null as any, model: null as any, scope: null as any, prefs: { projectIcons: {}, projectRemarks: {} },
   view: null as any, read: vi.fn(), set: vi.fn(), refresh: vi.fn(), controls: undefined as MemberControls | undefined,
   tabs: [{ tab: "overview", titleKey: "projects.tab.overview", entry: null }, { tab: "agents", titleKey: "projects.tab.agents", entry: null }],
-  api: null as any,
+  api: null as any, opened: [] as string[],
 }));
 vi.mock("../src/renderer/src/i18n", () => ({ useI18n: () => ({ t: (key: string) => key }) }));
 vi.mock("../src/renderer/src/store", () => ({ useApp: Object.assign((select: (s: any) => unknown) => select(fx.state), { getState: () => fx.state }), sidebarOf: () => fx.sidebar }));
@@ -42,7 +42,7 @@ vi.mock("../src/renderer/src/components/DelegationList", () => ({ DelegationList
 vi.mock("../src/renderer/src/components/ProjectMemory", () => ({ ProjectMemoryList: () => null }));
 vi.mock("../src/renderer/src/components/ServiceLine", () => ({ ServiceLine: () => null }));
 vi.mock("../src/renderer/src/components/Page", () => ({ PageBody: ({ children }: { children: React.ReactNode }) => h("div", null, children), SubNav: ({ children }: { children: React.ReactNode }) => h("nav", null, children), SUBNAV_ITEM: "", SUBNAV_ON: "", SUBNAV_OFF: "" }));
-vi.mock("../src/renderer/src/components/settings/Form", () => ({ SettingsGroup: ({ children }: any) => children, Button: () => null, SettingRow: ({ children }: any) => fx.state.colorTest ? children : null, Section: ({ children }: any) => fx.state.colorTest ? children : null, Select: () => null, TextInput: () => null }));
+vi.mock("../src/renderer/src/components/settings/Form", () => ({ ScopeBaseline: ({ children }: any) => children, SettingsGroup: ({ children }: any) => children, Button: () => null, SettingRow: ({ children }: any) => fx.state.colorTest ? children : null, Section: ({ children }: any) => fx.state.colorTest ? children : null, Select: () => null, TextInput: () => null }));
 vi.mock("../src/renderer/src/components/ProjectColorPicker", () => ({ ProjectColorPicker: ({ value, onChange, preview }: any) => fx.state.colorTest && preview ? h("button", { "data-test-color-row": preview.badge, onClick: () => onChange("#123456") }, value) : null }));
 vi.mock("../src/renderer/src/components/ProjectBadge", () => ({ ProjectBadge: () => null }));
 vi.mock("../src/renderer/src/components/ProjectIconPicker", () => ({ ProjectIconPicker: ({ color, onColor, disabled }: any) => fx.state.colorTest ? h("button", { "data-test-project-color": "", disabled, onClick: () => onColor("#A87956") }, color) : null }));
@@ -52,6 +52,10 @@ vi.mock("../src/renderer/src/modules/Outlet", () => ({ ItemBoundary: ({ children
 vi.mock("../src/renderer/src/modules/projects/DirectorRotationDialog", () => ({ DirectorRotationDialog: () => null }));
 vi.mock("../src/renderer/src/modules/projects/MemberPicker", () => ({ MemberPicker: () => null }));
 vi.mock("../src/renderer/src/modules/projects/ProjectRootEditor", () => ({ ProjectRootEditor: () => null }));
+vi.mock("../src/renderer/src/modules/projects/useProjectFacts", () => ({ useProjectFacts: (list: any[]) => list.map((p) => ({ key: `${p.hostId}:${p.project.project_id}`, archived: p.archived })) }));
+vi.mock("../src/renderer/src/modules/projects/ProjectRail", () => ({ ProjectRail: ({ selected }: { selected: string }) => h("nav", { "data-rail": selected }) }));
+vi.mock("../src/renderer/src/modules/projects/AllProjects", () => ({ AllProjects: ({ facts }: { facts: unknown[] }) => h("div", { "data-all-projects": facts.length }) }));
+vi.mock("../src/renderer/src/modules/projects/recentProjects", () => ({ noteProjectOpened: (key: string) => fx.opened.push(key) }));
 import { ProjectsPage } from "../src/renderer/src/modules/projects/ProjectsPage";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -62,7 +66,7 @@ beforeEach(() => {
   const online = [row("director"), row("operator"), row("member")];
   fx.sidebar = { active: online.map((r) => r.session), retired: [], hostRows: Object.fromEntries(online.map((r) => [r.id, { projectId: "p" }])), projects: { projects: [project] }, projectOperators: { p: ["director", "operator", "nonmember"] } };
   fx.model = { groups: [{ kind: "project", id: "p", online, offline: [] }] };
-  fx.scope = { focus: "local", hostsInScope: [{ id: "remote" }], showHostMarks: false, host: () => null };
+  fx.scope = { focus: "local", hostsInScope: [{ id: "remote" }], showHostMarks: false, host: () => null }; fx.opened = [];
   fx.state = { features: new Set(), sidebar: fx.sidebar, hosts: { active: "local" }, byHost: {}, refreshHostSidebar: fx.refresh };
   fx.view = { project_id: "p", authority_epoch: 1, director: { cutex_session_id: "director" }, lifecycle: "active", access_role: "human_management", operator_grant_revision: 2, agent_operators: ["director", "operator", "nonmember"] };
   fx.read.mockReset().mockImplementation(async () => fx.view); fx.set.mockReset().mockResolvedValue(undefined); fx.refresh.mockReset(); fx.controls = undefined;
@@ -180,4 +184,33 @@ it("keeps the saved colour and reports legacy RGB rejection; applies only after 
     expect(button().textContent).toBe("#A87956");
     expect(fx.api.projectPresentation).toHaveBeenLastCalledWith("p", { authorityEpoch: 1, presentationRevision: 0 }, { display_name: "Project", badge_label: "P", color: "#A87956" });
   } finally { fx.tabs.pop(); }
+});
+
+// 项目 page routing (owner 2026-11-25, option B): no project = 「全部项目」; a project = its page (noted under 最近打开);
+// a host still on its way shows 「正在读取」, never 「不提供这项数据」.
+it("shows 全部项目 without a project, the project's page with one, and notes it as opened", async () => {
+  await act(async () => root.render(h(ProjectsPage, { params: { host: "remote" } })));
+  expect(host.querySelector("[data-all-projects]")?.getAttribute("data-all-projects")).toBe("1");
+  expect(host.querySelector("[data-rail]")?.getAttribute("data-rail")).toBe("all");
+  expect(fx.opened).toEqual([]);
+  await mount();
+  expect(host.querySelector("[data-all-projects]")).toBeNull();
+  expect(host.querySelector("[data-rail]")?.getAttribute("data-rail")).toBe(JSON.stringify(["remote", "p"]));
+  expect(fx.opened).toEqual([JSON.stringify(["remote", "p"])]);
+});
+
+it("includes archived projects in the table and falls back to it for an unknown project", async () => {
+  fx.sidebar = { ...fx.sidebar, projects: { ...fx.sidebar.projects, archived_projects: [{ ...fx.sidebar.projects.projects[0], project_id: "old" }] } };
+  await act(async () => root.render(h(ProjectsPage, { params: { project: "old", host: "remote" } })));
+  expect(host.querySelector("[data-all-projects]")?.getAttribute("data-all-projects")).toBe("2");
+});
+
+it("shows 正在读取 while a connected host has no snapshot yet, and 不提供 only once it answered without projects", async () => {
+  fx.sidebar = null;
+  fx.scope = { ...fx.scope, host: () => ({ connected: true }) };
+  await act(async () => root.render(h(ProjectsPage, { params: { host: "remote" } })));
+  expect(host.querySelector("[data-projects-loading]")?.textContent).toBe("projects.loading");
+  fx.scope = { ...fx.scope, host: () => ({ connected: false }) };
+  await act(async () => root.render(h(ProjectsPage, { params: { host: "remote" } })));
+  expect(host.textContent).toContain("projects.unavailable");
 });
