@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.9 "Beautiful World" (2026-11-26)
+
+- Fixed: choosing a project or model on the New agent page had no effect.
+  修复了在新建智能体页面选择项目或模型不生效的问题。
+
 ## 0.2.8 "Beautiful World" (2026-11-26)
 
 - Adds browser identities with separate logins, history and browser settings. Grants name the identity and signed-in sites; agent tabs keep their separate login environment.

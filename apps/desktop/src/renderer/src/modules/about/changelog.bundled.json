@@ -2,6 +2,18 @@
   "schema": 1,
   "releases": [
     {
+      "version": "0.2.9",
+      "title": "Beautiful World",
+      "date": "2026-11-26",
+      "blocks": [
+        {
+          "kind": "item",
+          "text": "Fixed: choosing a project or model on the New agent page had no effect.",
+          "zh": "修复了在新建智能体页面选择项目或模型不生效的问题。"
+        }
+      ]
+    },
+    {
       "version": "0.2.8",
       "title": "Beautiful World",
       "date": "2026-11-26",

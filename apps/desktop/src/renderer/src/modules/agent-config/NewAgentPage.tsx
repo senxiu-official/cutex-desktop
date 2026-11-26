@@ -24,6 +24,7 @@ import { claudeCatalogChoices, claudeShortName, isClaudeCatalog } from "../../li
 import { effortText, effortTip, launchEffortShown, rowResolution, resolutionShown, unsetChoice } from "../../lib/effortDisplay";
 import { unlistedModel } from "../../lib/models";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { MenuLayersContext, menuLayerContains, useMenuLayers } from "../../lib/menuLayers";
 import type { SessionAvatar } from "@cutex-desktop/protocol";
 import type { SkillMetadata, SkillsListResponse } from "@cutex-desktop/protocol/codex/v2";
 import { Check, ChevronDown, FolderOpen, Info, LoaderCircle, Plus, Sparkles, UserRound, X } from "lucide-react";
@@ -263,12 +264,14 @@ function NewAgentForm({ params, target, presetHost, restored }: { params: PagePa
   useTrackOverlay(!!panel);
   const optionsRef = useRef<HTMLDivElement>(null);
   const detailsRef = useRef<HTMLDivElement>(null);
+  const layers = useMenuLayers();
   useEffect(() => {
     if (!panel) return;
     const outside = (event: MouseEvent) => {
       const target = event.target as Node;
       const trigger = optionsRef.current?.querySelector<HTMLButtonElement>(`[data-launch-option="${panel}"]`);
-      if (!detailsRef.current?.contains(target) && !trigger?.contains(target)) setPanel(null);
+      // A pick list portalled out of the panel (EntitySelect's Popover) is part of it: closing on its mousedown dropped the pick.
+      if (!detailsRef.current?.contains(target) && !trigger?.contains(target) && !menuLayerContains(layers, target)) setPanel(null);
     };
     const escape = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
@@ -840,7 +843,7 @@ function NewAgentForm({ params, target, presetHost, restored }: { params: PagePa
     );
   };
   const detailsPanel = panel && (
-            <div ref={detailsRef} id="agent-launch-options" role="dialog" aria-label={panelTitles[panel]} className="launch-popover">
+            <MenuLayersContext.Provider value={layers}><div ref={detailsRef} id="agent-launch-options" role="dialog" aria-label={panelTitles[panel]} className="launch-popover">
               <div className="mb-4 flex items-center justify-between gap-3">
                 <h2 className="text-sm font-medium">{panelTitles[panel]}</h2>
                 <button type="button" onClick={closePanel} aria-label={t("common.close")} className="rounded-md p-1 text-subtle hover:bg-surface-2 hover:text-foreground"><X size={15} /></button>
@@ -902,7 +905,7 @@ function NewAgentForm({ params, target, presetHost, restored }: { params: PagePa
                     onReset={() => { setLaunchTouched(false); setLaunch(formFrom(defaults)); }} />
                 )}
               </fieldset>
-            </div>
+            </div></MenuLayersContext.Provider>
   );
 
   return (

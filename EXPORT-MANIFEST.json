@@ -1,7 +1,7 @@
 {
   "project": "cutex-desktop",
-  "version": "0.2.8",
-  "exportDate": "2026-11-25",
+  "version": "0.2.9",
+  "exportDate": "2026-11-26",
   "sourceCommit": null,
   "sourceCommitNote": "withheld: kept in the private export record next to the export directory",
   "license": "Apache-2.0",
@@ -99,7 +99,7 @@
     },
     {
       "path": "apps/desktop/package.json",
-      "sha256": "8e1db4fde20361641a40a64d192928d98d18e86cc4a4fd2e40e5ae24268d6383",
+      "sha256": "6b2291c890684a327ff2dc86707f14d845b1c44d5468c0e819cfde7f66bb220a",
       "size": 1853
     },
     {
@@ -16469,8 +16469,8 @@
     },
     {
       "path": "apps/desktop/src/renderer/src/modules/about/changelog.bundled.json",
-      "sha256": "2cf3962951fd7180f86c461ff1ecef2706b6ddbdcb3248bd1ef0df66b1410a5d",
-      "size": 142008
+      "sha256": "d2b6df935b8c36fa2127c9a401abcf6fc3acaa1ca66625f661fac79a2db817f1",
+      "size": 142368
     },
     {
       "path": "apps/desktop/src/renderer/src/modules/about/changelog.ts",
@@ -16639,8 +16639,8 @@
     },
     {
       "path": "apps/desktop/src/renderer/src/modules/agent-config/NewAgentPage.tsx",
-      "sha256": "fccdc02a7d36791dbc125fb9e4d98478f7ac37c36d99a1bf2f077ea8f421ab2b",
-      "size": 85955
+      "sha256": "58e50dee98a12b9ed7c08b4e27b10836af45ddce0f7d5ea9f0f267b2f30b6045",
+      "size": 86322
     },
     {
       "path": "apps/desktop/src/renderer/src/modules/agent-config/NewAgentRuntimePicker.tsx",
@@ -28494,8 +28494,8 @@
     },
     {
       "path": "CHANGELOG.md",
-      "sha256": "6038de86c07cd1ab0f75186926fdadc3759fa739dffc49d5fc2caf4b7268454a",
-      "size": 117704
+      "sha256": "0f1547b88e5129fc7b08285ee2a411aa4370659c1340355ff9e641f342ac80a0",
+      "size": 117898
     },
     {
       "path": "CLAUDE.md",
@@ -28859,7 +28859,7 @@
     },
     {
       "path": "docs/KNOWN-ISSUES.md",
-      "sha256": "79dcabaed229b10ef579fa7b2e8f09bf9674bcbf77a1dcc17777dd7f839b7c21",
+      "sha256": "b4a6c7543884d80c1097ba8f93400f16c8cdf7326758136a7982942c3515f8f5",
       "size": 4920
     },
     {
