@@ -13,6 +13,7 @@ import type { ApprovalsReviewer } from "./ApprovalsReviewer";
 import type { AskForApproval } from "./AskForApproval";
 import type { CyberAccessProgram } from "./CyberAccessProgram";
 import type { ExternalInputEnvelope } from "./ExternalInputEnvelope";
+import type { OwnerInput } from "./OwnerInput";
 import type { SandboxPolicy } from "./SandboxPolicy";
 import type { TurnEnvironmentParams } from "./TurnEnvironmentParams";
 import type { TurnToolOutput } from "./TurnToolOutput";
@@ -24,6 +25,11 @@ export type TurnStartParams = { threadId: string,
  * Omitted/null preserves the list; [] clears it.
  */
 disabledPluginIds?: Array<string> | null, clientUserMessageId?: string | null, input: Array<UserInput>,
+/**
+ * Ordered owner prefix, excluding the ordinary carrier. Even [] requests
+ * ownerInputBatch v1: one idle turn containing every original identity.
+ */
+ownerInputs?: Array<OwnerInput>,
 /**
  * Canonical external items consumed only with this owner input. Never pre-submit these.
  */

@@ -1,15 +1,14 @@
-// 功能 Profile (cutex feature-profiles; owner 2026-11-25): Settings → 工具 → 功能 Profile, the host's model endpoints
-// that only app features use (提示词增强 first). A page of its own, apart from 智能体 → Profile: these rows are never
-// offered to agents (create, fork, switch, routing, auto-pick keep reading ordinary Profiles). Hidden on hosts without
-// the capability (feature-profiles-desktop.md: rollback hides it).
-import { KeyRound } from "lucide-react";
+// 功能 Profile (cutex feature-profiles; owner 2026-11-25): the host's model endpoints that only app features use
+// (提示词增强 first). A card of Settings → 智能体 → Profile (owner 2026-11-26: 「功能Profile的设置页面和Profile不在一起」),
+// after the agent Profiles' own cards, like Claude 账户 / Kimi 账户; its 全部 N 个 is the Profile page's sub-page
+// `features` (lib/featureProfilesNav). A card of its own with its own API: these rows are never offered to agents
+// (create, fork, switch, routing, auto-pick keep reading ordinary Profiles). Hidden on hosts without the capability
+// (feature-profiles-desktop.md: rollback hides it). The old page id `feature-profiles` lands here (lib/settingsNav).
 import { FEATURE_PROFILES_FEATURE } from "../../../../shared/featureProfiles";
+import { FEATURE_PROFILES_ALL_SECTION, FEATURE_PROFILES_SECTION } from "../../lib/featureProfilesNav";
 import { defineModule } from "../slots";
 import { lazyPage } from "../../lib/lazyPage";
-import { ALL_SECTION, FEATURE_PROFILES_PAGE, LIST_SECTION } from "./FeatureProfilesPage";
 
-const Page = lazyPage(() => import("./FeatureProfilesPage").then((m) => m.FeatureProfilesPage));
-const AllPage = lazyPage(() => import("./FeatureProfilesPage").then((m) => m.FeatureProfilesAllPage));
 const ListSection = lazyPage(() => import("./FeatureProfilesSection").then((m) => m.FeatureProfilesSection));
 const AllSection = lazyPage(() => import("./FeatureProfilesSection").then((m) => m.FeatureProfilesAll));
 
@@ -19,14 +18,10 @@ export default defineModule({
   descriptionKey: "feature-profiles.description",
   requires: { capabilities: [FEATURE_PROFILES_FEATURE] },
   contributes: {
-    "settings.page": [{
-      id: "feature-profiles.page", page: FEATURE_PROFILES_PAGE, group: "tools", order: 60, icon: KeyRound,
-      titleKey: "feature-profiles.title", hintKey: "feature-profiles.pageHint", source: "host", Page,
-      subPages: { all: { titleKey: "feature-profiles.section", Page: AllPage, anchors: [ALL_SECTION] } },
-    }],
     "settings.section": [
-      { id: LIST_SECTION, page: FEATURE_PROFILES_PAGE, order: 100, titleKey: "feature-profiles.section", keywords: ["feature-profiles.add", "feature-profiles.form.baseUrl", "feature-profiles.form.model"], Section: ListSection },
-      { id: ALL_SECTION, page: FEATURE_PROFILES_PAGE, order: 101, titleKey: "feature-profiles.section", Section: AllSection },
+      // After Claude 账户 (100), Kimi 账户 (110) and 从 CC Switch 导入 (200): the agent Profiles' cards stay together.
+      { id: FEATURE_PROFILES_SECTION, page: "profiles", order: 300, titleKey: "feature-profiles.section", keywords: ["feature-profiles.add", "feature-profiles.form.baseUrl", "feature-profiles.form.model"], Section: ListSection },
+      { id: FEATURE_PROFILES_ALL_SECTION, page: "profiles", order: 301, titleKey: "feature-profiles.section", Section: AllSection },
     ],
   },
 });

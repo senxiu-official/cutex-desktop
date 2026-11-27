@@ -1,14 +1,13 @@
-// A callout quote as a card (教学模式, docs/design/teaching-mode.md P1; lib/markdownCallouts marks the quote). With
-// 教学模式 off — and for every quote without a marker — streamdown's own blockquote renders, exactly as before.
-import { useSyncExternalStore, type ComponentType, type HTMLAttributes, type ReactNode } from "react";
+// A Markdown alert (`> [!NOTE]`, `[!TIP]`, `[!IMPORTANT]`, `[!WARNING]`, `[!CAUTION]`, `[!EXPLAIN]`; lib/markdownCallouts
+// marks the quote) as a card in every agent message (owner 2026-11-27: part of normal rendering, no switch). A quote
+// without a supported marker is streamdown's own blockquote, as before.
+import { type ComponentType, type HTMLAttributes, type ReactNode } from "react";
 import { CircleAlert, Info, Lightbulb, MessageSquareWarning, OctagonAlert, TriangleAlert, type LucideIcon } from "lucide-react";
 import { defaultComponents } from "streamdown";
 import { useI18n, type MessageKey } from "../i18n";
-import { getUiPrefs, subscribeUiPrefs } from "../lib/prefs";
 import { CALLOUT_KINDS, type CalloutKind } from "../lib/markdownCallouts";
 
 type QuoteProps = HTMLAttributes<HTMLQuoteElement> & { node?: unknown; children?: ReactNode; "data-callout"?: string; "data-callout-title"?: string };
-const teachingOn = () => getUiPrefs().teachingMode;
 const DefaultQuote = defaultComponents.blockquote as ComponentType<QuoteProps>;
 
 const LOOK: Record<CalloutKind, { icon: LucideIcon; box: string; head: string }> = {
@@ -21,10 +20,9 @@ const LOOK: Record<CalloutKind, { icon: LucideIcon; box: string; head: string }>
 };
 
 export function MarkdownCallout(props: QuoteProps) {
-  const teaching = useSyncExternalStore(subscribeUiPrefs, teachingOn, teachingOn);
   const { t } = useI18n();
   const kind = props["data-callout"] as CalloutKind | undefined;
-  if (!teaching || !kind || !(CALLOUT_KINDS as readonly string[]).includes(kind)) return <DefaultQuote {...props} />;
+  if (!kind || !(CALLOUT_KINDS as readonly string[]).includes(kind)) return <DefaultQuote {...props} />;
   const { node: _node, children, className: _className, "data-callout-title": title, ...rest } = props;
   const look = LOOK[kind] ?? { icon: CircleAlert, box: "border-border", head: "" };
   const Icon = look.icon;

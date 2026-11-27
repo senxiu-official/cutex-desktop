@@ -78,8 +78,8 @@ function SideChatCardBody(props: SideBodyProps<SideState>) {
   if (ended) return <div className="p-4 text-sm text-muted">{t("side-chat.ended")} · <button className="text-accent hover:underline" disabled={reopening} onClick={() => void reopen()}>{t("side-chat.new")}</button></div>;
   return <div className="flex h-full min-h-0 flex-col">
     {differs && <div className="flex flex-wrap gap-2 border-b border-border px-4 py-2 text-xs text-muted">
-      <span>{t("side-chat.existingAnchor", { turn: oldLabel })}</span>
-      <button className={armed ? "text-danger" : "text-accent"} disabled={reopening} onClick={() => armed ? void reopen() : setArmed(true)}>{armed ? t("side-chat.reopenConfirm") : t("side-chat.reopenFrom", { turn: newLabel })}</button>
+      <span>{t("side-chat.existingAnchor", { turn: oldLabel ?? t("side-chat.turnEarlier") })}</span>
+      <button className={armed ? "text-danger" : "text-accent"} disabled={reopening} onClick={() => armed ? void reopen() : setArmed(true)}>{armed ? t("side-chat.reopenConfirm") : t("side-chat.reopenFrom", { turn: newLabel ?? t("side-chat.turnThis") })}</button>
     </div>}
     {error && <p role="alert" className="p-4 text-xs text-danger">{sideErrorText(error, t)} <button className="underline" onClick={() => setRetry(n => n + 1)}>{t("side-chat.retry")}</button></p>}
     {chatId ? <SideChatBody hostId={hostId} sessionId={sessionId} chatId={chatId} visible={visible} revealed={revealed} /> : !error && <p className="p-4 text-sm text-muted">{t("side-chat.loading")}</p>}

@@ -19,6 +19,9 @@ import { AgendaCard } from "./AgendaCard";
 import { AssistantSettings } from "./AssistantForm";
 import { AuditList } from "./AuditList";
 import { GrantsCard } from "./GrantsCard";
+import { RuntimeCard } from "./RuntimeCard";
+import { ScopeRulesCard } from "./ScopeRulesCard";
+import { TodaySettingsCard } from "./TodaySettings";
 import { NotesList } from "./NotesList";
 import { PagedRequests } from "./PagedRequests";
 import { RequestList } from "./RequestList";
@@ -95,7 +98,7 @@ export function AssistantDetail({ row, hosts, refreshKey, tab, onTab, focus = nu
         {readOnly && <div className="mt-1 text-caption/[inherit] text-warn" data-pa-readonly="">{t("personal-assistants.offline", { host: host?.label ?? hostId })}</div>}
         {error && <div className="mt-1 text-caption/[inherit] text-danger" role="alert">{error}</div>}
       </header>
-      <div className="mb-3 flex gap-1 overflow-x-auto border-b border-border [scrollbar-width:none]" role="tablist" data-pa-tabs="">
+      <div className="mb-3 flex flex-wrap gap-x-1 border-b border-border" role="tablist" data-pa-tabs="">
         {tabs.map((id) => (
           <button
             key={id}
@@ -126,11 +129,16 @@ export function AssistantDetail({ row, hosts, refreshKey, tab, onTab, focus = nu
       ) : shownTab === "notes" ? (
         <NotesList hostId={hostId} assistantId={a.id} />
       ) : shownTab === "settings" ? (
-        <AssistantSettings hostId={hostId} view={view} hosts={hosts} readOnly={readOnly} />
+        <>
+          <AssistantSettings hostId={hostId} view={view} hosts={hosts} readOnly={readOnly} />
+          <RuntimeCard hostId={hostId} view={view} readOnly={readOnly} />
+          <TodaySettingsCard hostId={hostId} view={view} host={host} readOnly={readOnly} />
+          <ScopeRulesCard hostId={hostId} view={view} hosts={hosts} readOnly={readOnly} />
+        </>
       ) : shownTab === "grants" ? (
         <GrantsCard hostId={hostId} hostLabel={host?.label ?? hostId} view={view} readOnly={readOnly} />
       ) : (
-        <AuditList hostId={hostId} assistantId={a.id} host={host} refreshKey={`${String(refreshKey)}\n${historyTick}`} />
+        <AuditList hostId={hostId} assistantId={a.id} host={host} self={{ sessionId: a.sessionId, name: a.config.name }} refreshKey={`${String(refreshKey)}\n${historyTick}`} />
       )}
     </PageBody>
   );

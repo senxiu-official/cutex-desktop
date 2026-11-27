@@ -29,9 +29,11 @@ describe.each(["zh-CN", "en"] as const)("settings IA search %s", (locale) => {
   it.each([
     ["压缩", "profiles", "profile-models"], ["context", "profiles", "profile-models"],
     ["图片裁剪", "profiles", "profile-images"], ["autoPick", "profiles", "profile-tools"],
-    ["代理", "profiles", "profile-proxy"], ["头像底色", "appearance", "avatars"],
+    ["代理", "profiles", "profile-proxy"], ["头像底色", "appearance", "avatar"],
     ["侧栏布局", "sidebar", "agentRows"],
     ["网站权限", "browser", "site-permissions"], ["origin", "browser", "site-origins"],
+    // 贴边显示 under its old name too (owner 2026-11-27 looked for 窗格铺满 and found nothing).
+    ["贴边显示", "appearance", "work-surface"], ["窗格铺满", "appearance", "work-surface"], ["edge to edge", "appearance", "work-surface"],
   ])("%s finds the visible destination %s#%s", (query, page, anchor) => {
     expect(anchors(index(locale), query, page)).toContain(anchor);
   });

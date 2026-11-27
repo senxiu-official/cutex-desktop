@@ -2,9 +2,11 @@
 import { layoutStore } from "./userLayout";
 import type { SidebarLocal } from "./userLayoutModel";
 import { migrateNavPins } from "./navPins";
+import { migrateTurnBarPins, type TurnBarPins } from "./turnBarPins";
 import { DEFAULT_PORTRAIT_THEMES, isPortraitThemeKey, migratePortraitThemes } from "../../../shared/portraitDefaults";
 import { useSyncExternalStore } from "react";
 import type { SendKeyPreset } from "./sendKeys";
+import type { AtMentionOrder } from "./useProfileMentions";
 import type { CreateHostDefault } from "./hostPick";
 import { DEFAULT_CAPSULE_CORNER, DEFAULT_CAPSULE_EDGE, migrateCapsuleAnchor, type CapsuleCorner, type CapsuleEdge } from "./capsuleLayout";
 import { DEFAULT_OLDER_PROJECTS_AFTER, migrateOlderProjectsAfter, type OlderProjectsAfter } from "./rosterTiers";
@@ -98,6 +100,8 @@ export interface UiPrefs {
   delegationSteerKeys: boolean;
   /** 「多行时 Enter 换行（Ctrl+Enter 发送）」 (lib/sendKeys; owner 2026-11-24, default off). */
   multilineEnterNewline: boolean;
+  /** 「@ 列表顺序」: which group a plain `@` lists first, agents or profiles (owner 2026-11-28; paths stay last; `p@` / `m@` unchanged). */
+  atMentionOrder: AtMentionOrder;
   /** 悬停时显示分区名: hovering the queue frame's rail shows the section name as a strip (lib/railStrip). */
   queueSectionStrip: boolean;
   /** 「接下来」面板: "open" (★ 始终展开, owner 2026-10-16) = never collapses by itself, only the chevron
@@ -152,10 +156,6 @@ export interface UiPrefs {
   foldLines: FoldLines;
   /** Older agent replies fold the same way (the latest reply never does). */
   foldOlderReplies: boolean;
-  /** 教学模式 (owner 2026-11-17, docs/design/teaching-mode.md P1; default off): `> [!EXPLAIN]` / `[!NOTE]`-style
-   *  quotes render as cards and a text selection in Markdown gets the modules' `selection` actions (解释这段).
-   *  Off = plain quotes and the native selection menu. */
-  teachingMode: boolean;
   /** Sidebar v2 (lib/sidebarLayout): 全部分组 (projects without online agents fold to one row) or
    *  星标展开 (starred projects in full, every other one row under 其他项目). */
   projectGrouping: ProjectGrouping;
@@ -265,6 +265,9 @@ export interface UiPrefs {
   sidebarNowHeight: number;
   /** Sidebar top entries in the first screen, in pin order (lib/navPins); null = the defaults. Per device, not per host. */
   navPins: string[] | null;
+  /** 操作栏 pins of the reply row and the user bubble, in pin order (lib/turnBarPins); a missing bar = its defaults. Synced with the
+   * person's sidebar layout like `navPins` (lib/userLayoutModel, design 056); this device's own list until then. */
+  turnBarPins: TurnBarPins;
   /** Where a reference card opens (two sides, §19; host pending): left when it fits, always right, always left. */
   peekTarget: "auto" | "right" | "left";
   /** Gutter items shown docked when the gutter is wide enough (two sides, §19; host pending). */
@@ -303,7 +306,7 @@ export type { RunningAgents };
 
 const KEY = "cutex-desktop.ui";
 const ROW_PREVIEW_REV = 1;
-const BASE_DEFAULTS: Omit<UiPrefs, "imageHistoryHintDone"> = { deskPerformanceHintDone: false, viewerAutoRefresh: true, quotaGauges: {}, quotaResetDefault: true, quotaMerge: true, quotaRunOutAlert: true, composerProfileAvatar: true, quotaView: DEFAULT_QUOTA_VIEW, sidebarOpen: true, sidebarRail: false, agentMessages: "compact", foldedGroups: [], modelPins: {}, lastAgentCwd: "", remoteAgentCwd: {}, sendKeys: "queueFirst", multilineEnterNewline: false, delegationSteerKeys: false, capsuleCorner: DEFAULT_CAPSULE_CORNER, capsuleEdge: DEFAULT_CAPSULE_EDGE, reasoningView: DEFAULT_REASONING_VIEW, reasoningViewRev: REASONING_VIEW_REV, capsuleOpen: false, capsuleFoldedItems: [], timelineTurns: 30, timelineInteractions: true, timelineIntro: true, capsuleAlways: false, projectOrder: [], profileOrder: [], restOpen: [], olderProjectsAfter: DEFAULT_OLDER_PROJECTS_AFTER, nameGrouping: null, nameReading: null,runtimeButton: "all", foldLong: true, foldLines: DEFAULT_FOLD_LINES, foldOlderReplies: false, teachingMode: false, projectGrouping: "all", noOnlineProjects: "collapse", runningAgents: DEFAULT_RUNNING_AGENTS, runningAgentsRev: RUNNING_AGENTS_REV, offlineFoldOpen: [], foldedProjects: [], starredProjects: [], sidebarSections: [], projectRemarks: {}, projectDirectors: {}, projectIcons: {}, sectionCollapsedShows: "summary", projectSeparation: DEFAULT_PROJECT_SEPARATION, projectSeparationRev: PROJECT_SEPARATION_REV, projectIconStyle: "tint", systemRows: "plain", systemRowsRev: SYSTEM_ROWS_REV, statusChips: DEFAULT_STATUS_CHIPS, needsYouStrip: true, titleTwoLines: true, rowPreview: "all", rowPreviewRev: ROW_PREVIEW_REV, agentAvatarDefault: "important", agentAvatarDefaultRev: AGENT_AVATAR_DEFAULT_REV, avatarTint: "none", directorHeadwear: DEFAULT_DIRECTOR_HEADWEAR, operatorHeadwear: true, seasonalHeadwear: true, portraitPacks: [...DEFAULT_PORTRAIT_THEMES], avatarThemes: {}, messageImages: "thumbnail", turnSummary: "collapsed", sideMode: "push", sideNarrow: "overlay", sidePreview: DEFAULT_SIDE_PREVIEW, sidePreviewRev: SIDE_PREVIEW_REV, sideRestore: true, sideKeepHidden: 4, sideKeepMounted: 4, sideLauncherPins: {}, sidebarLayout: "roster", sidebarNowHeight: NOW_HEIGHT.def, navPins: null, peekTarget: "auto", gutterDocked: [], sideHomes: {}, gutterDockWidth: DOCK_WIDTH_DEFAULT, hostMarksSingle: false, hostMarkLocal: false, queueSectionStrip: true, queuePanelFold: DEFAULT_QUEUE_PANEL_FOLD, lastCreateHost: "", createHostDefault: "local", perfMode: "save" };
+const BASE_DEFAULTS: Omit<UiPrefs, "imageHistoryHintDone"> = { deskPerformanceHintDone: false, viewerAutoRefresh: true, quotaGauges: {}, quotaResetDefault: true, quotaMerge: true, quotaRunOutAlert: true, composerProfileAvatar: true, quotaView: DEFAULT_QUOTA_VIEW, sidebarOpen: true, sidebarRail: false, agentMessages: "compact", foldedGroups: [], modelPins: {}, lastAgentCwd: "", remoteAgentCwd: {}, sendKeys: "queueFirst", multilineEnterNewline: false, atMentionOrder: "agents", delegationSteerKeys: false, capsuleCorner: DEFAULT_CAPSULE_CORNER, capsuleEdge: DEFAULT_CAPSULE_EDGE, reasoningView: DEFAULT_REASONING_VIEW, reasoningViewRev: REASONING_VIEW_REV, capsuleOpen: false, capsuleFoldedItems: [], timelineTurns: 30, timelineInteractions: true, timelineIntro: true, capsuleAlways: false, projectOrder: [], profileOrder: [], restOpen: [], olderProjectsAfter: DEFAULT_OLDER_PROJECTS_AFTER, nameGrouping: null, nameReading: null,runtimeButton: "all", foldLong: true, foldLines: DEFAULT_FOLD_LINES, foldOlderReplies: false, projectGrouping: "all", noOnlineProjects: "collapse", runningAgents: DEFAULT_RUNNING_AGENTS, runningAgentsRev: RUNNING_AGENTS_REV, offlineFoldOpen: [], foldedProjects: [], starredProjects: [], sidebarSections: [], projectRemarks: {}, projectDirectors: {}, projectIcons: {}, sectionCollapsedShows: "summary", projectSeparation: DEFAULT_PROJECT_SEPARATION, projectSeparationRev: PROJECT_SEPARATION_REV, projectIconStyle: "tint", systemRows: "plain", systemRowsRev: SYSTEM_ROWS_REV, statusChips: DEFAULT_STATUS_CHIPS, needsYouStrip: true, titleTwoLines: true, rowPreview: "all", rowPreviewRev: ROW_PREVIEW_REV, agentAvatarDefault: "important", agentAvatarDefaultRev: AGENT_AVATAR_DEFAULT_REV, avatarTint: "none", directorHeadwear: DEFAULT_DIRECTOR_HEADWEAR, operatorHeadwear: true, seasonalHeadwear: true, portraitPacks: [...DEFAULT_PORTRAIT_THEMES], avatarThemes: {}, messageImages: "thumbnail", turnSummary: "collapsed", sideMode: "push", sideNarrow: "overlay", sidePreview: DEFAULT_SIDE_PREVIEW, sidePreviewRev: SIDE_PREVIEW_REV, sideRestore: true, sideKeepHidden: 4, sideKeepMounted: 4, sideLauncherPins: {}, sidebarLayout: "roster", sidebarNowHeight: NOW_HEIGHT.def, navPins: null, turnBarPins: {}, peekTarget: "auto", gutterDocked: [], sideHomes: {}, gutterDockWidth: DOCK_WIDTH_DEFAULT, hostMarksSingle: false, hostMarkLocal: false, queueSectionStrip: true, queuePanelFold: DEFAULT_QUEUE_PANEL_FOLD, lastCreateHost: "", createHostDefault: "local", perfMode: "save" };
 const DEFAULTS: UiPrefs = { ...BASE_DEFAULTS, imageHistoryHintDone: [] };
 const listeners = new Set<() => void>();
 /**
@@ -342,7 +345,7 @@ function project(prefs: UiPrefs): UiPrefs {
 }
 
 function effective(): UiPrefs { return { ...stored, ...layoutStore()?.local() }; }
-export function getLocalLayoutPrefs() { return { sidebarSections: stored.sidebarSections, starredProjects: stored.starredProjects, projectOrder: stored.projectOrder, foldedProjects: stored.foldedProjects, navPins: stored.navPins }; }
+export function getLocalLayoutPrefs() { return { sidebarSections: stored.sidebarSections, starredProjects: stored.starredProjects, projectOrder: stored.projectOrder, foldedProjects: stored.foldedProjects, navPins: stored.navPins, turnBarPins: stored.turnBarPins }; }
 export function refreshLayoutPrefs(): void {
   current = project(effective());
   for (const l of listeners) l();
@@ -431,8 +434,11 @@ export function toggleSidebarRail(): void {
   setUiPref("sidebarRail", !prefs.sidebarRail);
 }
 
-/** Stored prefs no longer read (design 006 v1 Q5: the step-3 right column's options; design 060: the project hover flyout, the 「最近 +N」 fold); load() leaves them out. */
-export const DROPPED_PREFS = ["sidePageBar", "sidePillAnchor", "sideLaneWhenHidden", "sideCurrentPageClick", "projectHoverPreview", "projectHoverDelay", "recentOpen"] as const;
+/**
+ * Stored prefs no longer read (design 006 v1 Q5: the step-3 right column's options; design 060: the project hover flyout,
+ * the 「最近 +N」 fold; owner 2026-11-27: 教学模式, callouts are normal message rendering); load() leaves them out.
+ */
+export const DROPPED_PREFS = ["sidePageBar", "sidePillAnchor", "sideLaneWhenHidden", "sideCurrentPageClick", "projectHoverPreview", "projectHoverDelay", "recentOpen", "teachingMode"] as const;
 
 /** The sidebar's folds before design 060 B (离线 N, N 个空闲, 在线空闲不收起); load() turns them into `restOpen`. */
 export const ROSTER_V1_PREFS = ["offlineAgents", "offlineOpen", "foldIdleAgents", "idleOpen", "idleUnfolded"] as const;
@@ -452,7 +458,7 @@ function load(): UiPrefs {
     const stored = JSON.parse(localStorage.getItem(KEY) ?? "{}") as Partial<UiPrefs> & { capsuleAnchor?: unknown; projectHeaderTint?: unknown; multiWindow?: unknown; quotaShowReset?: unknown } & Partial<Record<(typeof DROPPED_PREFS)[number] | (typeof ROSTER_V1_PREFS)[number], unknown>>;
     // projectHeaderTint (项目标题着色, removed 2026-10-18) only feeds the projectSeparation migration. The
     // DROPPED_PREFS are left out (design 006 v1 Q5). multiWindow moved to main (readLegacyMultiWindow).
-    const { capsuleAnchor, projectHeaderTint, sidePageBar: _a, sidePillAnchor: _b, sideLaneWhenHidden: _c, sideCurrentPageClick: _d, projectHoverPreview: _hp, projectHoverDelay: _hd, recentOpen: _ro, multiWindow: _mw, quotaShowReset: _oldResetSwitch, offlineAgents: _oa, offlineOpen: _oo, foldIdleAgents: _fi, idleOpen: _io, idleUnfolded: _iu, ...rest } = stored;
+    const { capsuleAnchor, projectHeaderTint, sidePageBar: _a, sidePillAnchor: _b, sideLaneWhenHidden: _c, sideCurrentPageClick: _d, projectHoverPreview: _hp, projectHoverDelay: _hd, recentOpen: _ro, teachingMode: _tm, multiWindow: _mw, quotaShowReset: _oldResetSwitch, offlineAgents: _oa, offlineOpen: _oo, foldIdleAgents: _fi, idleOpen: _io, idleUnfolded: _iu, ...rest } = stored;
     const anchor = stored.capsuleCorner ? null : migrateCapsuleAnchor(capsuleAnchor);
     return {
       ...DEFAULTS,
@@ -479,7 +485,6 @@ function load(): UiPrefs {
       sectionCollapsedShows: stored.sectionCollapsedShows === "attention" ? "attention" : "summary",
       viewerAutoRefresh: stored.viewerAutoRefresh !== false,
       timelineIntro: stored.timelineIntro !== false,
-      teachingMode: stored.teachingMode === true,
       timelineInteractions: stored.timelineInteractions !== false,
       gutterDockWidth: clampDockPref(stored.gutterDockWidth),
       projectSeparation: migrateProjectSeparation(stored.projectSeparation, stored.projectSeparationRev, projectHeaderTint),
@@ -491,7 +496,9 @@ function load(): UiPrefs {
       sideLauncherPins: migrateLauncherPins(stored.sideLauncherPins),
       sideHomes: migrateSideHomes(stored.sideHomes),
       navPins: migrateNavPins(stored.navPins),
+      turnBarPins: migrateTurnBarPins(stored.turnBarPins),
       sidebarLayout: stored.sidebarLayout === "now-all" ? "now-all" : "roster",
+      atMentionOrder: stored.atMentionOrder === "profiles" ? "profiles" : "agents",
       sidebarNowHeight: clampNowHeight(stored.sidebarNowHeight),
       sidePreview: migrateSidePreview(stored.sidePreview, stored.sidePreviewRev),
       sidePreviewRev: SIDE_PREVIEW_REV,

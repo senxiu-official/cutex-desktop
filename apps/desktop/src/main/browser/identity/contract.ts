@@ -10,7 +10,7 @@ import type { BrowserWindow, Session } from "electron";
 import type {
   BrowserClearDataRequest, BrowserHistoryDelete, BrowserHistoryEntry, BrowserHistoryPage, BrowserHistoryQuery, BrowserIdentityColor,
   BrowserIdentityEvent, BrowserIdentityPrefs, BrowserIdentityState, BrowserIdentityStorage, BrowserIdentityView, BrowserPasswordPromptChoice,
-  BrowserPasswordStoreStatus, BrowserSavedLoginView, BrowserTopSite,
+  BrowserPasswordStoreStatus, BrowserSavedLoginView, BrowserTopSite, BrowserIdentitySyncState,
 } from "../../../shared/browserIdentity";
 
 export type EmitBrowserIdentityEvent = (event: BrowserIdentityEvent) => void;
@@ -23,6 +23,10 @@ export interface BrowserIdentityService {
   update(id: string, expectedRevision: number, change: { name?: string; color?: BrowserIdentityColor; initial?: string }): Promise<BrowserIdentityView>;
   setCurrent(id: string): Promise<BrowserIdentityState>;
   signOut(id: string): Promise<void>;
+  /** signOut on one configured host (`stale_connection` otherwise). */
+  signOutHost(id: string, hostId: string): Promise<void>;
+  /** Removes the partition directory of a host no longer configured (`browser_identity_unavailable` if there is none). */
+  clearLeftover(id: string, hostId: string): Promise<void>;
   /** Refuses the default identity (`default_identity`). Also asks history and passwords to drop the identity. */
   remove(id: string): Promise<void>;
   storage(id: string): Promise<BrowserIdentityStorage[]>;
@@ -49,7 +53,7 @@ export interface BrowserHistoryService {
   clear(request: BrowserClearDataRequest): Promise<void>;
   /** Identity deleted / host removed: drop the files. */
   dropIdentity(identityId: string): Promise<void>;
-  dropHost(hostId: string): Promise<void>;
+  dropHost(hostId: string, identityId?: string): Promise<void>;
 }
 
 /** A secret as main holds it: zeroed by the holder after use; never serialised to the renderer except passwordReveal. */
@@ -113,8 +117,16 @@ export interface BrowserPasswordService {
  */
 export type OnIdentitySession = (session: Session, identity: { identityId: string; hostId: string }) => void | Promise<void>;
 
+/** 跨主机同步 (./sync.ts): cutex r297 directory per host; the local list follows one primary host's directory. */
+export interface BrowserIdentitySyncService {
+  state(): BrowserIdentitySyncState;
+  setHostSync(hostId: string, enabled: boolean): Promise<BrowserIdentitySyncState>;
+  confirmCleanup(identityId: string, deletionRevision: number): Promise<BrowserIdentitySyncState>;
+}
+
 export interface BrowserIdentityServices {
   identities?: BrowserIdentityService;
+  sync?: BrowserIdentitySyncService;
   history?: BrowserHistoryService;
   passwords?: BrowserPasswordService;
   /** Extension / sync hooks (no implementation yet). */

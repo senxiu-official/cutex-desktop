@@ -19,7 +19,7 @@ export default defineModule({
       { id: "subagents.claudeAgent", order: 310, match: isClaudeAgentTool, Row: ClaudeAgentRow, activity: () => "turn.activity.subagent" },
     ],
     "conversation.status": [
-      { id: "subagents.status", order: 400, titleKey: "subagents.statusTitle", defaultPlace: "capsule", useStatus: useSubagentsStatus, Meta: SubagentsMeta, Body: SubagentsBody, Bar: SubagentsStatusBar, icon: Bot },
+      { id: "subagents.status", order: 400, titleKey: "subagents.statusTitle", defaultPlace: "both", useStatus: useSubagentsStatus, Meta: SubagentsMeta, Body: SubagentsBody, Bar: SubagentsStatusBar, icon: Bot },
     ],
     "side.component": [
       {

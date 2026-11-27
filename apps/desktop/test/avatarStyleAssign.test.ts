@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionAvatar } from "@cutex-desktop/protocol";
 import type { AvatarStyle } from "../src/renderer/src/lib/avatarStyle";

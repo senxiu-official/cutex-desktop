@@ -6,6 +6,7 @@ import { getLocalLayoutPrefs, refreshLayoutPrefs } from "./prefs";
 import { hostData } from "./hostScope";
 import { hostAccessNow, hostAccessStore } from "./hostAccess";
 import { createUserLayout, layoutStore, setLayoutStore } from "./userLayout";
+import { storedSyncOn } from "./settingsSync/engine";
 import { describeLayoutHost, type LayoutHost } from "./userLayoutModel";
 
 export { useLayoutView } from "./userLayoutView";
@@ -18,6 +19,8 @@ export function startUserLayout(): () => void {
     local: () => ({ ...getLocalLayoutPrefs(), pinned: localPinnedKeys() }),
     backend: id => ({ get: () => apiFor(id).userLayout(), put: (revision, data) => apiFor(id).putUserLayout("sidebar", revision, data) }),
     saveMemoryHost: async h => { await bridge.shell?.setMemoryHost?.(h); },
+    // Settings → 你 → 侧栏布局 (design 056 §12); lib/settingsSync/run keeps it current.
+    follow: storedSyncOn("sidebar-layout", true),
   });
   setLayoutStore(store);
   let stopped = false;

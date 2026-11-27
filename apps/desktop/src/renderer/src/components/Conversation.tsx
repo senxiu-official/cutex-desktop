@@ -36,7 +36,7 @@ import { resetFolds } from "../lib/foldView";
 import { composerDraftKey } from "../lib/composerDrafts";
 import { isArchived } from "../lib/archivedAgent";
 import { ArchivedBanner } from "./ArchivedBanner";
-import { FirstRunPanel } from "./FirstRun";
+import { usePageOf } from "../modules/react";
 import { firstRunView } from "../lib/firstRun";
 import { hasNoHost, isRemote } from "../lib/hosts";
 import { ReadOnlyComposerNote } from "./AccessNotices";
@@ -56,6 +56,7 @@ import { composerInputMax, createShortPaneStore, measureComposerInput, measureSh
 import { UserLayoutToggleContext, type UserLayoutToggle } from "../lib/userLayoutToggle";
 import { isHTMLElement } from "../lib/ownerWindow";
 import { useOwnerWindow } from "../lib/ownerContext";
+import { useReadOnSight } from "../lib/readOnSight";
 import { ceilToDevicePixel, roundToDevicePixel, useDevicePixelRatio } from "../lib/pixelRatio";
 
 // The parts around the rows re-render with their own props / stores, not with every streamed frame of
@@ -66,6 +67,16 @@ const MemoStatusBar = memo(StatusBar);
 const MemoGutterHost = memo(GutterHost);
 const MemoOverlays = memo(ConversationOverlays);
 const NO_QUEUE: never[] = [];
+
+
+/** The empty main area on a first run: module start's 开始使用 page, embedded (no close button); plain text while it is off. */
+const START_TARGET = { page: "start.page" as const, params: { embedded: "1" } };
+function EmptyStart() {
+  const { t } = useI18n();
+  const Page = usePageOf(START_TARGET)?.entry?.item.Page;
+  if (!Page) return <div className="flex flex-1 items-center justify-center text-subtle">{t("conversation.empty")}</div>;
+  return <Page params={START_TARGET.params} />;
+}
 
 export function Conversation({ scope }: { scope: WorkspaceScope | null }) {
   const win = useOwnerWindow();
@@ -118,6 +129,9 @@ export function Conversation({ scope }: { scope: WorkspaceScope | null }) {
   useFarRows(scroller, content);
   const stick = useRef(true);
   const [atBottom, setAtBottom] = useState(true);
+  // Design 061: on a host with cross-device read state, the newest reply is read once it is on screen here.
+  const stuckNow = useCallback(() => stick.current, []);
+  useReadOnSight(hostId, selectedId, scroller, stuckNow, view);
   // History only moves up (owner 2026-10-26; lib/stickToBottom nextSlack): while following the bottom, no row on
   // screen goes down — what would pull one down (the live line leaving at a turn's end, the 需要你 strip or a status
   // row going away, the input box or 「接下来」 getting shorter, a row getting shorter) becomes blank room under the
@@ -448,7 +462,9 @@ export function Conversation({ scope }: { scope: WorkspaceScope | null }) {
   const timelineRev = useTimelineShapeRev(view?.timeline ?? null);
 
   if (!selectedId) {
-    if (firstRun) return <FirstRunPanel view={firstRun} daemon={daemon} />;
+    // 开始使用 (modules/start): a first run here — no host, cutex not installed / running, or a host without agents
+    // (a remote one too) — gets the three steps instead of 「从左侧选择」.
+    if (firstRun || (remote && daemon.kind === "connected" && agentCount === 0)) return <EmptyStart />;
     return <div className="flex flex-1 items-center justify-center text-subtle">{t("conversation.empty")}</div>;
   }
   const name = session?.displayName ?? selectedId;

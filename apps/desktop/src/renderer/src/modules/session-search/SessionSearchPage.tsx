@@ -15,6 +15,7 @@ import { apiFor } from "../../bridge";
 import { featuresOf, useApp } from "../../store";
 import { hostEpoch } from "../../../../shared/hosts";
 import { HISTORY_TURN_READ_FEATURE, type SearchTurnPreview } from "../../../../shared/sessionSearch";
+import { openModifiers } from "../../lib/openModifiers";
 import { createTaskSearch, openTaskHit, taskSearchStatus, type TaskHit } from "../../lib/sessionSearchStore";
 import { filtersOf, groupByAgent, hitTurnMs, newestFirst, NO_FILTERS, snippetAdds, type SearchFilterChoice } from "../../lib/sessionSearchView";
 import { searchPageParams, type SearchLayout } from "../../lib/sessionSearchPage";
@@ -146,8 +147,8 @@ export function SessionSearchPage({ params }: { params: PageParams }) {
     return p?.state === "ok" && p.turn.startedAt ? p.turn.startedAt * 1000 : null;
   };
 
-  const open = async (hit: TaskHit) => {
-    const result = await openTaskHit(hit);
+  const open = async (hit: TaskHit, beside = false) => {
+    const result = await openTaskHit(hit, { beside });
     if (result.status === "host-offline") useApp.getState().notify(t("sidebar.sessionSearch.hostOffline"), "error");
   };
   const move = (to: number) => {
@@ -194,7 +195,10 @@ export function SessionSearchPage({ params }: { params: PageParams }) {
         role="option"
         aria-selected={on}
         data-search-result={hit.key}
-        onClick={() => setSelected(hit.key)}
+        // Ctrl/⌘ + click, middle click: opened beside the focused agent (a plain click previews it here).
+        onClick={(e) => (openModifiers(e).newInstance ? void open(hit, true) : setSelected(hit.key))}
+        onAuxClick={(e) => e.button === 1 && void open(hit, true)}
+        onMouseDown={(e) => e.button === 1 && e.preventDefault()}
         onDoubleClick={() => void open(hit)}
         className={`flex min-w-0 cursor-default flex-col gap-0.5 rounded-ctl px-2 py-1.5 ${on ? "bg-accent/10" : "hover:bg-hover"}`}
       >

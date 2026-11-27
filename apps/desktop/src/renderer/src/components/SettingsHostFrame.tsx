@@ -15,7 +15,7 @@ import { setSettingsHost, useSettingsTarget, type SettingsTarget } from "../lib/
 import { TargetHostContext, useTargetFeatures } from "../lib/targetHost";
 import { useHostData, useHostScope } from "../lib/useHostScope";
 import { HostPicker } from "./HostPicker";
-import { Banner, EmptyState, Notice, PartSource, Section } from "./settings/Form";
+import { Banner, EmptyState, Notice, Section } from "./settings/Form";
 import { WifiOff } from "lucide-react";
 
 // The last data each host reported while its capabilities were known (kept across page visits:
@@ -58,9 +58,7 @@ export function SettingsDevicePart({ title, hint, children }: { title?: string; 
   return (
     <div data-settings-part="device" className="mb-4">
       {/* No part headings (owner 2026-10-19: one rule — a 混合设置 page's cards are tagged). */}
-      <PartSource  >
-        {children}
-      </PartSource>
+      {children}
     </div>
   );
 }
@@ -81,47 +79,6 @@ function RequiresGate({ requires, children }: { requires: readonly string[]; chi
 }
 
 /**
- * One host card on a device page (owner 2026-10-18: 输入区 → 排队顺序): the Settings host picker in the
- * card's title row (the same choice as the host pages), then the card's rows on that host — owner check,
- * offline frame, and a 「需要升级 cutex」 note when the host lacks `requires`. The page chip notes the
- * exception (Form SettingsPage).
- */
-export function SettingsHostSection({ id, title, hint, requires, children }: { id?: string; title: string; hint?: string; requires?: readonly string[]; children: ReactNode }) {
-  const { t } = useI18n();
-  const target = useSettingsTarget();
-  const scope = useHostScope();
-  const mode = hostPickerMode(scope, target.hostId);
-  const access = useHostAccess(target.hostId);
-  const label = scope.host(target.hostId)?.label ?? target.hostId;
-  const picker = <HostPicker chip value={target.hostId} onChange={(hostId) => setSettingsHost(hostId)} mode={mode === "none" ? "label" : mode} title={t("hostPicker.settingsTitle")} />;
-  return (
-    <Section id={id} title={title} hint={hint}  picker={picker}>
-      {!access.isOwner ? (
-        <EmptyState>{t(access.pending ? "users.access.pendingSettings" : "users.access.notOwnerSettings", { host: label })}</EmptyState>
-      ) : (
-        <SettingsHostFrame key={target.hostId} target={target}>
-          <PartSource >{requires?.length ? <CardRequiresGate requires={requires}>{children}</CardRequiresGate> : children}</PartSource>
-        </SettingsHostFrame>
-      )}
-    </Section>
-  );
-}
-
-/** RequiresGate inside a card: the note alone, no card of its own. */
-function CardRequiresGate({ requires, children }: { requires: readonly string[]; children: ReactNode }) {
-  const { t } = useI18n();
-  const features = useTargetFeatures();
-  const missing = requires.filter((c) => !features.has(c));
-  if (!missing.length) return <>{children}</>;
-  if (!features.size) return null;
-  return (
-    <div className="py-3">
-      <Notice tone="info">{t("modules.needsUpgrade", { feature: missing.join(", ") })}</Notice>
-    </div>
-  );
-}
-
-/**
  * A mixed page's host half: heading + the Settings host picker (always shows which host), then the
  * frame on the Settings target. `requires`: capabilities the whole half needs (else 「需要升级 cutex」).
  * `title` omitted (owner 2026-10-19): no heading; each host card carries the picker in its scope tag.
@@ -130,10 +87,8 @@ export function SettingsHostPart({ title, hint, requires, children }: { title?: 
   const { t } = useI18n();
   const target = useSettingsTarget();
   const scope = useHostScope();
-  const mode = hostPickerMode(scope, target.hostId);
   const access = useHostAccess(target.hostId);
   const label = scope.host(target.hostId)?.label ?? target.hostId;
-  const picker = <HostPicker chip value={target.hostId} onChange={(id) => setSettingsHost(id)} mode={mode === "none" ? "label" : mode} title={t("hostPicker.settingsTitle")} />;
   return (
     <div data-settings-part="host" data-settings-part-host={target.hostId}>
       {!access.isOwner ? (
@@ -143,11 +98,36 @@ export function SettingsHostPart({ title, hint, requires, children }: { title?: 
       ) : (
         // A host per frame: an explicit switch starts the half over (no state of one host shown for another).
         <SettingsHostFrame key={target.hostId} target={target}>
-          <PartSource   picker={picker}>
-            {requires?.length ? <RequiresGate requires={requires}>{children}</RequiresGate> : children}
-          </PartSource>
+          {requires?.length ? <RequiresGate requires={requires}>{children}</RequiresGate> : children}
         </SettingsHostFrame>
       )}
     </div>
+  );
+}
+
+/**
+ * The one host picker of Settings (owner 2026-11-28: 「全部统一为顶部那种：可以随时切换」): the title bar switcher's
+ * look, in the header of every page with host settings (a host page, or an app page with a host part). It sets the
+ * one Settings host (lib/settingsHost), so every page shows the same host; cards never carry a picker of their own.
+ * It follows the title bar (a switch there resets it to the new focus host) and never drives it: picking a host here
+ * edits that host's settings without changing what the window shows (docs/design/settings-rules.md).
+ */
+export function SettingsHostSwitcher({ all, onPick }: { all?: { label: string; hint?: string; selected: boolean; onSelect(): void }; onPick?(hostId: string): void }) {
+  const { t } = useI18n();
+  const target = useSettingsTarget();
+  const scope = useHostScope();
+  const mode = hostPickerMode(scope, target.hostId);
+  return (
+    <HostPicker
+      switcher
+      value={target.hostId}
+      onChange={(id) => {
+        onPick?.(id);
+        setSettingsHost(id);
+      }}
+      mode={mode}
+      title={t("hostPicker.settingsTitle")}
+      all={all}
+    />
   );
 }

@@ -378,7 +378,8 @@ function revisionOf(content: string): string {
 const entry = (name: string, description: string, type: string, body: string) => `---\nname: ${name}\ndescription: ${description}\nmetadata:\n  type: ${type}\n---\n\n${body}\n`;
 
 function seed(projectId: string): Store {
-  const dir = `C:\\Users\\sam\\.cutex\\projects\\${projectId}\\memory`;
+  // cutex's folder name: the id's slug + 12 hex of its SHA-256 (a fixed stand-in here; dev/mockBridge's memory edits use it).
+  const dir = `C:\\Users\\sam\\.cutex\\projects\\${projectId}-5a3c9e17d2b4\\memory`;
   const files = new Map<string, Doc>();
   if (projectId === "desktop") {
     files.set("decisions.md", { content: entry("decisions", "architecture choices the team agreed on", "project", "# Decisions\n\n- cutex is the daemon; desktop is a client.\n- One agent = one session = one native thread.\n- Tokens stay in the main process.\n\n**Why:** a remote host must work the same as the local one.\n**How to apply:** new desktop features go through daemon APIs."), updatedAt: "2026-10-06T09:40:00Z" });

@@ -7,7 +7,7 @@ import type { InputAction, InputKind, InputRecord, InputState, InputWaitingReaso
 import { INPUT_ACTIONS, INPUT_KINDS, INPUT_REASONS_BY_STATE, INPUT_STAGES } from "@cutex-desktop/protocol";
 
 /** docs/design/next-up-registry.md version this table implements. */
-export const REGISTRY_VERSION = "2.11";
+export const REGISTRY_VERSION = "2.12";
 
 export type Lang = "zh" | "en";
 export interface Text { zh: string; en: string }
@@ -427,6 +427,7 @@ export const DISABLED_REASONS = {
   notReviewable: { zh: "这个委托现在不能在这里审批，点「查看委托」", en: "This delegation cannot be approved here now; use “View delegation”" },
   notStartable: { zh: "这个 agent 现在不能从这里启动", en: "This agent cannot be started from here now" },
   notIdle: { zh: "对方正在工作，下次工作时会读入", en: "The agent is working; it reads this during its next work" },
+  inAutoDelivery: { zh: "这条已在一批自动送达里，正在等确认，不能单独读取", en: "Already in an automatic delivery waiting for confirmation; it can't be read on its own" },
   noText: { zh: "原文不在本机，不能放回输入框", en: "The text is not on this computer, so it cannot go back to the input box" },
   readOnly: { zh: "这里只能查看", en: "View only here" },
   pending: { zh: "正在处理", en: "Working on it" },
@@ -437,6 +438,9 @@ export type DisabledReasonId = keyof typeof DISABLED_REASONS;
 /** What the row knows besides the record (all optional; absent = not available). */
 export interface NextUpContext {
   readOnly?: boolean;
+  /** Registry 2.12: the host refuses 现在读取 for this note (note diagnostics `readNowDisabledReason`): `auto` = an
+   *  automatic delivery batch holds it, `other` = a reason this desktop does not know. */
+  readNowBlock?: "auto" | "other" | null;
   /** Owner row: its QueueItem (full text, queueId) has loaded. */
   queueItem?: boolean;
   /** The delegation is in the store (title, review state). */
@@ -505,7 +509,9 @@ function available(effect: NextUpEffectId, record: Pick<InputRecord, "actions" |
       return ctx.canReview ? { effect, enabled: true } : grey("notReviewable");
     case "resume": return ctx.canResume ? { effect, enabled: true } : grey("notOffered");
     case "start": return ctx.canStart ? { effect, enabled: true } : grey("notStartable");
-    case "readNow": return ctx.canReadNow ? { effect, enabled: true } : grey("notIdle");
+    case "readNow":
+      if (ctx.readNowBlock) return grey(ctx.readNowBlock === "auto" ? "inAutoDelivery" : "notOffered");
+      return ctx.canReadNow ? { effect, enabled: true } : grey("notIdle");
     case "moveToComposer": if (!ctx.hasText) return grey("noText"); return offered("dismiss") ? { effect, enabled: true } : grey("notOffered");
     case "viewDetails": case "viewReason": case "refresh": case "clearNotice": case "hideLocal": return { effect, enabled: true };
     default: return def.action && offered(def.action) ? { effect, enabled: true } : grey("notOffered");

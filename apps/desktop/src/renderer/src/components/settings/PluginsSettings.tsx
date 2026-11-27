@@ -1,7 +1,7 @@
 // Settings → Agent capabilities → 插件: codex plugins and marketplaces on the shared CODEX_HOME via
 // cutex `POST /v2/codex/requests` (capability `codex-plugins`; DESIGN §4.5, gap 21;
 // docs/research/codex-plugins.md). cutex projects the shared [plugins] into every Codex agent at
-// launch (settings `codexConfigFollowShared`, FollowSharedSection heads this page and MCP / 技能 / 钩子);
+// launch (settings `codexConfigFollowShared`, set on 运行时配置; this page and MCP / 技能 / 钩子 link there);
 // running agents need a restart.
 import { useSettingsCard } from "../../lib/settingsDrafts";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -24,7 +24,7 @@ import {
 } from "../../lib/codexPlugins";
 import { ArmedRemove, Banner, Button, EmptyState, RowGroup, ErrorNote, IconButton, Loading, RefreshButton, Section, Segmented, SettingRow, TextInput, Toggle, SettingsGroup } from "./Form";
 import { ARMED_FORM_BUTTON, useArmed } from "../../lib/armedConfirm";
-import { FollowSharedSection } from "./FollowShared";
+import { FollowSharedLink } from "./FollowShared";
 import { useTargetApi, useTargetFeatures } from "../../lib/targetHost";
 import { Tag } from "../../components/Tag";
 
@@ -339,7 +339,7 @@ export function PluginsPage() {
   if (!supported) {
     return (
       <>
-        <FollowSharedSection />
+        <FollowSharedLink />
         <Section title={t("codex-config.plugins")}>
           <p className="py-2 text-sm text-muted">{t("codex-config.plugins.needsCutex")}</p>
         </Section>
@@ -399,7 +399,7 @@ export function PluginsPage() {
   );
   return (
     <>
-      <FollowSharedSection />
+      <FollowSharedLink />
       <Banner className="mb-6" icon={<AlertTriangle size={15} />}>{t("codex-config.plugins.warning")}</Banner>
       {notice && (
         <Banner tone="info" className="mb-3" actions={<IconButton label={t("codex-config.plugins.dismiss")} onClick={() => setNotice(null)}><X size={13} /></IconButton>}>{notice}</Banner>

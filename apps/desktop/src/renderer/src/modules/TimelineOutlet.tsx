@@ -1,5 +1,5 @@
 // Per-item boundaries and core fallbacks for the predefined timeline slots (§3.5).
-import { useContext, type ReactNode } from "react";
+import { Fragment, useContext, type ReactNode } from "react";
 import { TimelineFallbackContext as Fallback } from "./timelineFallback";
 import { receivedRendererFor } from "../lib/receivedRows";
 import { toolRendererFor } from "../lib/timelineRenderers";
@@ -44,16 +44,17 @@ export function ReceivedOutlet({ message, sessionId, readOnly, fallback }: { mes
   });
 }
 
-export function ToolOutlet({ item, sessionId }: { item: RawItem; sessionId: string }) {
+export function ToolOutlet({ item, sessionId, items }: { item: RawItem; sessionId: string; items?: readonly RawItem[] }) {
   return withView(sessionId, useContext(TimelineViewContext), (view) => {
     const entry = toolRendererFor(item, view.tools);
-    const fallback = <><PlainToolRow item={item} /><ItemMedia item={item} hostId={view.hostId} /></>;
+    // A gathered row that cannot render keeps every call it stood for as a plain row.
+    const fallback = <>{(items ?? [item]).map((x) => <Fragment key={x.id}><PlainToolRow item={x} /><ItemMedia item={x} hostId={view.hostId} /></Fragment>)}</>;
     if (!entry) return fallback;
     const { Row } = entry.item;
     return (
       <Fallback.Provider value={fallback}>
         <TimelineBoundary moduleId={entry.moduleId} resetKey={resetKey(view, entry.item.id)} fallback={fallback}>
-          <Row item={item} sessionId={sessionId} />
+          <Row item={item} sessionId={sessionId} {...(items ? { items } : {})} />
         </TimelineBoundary>
       </Fallback.Provider>
     );

@@ -35,6 +35,8 @@ export interface DraftImage {
   /** Returned by this desktop's picker; restored host attachments omit this. */
   pickedLocally?: boolean;
   source: { kind: "data"; url: string } | { kind: "path"; path: string };
+  /** 图片编辑: the attachment before its first edit, kept until send so 恢复原图 can put it back (never sent). */
+  original?: Omit<DraftImage, "id" | "original">;
 }
 
 export function imageInputItems(images: readonly DraftImage[]): ExtraInput[] {

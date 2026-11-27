@@ -39,6 +39,9 @@ vi.mock("../src/renderer/src/components/Sidebar", () => ({ OfflineSection: ({ ro
 vi.mock("../src/renderer/src/components/AgentRows", () => ({ AgentRowButton: ({ row }: { row: AgentRow }) => h("span", { "data-agent-id": row.id }, row.name) }));
 vi.mock("../src/renderer/src/components/AgentList", () => ({ AgentList: ({ members }: { members?: MemberControls }) => { fx.controls = members; return h("div", { "data-agent-list": "" }); } }));
 vi.mock("../src/renderer/src/components/DelegationList", () => ({ DelegationList: () => null }));
+vi.mock("../src/renderer/src/lib/delegationStore", () => ({ loadClosedDelegations: vi.fn(), useHostDelegations: () => ({}) }));
+vi.mock("../src/renderer/src/lib/delegationsView", () => ({ useDelegationContext: () => () => ({}) }));
+vi.mock("../src/renderer/src/lib/delegationOpen", () => ({ openDelegationDetail: vi.fn() }));
 vi.mock("../src/renderer/src/components/ProjectMemory", () => ({ ProjectMemoryList: () => null }));
 vi.mock("../src/renderer/src/components/ServiceLine", () => ({ ServiceLine: () => null }));
 vi.mock("../src/renderer/src/components/Page", () => ({ PageBody: ({ children }: { children: React.ReactNode }) => h("div", null, children), SubNav: ({ children }: { children: React.ReactNode }) => h("nav", null, children), SUBNAV_ITEM: "", SUBNAV_ON: "", SUBNAV_OFF: "" }));
@@ -77,12 +80,15 @@ afterEach(() => { act(() => root.unmount()); host.remove(); });
 const mount = async (tab = "overview") => { await act(async () => root.render(h(ProjectsPage, { params: { project: "p", host: "remote", tab } }))); };
 const operatorItem = (id: string) => fx.controls?.rowMenu(row(id)).find((item): item is MenuAction => !!item && typeof item === "object" && (item.label === "projects.setOperator" || item.label === "projects.revokeOperator"));
 
-it("groups active Operators separately without duplicating the Director or including nonmembers", async () => {
+it("概览 v2: the 成员 block lists the Director once and working members only; the whole roster stays on the 智能体 tab", async () => {
+  fx.model.groups[0].online[1].status = "running";
   await mount();
-  expect([...host.querySelectorAll('[data-project-role="operator"] [data-agent-id]')].map((el) => el.getAttribute("data-agent-id"))).toEqual(["operator"]);
-  expect(host.querySelectorAll('[data-agent-id="director"]')).toHaveLength(1);
-  expect(host.querySelector('[data-project-role="director"] [data-agent-id="director"]')).not.toBeNull();
-  expect(host.querySelector('[data-project-role="member"] [data-agent-id="member"]')).not.toBeNull();
+  const team = host.querySelector('[data-overview-block="team"]')!;
+  expect([...team.querySelectorAll("[data-agent-id]")].map((el) => el.getAttribute("data-agent-id"))).toEqual(["director", "operator"]);
+  expect(team.textContent).toContain("projects.overview.allMembers");
+  // Nothing for the owner to handle: no 需要你处理 block at all (owner 2026-11-26).
+  expect(host.querySelector('[data-overview-block="needs"]')).toBeNull();
+  expect(host.querySelector("[data-project-role]")).toBeNull();
 });
 
 it("offers grant/revoke only for active non-Directors and calls the action on the project's host then refetches", async () => {

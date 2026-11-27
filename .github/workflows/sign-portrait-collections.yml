@@ -1,0 +1,101 @@
+name: Sign portrait collections
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sign-portrait-collections
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - run: git config --global core.autocrlf false
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          node-version: '24.21.0'
+      - name: Verify starter and collection behavior, then build immutable archives
+        run: |
+          set -euo pipefail
+          export COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+          corepack pnpm install --frozen-lockfile
+          (cd apps/desktop && corepack pnpm exec vitest run test/portraitCollections.test.ts)
+          node apps/desktop/scripts/portrait-collections.mjs "$RUNNER_TEMP/portraits" \
+            "https://github.com/$GITHUB_REPOSITORY/releases/download/portrait-collections" 1 1
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: unsigned-portrait-collections
+          path: ${{ runner.temp }}/portraits/
+          if-no-files-found: error
+          retention-days: 14
+
+  sign:
+    needs: build
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-24.04
+    environment: release
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: unsigned-portrait-collections
+          path: ${{ runner.temp }}/portraits
+      - name: Validate exact archive inventory
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, json, os, re
+          from pathlib import Path
+          root = Path(os.environ["RUNNER_TEMP"]) / "portraits"
+          doc = json.loads((root / "portraits.json").read_bytes())
+          assert doc["schema"] == doc["sequence"] == 1
+          assert len(doc["collections"]) == 20
+          names = {"portraits.json"}
+          for part in doc["collections"]:
+              theme = part["theme"]
+              assert re.fullmatch(r"[a-z0-9-]+", theme) and part["version"] == 1
+              name = theme + "-1.tar.gz"
+              rec = part["archive"]
+              assert rec["path"] == name and name not in names
+              assert rec["url"] == f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/releases/download/portrait-collections/{name}"
+              data = (root / name).read_bytes()
+              assert len(data) == rec["size"] and hashlib.sha256(data).hexdigest() == rec["sha256"]
+              names.add(name)
+          assert {file.name for file in root.iterdir()} == names
+          PY
+      - name: Install minisign
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q minisign
+      - name: Sign and verify the exact index
+        env:
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          umask 077
+          key="$(mktemp "$RUNNER_TEMP/portraits-key.XXXXXXXX")"
+          trap 'rm -f -- "$key"' EXIT
+          printf '%s\n' "$MINISIGN_SECRET_KEY" > "$key"
+          unset MINISIGN_SECRET_KEY
+          index="$RUNNER_TEMP/portraits/portraits.json"
+          printf '%s\n' "$MINISIGN_PASSWORD" | minisign -S -s "$key" -m "$index"
+          unset MINISIGN_PASSWORD
+          minisign -V -p .github/ci/cutex-release.pub -m "$index" | grep -qE $'^Trusted comment: (.*\t)?file:portraits\\.json(\t|$)'
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: portrait-collections-${{ github.run_id }}
+          path: ${{ runner.temp }}/portraits/
+          if-no-files-found: error
+          retention-days: 14

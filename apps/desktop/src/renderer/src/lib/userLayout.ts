@@ -3,17 +3,18 @@ import { keyFocus } from "./hostKeys";
 import { create } from "zustand";
 import type { MemoryHost, UserLayout, LayoutWritten } from "@cutex-desktop/cutex-client";
 import type { HomeResult } from "../../../shared/home";
-import { applyLayoutOp, decodeSidebar, encodeSidebar, readSidebar, sidebarEdits, type LayoutHost, type LayoutOp, type SidebarDoc, type SidebarLocal } from "./userLayoutModel";
+import { applyLayoutOp, decodeSidebar, encodeSidebar, readSidebar, sidebarEdits, TURN_BARS, turnBarEdits, type LayoutHost, type LayoutOp, type SidebarDoc, type SidebarLocal, type TurnBarDoc } from "./userLayoutModel";
 
 export const USER_LAYOUT_KEY = "cutex-desktop.userLayout.v1";
 export interface LayoutBackend {
   get(): Promise<HomeResult<UserLayout>>;
   put(revision: number, data: SidebarDoc): Promise<HomeResult<LayoutWritten>>;
 }
-interface CachedLayout { docKey: string; revision: number; confirmed: SidebarDoc; operations: LayoutOp[]; migratedAt?: number }
+/** `turnBarSeededAt`: this device's own 操作栏 pins were offered to the document once (they joined it after the first sync). */
+interface CachedLayout { docKey: string; revision: number; confirmed: SidebarDoc; operations: LayoutOp[]; migratedAt?: number; turnBarSeededAt?: number }
 interface LayoutCache { memoryHost: MemoryHost | null; hosts: Record<string, string>; entries: Record<string, CachedLayout> }
 interface LayoutState { memoryHost: MemoryHost | null; hosts: LayoutHost[]; doc: SidebarDoc | null; status: "local" | "loading" | "synced" | "offline" | "missing" | "unsupported"; error: string | null; migration: boolean; ownerPersonConfirmed: boolean; pending: number }
-export function createUserLayout(deps: { storage: Pick<Storage, "getItem" | "setItem">; backend(hostId: string): LayoutBackend; local(): SidebarLocal; saveMemoryHost?(h: MemoryHost): Promise<void> }) {
+export function createUserLayout(deps: { storage: Pick<Storage, "getItem" | "setItem">; backend(hostId: string): LayoutBackend; local(): SidebarLocal; saveMemoryHost?(h: MemoryHost): Promise<void>; /** Settings → 你 → 侧栏布局 (design 056 §12): off = this device keeps its own sidebar; the memory host is still tracked. */ follow?: boolean }) {
   let cache: LayoutCache;
   try { cache = JSON.parse(deps.storage.getItem(USER_LAYOUT_KEY) ?? "null") as LayoutCache; } catch { cache = null!; }
   if (!cache || !cache.entries || !cache.hosts) cache = { memoryHost: null, hosts: {}, entries: {} };
@@ -25,6 +26,7 @@ export function createUserLayout(deps: { storage: Pick<Storage, "getItem" | "set
   let invalidated = false;
   let lastEditAt = Date.now();
   let disposed = false;
+  let follow = deps.follow ?? true;
   const persist = () => {
     try { deps.storage.setItem(USER_LAYOUT_KEY, JSON.stringify(cache)); }
     catch (e) { state.setState({ error: String(e) }); return false; }
@@ -37,6 +39,18 @@ export function createUserLayout(deps: { storage: Pick<Storage, "getItem" | "set
     state.setState({ memoryHost: cache.memoryHost, doc: e ? e.operations.reduce(applyLayoutOp, e.confirmed) : null, pending: e?.operations.length ?? 0 });
   }
   function localDoc() { return encodeSidebar(deps.local(), state.getState().hosts, keyFocus()); }
+  /**
+   * 操作栏 pins (2026-11-28) joined the synced layout after this device's first sync: once, its own list seeds each bar the
+   * document still leaves at its defaults; a bar already set elsewhere keeps that order.
+   */
+  function seedTurnBars(e: CachedLayout) {
+    const doc = e.operations.reduce(applyLayoutOp, e.confirmed).turnBarPins;
+    const mine = localDoc().turnBarPins;
+    const bars = TURN_BARS.filter(bar => doc[bar] === null && mine[bar] !== null);
+    const next = { ...doc, ...Object.fromEntries(bars.map(bar => [bar, mine[bar]])) } as TurnBarDoc;
+    e.operations.push(...turnBarEdits(doc, next, Math.max(Date.now(), lastEditAt + 1), bars));
+    e.turnBarSeededAt = Date.now();
+  }
   async function readAndMigrate(h: LayoutHost, gen: number): Promise<boolean> {
     const result = await deps.backend(h.id).get();
     if (gen !== generation) return false;
@@ -58,12 +72,14 @@ export function createUserLayout(deps: { storage: Pick<Storage, "getItem" | "set
       const source = migrationSource ?? localDoc();
       if (!section?.data || Object.keys(section.data).length === 0) {
         e.operations.push({ kind: "import", data: source, t: Date.now() });
-        e.migratedAt = Date.now();
+        e.migratedAt = e.turnBarSeededAt = Date.now();
       } else if (JSON.stringify(decodeSidebar(e.confirmed, state.getState().hosts)) !== JSON.stringify(decodeSidebar(source, state.getState().hosts))) {
         remoteForMigration = r;
         state.setState({ migration: true });
-      } else e.migratedAt = Date.now();
+      } else e.migratedAt = e.turnBarSeededAt = Date.now();
     }
+    // A sync set up before the 操作栏 pins joined the layout (a migration from here on carries them itself).
+    if (e.migratedAt && !e.turnBarSeededAt) seedTurnBars(e);
     const durable = persist(); publish();
     return durable;
   }
@@ -105,6 +121,7 @@ export function createUserLayout(deps: { storage: Pick<Storage, "getItem" | "set
       if (!h.online) { state.setState({ status: "offline" }); publish(); return; }
       if (h.known === false) { state.setState({ status: "loading" }); publish(); return; }
       if (!h.supported || !h.eligible) { state.setState({ status: "unsupported", doc: null }); return; }
+      if (!follow) { state.setState({ status: "synced", error: null }); return; }
       if (await readAndMigrate(h, gen)) { state.setState({ status: "synced", error: null }); await flush(); }
     })().catch((e: unknown) => { if (gen === generation) state.setState({ status: "offline", error: String(e) }); }).finally(() => { running = null; if (invalidated) { invalidated = false; void refresh(); } });
     return running;
@@ -116,7 +133,7 @@ export function createUserLayout(deps: { storage: Pick<Storage, "getItem" | "set
     persist(); publish();
   }
   function edit(before: SidebarLocal, after: SidebarLocal) {
-    if (disposed) return;
+    if (disposed || !follow) return;
     const e = entry(); const s = state.getState();
     if (!e || s.status === "unsupported" || !s.doc || s.migration) return;
     const ops = sidebarEdits(encodeSidebar(before, s.hosts, keyFocus()), encodeSidebar(after, s.hosts, keyFocus()), lastEditAt = Math.max(Date.now(), lastEditAt + 1));
@@ -141,7 +158,7 @@ export function createUserLayout(deps: { storage: Pick<Storage, "getItem" | "set
       if (h?.online && h.supported) {
         const result = await deps.backend(h.id).get();
         if (result.ok && !result.value.sections.sidebar?.data) {
-          cache.entries[memoryHost.instanceId] = { docKey: result.value.docKey, revision: result.value.sections.sidebar?.revision ?? 0, confirmed: readSidebar(result.value.sections.sidebar?.data), operations: [{ kind: "import", data: previous, t: Date.now() }], migratedAt: Date.now() };
+          cache.entries[memoryHost.instanceId] = { docKey: result.value.docKey, revision: result.value.sections.sidebar?.revision ?? 0, confirmed: readSidebar(result.value.sections.sidebar?.data), operations: [{ kind: "import", data: previous, t: Date.now() }], migratedAt: Date.now(), turnBarSeededAt: Date.now() };
           persist();
         }
       }
@@ -153,11 +170,20 @@ export function createUserLayout(deps: { storage: Pick<Storage, "getItem" | "set
   async function resolveMigration(merge: boolean) {
     const e = entry(); if (!e || !remoteForMigration) return;
     if (merge) e.operations.push({ kind: "import", data: migrationSource ?? localDoc(), t: Date.now() });
-    e.migratedAt = Date.now(); remoteForMigration = null; migrationSource = null;
+    e.migratedAt = e.turnBarSeededAt = Date.now(); remoteForMigration = null; migrationSource = null;
     state.setState({ migration: false }); persist(); publish(); await refresh();
   }
+  /** Turning it back on compares this device's sidebar with the synced one again (the 056 §6.2 question). */
+  function setFollow(on: boolean) {
+    if (on === follow) return;
+    follow = on;
+    if (on) { const e = entry(); if (e) { delete e.migratedAt; migrationSource = null; persist(); } }
+    else state.setState({ migration: false });
+    publish(); void refresh();
+  }
   publish();
-  return { state, refresh, setHosts, edit, choose, resolveMigration,
+  return { state, refresh, setHosts, edit, choose, resolveMigration, setFollow,
+    following: () => follow,
     dispose() { disposed = true; generation++; },
     invalidate(docKey: string, revision: number) {
       const e = entry();
@@ -166,7 +192,7 @@ export function createUserLayout(deps: { storage: Pick<Storage, "getItem" | "set
         else void refresh();
       }
     },
-    local: (): SidebarLocal | null => { const s = state.getState(); return s.doc && s.status !== "unsupported" ? decodeSidebar(s.doc, s.hosts) : null; },
+    local: (): SidebarLocal | null => { const s = state.getState(); return follow && s.doc && s.status !== "unsupported" ? decodeSidebar(s.doc, s.hosts) : null; },
   };
 }
 export type UserLayoutStore = ReturnType<typeof createUserLayout>;

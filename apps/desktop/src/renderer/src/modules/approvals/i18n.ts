@@ -121,6 +121,8 @@ export const zhCN = {
   "approvals.state.expired": "已过期",
   "approvals.kind.workflow_run": "运行工作流",
   "approvals.reason.workflow_run": "{{agent}}要运行一个工作流，需要你先批准运行计划",
+  "approvals.kind.personal_assistant_write": "个人助理跨项目写入",
+  "approvals.reason.personal_assistant_write": "个人助理要修改其他项目里的文件；批准只放行这一次修改，之后它会重试这次修改",
   "approvals.field.description": "说明",
   "approvals.field.phases": "阶段",
   "approvals.field.stepProfiles": "步骤 Profile",

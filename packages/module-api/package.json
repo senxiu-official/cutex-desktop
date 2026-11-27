@@ -1,6 +1,6 @@
 {
   "name": "@cutex-desktop/module-api",
-  "version": "1.31.0",
+  "version": "1.33.0",
   "description": "The public API for writing Cutex desktop modules",
   "license": "Apache-2.0",
   "homepage": "https://github.com/senxiu-official/cutex-desktop",

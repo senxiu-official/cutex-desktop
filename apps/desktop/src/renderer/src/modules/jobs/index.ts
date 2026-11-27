@@ -19,7 +19,7 @@ export default defineModule({
   requires: { capabilities: [JOB_SERVICE_FEATURE], component: "job-service" },
   contributes: {
     "conversation.status": [
-      { id: "jobs.status", order: 600, titleKey: "jobs.statusTitle", defaultPlace: "capsule", useStatus: useJobsStatus, Meta: JobsMeta, Body: JobsBody, Bar: JobsStatusBar, icon: Hourglass },
+      { id: "jobs.status", order: 600, titleKey: "jobs.statusTitle", defaultPlace: "both", useStatus: useJobsStatus, Meta: JobsMeta, Body: JobsBody, Bar: JobsStatusBar, icon: Hourglass },
     ],
     "nav.primary": [{ id: "jobs.nav", order: 600, icon: Hourglass, titleKey: "jobs.nav", unavailable: "hide", target: { page: "jobs.page" } }],
     "main.page": [{ id: "jobs.page", Page: JobsPage, useTitle: pageTitle("jobs.nav") }],

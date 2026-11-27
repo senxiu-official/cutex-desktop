@@ -737,6 +737,22 @@ export class HostManager implements HostApi {
     return { hostId: conn.hostId, credential, epoch: conn.routingEpoch, client: conn.daemon };
   }
 
+  /** 浏览器身份 跨主机同步 (main/browser/identity/sync.ts): connected hosts with their daemon instance id. */
+  browserIdentitySyncTargets(): import("./browser/identity/sync").BrowserIdentitySyncTarget[] {
+    return [...this.conns.values()].filter((c) => c.daemon.currentState.kind === "connected").map((conn) => {
+      const state = conn.daemon.currentState;
+      return {
+        hostId: conn.hostId, epoch: conn.routingEpoch,
+        instanceId: state.kind === "connected" && typeof state.instanceId === "string" ? state.instanceId : null,
+        client: { capabilities: () => conn.daemon.capabilities(), browserIdentities: (method, route, body) => conn.daemon.browserIdentities(method, route, body) },
+      };
+    });
+  }
+
+  browserIdentityProof(hostId: string, instanceId: string): { publicKey: string; signature: string } | null {
+    return this.local.identity?.browserIdentityProof(hostId, instanceId) ?? null;
+  }
+
   /** Connected hosts (identity: claim again after an import). */
   claimTargets(): ClaimTarget[] {
     return [...this.conns.values()].filter((c) => c.daemon.currentState.kind === "connected").map((c) => this.claimTarget(c));

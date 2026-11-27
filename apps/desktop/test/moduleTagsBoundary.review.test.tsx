@@ -2,12 +2,12 @@
 import { act, createElement as h } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-const fx = vi.hoisted(() => ({
+const fx = vi.hoisted(() => ({ none: [] as never[], // a stable empty slot snapshot (useSyncExternalStore)
   modules: [] as any[], rt: { view: null, active: {}, decisions: {}, bundled: {} } as any,
   dev: null as any, enable: vi.fn(),
 }));
 vi.mock("../src/renderer/src/bridge", () => ({ api: {}, apiFor: () => ({}), bridge: { on: () => () => {} }, onEvent: () => () => {}, cleanIpcMessage: (m: string) => m }));
-vi.mock("../src/renderer/src/modules/app", () => ({ appModules: () => ({ modules: fx.modules, isEnabled: () => true, setEnabled: fx.enable, retry: vi.fn(), statuses: () => new Map(), subscribe: () => () => {}, snapshot: () => [] }) }));
+vi.mock("../src/renderer/src/modules/app", () => ({ appModules: () => ({ modules: fx.modules, isEnabled: () => true, setEnabled: fx.enable, retry: vi.fn(), statuses: () => new Map(), subscribe: () => () => {}, snapshot: () => fx.none }) }));
 vi.mock("../src/renderer/src/modules/react", async (original) => ({ ...(await original<object>()), useModuleStatuses: () => new Map() }));
 vi.mock("../src/renderer/src/modules/packs", async (original) => ({ ...(await original<object>()), usePackRuntime: () => fx.rt }));
 vi.mock("../src/renderer/src/modules/devModules", () => ({ useModuleDevView: () => fx.dev }));
@@ -44,6 +44,9 @@ it("a loaded developer-folder module keeps its local origin, own version and int
 });
 it("a core module shows only a lock with its explanation, no switch", async () => {
   fx.modules = [def("shell", true)]; await render();
+  // 核心模块 starts folded (module list v2).
+  expect(host.querySelector("[data-module-locked]")).toBeNull();
+  act(() => host.querySelector<HTMLButtonElement>("[data-module-group=core] > button")!.click());
   const lock = host.querySelector<HTMLElement>("[data-module-locked]")!;
   expect(lock.querySelector("button, [role=switch]")).toBeNull();
   expect(lock.getAttribute("role")).toBe("img");

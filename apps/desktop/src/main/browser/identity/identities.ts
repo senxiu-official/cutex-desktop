@@ -6,7 +6,7 @@ import {
   BROWSER_IDENTITY_NAME_MAX, browserIdentityPartition, DEFAULT_BROWSER_IDENTITY_ID as DEFAULT_ID, DEFAULT_BROWSER_IDENTITY_PREFS,
   isBrowserIdentityColor, isBrowserIdentityId, parseBrowserIdentityRequest,
   type BrowserClearDataRequest, type BrowserIdentityColor, type BrowserIdentityPrefs, type BrowserIdentityState,
-  type BrowserIdentityStorage, type BrowserIdentityView,
+  type BrowserIdentityStorage, type BrowserIdentityView, type BrowserIdentityCleanup,
 } from "../../../shared/browserIdentity";
 import { writeFileAtomic } from "../../fileWrites";
 import type { BrowserIdentityService, EmitBrowserIdentityEvent } from "./contract";
@@ -14,6 +14,34 @@ import { browserIdentityHostId, diskEntry, parseIdentityPartition, partitionByte
 
 type Identity = Omit<BrowserIdentityView, "isDefault" | "hosts" | "openTabs">;
 type Cell = { identityId: string; hostId: string };
+
+/** 跨主机同步 (./sync.ts): one change waiting for the primary host's directory. `sent`: tried at least once, so a
+ *  retry repeats the same body (the daemon answers a repeat with its snapshot); `expectedRevision` is fixed then. */
+export interface DirectoryOutboxEntry {
+  mutationId: string;
+  kind: "create" | "update" | "delete";
+  id: string;
+  name?: string;
+  color?: BrowserIdentityColor;
+  expectedRevision?: number;
+  sent?: true;
+  tries?: number;
+}
+/** A remote deletion whose local partitions (logins, site data) wait for the owner's 清除. */
+interface DirectoryCleanup { identityId: string; name: string; color: BrowserIdentityColor | null; deletionRevision: number; partitions: string[] }
+interface DirectoryFile { attached: boolean; outbox: DirectoryOutboxEntry[]; cleanups: DirectoryCleanup[] }
+/** cutex r297 `GET /v2/browser-identities` (the fields this desktop reads). */
+export interface BrowserIdentityDirectory {
+  desktopRegistered: boolean;
+  syncEnabled: boolean;
+  revision: number;
+  identities: { id: string; name: string; color: BrowserIdentityColor | null; revision: number }[];
+  deleted: { id: string; revision: number; requiresLocalCleanupConfirmation: boolean }[];
+  peers: { instanceId: string; label: string; state: string; confirmedRevision: number | null; confirmedAt: string | null }[];
+}
+const MUTATION_ID = /^[a-f0-9]{32}$/;
+const OUTBOX_MAX = 512;
+const blankDirectory = (): DirectoryFile => ({ attached: false, outbox: [], cleanups: [] });
 interface IdentityFile {
   version: 1;
   current: string;
@@ -23,9 +51,13 @@ interface IdentityFile {
   pendingPartitions: string[];
   knownHosts: string[];
   pendingHosts: string[];
+  /** 跨主机同步; absent before the first directory was seen. */
+  directory?: DirectoryFile;
 }
 
+/** Identities this desktop creates itself; synced rows from other hosts may go beyond it (up to MAX_STORED). */
 const MAX_IDENTITIES = 64;
+const MAX_STORED = 2048;
 const MAX_FILE_BYTES = 1024 * 1024;
 const FILE = "browser-identities.json";
 const DEFAULT: Identity = { id: DEFAULT_ID, name: "个人", color: null, initial: "个", createdAt: 0, updatedAt: 0, revision: 0 };
@@ -48,7 +80,7 @@ class IdentityStorage {
       if (info) {
         if (!info.isFile() || info.size > MAX_FILE_BYTES) throw Error("invalid_browser_identity_storage");
         const input = JSON.parse(readFileSync(this.file, "utf8")) as IdentityFile;
-        if (input?.version !== 1 || !Array.isArray(input.identities) || input.identities.length > MAX_IDENTITIES
+        if (input?.version !== 1 || !Array.isArray(input.identities) || input.identities.length > MAX_STORED
           || !Array.isArray(input.tombstones) || !Array.isArray(input.pendingPartitions) || !Array.isArray(input.knownHosts)
           || input.pendingHosts !== undefined && !Array.isArray(input.pendingHosts))
           throw Error("invalid_browser_identity_storage");
@@ -56,7 +88,7 @@ class IdentityStorage {
         const ids = new Set<string>();
         const identities = input.identities.map(item => {
           if (!item || !isBrowserIdentityId(item.id) || ids.has(item.id) || typeof item.name !== "string"
-            || !item.name.trim() || item.name.length > BROWSER_IDENTITY_NAME_MAX || /[\x00-\x1f\x7f]/.test(item.name)
+            || !item.name.trim() || [...item.name].length > BROWSER_IDENTITY_NAME_MAX || /[\x00-\x1f\x7f]/.test(item.name)
             || !validInitial(item.initial) || !validTime(item.createdAt) || !validTime(item.updatedAt)
             || !validTime(item.revision) || item.revision >= Number.MAX_SAFE_INTEGER
             || (item.id === DEFAULT_ID ? item.color !== null : !isBrowserIdentityColor(item.color)))
@@ -76,6 +108,7 @@ class IdentityStorage {
           knownHosts: [...new Set(input.knownHosts)], pendingPartitions: [...new Set(input.pendingPartitions)],
           pendingHosts: [...new Set(input.pendingHosts ?? [])],
           tombstones: input.tombstones.map(({ id, updatedAt, revision }) => ({ id, updatedAt, revision })),
+          ...(input.directory !== undefined ? { directory: parseDirectoryFile(input.directory, ids) } : {}),
         };
       }
       this.available = true;
@@ -96,6 +129,33 @@ class IdentityStorage {
     this.data = data;
   }
 }
+
+function parseDirectoryFile(raw: unknown, live: ReadonlySet<string>): DirectoryFile {
+  const bad = () => Error("invalid_browser_identity_storage");
+  if (!raw || typeof raw !== "object") throw bad();
+  const o = raw as Partial<DirectoryFile>;
+  if (typeof o.attached !== "boolean" || !Array.isArray(o.outbox) || o.outbox.length > OUTBOX_MAX || !Array.isArray(o.cleanups) || o.cleanups.length > MAX_STORED) throw bad();
+  const outbox = o.outbox.map(e => {
+    if (!e || !MUTATION_ID.test(e.mutationId) || !["create", "update", "delete"].includes(e.kind) || !isBrowserIdentityId(e.id)
+      || e.name !== undefined && (typeof e.name !== "string" || !e.name.trim() || [...e.name].length > BROWSER_IDENTITY_NAME_MAX || /[\x00-\x1f\x7f]/.test(e.name))
+      || e.color !== undefined && !isBrowserIdentityColor(e.color) || e.expectedRevision !== undefined && !validTime(e.expectedRevision)
+      || e.sent !== undefined && e.sent !== true || e.tries !== undefined && !validTime(e.tries)) throw bad();
+    const { mutationId, kind, id, name, color, expectedRevision, sent, tries } = e;
+    return { mutationId, kind, id, ...(name !== undefined ? { name } : {}), ...(color !== undefined ? { color } : {}),
+      ...(expectedRevision !== undefined ? { expectedRevision } : {}), ...(sent ? { sent } : {}), ...(tries !== undefined ? { tries } : {}) };
+  });
+  const cleanups = o.cleanups.map(c => {
+    if (!c || !isBrowserIdentityId(c.identityId) || c.identityId === DEFAULT_ID || live.has(c.identityId) || typeof c.name !== "string" || [...c.name].length > BROWSER_IDENTITY_NAME_MAX
+      || !(c.color === null || isBrowserIdentityColor(c.color)) || !validTime(c.deletionRevision) || !Array.isArray(c.partitions)
+      || !c.partitions.every(p => typeof p === "string" && parseIdentityPartition(p)?.identityId === c.identityId)) throw bad();
+    return { identityId: c.identityId, name: c.name, color: c.color, deletionRevision: c.deletionRevision, partitions: [...new Set(c.partitions)] };
+  });
+  return { attached: o.attached, outbox, cleanups };
+}
+
+const mutationId = () => randomBytes(16).toString("hex");
+const firstChar = (name: string) => [...name][0] ?? "?";
+const validRemoteName = (v: unknown): v is string => typeof v === "string" && v.trim().length > 0 && [...v].length <= BROWSER_IDENTITY_NAME_MAX && !/[\x00-\x1f\x7f]/.test(v);
 
 /** Called before any Electron session can open a partition. Failure leaves the pending entry blocked. */
 export function cleanDeletedBrowserPartitions(userData: string, sessionData: string): void {
@@ -129,13 +189,18 @@ interface IdentityOptions {
   session(partition: string): Session;
   close(identityId: string, hostId?: string): void;
   revoke(partition: string): void;
+  /** With a host: only what is kept per identity and host (本机回环, certificate exceptions); site permissions are per
+   *  identity (every host) and stay. Without: everything of the identity. */
   forgetAdmissions(identityId: string, hostId?: string): void;
   forgetHostAdmissions(hostId: string): void;
   reload(identityId: string, hostId: string): void;
   dropIdentity(identityId: string): Promise<void>;
-  dropHost(hostId: string): Promise<void>;
+  /** History of a host: every identity's, or one identity's. */
+  dropHost(hostId: string, identityId?: string): Promise<void>;
   retentionChanged(): void;
   emit: EmitBrowserIdentityEvent;
+  /** 跨主机同步: a change waits in the outbox / a cleanup item changed (./sync.ts drains and republishes). */
+  directoryChanged?(): void;
   now?: () => number;
 }
 
@@ -221,8 +286,9 @@ export class BrowserIdentities implements BrowserIdentityService {
     if (data.identities.length >= MAX_IDENTITIES) throw Error("browser_identity_limit");
     const now = this.now();
     const row: Identity = { id: randomBytes(16).toString("hex"), name, color, initial: initial ?? [...name][0]!, createdAt: now, updatedAt: now, revision: 1 };
-    this.storageFile.save({ ...data, identities: [...data.identities, row] });
+    this.storageFile.save({ ...data, identities: [...data.identities, row], ...this.enqueue(data, { kind: "create", id: row.id, name, color }) });
     this.changed();
+    this.options.directoryChanged?.();
     return this.view(row);
   }
 
@@ -234,8 +300,11 @@ export class BrowserIdentities implements BrowserIdentityService {
       initial: change.initial ?? before.initial, updatedAt: Math.max(this.now(), before.updatedAt + 1), revision: before.revision + 1,
     };
     const data = this.storageFile.data;
-    this.storageFile.save({ ...data, identities: data.identities.map(identity => identity.id === id ? row : identity) });
+    const synced = { ...(row.name !== before.name ? { name: row.name } : {}), ...(row.color && row.color !== before.color ? { color: row.color } : {}) };
+    this.storageFile.save({ ...data, identities: data.identities.map(identity => identity.id === id ? row : identity),
+      ...(Object.keys(synced).length ? this.enqueue(data, { kind: "update", id, ...synced }) : {}) });
     this.changed();
+    if (Object.keys(synced).length) this.options.directoryChanged?.();
     return this.view(row);
   }
 
@@ -261,8 +330,15 @@ export class BrowserIdentities implements BrowserIdentityService {
   async storage(id: string): Promise<BrowserIdentityStorage[]> {
     this.require(id);
     const output: BrowserIdentityStorage[] = [];
+    const configured = this.options.hostIds();
     for (const { hostId } of this.cells().filter(cell => cell.identityId === id)) {
       let siteDataBytes: number | null = null, cacheBytes: number | null = null;
+      if (!configured.includes(hostId)) {
+        // A leftover of a removed host: measured on disk (opening its session would recreate it).
+        try { siteDataBytes = await partitionBytes(partitionDirectory(this.options.sessionData, id, hostId)); } catch { /* not measurable */ }
+        output.push({ hostId, siteDataBytes, cacheBytes: null, removedHost: true });
+        continue;
+      }
       try {
         const partition = this.partition(id, hostId);
         cacheBytes = await this.options.session(partition).getCacheSize();
@@ -298,7 +374,9 @@ export class BrowserIdentities implements BrowserIdentityService {
     if (types.includes("siteData")) dataTypes.push("cookies", "backgroundFetch", "fileSystems", "indexedDB", "localStorage", "serviceWorkers", "webSQL");
     if (types.includes("cache")) dataTypes.push("cache");
     if (!dataTypes.length) return;
-    const hosts = hostId === "all" ? this.cells().filter(cell => cell.identityId === id).map(cell => cell.hostId) : [hostId];
+    // 所有主机 = the configured hosts holding data; a removed host's leftover is cleared by clearLeftover.
+    const configured = this.options.hostIds();
+    const hosts = hostId === "all" ? this.cells().filter(cell => cell.identityId === id && configured.includes(cell.hostId)).map(cell => cell.hostId) : [hostId];
     for (const host of hosts) {
       const partition = this.partition(id, host);
       await this.options.session(partition).clearData({ dataTypes, ...(origins ? { origins, originMatchingMode: "origin-in-all-contexts" } : {}) });
@@ -336,6 +414,46 @@ export class BrowserIdentities implements BrowserIdentityService {
     finally { this.busy.delete(id); this.changed(); }
   }
 
+  async signOutHost(id: string, hostId: string): Promise<void> {
+    const partition = this.partition(id, hostId);
+    this.busy.add(id);
+    try {
+      this.options.close(id, hostId);
+      this.options.revoke(partition);
+      const target = this.options.session(partition);
+      await target.clearData();
+      await target.clearStorageData();
+      await target.clearCache();
+      await target.clearAuthCache();
+      this.options.forgetAdmissions(id, hostId);
+    } finally { this.busy.delete(id); this.changed(); }
+  }
+
+  async clearLeftover(id: string, hostId: string): Promise<void> {
+    this.require(id);
+    if (this.busy.has(id)) throw Error("browser_identity_busy");
+    if (this.options.hostIds().includes(hostId)) throw Error("host_configured");
+    const partition = browserIdentityPartition(id, hostId);
+    if (!this.cells(true).some(cell => cell.identityId === id && cell.hostId === hostId)) throw Error("browser_identity_unavailable");
+    // Queued first (cleanDeletedBrowserPartitions removes it before any session opens at the next start, should
+    // removing it now fail); this run never opened the session of a host that is not configured.
+    const data = this.storageFile.data;
+    this.storageFile.save({ ...data, pendingPartitions: [...new Set([...data.pendingPartitions, partition])] });
+    this.activeCells.delete(partition);
+    try {
+      // Same checks as the startup cleanup: a symlink (diskEntry throws) or a non-directory stays queued.
+      const directory = partitionDirectory(this.options.sessionData, id, hostId), info = diskEntry(directory);
+      if (info && !info.isDirectory()) throw Error("browser_identity_storage_unavailable");
+      if (info) rmSync(directory, { recursive: true });
+      const now = this.storageFile.data;
+      this.storageFile.save({ ...now, pendingPartitions: now.pendingPartitions.filter(p => p !== partition) });
+    } catch { /* Left queued for the next start. */ }
+    // The rest it left on that host: certificate exceptions / 本机回环 and its browsing history there.
+    this.options.forgetAdmissions(id, hostId);
+    await this.options.dropHost(hostId, id).catch(() => {});
+    this.changed();
+  }
+
   async remove(id: string): Promise<void> {
     this.require(id);
     if (id === DEFAULT_ID) throw Error("default_identity");
@@ -350,9 +468,150 @@ export class BrowserIdentities implements BrowserIdentityService {
         identities: data.identities.filter(identity => identity.id !== id),
         tombstones: [...data.tombstones, { id, updatedAt: Math.max(this.now(), row.updatedAt + 1), revision: row.revision + 1 }],
         pendingPartitions: [...new Set([...data.pendingPartitions, ...partitions])],
+        ...this.enqueue(data, { kind: "delete", id }),
       });
       for (const partition of partitions) this.activeCells.delete(partition);
+      this.options.directoryChanged?.();
     } finally { this.busy.delete(id); this.changed(); }
+  }
+
+  // ---------- 跨主机同步 (./sync.ts) ----------
+
+  /** The outbox after one more local change (nothing before the first directory: that one imports everything). */
+  private enqueue(data: IdentityFile, change: Omit<DirectoryOutboxEntry, "mutationId">): Pick<IdentityFile, "directory"> | Record<string, never> {
+    const dir = data.directory;
+    if (!dir?.attached) return {};
+    let outbox = dir.outbox;
+    if (change.kind === "update") {
+      // Not yet sent: one update per identity carries the latest name / colour.
+      const waiting = outbox.find(e => e.id === change.id && !e.sent && (e.kind === "update" || e.kind === "create"));
+      if (waiting) return { directory: { ...dir, outbox: outbox.map(e => e === waiting ? { ...e, ...(change.name ? { name: change.name } : {}), ...(change.color ? { color: change.color } : {}) } : e) } };
+    }
+    if (change.kind === "delete") {
+      const unsentCreate = outbox.some(e => e.id === change.id && e.kind === "create" && !e.sent);
+      outbox = outbox.filter(e => !(e.id === change.id && !e.sent));
+      // Never reached the directory: nothing to delete there (and the id is never created again).
+      if (unsentCreate) return { directory: { ...dir, outbox } };
+    }
+    if (outbox.length >= OUTBOX_MAX) outbox = outbox.slice(outbox.length - OUTBOX_MAX + 1);
+    return { directory: { ...dir, outbox: [...outbox, { mutationId: mutationId(), ...change }] } };
+  }
+
+  directoryAttached(): boolean { return !!this.storageFile.data.directory?.attached; }
+  directoryOutbox(): readonly DirectoryOutboxEntry[] { return this.storageFile.data.directory?.outbox ?? []; }
+
+  /** One outbox entry after a send: replaced (`sent`, a new revision / id) or done (null). */
+  directoryOutboxUpdate(id: string, next: DirectoryOutboxEntry | null): void {
+    const data = this.storageFile.data, dir = data.directory;
+    if (!dir || !dir.outbox.some(e => e.mutationId === id)) return;
+    const outbox = next ? dir.outbox.map(e => e.mutationId === id ? next : e) : dir.outbox.filter(e => e.mutationId !== id);
+    this.storageFile.save({ ...data, directory: { ...dir, outbox } });
+  }
+
+  cleanups(): BrowserIdentityCleanup[] {
+    return (this.storageFile.data.directory?.cleanups ?? []).map(({ identityId, name, color, deletionRevision, partitions }) => ({
+      identityId, name, color, deletionRevision, hosts: [...new Set(partitions.map(p => parseIdentityPartition(p)!.hostId))].sort(),
+    }));
+  }
+
+  /**
+   * Merges the primary host's directory. Names and colours follow it (not while this desktop's own change waits); new
+   * identities appear; a deletion closes the identity's tabs, refuses its partitions at once and keeps their data for
+   * the owner's 清除 when the daemon asks for that. The first directory imports this desktop's identities and deletions.
+   */
+  applyDirectory(snapshot: BrowserIdentityDirectory): { limit: boolean } {
+    const data = this.storageFile.data;
+    const dir = data.directory ?? blankDirectory();
+    const waiting = new Set(dir.outbox.map(e => e.id));
+    const deleted = new Map(snapshot.deleted.filter(d => isBrowserIdentityId(d.id) && d.id !== DEFAULT_ID).map(d => [d.id, d]));
+    const remote = new Map(snapshot.identities.filter(r => isBrowserIdentityId(r.id) && !deleted.has(r.id)).map(r => [r.id, r]));
+    const tombstoned = new Set([...data.tombstones.map(t => t.id), ...dir.cleanups.map(c => c.identityId)]);
+    const now = this.now();
+    let limit = false, changed = false;
+    const outbox = [...dir.outbox];
+    const identities: Identity[] = [];
+    const removals: Identity[] = [];
+    for (const row of data.identities) {
+      if (deleted.has(row.id) && !this.busy.has(row.id)) { removals.push(row); continue; }
+      const r = remote.get(row.id);
+      if (r && !waiting.has(row.id) && validRemoteName(r.name)) {
+        const color = row.id === DEFAULT_ID ? null : isBrowserIdentityColor(r.color) ? r.color : row.color;
+        if (r.name !== row.name || color !== row.color) {
+          changed = true;
+          identities.push({ ...row, name: r.name, color, initial: row.initial === firstChar(row.name) ? firstChar(r.name) : row.initial,
+            updatedAt: Math.max(now, row.updatedAt + 1), revision: row.revision + 1 });
+          continue;
+        }
+      }
+      identities.push(row);
+    }
+    for (const r of remote.values()) {
+      if (identities.some(row => row.id === r.id) || tombstoned.has(r.id) || r.id === DEFAULT_ID) continue;
+      if (!validRemoteName(r.name) || !isBrowserIdentityColor(r.color)) continue;
+      if (identities.length >= MAX_STORED) { limit = true; continue; }
+      changed = true;
+      identities.push({ id: r.id, name: r.name, color: r.color, initial: firstChar(r.name), createdAt: now, updatedAt: now, revision: 1 });
+    }
+    if (!dir.attached) {
+      // The first directory: this desktop's identities (existing ids) and deletions join it.
+      for (const row of identities) {
+        if (remote.has(row.id) || deleted.has(row.id) || waiting.has(row.id)) continue;
+        if (row.id === DEFAULT_ID) outbox.push({ mutationId: mutationId(), kind: "update", id: DEFAULT_ID, name: row.name, expectedRevision: 0 });
+        else outbox.push({ mutationId: mutationId(), kind: "create", id: row.id, name: row.name, color: row.color! });
+      }
+      for (const t of data.tombstones) {
+        if (deleted.has(t.id) || waiting.has(t.id)) continue;
+        outbox.push({ mutationId: mutationId(), kind: "delete", id: t.id });
+      }
+    }
+    const cleanups = [...dir.cleanups];
+    const tombstones = [...data.tombstones];
+    let pendingPartitions = data.pendingPartitions, current = data.current;
+    const dropped: string[] = [];
+    for (const row of removals) {
+      const d = deleted.get(row.id)!;
+      const partitions = this.cells().filter(cell => cell.identityId === row.id).map(cell => browserIdentityPartition(row.id, cell.hostId));
+      this.options.close(row.id);
+      for (const partition of partitions) { this.options.revoke(partition); this.activeCells.delete(partition); }
+      tombstones.push({ id: row.id, updatedAt: Math.max(now, row.updatedAt + 1), revision: d.revision });
+      if (current === row.id) current = DEFAULT_ID;
+      if (!partitions.length) continue;
+      if (d.requiresLocalCleanupConfirmation) cleanups.push({ identityId: row.id, name: row.name, color: row.color, deletionRevision: d.revision, partitions });
+      else { pendingPartitions = [...new Set([...pendingPartitions, ...partitions])]; dropped.push(row.id); }
+    }
+    if (changed || removals.length || !dir.attached || outbox.length !== dir.outbox.length) {
+      this.storageFile.save({ ...data, identities, tombstones, current, pendingPartitions,
+        directory: { attached: true, outbox: outbox.slice(-OUTBOX_MAX), cleanups } });
+      this.changed();
+      if (removals.length) this.options.directoryChanged?.();
+    }
+    // The daemon recorded this desktop's own confirmed delete: its data goes without asking again.
+    for (const id of dropped) void this.options.dropIdentity(id).catch(() => {});
+    return { limit };
+  }
+
+  /** 清除 (the owner confirmed in place; ./sync.ts checked the gesture): the retained partitions, history and saved passwords. */
+  async confirmCleanup(identityId: string, deletionRevision: number): Promise<void> {
+    const item = this.storageFile.data.directory?.cleanups.find(c => c.identityId === identityId && c.deletionRevision === deletionRevision);
+    if (!item) throw Error("browser_identity_cleanup_missing");
+    if (this.busy.has(identityId)) throw Error("browser_identity_busy");
+    this.busy.add(identityId);
+    try {
+      this.options.close(identityId);
+      for (const partition of item.partitions) {
+        this.options.revoke(partition);
+        const target = this.options.session(partition);
+        await target.clearData();
+        await target.clearStorageData();
+        await target.clearCache();
+        await target.clearAuthCache();
+      }
+      await this.options.dropIdentity(identityId);
+      this.options.forgetAdmissions(identityId);
+      const data = this.storageFile.data, dir = data.directory!;
+      this.storageFile.save({ ...data, pendingPartitions: [...new Set([...data.pendingPartitions, ...item.partitions])],
+        directory: { ...dir, cleanups: dir.cleanups.filter(c => c !== item && !(c.identityId === identityId && c.deletionRevision === deletionRevision)) } });
+    } finally { this.busy.delete(identityId); this.changed(); this.options.directoryChanged?.(); }
   }
 
   reconcileHosts(hostIds: readonly string[]): void {

@@ -66,6 +66,7 @@ import type { KimiAccountList, KimiAccountRemoveResult, KimiAccountResult, KimiL
 import type { AlarmCancelResult, AlarmList } from "./alarms";
 import type { OwnerPinChange, OwnerPinList, OwnerPinUpdateResult } from "./ownerPins";
 import type { SkillArchiveList, SkillArchiveResult } from "./skillsArchive";
+import type { RuntimeSkillsAnswer, SkillCopyAnswer, SkillCopyPreviewAnswer, SkillCopyRequest, SkillCopySelection, SkillRuntime } from "./runtimeSkills";
 import type { QuotaAttribution, QuotaHistory } from "./quotaAttribution";
 import type { UsageSourceCreate, UsageSourceDeleteResult, UsageSourcePatch, UsageSourceResult, UsageSourcesView } from "./usageSources";
 import type { WorkflowRunAction, WorkflowRunList, WorkflowRunView } from "./workflows";
@@ -1255,7 +1256,7 @@ export interface ApprovalRecord {
   ruleRevision?: number | null;
 }
 
-export type ApprovalKind = "managed_service" | "service_lifetime" | "static_root" | "agent_profile" | "ask_delivery" | "browser_claim" | "browser_open" | "workflow_run";
+export type ApprovalKind = "managed_service" | "service_lifetime" | "static_root" | "agent_profile" | "ask_delivery" | "browser_claim" | "browser_open" | "workflow_run" | "personal_assistant_write";
 export type ApprovalRuleExpiryMode = "turn" | "hour" | "today" | "revoked";
 export interface ApprovalRuleDraft {
   enabled: boolean;
@@ -1706,6 +1707,13 @@ export interface DaemonApi extends StorageCleanupApi {
   /** history-turn-read: one search result's turn as plain text with its times (the search page's preview); null = no such turn. */
   sessionSearchTurn(sessionId: string, turnId: string): Promise<SearchTurnPreview | null>;
   // ---- 个人助理 (cutex r295 personal-assistants-local-v1, r296 recurring / owner views; main/personalAssistantsApi.ts) ----
+  paScopeRules(id: string): Promise<import("./personalAssistantsPhase1").PaScopeRuleSet>;
+  paScopeRulesSave(id: string, body: import("./personalAssistantsPhase1").PaScopeSaveInput): Promise<import("./personalAssistantsPhase1").PaScopeRuleSet>;
+  paBrief(id: string): Promise<import("./personalAssistantsPhase1").PaBriefView>;
+  paBriefSchedule(id: string, body: import("./personalAssistantsPhase1").PaBriefScheduleInput): Promise<import("./personalAssistantsPhase1").PaBriefView>;
+  paReminderCreate(id: string, body: import("./personalAssistantsPhase1").PaReminderCreateInput): Promise<import("./personalAssistants").PaReminder>;
+  ownerPinCreate(body: import("./personalAssistantsPhase1").OwnerPinCreateInput): Promise<import("./ownerPins").OwnerPin>;
+  paCreateOptions(): Promise<import("./personalAssistants").PaCreateOptions>;
   paList(query?: { cursor?: string | null; limit?: number }): Promise<import("./personalAssistants").PaList>;
   paGet(id: string): Promise<import("./personalAssistants").PaView>;
   paCreate(input: import("./personalAssistants").PaCreateInput): Promise<import("./personalAssistants").PaView>;
@@ -1853,6 +1861,12 @@ export interface DaemonApi extends StorageCleanupApi {
   archiveSkill(path: string): Promise<SkillArchiveResult>;
   /** `POST /v2/codex/skills/archive/{id}/restore`: move it back (409 skill_name_taken when its place is taken). */
   restoreSkill(archiveId: string): Promise<SkillArchiveResult>;
+  /** `GET /v2/runtime-skills?runtime=` (runtime-skills; dsh / kimi behind their own flags): the host's skills of one runtime, owner only. */
+  runtimeSkills(runtime: SkillRuntime): Promise<RuntimeSkillsAnswer>;
+  /** `POST /v2/runtime-skills/copy/preview` (runtime-skill-copy): what copying a personal skill to the other runtime would do. */
+  previewSkillCopy(selection: SkillCopySelection): Promise<SkillCopyPreviewAnswer>;
+  /** `POST /v2/runtime-skills/copy`: apply a preview (its token, a stable action id, the confirm phrase for writes). */
+  copySkill(request: SkillCopyRequest): Promise<SkillCopyAnswer>;
   /** `GET /v2/codex/managed-mcp`: MCP servers cutex injects at launch, with tool lists. null on older cutex. */
   managedMcp(): Promise<{ servers: { name: string; configured?: boolean; approvalMode: string; toolsSource: string; tools: { name: string; description: string }[] | null }[] } | null>;
   /** `POST /v2/human/agents` (human-create-agent): new agent, optionally in a project and started. */
@@ -2001,12 +2015,26 @@ export interface DaemonApi extends StorageCleanupApi {
   textRewrite(request: import("./textRewrite").TextRewriteRequest): Promise<import("./textRewrite").TextRewriteResult>;
   /** Drops that call: main aborts the request, which closes the connection and cancels it in cutex. */
   cancelTextRewrite(requestId: string): void;
+  /** 输入优化 v2 (feature text-rewrite-v2, shared/textRewriteV2.ts): one template call; cancelled by cancelTextRewrite. */
+  structuredTextRewrite(request: import("./textRewriteV2").StructuredRewriteRequest): Promise<import("./textRewriteV2").StructuredRewriteResult>;
+  /** The host's rewrite templates (built-ins first). Owner only; errors throw like other Management calls. */
+  textRewriteTemplates(): Promise<import("./textRewriteV2").RewriteTemplate[]>;
+  createTextRewriteTemplate(input: import("./textRewriteV2").RewriteTemplateCreate): Promise<import("./textRewriteV2").RewriteTemplate>;
+  /** Built-ins accept only `route` (null restores the default; r298: follow the global order). */
+  patchTextRewriteTemplate(id: string, patch: import("./textRewriteV2").RewriteTemplatePatch): Promise<import("./textRewriteV2").RewriteTemplate>;
+  deleteTextRewriteTemplate(id: string): Promise<void>;
+  /** r298 (text-rewrite-global-route): the global Profile order that templates without their own route follow. */
+  textRewriteRoute(): Promise<import("./textRewriteV2").RewriteTemplateRoute>;
+  patchTextRewriteRoute(route: import("./textRewriteV2").RewriteTemplateRoute): Promise<import("./textRewriteV2").RewriteTemplateRoute>;
   /** 功能 Profile (cutex feature-profiles, shared/featureProfiles.ts): app-feature endpoints, never agents'. Owner only.
    *  The key is write-only: sent on create / replace, never returned (rows carry `keyPresent`). */
   featureProfiles(): Promise<import("./featureProfiles").FeatureProfileListView>;
   createFeatureProfile(input: import("./featureProfiles").FeatureProfileCreate): Promise<import("./featureProfiles").FeatureProfile>;
   patchFeatureProfile(id: string, patch: import("./featureProfiles").FeatureProfilePatch): Promise<import("./featureProfiles").FeatureProfile>;
   deleteFeatureProfile(id: string): Promise<void>;
+  /** 测试连接 (feature-profile-test-v1): a saved row by ID, or an unsaved draft with the typed key (never saved or
+   *  returned). Resolves with the result of a completed test; HTTP errors throw like other Management calls. */
+  testFeatureProfile(request: import("./featureProfiles").FeatureProfileTestRequest): Promise<import("./featureProfiles").FeatureProfileTestResult>;
   pruneRuntimes(ids: string[]): Promise<RuntimePruneResult>;
   /** `GET /v2/claude/accounts` (feature claude-accounts); null when the daemon predates it. */
   claudeAccounts(): Promise<ClaudeAccountList | null>;
@@ -2084,6 +2112,12 @@ export interface DaemonApi extends StorageCleanupApi {
   ownerNewDevices(): Promise<UsersResult<import("./users").OwnerNewDevice[] | null>>;
   /** cutex `owner-device-notice`: `POST /v2/users/owner/new-devices/{tokenId}/ack` (full owner; idempotent). */
   ackOwnerNewDevice(tokenId: string): Promise<UsersResult<import("./users").OwnerDeviceAck>>;
+  /** Design 061 (cutex `attention-state-v1`): `GET /v2/attention`, the owner person's read / 需要你 state; main then forwards its `attentionChanged` events. */
+  attention(): Promise<import("./attention").AttentionResult<import("./attention").AttentionSnapshot>>;
+  /** `POST /v2/attention/read`: exactly these replies were on screen (snapshot tokens, ≤ 100). */
+  attentionRead(reads: readonly { agentId: string; through: string }[]): Promise<import("./attention").AttentionResult<{ changed: number }>>;
+  /** `POST /v2/attention/dismiss`: hide these 需要你 items for the person on every device (snapshot keys, ≤ 100). */
+  attentionDismiss(items: readonly { agentId: string; itemKey: string }[]): Promise<import("./attention").AttentionResult<{ changed: number }>>;
   /**
    * cutex `client-remote-close`: `GET /v2/clients` — the desktops registered on this host (the owner sees
    * all, other users their own); `self` marks this desktop instance. Refusals as values.
@@ -2817,6 +2851,10 @@ export interface DaemonEvents {
   panEvents: import("./baiduPan").PanEventsMessage;
   /** cutex `users`: this connection's user or grant changed (the host feed ended with `cutex/access/changed`). */
   accessChanged: { changedAt: string | null };
+  /** Design 061: `cutex/summary/attentionChanged` (after the renderer read an attention snapshot): read it again. */
+  attentionChanged: import("./attention").AttentionChange;
+  /** Design 061: main's attentionChanged feed of this host is live / not (refused, away, reconnecting). */
+  attentionFeed: import("./attention").AttentionFeedState;
 }
 
 /** Which host connection an event came from: the desktop host id and that connection's routing epoch. */
@@ -2826,6 +2864,7 @@ export interface HostTag {
 }
 
 export interface DesktopEvents {
+  portraitCollections: { view: import("./portraitCollections").PortraitCollectionsView; packsChanged: boolean };
   debug: import("./debug").DebugEvent;
   profileLinkState: import("./profileLink").ProfileLinkState;
   browserEvent: HostTag & import("./browser").BrowserEvent;
@@ -2852,6 +2891,8 @@ export interface DesktopEvents {
   projectEvents: HostTag & DaemonEvents["projectEvents"];
   panEvents: HostTag & DaemonEvents["panEvents"];
   accessChanged: HostTag & DaemonEvents["accessChanged"];
+  attentionChanged: HostTag & DaemonEvents["attentionChanged"];
+  attentionFeed: HostTag & DaemonEvents["attentionFeed"];
   /** From the main process (tray menu): "newChat" = the window was shown; start a quick chat. */
   shellCommand: { command: ShellCommand };
   /** A desk window closed / took the focus (main/deskShell.ts). */
@@ -2885,7 +2926,7 @@ export interface DesktopEvents {
 export type HostTaggedEvent = { [K in keyof DesktopEvents]: DesktopEvents[K] extends HostTag ? K : never }[keyof DesktopEvents];
 
 /** Events that carry a `HostTag` (preload drops the ones of a replaced connection). */
-export const HOST_TAGGED_EVENTS = ["daemonState", "hostEvent", "hostResync", "sidebarChanged", "sidebarProgress", "sessionEvent", "sessionLiveDelta", "sessionLiveReset", "sessionFullText", "sessionResync", "sessionStatus", "workspaceChanged", "terminalOutput", "terminalExit", "accessChanged", "browserEvent", "projectEvents", "panEvents"] as const satisfies readonly HostTaggedEvent[];
+export const HOST_TAGGED_EVENTS = ["daemonState", "hostEvent", "hostResync", "sidebarChanged", "sidebarProgress", "sessionEvent", "sessionLiveDelta", "sessionLiveReset", "sessionFullText", "sessionResync", "sessionStatus", "workspaceChanged", "terminalOutput", "terminalExit", "accessChanged", "attentionChanged", "attentionFeed", "browserEvent", "projectEvents", "panEvents"] as const satisfies readonly HostTaggedEvent[];
 
 export const INVOKE_CHANNEL = "cutex-desktop:invoke";
 export const EVENT_CHANNEL = "cutex-desktop:event";
@@ -2932,6 +2973,7 @@ export interface PreloadBridge {
   fontPack?: import("./fontCatalog").FontPackBridge;
   /** 拟人头像包 in the owner's folder in userData (shared/portraitPacks.ts). Absent in a plain browser. */
   portraitPacks?: import("./portraitPacks").PortraitPacksBridge;
+  portraitCollections?: import("./portraitCollections").PortraitCollectionsBridge;
 }
 
 export const WINDOW_CHANNEL = "cutex-desktop:window";
@@ -3011,6 +3053,9 @@ export interface ShellTermsPref {
 /** Desktop-local prefs the main process needs (stored by main in userData/desktop-prefs.json). */
 export interface DesktopPrefs {
   memoryHost?: import("@cutex-desktop/cutex-client").MemoryHost;
+  /** 外观 → 应用图标 on this device (shared/appIcons.ts); absent = the default style (螺钿). Main applies it to the tray,
+   *  windows, notifications and (Windows) the shortcuts it owns; the renderer syncs the choice. */
+  appIcon?: string;
   /** Owner-enabled desktop diagnostics; absent is off. */
   debugMode?: boolean;
   closeBehavior: CloseBehavior;
@@ -3058,6 +3103,9 @@ export interface ShellState {
   osUserName?: string | null;
   /** Help & docs can open QUICKSTART: a local copy (source checkout, release package, dev repo) or, on a packaged app, the published page. */
   quickstart?: boolean;
+  /** 外观 → 应用图标 as applied here. `shortcuts`: Windows shortcuts of this install now showing it (Start menu,
+   *  desktop, taskbar pins); null where this install has none main manages (macOS / Linux / a dev or side run). */
+  appIcon?: { id: string; shortcuts: number | null };
 }
 /** A desktop notification raised through main (Electron `Notification`, works while hidden to the tray). */
 export type { ServiceNotificationOpen } from "./serviceNotifications";
@@ -3093,6 +3141,7 @@ export type ShellRequest =
   | { op: "filePath"; hostId: string; path: string; action: "reveal" | "open" | "run" }
   | { op: "state" }
   | { op: "setCloseBehavior"; value: CloseBehavior }
+  | { op: "setAppIcon"; id: string }
   | { op: "setLocale"; value: ShellLocale }
   | { op: "setTerms"; value: ShellTermsPref | null }
   | { op: "setAttention"; count: number }
@@ -3125,6 +3174,8 @@ export interface ShellBridge {
   filePath?(hostId: string, path: string, action: "reveal" | "open" | "run"): Promise<void>;
   state(): Promise<ShellState>;
   setCloseBehavior(value: CloseBehavior): Promise<ShellState>;
+  /** 外观 → 应用图标: a style id of shared/appIcons.ts (main refuses others); resolves once main applied it. */
+  setAppIcon?(id: string): Promise<ShellState>;
   setLocale(value: ShellLocale): Promise<void>;
   /** The resolved terms of the current UI locale (Settings → 通用 → 称呼); null = back to defaults. */
   setTerms?(value: ShellTermsPref | null): Promise<void>;

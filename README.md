@@ -70,10 +70,10 @@ other, while the app is closed.
 
 ## Download
 
-Current public release: **v0.2.2 — Beautiful World**. The 0.2 series uses the name Beautiful World. Downloads are on the
-[latest release page](https://github.com/senxiu-official/cutex-desktop/releases/latest).
+Download the desktop from the [latest release page](https://github.com/senxiu-official/cutex-desktop/releases/latest).
+The 0.2 series is called **Beautiful World**.
 
-| Platform | Package | What runs there |
+| Platform | Desktop package | What the platform supports |
 |---|---|---|
 | Windows 10 / 11 x64 | `cutex-desktop-<version>-windows-x64.zip` | cutex, agents and the desktop |
 | Linux x64 | `cutex-desktop-<version>-linux-x64.tar.gz` | cutex, agents and the desktop |
@@ -105,9 +105,9 @@ Hosts are updated separately, in Settings → Host backend updates. A short tour
 - [Quick start](docs/QUICKSTART.md) (Chinese, with an English summary)
 - [Known issues](docs/KNOWN-ISSUES.md) (also in the app: Settings → About)
 - [Changelog](CHANGELOG.md)
-- [Optional modules for Claude Science and NCI remote jobs](docs/install/ANU.md)
+- [Optional desktop modules](docs/install/OPTIONAL-MODULES.md)
 - [Architecture and product decisions](docs/DESIGN.md)
-- [Module contract](docs/desktop-modules.md), [writing a module](docs/module-dev-guide.md) and
+- [Module contract](docs/desktop-modules.md), [writing a module](docs/module-authoring.md) and
   [plugin examples](examples/README.md)
 
 ## Platform support

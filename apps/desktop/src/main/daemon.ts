@@ -57,6 +57,8 @@ import { RecentFeedTraffic, submitHttpTraceBuffer } from "./sendDiagnostics";
 import { notesApi, sideApi } from "./notesSideApi";
 import { sessionSearchApi } from "./sessionSearchApi";
 import { personalAssistantsApi } from "./personalAssistantsApi";
+import { AttentionFeed } from "./attentionFeed";
+import { ATTENTION_BATCH, isAttentionAgentId, isItemKey, isThrough, readAttentionSnapshot, type AttentionResult, type AttentionSnapshot } from "../shared/attention";
 import type { PaAgendaQuery, PaCalendarClear, PaCalendarImport, PaCancelInput, PaConfirmInput, PaCreateInput, PaNotesQuery, PaOwnerRequestsQuery, PaRequestsQuery, PaTemplateConfirmInput, PaTemplateStopInput, PaUpdateInput } from "../shared/personalAssistants";
 import type { SessionSearchQuery } from "../shared/sessionSearch";
 import type { ExportReply, ImportReply } from "./profileTransfer";
@@ -64,7 +66,11 @@ import { remoteJobsApi } from "./remoteJobsApi";
 import { followPanEvents, panApi } from "./panApi";
 import { TextRewrites, type RewriteOwner } from "./textRewrite";
 import type { TextRewriteRequest } from "../shared/textRewrite";
-import { featureProfileCreateBody, featureProfilePatchBody, isFeatureProfileId, parseFeatureProfileList, parseFeatureProfileReply, type FeatureProfile, type FeatureProfileCreate, type FeatureProfileListView, type FeatureProfilePatch } from "../shared/featureProfiles";
+import {
+  isRewriteTemplateId, parseRewriteGlobalRouteReply, parseRewriteTemplateList, parseRewriteTemplateReply, rewriteGlobalRouteBody, rewriteTemplateCreateBody, rewriteTemplatePatchBody,
+  type RewriteTemplate, type RewriteTemplateCreate, type RewriteTemplatePatch, type RewriteTemplateRoute, type StructuredRewriteRequest,
+} from "../shared/textRewriteV2";
+import { featureProfileCreateBody, featureProfilePatchBody, featureProfileTestBody, isFeatureProfileId, parseFeatureProfileList, parseFeatureProfileReply, parseFeatureProfileTestResult, type FeatureProfile, type FeatureProfileCreate, type FeatureProfileListView, type FeatureProfilePatch, type FeatureProfileTestRequest, type FeatureProfileTestResult } from "../shared/featureProfiles";
 import { BAIDU_PAN_FEATURE, type PanAppInput, type PanDownloadAction, type PanDownloadRequest } from "../shared/baiduPan";
 import type { InboundMailInput, MarkExternalInput, NciVerificationInput } from "../shared/remoteJobs";
 import type { NoteCreate, NotesQuery, NoteUpdate } from "../shared/notes";
@@ -148,6 +154,7 @@ import { ALARM_ID, type AlarmCancelResult, type AlarmList, type AlarmView } from
 import { asOwnerPin, OWNER_PIN_ID, OWNER_PINS_MAX_LIMIT, type OwnerPinChange, type OwnerPinList, type OwnerPinUpdateResult } from "../shared/ownerPins";
 import { USAGE_SOURCE_ID, USAGE_SOURCE_KINDS, type UsageSource, type UsageSourceCreate, type UsageSourceDeleteResult, type UsageSourcePatch, type UsageSourceResult, type UsageSourcesView } from "../shared/usageSources";
 import { SKILL_ARCHIVE_ID, type SkillArchiveList, type SkillArchiveRecord, type SkillArchiveResult } from "../shared/skillsArchive";
+import { copyRequestBody, copySelectionBody, isSkillRuntime, validCopyRequest, validCopySelection, type RuntimeSkillList, type RuntimeSkillsAnswer, type SkillCopyAnswer, type SkillCopyPreview, type SkillCopyPreviewAnswer, type SkillCopyRequest, type SkillCopyResult, type SkillCopySelection, type SkillRuntime } from "../shared/runtimeSkills";
 import { WORKFLOW_RUN_ID, type WorkflowRunAction, type WorkflowRunList, type WorkflowRunView } from "../shared/workflows";
 import type { RestoreCandidates } from "../shared/runtimeRestore";
 import type { QuotaContinueResult, QuotaContinueView } from "../shared/quotaContinue";
@@ -339,6 +346,13 @@ export class DaemonService implements DaemonApi {
   sideClose(sessionId: string, chatId: string) { return sideApi(this.requireClient()).sideClose(sessionId, chatId); }
   sessionSearch(query: SessionSearchQuery) { return sessionSearchApi(this.requireClient()).sessionSearch(query); }
   sessionSearchTurn(sessionId: string, turnId: string) { return sessionSearchApi(this.requireClient()).sessionSearchTurn(sessionId, turnId); }
+  paScopeRules(id: string) { return personalAssistantsApi(this.requireClient()).paScopeRules(id); }
+  paScopeRulesSave(id: string, body: import("../shared/personalAssistantsPhase1").PaScopeSaveInput) { return personalAssistantsApi(this.requireClient()).paScopeRulesSave(id, body); }
+  paBrief(id: string) { return personalAssistantsApi(this.requireClient()).paBrief(id); }
+  paBriefSchedule(id: string, body: import("../shared/personalAssistantsPhase1").PaBriefScheduleInput) { return personalAssistantsApi(this.requireClient()).paBriefSchedule(id, body); }
+  paReminderCreate(id: string, body: import("../shared/personalAssistantsPhase1").PaReminderCreateInput) { return personalAssistantsApi(this.requireClient()).paReminderCreate(id, body); }
+  ownerPinCreate(body: import("../shared/personalAssistantsPhase1").OwnerPinCreateInput) { return personalAssistantsApi(this.requireClient()).ownerPinCreate(body); }
+  paCreateOptions() { return personalAssistantsApi(this.requireClient()).paCreateOptions(); }
   paList(query?: { cursor?: string | null; limit?: number }) { return personalAssistantsApi(this.requireClient()).paList(query); }
   paGet(id: string) { return personalAssistantsApi(this.requireClient()).paGet(id); }
   paCreate(input: PaCreateInput) { return personalAssistantsApi(this.requireClient()).paCreate(input); }
@@ -381,6 +395,8 @@ export class DaemonService implements DaemonApi {
   private endpoint: DaemonEndpoint | null = null;
   private state: DaemonState = { kind: "connecting", baseUrl: "" };
   private hostFeed: EventFeed | null = null;
+  /** Design 061: this host's attentionChanged events (started by the first attention snapshot read). */
+  private attentionFeed: { client: CutexClient; feed: AttentionFeed } | null = null;
   private connectAttempt = 0;
   private connectRead: AbortController | null = null;
   private hostFeedAttempt = 0;
@@ -546,6 +562,8 @@ export class DaemonService implements DaemonApi {
     this.retryTimer = null;
     this.hostFeed?.stop();
     this.hostFeed = null;
+    this.attentionFeed?.feed.stop();
+    this.attentionFeed = null;
     for (const feed of this.sessionFeeds.values()) feed.stop();
     for (const watch of this.watches.values()) watch.close();
     this.watches.clear();
@@ -1666,6 +1684,14 @@ export class DaemonService implements DaemonApi {
     return caps;
   }
 
+  /** Main-only (跨主机同步 of 浏览器身份, cutex r297): four fixed routes, absent from DaemonApi / preload. */
+  browserIdentities(method: "GET" | "POST" | "PUT", route: "directory" | "desktop" | "sync" | "mutations", body?: unknown): Promise<unknown> {
+    const path = route === "directory" ? "/v2/browser-identities" : `/v2/browser-identities/${route}`;
+    const allowed = (route === "directory" && method === "GET") || (route === "sync" && method === "PUT") || ((route === "desktop" || route === "mutations") && method === "POST");
+    if (!allowed) return Promise.reject(new Error("invalid_browser_identity_route"));
+    return this.requireClient().request<unknown>(method, path, body === undefined ? {} : { body });
+  }
+
   /** Main-only: the fixed link-secret route is deliberately absent from DaemonApi/preload. */
   profileLinkRequest<T>(method: "GET" | "PUT", body?: unknown): Promise<T> {
     return this.requireClient().request<T>(method, "/v2/profile-link/secret", body === undefined ? {} : { body });
@@ -1977,6 +2003,33 @@ export class DaemonService implements DaemonApi {
   restoreSkill(archiveId: string): Promise<SkillArchiveResult> {
     if (typeof archiveId !== "string" || !SKILL_ARCHIVE_ID.test(archiveId)) throw new Error("bad archive id");
     return this.skillArchiveCall(`/v2/codex/skills/archive/${encodeURIComponent(archiveId)}/restore`, {});
+  }
+
+  // Runtime skills (cutex runtime-skills / runtime-skill-copy): the owner's per-runtime inventory and Codex ↔ Claude copy.
+  // Refusals (unsupported_runtime, skill_not_copyable, skill_copy_preview_stale …) come back as `ok: false`.
+  private async refusable<T, A>(call: () => Promise<T>, wrap: (value: T) => A): Promise<A | { ok: false; error: CutexRefusal }> {
+    try {
+      return wrap(await call());
+    } catch (error) {
+      const refusal = refusalOf(error);
+      if (refusal) return { ok: false, error: refusal };
+      throw error;
+    }
+  }
+
+  runtimeSkills(runtime: SkillRuntime): Promise<RuntimeSkillsAnswer> {
+    if (!isSkillRuntime(runtime)) throw new Error("bad runtime");
+    return this.refusable(() => this.requireClient().request<RuntimeSkillList>("GET", `/v2/runtime-skills?runtime=${runtime}`), (list) => ({ ok: true as const, list }));
+  }
+
+  previewSkillCopy(selection: SkillCopySelection): Promise<SkillCopyPreviewAnswer> {
+    if (!validCopySelection(selection)) throw new Error("bad skill copy selection");
+    return this.refusable(() => this.requireClient().request<SkillCopyPreview>("POST", "/v2/runtime-skills/copy/preview", { body: copySelectionBody(selection) }), (preview) => ({ ok: true as const, preview }));
+  }
+
+  copySkill(request: SkillCopyRequest): Promise<SkillCopyAnswer> {
+    if (!validCopyRequest(request)) throw new Error("bad skill copy request");
+    return this.refusable(() => this.requireClient().request<SkillCopyResult>("POST", "/v2/runtime-skills/copy", { body: copyRequestBody(request) }), (result) => ({ ok: true as const, result }));
   }
 
   /** `POST /v2/sessions/{id}/reapprove-paths` (session-path-reapproval, owner full token): approves the agent's current folders; starts nothing. */
@@ -2542,6 +2595,32 @@ export class DaemonService implements DaemonApi {
   /** `owner`: the asking renderer (main/index.ts passes event.sender); its reload / crash / close cancels the call. */
   textRewrite(request: TextRewriteRequest, owner?: RewriteOwner) { return this.textRewrites.run(this.requireClient(), request, owner); }
   cancelTextRewrite(requestId: string) { this.textRewrites.cancel(requestId); }
+  // 输入优化 v2 (shared/textRewriteV2.ts): the structured call shares the v1 slot, cancel and owner binding.
+  structuredTextRewrite(request: StructuredRewriteRequest, owner?: RewriteOwner) { return this.textRewrites.runStructured(this.requireClient(), request, owner); }
+  async textRewriteTemplates(): Promise<RewriteTemplate[]> {
+    return parseRewriteTemplateList(await this.requireClient().request<unknown>("GET", "/v2/text-rewrite/templates"));
+  }
+  async createTextRewriteTemplate(input: RewriteTemplateCreate): Promise<RewriteTemplate> {
+    const body = rewriteTemplateCreateBody(input);
+    return parseRewriteTemplateReply(await this.requireClient().request<unknown>("POST", "/v2/text-rewrite/templates", { body }));
+  }
+  async patchTextRewriteTemplate(id: string, patch: RewriteTemplatePatch): Promise<RewriteTemplate> {
+    if (!isRewriteTemplateId(id)) throw new Error("invalid template id");
+    const body = rewriteTemplatePatchBody(patch);
+    return parseRewriteTemplateReply(await this.requireClient().request<unknown>("PATCH", `/v2/text-rewrite/templates/${encodeURIComponent(id)}`, { body }));
+  }
+  // r298 (text-rewrite-global-route): the global Profile order templates follow.
+  async textRewriteRoute(): Promise<RewriteTemplateRoute> {
+    return parseRewriteGlobalRouteReply(await this.requireClient().request<unknown>("GET", "/v2/text-rewrite/route"));
+  }
+  async patchTextRewriteRoute(route: RewriteTemplateRoute): Promise<RewriteTemplateRoute> {
+    const body = rewriteGlobalRouteBody(route);
+    return parseRewriteGlobalRouteReply(await this.requireClient().request<unknown>("PATCH", "/v2/text-rewrite/route", { body }));
+  }
+  async deleteTextRewriteTemplate(id: string): Promise<void> {
+    if (!isRewriteTemplateId(id)) throw new Error("invalid template id");
+    await this.requireClient().request<unknown>("DELETE", `/v2/text-rewrite/templates/${encodeURIComponent(id)}`);
+  }
 
   // 功能 Profile (shared/featureProfiles.ts): bodies rebuilt from known fields; only the parsed view goes back (no key).
   async featureProfiles(): Promise<FeatureProfileListView> {
@@ -2559,6 +2638,11 @@ export class DaemonService implements DaemonApi {
   async deleteFeatureProfile(id: string): Promise<void> {
     if (!isFeatureProfileId(id)) throw new Error("invalid feature profile id");
     await this.requireClient().request<unknown>("DELETE", `/v2/feature-profiles/${encodeURIComponent(id)}`);
+  }
+  /** 测试连接: the body rebuilt from known fields (the draft's key goes to the host only); the parsed result back. */
+  async testFeatureProfile(request: FeatureProfileTestRequest): Promise<FeatureProfileTestResult> {
+    const body = featureProfileTestBody(request);
+    return parseFeatureProfileTestResult(await this.requireClient().request<unknown>("POST", "/v2/feature-profiles/test", { body }));
   }
 
   pruneRuntimes(ids: string[]) { return this.requireClient().pruneRuntimes(ids); }
@@ -2814,6 +2898,49 @@ export class DaemonService implements DaemonApi {
       const r = await this.requireClient().request<{ tokenId?: unknown; acknowledged?: unknown }>("POST", `/v2/users/owner/new-devices/${encodeURIComponent(tokenId)}/ack`);
       return { tokenId: typeof r?.tokenId === "string" ? r.tokenId : tokenId, acknowledged: r?.acknowledged === true };
     });
+  }
+
+  // ---------- read state (design 061, cutex `attention-state-v1`, shared/attention.ts) ----------
+
+  /** `GET /v2/attention`: the owner person's read / 需要你 state. Starts following its `attentionChanged` events. */
+  attention(): Promise<AttentionResult<AttentionSnapshot>> {
+    return this.attentionCall(async () => {
+      const client = this.requireClient();
+      const snapshot = readAttentionSnapshot(await client.request<unknown>("GET", "/v2/attention", { background: true }));
+      if (!snapshot) return { ok: false, code: "attention_unavailable" };
+      if (this.client === client) {
+        if (this.attentionFeed?.client !== client) {
+          this.attentionFeed?.feed.stop();
+          this.attentionFeed = { client, feed: new AttentionFeed(client, (change) => { if (this.client === client) this.emit("attentionChanged", change); }, (state) => { if (this.client === client) this.emit("attentionFeed", state); }) };
+        }
+        this.attentionFeed.feed.follow(snapshot.cursor);
+      }
+      return { ok: true, value: snapshot };
+    });
+  }
+
+  /** `POST /v2/attention/read`: the person saw exactly these replies (tokens from the snapshot; ≤ 100). */
+  attentionRead(reads: readonly { agentId: string; through: string }[]): Promise<AttentionResult<{ changed: number }>> {
+    if (!Array.isArray(reads) || reads.length === 0 || reads.length > ATTENTION_BATCH || !reads.every((r) => isAttentionAgentId(r?.agentId) && isThrough(r?.through))) throw new Error("bad attention read");
+    const body = { reads: reads.map((r) => ({ agentId: r.agentId, through: r.through })) };
+    return this.attentionCall(async () => ({ ok: true, value: changedOf(await this.requireClient().request<unknown>("POST", "/v2/attention/read", { body })) }));
+  }
+
+  /** `POST /v2/attention/dismiss`: hide these 需要你 items for the person on every device (keys from the snapshot; ≤ 100). */
+  attentionDismiss(items: readonly { agentId: string; itemKey: string }[]): Promise<AttentionResult<{ changed: number }>> {
+    if (!Array.isArray(items) || items.length === 0 || items.length > ATTENTION_BATCH || !items.every((i) => isAttentionAgentId(i?.agentId) && isItemKey(i?.itemKey))) throw new Error("bad attention dismissal");
+    const body = { items: items.map((i) => ({ agentId: i.agentId, itemKey: i.itemKey })) };
+    return this.attentionCall(async () => ({ ok: true, value: changedOf(await this.requireClient().request<unknown>("POST", "/v2/attention/dismiss", { body })) }));
+  }
+
+  /** Refusals and an unreachable / disconnected host as values (`code`: the cutex error code, else `unavailable`). */
+  private async attentionCall<T>(run: () => Promise<AttentionResult<T>>): Promise<AttentionResult<T>> {
+    try {
+      return await run();
+    } catch (error) {
+      if (error instanceof CutexApiError && !error.code.startsWith("http_")) return { ok: false, code: error.code };
+      return { ok: false, code: "unavailable" };
+    }
   }
 
   // ---------- online desktops (cutex `client-remote-close`, shared/remoteClose.ts) ----------
@@ -4717,3 +4844,7 @@ export class DaemonService implements DaemonApi {
   }
 }
 
+function changedOf(v: unknown): { changed: number } {
+  const n = (v as { changed?: unknown } | null)?.changed;
+  return { changed: typeof n === "number" && Number.isSafeInteger(n) && n >= 0 ? n : 0 };
+}

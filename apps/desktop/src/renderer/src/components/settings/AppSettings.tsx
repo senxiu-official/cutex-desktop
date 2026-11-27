@@ -1,7 +1,7 @@
 import { UserLayoutSettings } from "../UserLayoutMemory";
 import { agentFeaturesOf, lacks } from "../../lib/agentFeatures";
 // Settings pages for this machine (group 「应用」): 通用 (+ 更新与诊断 from the updater module), 对话,
-// 左侧栏 (+ 会话两侧), 状态显示 — plus 归档 (数据) and 键盘快捷键, 关于 (系统: versions, licenses, the dragon). Desktop-local prefs live in localStorage
+// 左侧栏 (+ 会话两侧) — plus 归档 (数据) and 键盘快捷键, 关于 (系统: versions, licenses, the app icon). Desktop-local prefs live in localStorage
 // (lib/prefs, lib/appearance) or the main process (close behaviour, update interval).
 import { useEffect, useState } from "react";
 import { Trash2 } from "lucide-react";
@@ -25,7 +25,6 @@ import { PERF_MODES, setUiPref, useUiPrefs, type PerfMode } from "../../lib/pref
 import { setMultiWindow, useMultiWindow } from "../../lib/multiWindowPref";
 import { displayKey, shortcutsFor } from "../../lib/shortcuts";
 import { KeybindingsSection } from "./KeybindingsSection";
-import { PromptEnhanceSection } from "./PromptEnhanceSettings";
 import { GestureGuide } from "./GestureGuide";
 import { useSidebarModel } from "../../lib/sidebarView";
 import { useTargetFeatures, useTargetHostId, useTargetSelect, useTargetSidebar } from "../../lib/targetHost";
@@ -33,6 +32,7 @@ import { packageLabel } from "../../lib/runtimePackages";
 import { refreshRuntimePackages } from "../../lib/runtimePackageStore";
 import { useHostRuntimePackages, useOutdatedAgentCount } from "../../lib/runtimePackagesView";
 import { buildLabel, cutexBuildText, settingsAnchorId } from "../../lib/settingsNav";
+import { INPUT_REFINEMENT_SECTION } from "../../lib/inputRefinementNav";
 import { channelLabel, unsupportedHintKey, updateButtonVisible, updateSummary, useUpdateStatus } from "../../lib/update";
 import { formatAbsolute, formatWhen } from "../../lib/time";
 import { BACKEND_UPGRADE_FEATURE } from "../../../../shared/backendUpgrade";
@@ -49,7 +49,7 @@ import { AboutDragon } from "./AboutDragon";
 import { SidebarSettingsCards } from "./regions/SidebarSettings";
 import { OwnerNotifySection } from "./OwnerNotifySettings";
 import { Button, IconButton, useCompactSettings, EmptyState, ErrorNote, HintAction, LinkRow, ListRow, PartHeading, PartNav, Section, Segmented, Select, SettingRow, SubPageRow, TextLink, Toggle, SettingsGroup } from "./Form";
-import { StatusPlaceTable } from "./StatusPlaceTable";
+import { StatusRowChecks } from "./StatusItemChecks";
 import { TermsSection } from "./TermsSettings";
 import { SettingsSections } from "../../modules/Outlet";
 import { services } from "../../modules/app";
@@ -465,7 +465,8 @@ export function UpdatesPage() {
 
 // ---- 对话 ----
 
-const CONVERSATION_INPUT_SECTIONS = ["shell.composer"] as const;
+// 输入优化 (module input-refinement; owner 2026-11-26) sits right after 输入区: its card, not a page of its own.
+const CONVERSATION_INPUT_SECTIONS = ["shell.composer", INPUT_REFINEMENT_SECTION] as const;
 const CONVERSATION_LAYOUT_SECTIONS = ["shell.convWidth", "shell.gutter", "shell.shelfOnly"] as const;
 const CONVERSATION_SIDE_SECTIONS = ["side-chat.settings", "side-chat.summarySettings"] as const;
 const CONVERSATION_PLACED_SECTIONS = [...CONVERSATION_INPUT_SECTIONS, ...CONVERSATION_LAYOUT_SECTIONS, ...CONVERSATION_SIDE_SECTIONS];
@@ -553,10 +554,6 @@ export function ConversationPage() {
         )}
         <SettingRow agents="none" source="local" label={t("conversation.timelineIntro")} hint={t("conversation.timelineIntroHint")}>
           <Toggle checked={ui.timelineIntro} onChange={(v) => setUiPref("timelineIntro", v)} />
-        </SettingRow>
-        {/* 教学模式 (owner 2026-11-17, docs/design/teaching-mode.md P1): off by default; this device only. */}
-        <SettingRow agents="none" source="local" label={t("conversation.teachingMode")} info={t("conversation.teachingModeHint")}>
-          <Toggle checked={ui.teachingMode} onChange={(v) => setUiPref("teachingMode", v)} />
         </SettingRow>
       </Section>
 
@@ -679,8 +676,8 @@ function HostImageBusyRow() {
 
 /**
  * 输入区 (owner 2026-10-18: settings by screen region): sending (from 对话 → 输入框), the 「接下来」 panel,
- * what sits right above the input (「需要你」 strip, status row) and the 底栏 below it. Where status items
- * show and the capsule moved to their own page, 状态 (StatusPage; owner 2026-10-18: neither is the input).
+ * what sits right above the input (「需要你」 strip, status row: which items it shows, owner 2026-11-28 — the 状态显示
+ * page is gone) and the 底栏 below it. The capsule's settings are its module page (modules/status-capsule).
  */
 /** 输入区: the 会话 page's input-area cards (design 006 v1: was its own page `composer`, now a section of 会话). */
 export function ComposerPage() {
@@ -728,8 +725,16 @@ export function ComposerPage() {
         {/* 运行中的图片消息 is the host's (r264): on 协作 next to 排队顺序; here only a way there. */}
         {imageSteer && !panel && <LinkRow agents="none" source="local" label={t("queue.imageBusy")} link={t("queue.imageBusy.link")} onClick={() => openSettings("collab", { anchor: "imageBusy" })} />}
       </Section>
-      {/* 提示词增强 (owner 2026-11-24, experimental): only where the host offers text-rewrite-v1. */}
-      {!panel && <PromptEnhanceSection />}
+      {/* 「@ 列表顺序」 (owner 2026-11-28): only the order of a plain `@`'s groups; per device. */}
+      <Section id={settingsAnchorId("atMention")} title={t("settings.atMention")}>
+        <SettingRow agents="none" source="local" label={t("settings.atMentionOrder")} hint={t("settings.atMentionOrderHint")}>
+          <Segmented
+            value={ui.atMentionOrder}
+            options={(["agents", "profiles"] as const).map((v) => ({ value: v, label: t(`settings.atMentionOrder.${v}`) }))}
+            onChange={(v) => setUiPref("atMentionOrder", v)}
+          />
+        </SettingRow>
+      </Section>
       <Section id={settingsAnchorId("queuePanel")} title={t("queue.panelFold")}>
         <SettingRow agents="none" source="local" label={t("shell.composer.panelOpen")} hint={t(ui.queuePanelFold === "auto" ? "queue.panelFold.autoHint" : "queue.panelFold.openHint")}>
           <Segmented
@@ -751,32 +756,14 @@ export function ComposerPage() {
         <SettingRow agents="none" source="local" label={t("appearance.needsYouStrip")} hint={t("appearance.needsYouStripHint")}>
           <Toggle checked={ui.needsYouStrip} onChange={(v) => setUiPref("needsYouStrip", v)} />
         </SettingRow>
-        <LinkRow agents="none" source="local" label={t("shell.composer.barItems")} hint={t("shell.composer.barItemsHint")} link={t("shell.composer.barItemsLink")} onClick={() => openSettings("status")} />
+        {/* Which items the status row shows (owner 2026-11-28: here, where the row is; the 状态显示 page is gone). */}
+        <StatusRowChecks />
       </Section>
       <Section id={settingsAnchorId("inputBar")} title={t("shell.composer.inputBar")} hint={t("shell.composer.inputBarHint")}>
         <SettingRow agents="none" source="local" label={t("composer.profileAvatar")} info={t("composer.profileAvatarHint")}>
           <Toggle checked={ui.composerProfileAvatar} onChange={(v) => setUiPref("composerProfileAvatar", v)} />
         </SettingRow>
       </Section>
-    </>
-  );
-}
-
-// ---- 状态 ----
-
-/**
- * 状态 (owner 2026-10-18: split out of 输入区 again): where status items show — the shell's generic
- * placement table, reachable with the capsule module off (it then says why capsule choices do not show)
- * — and the sections modules add for their status surfaces (the capsule's, module status-capsule).
- */
-export function StatusPage() {
-  const { t } = useI18n();
-  return (
-    <>
-      <Section id={settingsAnchorId("places")} title={t("shell.capsule.places")} hint={t("shell.statusPlace.hint")}>
-        <StatusPlaceTable />
-      </Section>
-      <SettingsSections page="status" />
     </>
   );
 }
@@ -848,8 +835,19 @@ export function ArchivePage() {
   return (
     <>
       <ArchiveBehaviour />
+      <IdleEntry />
       <ArchivedList />
     </>
+  );
+}
+
+/** 整理不常用的智能体 (modules/archive/IdleAgents): one row into the sub-page. */
+function IdleEntry() {
+  const { t } = useI18n();
+  return (
+    <Section id={settingsAnchorId("idle")} title={t("archive.idle.page")}>
+      <SubPageRow title={t("archive.idle.entry")} onOpen={() => useApp.getState().openSettings("archive", { sub: "idle" })} />
+    </Section>
   );
 }
 
@@ -959,7 +957,7 @@ export function ArchiveBehaviour() {
 /**
  * Settings → 关于: the version card on top — this desktop (version, where it stands, 更新 when one is
  * ready, → 更新与诊断), the connected host's cutex (→ 主机后端更新) and its runtime (→ 运行时), with the
- * exact builds under 详细信息 — then the about module's cards (已知问题, 更新记录, 项目) and the dragon.
+ * exact builds under 详细信息 — then the about module's cards (已知问题, 更新记录, 项目) and the app icon (AboutDragon).
  */
 export function AboutPage() {
   const { t } = useI18n();

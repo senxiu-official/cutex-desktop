@@ -11,47 +11,10 @@
 .launch-intro-title { max-width: 44rem; font-size: clamp(1.75rem, calc(4 * var(--cqw, 1vw)), 2.5rem); line-height: 1.2; overflow-wrap: anywhere; text-wrap: balance; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 .launch-intro-title-long { font-size: clamp(1.125rem, calc(3 * var(--cqw, 1vw)), 1.75rem); -webkit-line-clamp: 4; }
 /* The art keeps its fixed anchor unless the dock (--launch-dock-h, measured by LaunchDock) grows
-   past it: then it shrinks so it never runs under an error or notice at the top of the dock (2.5rem:
-   the picked pose and its caption hang 1.5rem below the box, .launch-portrait-selected). */
+   past it: then it shrinks so it never runs under an error or notice at the top of the dock. */
 .launch-intro-with-art { top: 1rem; bottom: max(23rem, calc(var(--launch-dock-h, 0px) + 2.5rem)); width: calc(100% - 2rem); max-width: 46rem; margin-inline: auto; padding-inline: 0; z-index: 1; }
-.launch-portrait-stage { width: 100%; height: 100%; min-height: 0; pointer-events: auto; }
-.launch-portrait-strip { display: grid; grid-template-rows: minmax(0, 1fr) auto; width: 100%; height: 100%; margin-inline: auto; }
-.launch-portrait-card { position: relative; display: grid; grid-row: span 2; grid-template-rows: subgrid; min-width: 0; min-height: 0; background: transparent; border-inline-end: 1px solid color-mix(in srgb, var(--fg-muted) 12%, transparent); isolation: isolate; transition: filter 200ms ease; }
-.launch-portrait-card:last-child { border-inline-end: 0; }
-/* One shared lower crop/fade line; optical scale accounts for different source eye lines. */
-.launch-portrait-pick { position: relative; min-height: 0; width: 100%; }
 .launch-portrait-figure { position: absolute; inset: 0; overflow: hidden; mask-image: linear-gradient(to bottom, #000 calc(100% - 5rem), transparent 100%); }
-/* Keep a small image bleed below the shared crop so optical offsets never lift a raw hem into view. */
-.launch-portrait-card img { position: absolute; max-width: none; height: auto; max-height: calc(100% + 20px); object-fit: contain; object-position: center bottom; left: 50%; bottom: -20px; transform: translateX(-50%); filter: grayscale(1); }
-.launch-portrait-card.is-muted { filter: brightness(.72); }
-/* The pointed-at portrait rises and its name is underlined: dimming alone read as "the dark one is picked". */
-.launch-portrait-figure { transition: transform 200ms ease; }
-.launch-portrait-name { text-decoration: underline 2px transparent; text-underline-offset: .3em; transition: text-decoration-color 200ms ease; }
-.launch-portrait-card:hover .launch-portrait-figure, .launch-portrait-card:focus-within .launch-portrait-figure { transform: translateY(-6px); }
-.launch-portrait-card:hover .launch-portrait-name, .launch-portrait-card:focus-within .launch-portrait-name { text-decoration-color: var(--accent); }
-.launch-portrait-card:focus-within, .launch-portrait-card:hover { z-index: 3; }
-.launch-portrait-pick:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
-.launch-portrait-caption { position: relative; min-height: 4.5rem; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: .35rem; padding: .4rem .2rem .5rem; }
-.launch-portrait-name { color: var(--fg); font-family: var(--font-sans); font-size: 1.6rem; font-weight: 400; line-height: 1.2; letter-spacing: -.045em; }
-.launch-portrait-profiles { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: center; gap: .15rem; width: 100%; }
-.launch-portrait-profile { display: inline-flex; max-width: 100%; min-width: 0; align-items: center; justify-content: center; border: 0; border-radius: 0; padding: .25rem .5rem; color: var(--fg-muted); font-size: .75rem; line-height: 1.3; }
-.launch-portrait-profile span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.launch-portrait-profile:hover, .launch-portrait-profile[aria-pressed=true] { background: transparent; color: var(--fg); }
-.launch-portrait-profile[aria-pressed=true] { box-shadow: none; }
-.launch-portrait-profile:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.launch-portrait-profile:disabled { opacity: .45; }
-.launch-portrait-selected { position: relative; display: grid; grid-template-rows: minmax(0, 1fr) auto; width: 100%; height: calc(100% + 1.5rem); }
-.launch-victory { position: relative; width: 100%; height: 100%; min-height: 0; }
-.launch-victory.is-entering { animation: launch-victory-in 350ms ease-out both; }
 .launch-art-greeting { position: absolute; top: 100%; margin-top: 3rem; width: 100%; padding-inline: 1rem; font-size: clamp(1.1rem, calc(2.5 * var(--cqw, 1vw)), 1.5rem); line-height: 1.5; font-weight: 400; color: var(--fg-muted); text-wrap: balance; overflow-wrap: anywhere; pointer-events: none; }
-.launch-victory img { position: absolute; top: 0; left: 50%; width: auto; max-width: 100%; height: 100%; object-fit: contain; transform: translateX(-50%); }
-.launch-victory-sharp { filter: grayscale(1); mask-image: linear-gradient(to bottom, #000 84%, transparent 100%), linear-gradient(to right, transparent, #000 4%, #000 96%, transparent); mask-composite: intersect; }
-.launch-victory-soft { filter: grayscale(1) blur(8px); opacity: .45; mask-image: linear-gradient(to bottom, #000 82%, transparent 100%), linear-gradient(to right, transparent, #000 2%, #000 98%, transparent); mask-composite: intersect; }
-@keyframes launch-victory-in { from { opacity: 0; transform: translateY(.5rem) scale(.96); } to { opacity: 1; transform: none; } }
-@media (prefers-reduced-motion: reduce) {
-  .launch-portrait-card, .launch-portrait-figure, .launch-portrait-name { transition: none; }
-  .launch-victory.is-entering { animation: none; }
-}
 .launch-page:has(.launch-intro-with-art) > .launch-dock { z-index: 2; }
 .launch-dock { position: relative; z-index: 1; flex-shrink: 0; width: 100%; max-width: 48rem; margin: auto auto 0; padding: 0 1rem .75rem; }
 .launch-page[data-wide] .launch-dock { max-width: 56rem; }
@@ -129,8 +92,6 @@
 .launch-profile-choice:hover { background: var(--surface); }
 .launch-profile-choice:disabled { opacity: .4; }
 /* Narrow page (≤ 520px). */
-.launch-page[data-narrow] .launch-portrait-name { font-size: 1.05rem; letter-spacing: -.04em; }
-.launch-page[data-narrow] .launch-portrait-profile { font-size: .65rem; padding-inline: .15rem; }
 .launch-page[data-narrow] .launch-intro-with-art { bottom: max(27rem, calc(var(--launch-dock-h, 0px) + 2.5rem)); }
 /* The quick-chat greeting hangs 3rem below the art (two lines at most): keep its room above the dock. */
 .launch-page .launch-intro-with-greeting { bottom: max(23rem, calc(var(--launch-dock-h, 0px) + 8rem)); }
@@ -151,3 +112,44 @@
 .launch-page[data-short] .launch-intro-title { font-size: 1.75rem; }
 .launch-page[data-short] :is(.launch-intro-icon, .launch-intro > p) { display: none; }
 .launch-page[data-shorter] .launch-intro { display: none; }
+
+/* New Agent page opening (owner 2026-11-27, components/LaunchProviderColumns): provider columns left to right. Top: the
+   provider's artwork (the 启动页立绘 slot) or its name as large quiet text; below: Profile chips with avatars. Without
+   any artwork the block sits where the welcome line was; with artwork it takes the portraits' frame. The artwork's
+   look (grey today) is one variable, so coloured artwork only changes --launch-art-filter. */
+.launch-page { --launch-art-filter: grayscale(1); }
+.launch-intro-columns { pointer-events: auto; }
+.launch-intro-columns .launch-art-greeting { text-align: center; }
+.launch-intro-columns:not(.launch-intro-with-art) { overflow: visible; }
+.launch-columns { display: grid; width: 100%; max-width: 64rem; margin-inline: auto; column-gap: .5rem; }
+.launch-intro-columns.launch-intro-with-art { max-width: 64rem; }
+/* Columns hang nothing below their box: the artwork opening reaches down to just above the dock (more room for chips). */
+.launch-page .launch-intro-columns.launch-intro-with-art:not(.launch-intro-with-greeting) { bottom: calc(var(--launch-dock-h, 0px) + .75rem); }
+/* Text only: one row of equal columns (at most 11rem); on a narrow page they shrink and long names truncate. */
+.launch-columns:not(.launch-columns-art) { display: flex; flex-wrap: nowrap; justify-content: center; align-items: flex-start; gap: 1rem; max-width: 84rem; }
+.launch-columns:not(.launch-columns-art) > .launch-column { flex: 1 1 0; min-width: 0; max-width: 11rem; }
+.launch-columns-art { height: 100%; grid-template-rows: minmax(0, 1fr) auto; }
+.launch-column { position: relative; display: flex; flex-direction: column; align-items: center; min-width: 0; transition: filter 200ms ease, opacity 200ms ease; }
+.launch-columns-art > .launch-column { display: grid; grid-row: span 2; grid-template-rows: subgrid; align-items: stretch; justify-items: center; min-height: 0; border-inline-end: 1px solid color-mix(in srgb, var(--fg-muted) 12%, transparent); }
+.launch-columns-art > .launch-column:last-child { border-inline-end: 0; }
+.launch-column.is-muted { filter: brightness(.8); }
+.launch-column.is-unavailable { opacity: .45; }
+.launch-column-top { position: relative; display: flex; min-height: 0; width: 100%; align-items: flex-end; justify-content: center; padding-bottom: .5rem; }
+.launch-column-top img { position: absolute; max-width: none; height: auto; max-height: calc(100% + 20px); object-fit: contain; object-position: center bottom; left: 50%; bottom: -20px; transform: translateX(-50%); filter: var(--launch-art-filter); }
+.launch-column-top .launch-portrait-figure { transition: transform 200ms ease; }
+.launch-column:hover .launch-portrait-figure { transform: translateY(-6px); }
+.launch-column-caption { display: flex; min-width: 0; width: 100%; flex-direction: column; align-items: center; gap: .5rem; padding: .4rem .25rem .5rem; }
+.launch-column-title { display: inline-flex; max-width: 100%; overflow: hidden; align-items: baseline; gap: .4rem; color: var(--fg); font-size: clamp(1.1rem, calc(2.2 * var(--cqw, 1vw)), 1.6rem); font-weight: 400; line-height: 1.2; letter-spacing: -.03em; white-space: nowrap; }
+.launch-column-name { display: inline-flex; align-items: baseline; gap: .4rem; color: var(--fg); font-size: 1.15rem; line-height: 1.2; letter-spacing: -.03em; }
+.launch-column-auto { border-radius: 999px; padding: .05rem .45rem; background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); font-size: .7rem; letter-spacing: 0; }
+.launch-column-chips { display: flex; width: 100%; max-width: 11rem; flex-direction: column; align-items: stretch; gap: .3rem; }
+.launch-column-chip { display: flex; min-width: 0; align-items: center; justify-content: flex-start; gap: .4rem; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); padding: .2rem .65rem .2rem .25rem; color: var(--fg-muted); font-size: .8rem; line-height: 1.3; transition: border-color 150ms ease, background-color 150ms ease, color 150ms ease; }
+.launch-column-chip-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.launch-column-chip:hover:not(:disabled) { background: var(--surface-2); color: var(--fg); }
+.launch-column-chip[aria-pressed=true] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--surface)); color: var(--fg); font-weight: 500; }
+.launch-column-chip:disabled { opacity: .5; cursor: default; }
+.launch-column-chip:focus-visible, .launch-column-top:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.launch-column-more { align-self: center; justify-content: center; padding-inline: .65rem; color: var(--fg-muted); }
+.launch-page[data-narrow] .launch-column-chip { padding-inline: .2rem .4rem; font-size: .7rem; }
+.launch-page[data-narrow] .launch-column-title { font-size: 1.05rem; }
+@media (prefers-reduced-motion: reduce) { .launch-column, .launch-column-chip, .launch-column-top .launch-portrait-figure { transition: none; } }

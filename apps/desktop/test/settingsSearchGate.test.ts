@@ -38,10 +38,10 @@ const PENDING = { isOwner: false, pending: true };
 it("the page header picks a host only for host pages and pages with a host part", () => {
   const pages = PAGES.filter((entry) => settingsPageHasHostPicker(entry.item)).map((entry) => entry.item.page).sort();
   expect(pages).toEqual([
-    "access", "archive", "backend", "browser", "collab", "defaults", "feature-profiles", "hooks", "instructions", "mcp", "nci",
-    "notifications", "plugins", "profiles", "proxy", "runtime", "service-notifications", "skills", "storage", "usage",
+    "access", "archive", "backend", "browser", "collab", "defaults", "hooks", "input-refinement-detail", "instructions", "mcp", "nci",
+    "notifications", "plugins", "profiles", "proxy", "runtime", "runtime-config", "service-notifications", "skills", "storage", "usage",
   ]);
-  for (const page of ["general", "appearance", "sidebar", "conversation", "sides", "status", "tray", "desktop", "me", "hosts", "modules", "shortcuts", "whats-new", "updates", "about", "help"]) {
+  for (const page of ["general", "appearance", "sidebar", "conversation", "sides", "tray", "desktop", "me", "hosts", "modules", "shortcuts", "whats-new", "updates", "about", "help"]) {
     expect(PAGES.some((entry) => entry.item.page === page), page).toBe(true);
     expect(pages, page).not.toContain(page);
   }

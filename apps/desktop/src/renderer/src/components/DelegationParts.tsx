@@ -5,6 +5,7 @@ import type { DelegationStatus, DelegationWait, StatusGlyph, StatusTone } from "
 import { blockedReasonKey, continuationOverdue, continuationTrailing } from "../lib/continuationWait";
 import { formatAbsolute, formatAt, useClock } from "../lib/time";
 import { useStatusWord } from "../lib/delegationsView";
+import { STATUS_TIP_WORD } from "../lib/statusTip";
 import { taskTag } from "../lib/tasks";
 import { useI18n } from "../i18n";
 
@@ -83,21 +84,26 @@ export function useContinuationText(cont: ContinuationWait | undefined, legacy?:
   return { trailing, hint, overdue };
 }
 
-export function DelegationStatusMark({ status, name, trailing, error, className = "" }: { status: DelegationStatus; name: string; trailing?: string | null; error?: string | null; className?: string }) {
+/** The hover text of a delegation's status word: the continuation, wait or status hint (undefined: none). */
+export function useDelegationStatusHint(status: DelegationStatus): string | undefined {
   const { t } = useI18n();
+  const cont = useContinuationText(status.cont, status.wait);
+  if (status.cont) return cont.hint;
+  const deadline = status.wait?.timeoutAt ? Date.parse(status.wait.timeoutAt) : NaN;
+  if (status.wait) return [t("delegation.wait.hint"), status.wait.note, Number.isFinite(deadline) ? formatAbsolute(deadline / 1000) : null].filter(Boolean).join("\n");
+  return hintText(status, t);
+}
+
+export function DelegationStatusMark({ status, name, trailing, error, className = "" }: { status: DelegationStatus; name: string; trailing?: string | null; error?: string | null; className?: string }) {
   const word = useStatusWord()(status, name);
-  const statusHint = hintText(status, t);
   // A delegation_await: what it waits for in place of any time (its attempt's run time is the finished turn's).
   const waitText = useWaitText()(status.wait);
   if (status.wait) trailing = waitText;
-  const deadline = status.wait?.timeoutAt ? Date.parse(status.wait.timeoutAt) : NaN;
-  let hint = status.wait ? [t("delegation.wait.hint"), status.wait.note, Number.isFinite(deadline) ? formatAbsolute(deadline / 1000) : null].filter(Boolean).join("\n") : statusHint;
+  const hint = useDelegationStatusHint(status);
   // A yielded wait (r290 P14): when it continues in place of the ended attempt's run time.
   const cont = useContinuationText(status.cont, status.wait);
-  if (status.cont) {
-    trailing = cont.trailing;
-    hint = cont.hint;
-  }
+  if (status.cont) trailing = cont.trailing;
+  const tip = [hint, error].filter(Boolean).join("\n") || undefined;
   // The word stays whole only beside a wait text (a bare 自动继续已到期 truncates like any word).
   const long = (!!status.wait && !status.cont) || (!!status.cont && !!trailing);
   const wordTone = status.dangerText ? "text-danger" : status.tone === "danger" ? "text-danger" : status.tone === "warn" ? "text-warn" : "text-muted";
@@ -105,11 +111,11 @@ export function DelegationStatusMark({ status, name, trailing, error, className 
     <span className={`inline-flex min-w-0 items-center gap-1 ${className}`}>
       <DelegationGlyph glyph={status.glyph} tone={status.tone} />
       {/* A wait's text is longer than a time: it gives way first, the status word stays whole. */}
-      <span className={`${long ? "shrink-0" : "truncate"} ${wordTone} ${error || hint ? "cursor-help underline decoration-dotted underline-offset-2" : ""}`} title={[hint, error].filter(Boolean).join("\n") || undefined}>
+      <span className={`${long ? "shrink-0" : "truncate"} ${wordTone} ${tip ? STATUS_TIP_WORD : ""}`} data-tip={tip} data-delegation-status-word="">
         {word}
       </span>
       {/* Past its time and still waiting: a muted warning (owner 2026-11-25), never 「即将」. */}
-      {trailing && <span className={`${long ? "min-w-0 truncate" : "shrink-0"} ${status.cont && cont.overdue ? "text-warn-text/80" : "text-subtle"} tabular-nums`} data-cont-overdue={status.cont && cont.overdue ? "" : undefined} title={long ? hint : undefined}>· {trailing}</span>}
+      {trailing && <span className={`${long ? "min-w-0 truncate" : "shrink-0"} ${status.cont && cont.overdue ? "text-warn-text/80" : "text-subtle"} tabular-nums`} data-cont-overdue={status.cont && cont.overdue ? "" : undefined} data-tip={long ? hint : undefined}>· {trailing}</span>}
     </span>
   );
 }

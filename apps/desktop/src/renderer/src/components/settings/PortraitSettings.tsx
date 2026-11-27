@@ -7,7 +7,7 @@
 // Director portraits, other icons and colours stay. 「都换成当前风格」 stores the style's pick (字母: clears), 「重新分配」
 // a fresh pick within the same style. Both name the hosts and count, ask in place (medium risk) and keep one undo.
 // After a pack was replaced with fewer / renamed pictures, a notice counts the agents shown with a stand-in and
-// 「修复缺图」 writes the stand-ins. 打开头像包文件夹 / 重新扫描: the owner's packs in userData. The card keeps its
+// 「修复缺图」 writes the stand-ins. 完整头像主题 (./PortraitLibrary): download the bundled pack's full themes (owner 2026-11-27). 打开头像包文件夹 / 重新扫描: the owner's packs in userData. The card keeps its
 // `portraits` anchor (search, links).
 import { useMemo, useState } from "react";
 import { FolderOpen, RefreshCw } from "lucide-react";
@@ -20,6 +20,7 @@ import { canOpenPortraitPackFolder, fallenBack, familyMismatched, loadPortraitPa
 import { agentsForPortraits, applyPortraitChanges, undoPortraitChanges, usePortraitUndo } from "../../lib/portraitAssign";
 import { settingsAnchorId } from "../../lib/settingsNav";
 import { AvatarStylePicker } from "./AvatarStylePicker";
+import { PortraitLibrarySection } from "./PortraitLibrary";
 import { SettingsRiskConfirmation } from "./SettingsRiskConfirmation";
 import { Button, Notice, Section, SettingsGroup } from "./Form";
 
@@ -93,6 +94,7 @@ export function PortraitPackSection() {
         <SettingsGroup agents="none" source="local"><AvatarStylePicker value={style} onChange={(next) => next && setAppAvatarStyle(next)} /></SettingsGroup>
       </div>
     </Section>
+    <PortraitLibrarySection />
     <Section id={settingsAnchorId("portraits-bulk")} title={t("avatarStyle.bulk.title")} hint={<span role="note" data-portrait-bulk-scope="">{t("settings.ia.bulkScope", { hosts: hostsOf(planned) || "—", n: planned.length })}</span>}>
       <div className="space-y-3 py-3" data-portrait-bulk="">
         {(fallen > 0 || mismatched > 0) && (

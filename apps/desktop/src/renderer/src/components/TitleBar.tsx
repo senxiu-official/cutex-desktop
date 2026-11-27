@@ -21,7 +21,7 @@ import { useApp } from "../store";
 import { PageTitle } from "./PageTitle";
 import { CaptionSpace, LinuxControls } from "./WindowControls";
 import { TitleBarLaunchers } from "./side/TitleBarLaunchers";
-import cutexLogo from "../assets/cutex-logo-64.png";
+import { useAppLogo } from "../lib/appIcon";
 import { HostSwitcher } from "./HostSwitcher";
 import { TitleBarEntries } from "./SidebarNav";
 import { RestoreChip } from "./RestoreBanner";
@@ -101,6 +101,7 @@ function SearchField({ entry }: { entry: AppSlotEntry<"window.search"> }) {
 }
 
 export function TitleBar() {
+  const logo = useAppLogo(16);
   const ownerWin = useOwnerWindow();
   const { t } = useI18n();
   // Collapsed = fully hidden with the left-edge pop-out (Ctrl/⌘+B; this window's own choice,
@@ -154,7 +155,7 @@ export function TitleBar() {
               aria-expanded={shown}
               className={`${ICON_BTN} group/logo relative shrink-0`}
             >
-              <img src={cutexLogo} alt="" draggable={false} className="h-4 w-4 group-hover/logo:invisible group-focus-visible/logo:invisible" />
+              <img {...logo} alt="" draggable={false} className="h-4 w-4 group-hover/logo:invisible group-focus-visible/logo:invisible" />
               <span className="invisible absolute inset-0 flex items-center justify-center group-hover/logo:visible group-focus-visible/logo:visible">
                 {shown ? <PanelLeftClose size={16} /> : <PanelLeft size={16} />}
               </span>

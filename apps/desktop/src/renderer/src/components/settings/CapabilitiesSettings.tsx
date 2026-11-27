@@ -4,7 +4,7 @@
 // Writes are `config/batchWrite` edits built in lib/codexTools.ts (secrets are never written back).
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { ChevronDown, ChevronRight, Pencil, X } from "lucide-react";
-import type { ConfigEdit, HookMetadata, HooksListResponse, ListMcpServerStatusResponse, McpServerConnectionStatus, McpServerStatus, SkillMetadata, SkillScope, SkillsListResponse } from "@cutex-desktop/protocol/codex/v2";
+import type { ConfigEdit, HookMetadata, HooksListResponse, ListMcpServerStatusResponse, McpServerConnectionStatus, McpServerStatus, SkillMetadata, SkillsListResponse } from "@cutex-desktop/protocol/codex/v2";
 import type { DaemonApi, FsFile } from "../../../../shared/ipc";
 import { useI18n, type MessageKey } from "../../i18n";
 import { settingsAnchorId } from "../../lib/settingsNav";
@@ -38,6 +38,8 @@ import { useTargetApi, useTargetFeatures } from "../../lib/targetHost";
 import { useApp } from "../../store";
 import { SKILLS_ARCHIVE_FEATURE, type SkillArchiveRecord, type SkillArchiveResult } from "../../../../shared/skillsArchive";
 import { ArchivedSkills, ArchiveSkillButton } from "./SkillsArchive";
+import { FollowSharedLink } from "./FollowShared";
+import { SKILL_ORIGINS, pluginShortName, skillArchivable, skillOrigin, type SkillOrigin } from "../../lib/skillOrigin";
 
 type McpConfig = Record<string, McpServerConfig>;
 
@@ -48,31 +50,6 @@ function errorText(e: unknown): string {
 /** `config/batchWrite` on the shared CODEX_HOME config.toml. */
 async function writeCodexConfig(api: DaemonApi, edits: ConfigEdit[]): Promise<void> {
   if (edits.length) await api.codexRequest("config/batchWrite", { edits });
-}
-
-/**
- * 「{{agent}}跟随共享配置」 is set once, on 插件 (FollowSharedSection); MCP / 技能 / 钩子 show its state
- * and a link there (settings audit 2026-10-15 #29). Hidden on a cutex whose settings lack the field.
- */
-function FollowSharedLink() {
-  const api = useTargetApi();
-  const { t } = useI18n();
-  const openSettings = useApp((s) => s.openSettings);
-  const [follow, setFollow] = useState<boolean | undefined>(undefined);
-  useEffect(() => {
-    api.getSettings().then((s) => setFollow(s.codexConfigFollowShared), () => setFollow(undefined));
-  }, []);
-  if (follow === undefined) return null;
-  return (
-    <Section>
-      <LinkRow agents="none" source="local"
-        label={t("codex-config.plugins.follow")}
-        hint={t(follow ? "codex-config.plugins.followOn" : "codex-config.plugins.followOff")}
-        link={t("codex-config.plugins.followLink")}
-        onClick={() => openSettings("plugins")}
-      />
-    </Section>
-  );
 }
 
 function useCodex<T>(load: () => Promise<T>) {
@@ -405,7 +382,6 @@ export function McpPage() {
   );
 }
 
-const SCOPES: SkillScope[] = ["user", "repo", "admin", "system"];
 const SKILL_MAX_BYTES = 256 * 1024;
 
 /** SKILL.md through cutex `GET /v2/fs/file` (host path), read-only. */
@@ -430,7 +406,8 @@ function SkillContent({ path }: { path: string }) {
   );
 }
 
-export function SkillsPage() {
+/** `copyTo`: 运行时配置 → 技能 puts 「复制到…」 into each row (before 默认启用) where the host can list runtime skills. */
+export function SkillsPage({ copyTo }: { copyTo?: (skill: SkillMetadata) => ReactNode } = {}) {
   const api = useTargetApi();
   const { t } = useI18n();
   const features = useTargetFeatures();
@@ -471,9 +448,9 @@ export function SkillsPage() {
   };
   const all = skills.data?.data.flatMap((entry) => entry.skills) ?? [];
   const errors = skills.data?.data.flatMap((entry) => entry.errors) ?? [];
-  const byScope = new Map<SkillScope, SkillMetadata[]>();
-  for (const s of all) byScope.set(s.scope, [...(byScope.get(s.scope) ?? []), s]);
-  const scopes = [...byScope.keys()].sort((a, b) => SCOPES.indexOf(a) - SCOPES.indexOf(b));
+  const byOrigin = new Map<SkillOrigin, SkillMetadata[]>();
+  for (const s of all) byOrigin.set(skillOrigin(s), [...(byOrigin.get(skillOrigin(s)) ?? []), s]);
+  const origins = [...byOrigin.keys()].sort((a, b) => SKILL_ORIGINS.indexOf(a) - SKILL_ORIGINS.indexOf(b));
   return (
     <>
       <FollowSharedLink />
@@ -489,20 +466,25 @@ export function SkillsPage() {
           <EmptyState>{t("codex-config.skills.none")}</EmptyState>
         </Section>
       )}
-      {scopes.map((scope, i) => (
-        <Section key={scope} title={t(`codex-config.skills.scope.${scope}` as MessageKey)} actions={i === 0 ? <RefreshButton onClick={skills.reload} /> : undefined}>
-          {byScope.get(scope)!.map((s) => (
+      {origins.map((origin, i) => (
+        <Section key={origin} title={t(`codex-config.skills.scope.${origin}` as MessageKey)} actions={i === 0 ? <RefreshButton onClick={skills.reload} /> : undefined}>
+          {/* Every row: [plugin name] · 查看 · 归档 · [复制到…] · 默认启用, the same actions in the same places; one that does not
+              apply to this skill stays, disabled, saying why (owner 2026-11-28). */}
+          {byOrigin.get(origin)!.map((s) => (
             <div key={s.path}>
               <SettingRow agents="next" source="codex" label={s.interface?.displayName ?? s.name} hint={s.interface?.shortDescription ?? s.shortDescription ?? s.description}>
-                {s.pluginId && <span className="text-caption/[inherit] text-subtle">{s.pluginId}</span>}
+                {s.pluginId && <span data-skill-origin={s.pluginId} title={s.pluginId} className="max-w-32 truncate text-caption/[inherit] text-subtle">{pluginShortName(s.pluginId)}</span>}
                 {canRead && (
                   <button aria-expanded={open === s.path} onClick={() => setOpen(open === s.path ? null : s.path)} className="flex items-center gap-0.5 rounded text-xs whitespace-nowrap text-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent/60 focus-visible:outline-none">
                     {open === s.path ? t("codex-config.skills.hide") : t("codex-config.skills.view")}
                     {open === s.path ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
                   </button>
                 )}
-                {canArchive && s.scope === "user" && !s.pluginId && <ArchiveSkillButton name={s.interface?.displayName ?? s.name} disabled={busy !== null} onArchive={() => void archiveSkill(s)} />}
-                <Toggle label={s.name} checked={s.enabled} onChange={(v) => void toggle(s, v)} />
+                {canArchive && <ArchiveSkillButton name={s.interface?.displayName ?? s.name} blocked={skillArchivable(origin) ? undefined : t(`codex-config.skills.archiveBlocked.${origin}` as MessageKey)} disabled={busy !== null} onArchive={() => void archiveSkill(s)} />}
+                {/* The shared Codex config's switch (skills/config/write → config.toml): Codex agents load the skill
+                    from their next launch on; running ones keep what they started with. A default, not a live on/off. */}
+                {copyTo?.(s)}
+                <Toggle label={t("codex-config.skills.defaultOn", { name: s.interface?.displayName ?? s.name })} checked={s.enabled} onChange={(v) => void toggle(s, v)} />
               </SettingRow>
               {open === s.path && <SkillContent path={s.path} />}
             </div>

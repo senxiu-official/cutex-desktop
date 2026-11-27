@@ -43,6 +43,7 @@ import { passThroughKey } from "../src/renderer/src/modules/terminal/terminalSta
 import { isTrayKey } from "../src/renderer/src/lib/trayModel";
 import { isQuickSwitchKey, paletteKey } from "../src/renderer/src/modules/quick-switch/model";
 import { KeybindingsSection } from "../src/renderer/src/components/settings/KeybindingsSection";
+import { createScheme } from "../src/renderer/src/lib/keybindingSchemeStore";
 
 type Platform = "mac" | "other";
 
@@ -233,6 +234,8 @@ describe("Settings → 键盘快捷键", () => {
     host = document.createElement("div");
     document.body.append(host);
     root = createRoot(host);
+    // Edits go to an editable scheme (the built-in 默认 is read-only: test/keybindingSchemes).
+    createScheme("Mine");
     act(() => root.render(h(KeybindingsSection)));
   });
   afterEach(() => {
@@ -322,6 +325,7 @@ describe("no hard-coded handler for a registry command", () => {
     "lib/draftUndo.ts": "Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y undo and redo of the focused composer draft",
     "modules/quick-switch/model.ts": "Ctrl+N / Ctrl+P move in the open palette",
     "modules/workspace/explorer/Explorer.tsx": "the file tree's own filter / copy keys while it has focus",
+    "components/ImageEditor.tsx": "Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y undo and redo inside the modal image editor (its own edit history)",
   };
   const files = (dir: string): string[] => readdirSync(dir).flatMap((f) => (statSync(join(dir, f)).isDirectory() ? files(join(dir, f)) : /\.(ts|tsx)$/.test(f) ? [join(dir, f)] : []));
   // A modifier / key test of one of the registry's keys.

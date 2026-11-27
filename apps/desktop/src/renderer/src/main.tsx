@@ -16,6 +16,7 @@ import "./motion.css";
 import { startMotion } from "./lib/motion";
 import { applyContrast, applyDarkPalette, applyLightPalette, applyTheme, loadContrast, loadDarkPalette, loadLightPalette, loadTheme } from "./lib/theme";
 import { loadAccent, setAccentVars } from "./lib/accent";
+import { initAppIcon } from "./lib/appIcon";
 import { bridge } from "./bridge";
 import { startProfileAccountLinks } from "./lib/profileAccountLinks";
 import { startProfileLinkAppearanceSync } from "./lib/profileLinkAppearance";
@@ -47,6 +48,7 @@ applyLightPalette(loadLightPalette());
 applyDarkPalette(loadDarkPalette());
 applyContrast(loadContrast());
 setAccentVars(loadAccent());
+initAppIcon();
 applyAppearance();
 installCopyFeedback();
 // Looping animations (spinners, running rings) in one phase: one main-thread frame per loop, not one per element.
@@ -63,7 +65,7 @@ void startLocaleReady.then(() => {
   // Built-in modules (docs/desktop-modules.md): gated on the active host, before the first render.
   const moduleHost = startAppModules(MODULES);
   // Signed first-party module packs (§23): a verified newer pack replaces its bundled copy once loaded.
-  startModulePacks(moduleHost, MODULES, BUNDLED_PACK_VERSIONS, bridge.modulePacks);
+  startModulePacks(moduleHost, moduleHost.modules, BUNDLED_PACK_VERSIONS, bridge.modulePacks);
   // Developer mode (§30.5): modules loaded from a folder, replaced as they are rebuilt.
   startDevModules(moduleHost, bridge.moduleDev);
   followActingUsers();

@@ -36,6 +36,7 @@ export function draftBytes(draft: ComposerDraft): number {
     n += image.preview?.length ?? 0;
     if (image.source.kind === "data") n += image.source.url.length;
     else n += image.source.path.length;
+    if (image.original) n += (image.original.preview?.length ?? 0) + (image.original.source.kind === "data" ? image.original.source.url.length : image.original.source.path.length);
   }
   for (const skill of draft.pickedSkills) n += skill.name.length + skill.path.length;
   return n * 2;

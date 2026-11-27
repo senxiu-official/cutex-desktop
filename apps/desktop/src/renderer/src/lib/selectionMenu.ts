@@ -1,7 +1,7 @@
 // Right-click on selected agent text (Markdown, and any block wrapped in components/SelectionActions): the modules'
 // `ref.action` items for a `selection` ref (the side chat's 解释这段 and 批注追问) above Copy, instead of the native
-// Copy menu (main/index.ts installEditMenu). A general feature since the owner's 2026-11-25 decision (it was 教学模式
-// P1 only, docs/design/teaching-mode.md). No agent or no module action → the event is left alone and the native menu
+// Copy menu (main/index.ts installEditMenu). A general feature (owner 2026-11-25), independent of any display setting.
+// No agent or no module action → the event is left alone and the native menu
 // shows exactly as before. Text whose agent is ambiguous (SelectionSourceScope "copy": a delegation brief the owner
 // wrote, a result from another host) gets only 复制. The keyboard opens the same menu: Shift+F10 or the ContextMenu key
 // with a selection inside a registered block. Shell file: no module names.

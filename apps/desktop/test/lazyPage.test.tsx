@@ -7,7 +7,7 @@ import { act, createElement as h, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { I18nProvider } from "../src/renderer/src/i18n";
-import { LAZY_RETRY_MS, lazyPage, lazyPageCount, preloadLazyPages, preloadOnIntent, resetPreloadIntent } from "../src/renderer/src/lib/lazyPage";
+import { LAZY_RETRY_MS, lazyPage, lazyPageCount, preloadLazyPages, preloadPage } from "../src/renderer/src/lib/lazyPage";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -96,15 +96,16 @@ describe("lazyPage (lib/lazyPage)", () => {
     expect(host.textContent).toBe("ok");
   });
 
-  it("preloadOnIntent preloads once, however often the owner heads for a page", async () => {
-    resetPreloadIntent();
-    let loads = 0;
-    lazyPage(() => (loads++, Promise.resolve(() => null)));
-    const before = lazyPageCount();
-    await Promise.all([preloadOnIntent(), preloadOnIntent()]);
-    await preloadOnIntent();
-    expect(loads).toBe(1);
-    expect(before).toBeGreaterThan(0);
+  it("preloads only the intended page and shares the load with its mount", async () => {
+    let targeted = 0;
+    let unrelated = 0;
+    const Page = lazyPage(() => (++targeted, Promise.resolve(() => h("span", null, "ready"))));
+    lazyPage(() => (++unrelated, Promise.resolve(() => null)));
+    await Promise.all([preloadPage(Page), preloadPage(Page)]);
+    act(() => root.render(h(Page, {})));
+    expect(host.textContent).toBe("ready");
+    expect(targeted).toBe(1);
+    expect(unrelated).toBe(0);
   });
 
   it("preloadLazyPages loads every registered page, one per idle period", async () => {
@@ -122,7 +123,7 @@ describe("lazyPage (lib/lazyPage)", () => {
 });
 
 // Every Settings page / section a module contributes is lazy; only the pages opened often stay in the entry chunk.
-const EAGER = new Set(["ApprovalsPage", "DelegationsPage", "JobsPage", "ProjectsPage", "PendingChat", "ServicesPage", "WorkflowsPage", "Settings", "SettingsNav"]);
+const EAGER = new Set(["ApprovalsPage", "DelegationsPage", "JobsPage", "PendingChat", "Settings", "SettingsNav"]);
 describe("module pages are lazy (source)", () => {
   const modules = join(__dirname, "../src/renderer/src/modules");
   // Module packs (a pack.json, scripts/module-packs) are one ES module with no dynamic import.

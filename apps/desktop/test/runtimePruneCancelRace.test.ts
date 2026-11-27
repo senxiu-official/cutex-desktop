@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 // Cross-review 2026-11-15 (gate-notice-review): a plan read whose last panel closed before its GET started must not
 // send the GET (order was CANCEL, GET: the cancelled request ran unwatched for up to 20 s).
 import { expect, it, vi } from "vitest";

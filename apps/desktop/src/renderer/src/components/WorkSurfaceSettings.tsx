@@ -11,7 +11,8 @@ import type { CardMaterial, SingleWidthMode } from "../lib/workSurface";
 import type { WorkspaceRailPlacement, WorkspaceWidthMode } from "../lib/workspaceRow";
 import { setEveryShelfRail } from "../lib/sideLayoutStore";
 import { NumberField, ResetButton, Section, Segmented, SettingRow, Toggle } from "./settings/Form";
-import { TraySettingRows } from "./TraySettings";
+import { ThreeWorkspacesRow, TraySettingRows } from "./TraySettings";
+import { WORKSPACES_ANCHOR } from "../lib/settingsNav";
 import { setForetellOn, useForetellOn } from "../lib/foretellPref";
 import { PAGE_SHELF_WIDTH } from "../lib/pageShelfWidth";
 import { DEFAULT_PORTRAIT, setOrientationSetting, setPortraitPrefs, useOrientationSetting, usePortrait, type OrientationSetting } from "../lib/portrait";
@@ -211,6 +212,7 @@ export function ConversationWidthSection() {
   const a = useAppearance();
   const fullWidth = a.readingWidth === 0;
   return (
+    <>
     <Section  id={settingsAnchorId("conv-width")} title={t("settings.panel.convWidth")}>
       <SettingRow agents="none" source="local"
         label={t("workSurface.single")}
@@ -244,6 +246,11 @@ export function ConversationWidthSection() {
         />
       </SettingRow>
     </Section>
+    {/* 并排工作区 (owner 2026-11-28): how many workspaces sit side by side is the conversation's layout, not the tray's. */}
+    <Section id={settingsAnchorId(WORKSPACES_ANCHOR)} title={t("workspace.sideBySide")}>
+      <ThreeWorkspacesRow />
+    </Section>
+    </>
   );
 }
 

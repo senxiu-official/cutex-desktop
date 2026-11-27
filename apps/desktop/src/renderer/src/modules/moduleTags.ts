@@ -2,7 +2,7 @@
 // everywhere, and the list's search / filter / sort. Pure; the rows render in shell/ModulesPage.tsx, the tags (the
 // settings ScopeChip: a click floats the explanation) in shell/ModulePacks.tsx ModuleTags.
 //
-// Order after the name, always: origin chip → version (muted text, never inside a chip) → trust → risk → state.
+// Order after the name, always: origin chip → version (muted text, never inside a chip) → optional → trust → risk → state.
 //   origin   核心 (required) · 内置 (ships with the app) · 已下载 (a signed pack in use) · 本地安装 (from a file, or a
 //            developer folder) · 已安装 (a copy that failed its check: where it came from is not known) · 可下载 (index only)
 //   version  the module's own pack version where it has one (a pack: downloaded / local / offered; a bundled module
@@ -13,12 +13,13 @@
 //   risk     内部接口 (reads app internals, a local module in a dev build) · 实验接口 (module-api/experimental)
 //   state    未使用 · 需更新应用 · 需更新模块 · 加载失败 · 已损坏 (an installed pack that is not in use, and why)
 // The update itself stays a button (更新到 vX) on the right; core modules show a locked switch there.
+import { moduleMetadata } from "../../../shared/moduleMetadata";
 import type { PackRow } from "./packs";
 import { readsAppInternals } from "../../../shared/modulePacks";
 import { usesExperimentalApi } from "./packHost";
 
 export type ModuleOrigin = "core" | "bundled" | "downloaded" | "local" | "installed" | "available";
-export type ModuleTagKind = "unverified" | "internal" | "experimental" | "notNewer" | "needsNewerApp" | "needsNewerModule" | "failed" | "broken";
+export type ModuleTagKind = "optional" | "unverified" | "internal" | "experimental" | "notNewer" | "needsNewerApp" | "needsNewerModule" | "failed" | "broken";
 export type TagTone = "plain" | "warn" | "danger";
 
 export interface ModuleTag {
@@ -27,6 +28,11 @@ export interface ModuleTag {
   /** For the popover text: the version / error it is about. */
   version?: string;
   error?: string;
+  /**
+   * An optional module's look (owner 2026-11-26), in place of its origin chip: shipped = 可选 · 随应用提供 (built in,
+   * off on new installs, has a switch); missing = 可选 · 未下载 (only in the index: a 下载 button). Otherwise plain 可选.
+   */
+  optional?: "shipped" | "missing";
 }
 
 export interface ModuleFacts {
@@ -48,18 +54,27 @@ export interface DevModuleFacts {
  * Origin, version and tags of one row. `pack` null = a core module or no pack bridge; `appVersion` the desktop's;
  * `dev` the developer-folder build this row's module is running from, if any (it wins: that is the code running).
  */
-export function moduleFacts(input: { required: boolean; pack: PackRow | null; appVersion: string | null; dev?: DevModuleFacts | null }): ModuleFacts {
+export function moduleFacts(input: { id?: string; required: boolean; pack: PackRow | null; appVersion: string | null; dev?: DevModuleFacts | null }): ModuleFacts {
+  const facts = rawFacts(input);
+  // A module only in the index is optional by nature (never downloaded by itself).
+  if (facts.origin === "available" && !facts.tags.some((t) => t.kind === "optional")) facts.tags.unshift({ kind: "optional", tone: "plain" });
+  const optional = facts.origin === "bundled" ? "shipped" : facts.origin === "available" ? "missing" : null;
+  if (optional) facts.tags = facts.tags.map((t) => (t.kind === "optional" ? { ...t, optional } : t));
+  return facts;
+}
+
+function rawFacts(input: { id?: string; required: boolean; pack: PackRow | null; appVersion: string | null; dev?: DevModuleFacts | null }): ModuleFacts {
   const { required, pack, appVersion, dev } = input;
-  const app = (origin: ModuleOrigin): ModuleFacts => ({ origin, version: appVersion, versionOf: appVersion ? "app" : null, tags: [] });
+  const tags: ModuleTag[] = moduleMetadata(input.id ?? pack?.id ?? "")?.optional ? [{ kind: "optional", tone: "plain" }] : [];
+  const app = (origin: ModuleOrigin): ModuleFacts => ({ origin, version: appVersion, versionOf: appVersion ? "app" : null, tags });
   if (required) return app("core");
   if (dev) {
-    const tags: ModuleTag[] = [{ kind: "unverified", tone: "warn" }];
+    tags.push({ kind: "unverified", tone: "warn" });
     if (readsAppInternals(dev.host)) tags.push({ kind: "internal", tone: "warn" });
     if (usesExperimentalApi(dev.host)) tags.push({ kind: "experimental", tone: "warn" });
     return { origin: "local", version: dev.version, versionOf: dev.version ? "module" : null, tags };
   }
   if (!pack) return app("bundled");
-  const tags: ModuleTag[] = [];
   const d = pack.decision;
   const installed = pack.installed;
   const localInUse = !!installed?.local && (!!pack.activeVersion || !d || d.use);

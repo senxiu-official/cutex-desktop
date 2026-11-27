@@ -2,11 +2,9 @@ import { useState } from "react";
 import { AppWindow } from "lucide-react";
 import { useI18n } from "../../i18n";
 import { useHostServices } from "../../lib/serviceLinkView";
-import { serviceSlugOf } from "../../lib/serviceLink";
-import type { SideBodyProps, SideTabProps } from "../slots";
+import type { SideBodyProps } from "../slots";
 import { BrowserBody } from "./BrowserBody";
 import { initBrowser, type BrowserState } from "./browserState";
-import { useBrowserTab } from "./tabs";
 
 /** Same guest implementation and main-process policy; only the empty service tab has a source picker. */
 export function ServiceBody(props: SideBodyProps<BrowserState>) {
@@ -31,14 +29,4 @@ function ServicePicker(props: SideBodyProps<BrowserState>) {
       {!services.length && <p className="text-xs text-subtle">{t(q ? "browser.service.noMatch" : "services.none")}</p>}
     </div>
   </div>;
-}
-
-
-export function useServiceTab(props: SideTabProps<BrowserState>) {
-  const { t } = useI18n();
-  const info = useBrowserTab(props);
-  const list = useHostServices(props.hostId);
-  const slug = serviceSlugOf(props.instance.state.url);
-  const service = slug ? list?.find(s => s.slug === slug) : null;
-  return { ...info, title: service?.displayName || slug || (props.instance.state.url === "about:blank" ? t("browser.service.title") : info.title) };
 }

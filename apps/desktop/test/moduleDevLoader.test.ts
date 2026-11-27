@@ -24,8 +24,8 @@ it("a deferred folder reload must not replace a pack installed while its import 
   await t.host.removeModule("my-thing");
   await vi.waitFor(() => expect(t.importEntry).toHaveBeenCalledTimes(1));
   const signed = build("Signed replacement", { displayName: "Signed replacement" });
-  const pack = { id: "my-thing", version: "2.0.0", moduleApi: "^1.31", compat: "ok", entry: "cutex-module://my-thing/2.0.0/index.js", styles: [], host: {} };
-  const packView = { appModuleApi: "1.31", installed: [pack], broken: [], index: null, operation: null, lastError: null, local: { allowed: true, internal: false, safeStart: null, held: [], error: null } } as any;
+  const pack = { id: "my-thing", version: "2.0.0", moduleApi: "^1.32", compat: "ok", entry: "cutex-module://my-thing/2.0.0/index.js", styles: [], host: {} };
+  const packView = { appModuleApi: "1.32", installed: [pack], broken: [], index: null, operation: null, lastError: null, local: { allowed: true, internal: false, safeStart: null, held: [], error: null } } as any;
   const bridge = { onState: () => () => {}, state: async () => packView, localFailed: async () => packView } as any;
   const packs = createPackLoader({ host: t.host, bundled: [], bundledVersions: {}, bridge, importEntry: async () => signed });
   try {
@@ -52,12 +52,12 @@ function newHost(modules: AppModule[] = []): AppModuleHost {
 
 const FOLDER = "D:/work/my-thing";
 const entry = (rev: number) => `cutex-module://dev/my-thing/${rev}/index.js`;
-const row = (rev: number, over: Partial<DevModuleView> = {}): DevModuleView => ({ folder: FOLDER, id: "my-thing", version: "0.1.0", moduleApi: "^1.31", rev, entry: entry(rev), styles: [], host: { "@cutex-desktop/module-api": ["defineModule"] }, error: null, ...over });
+const row = (rev: number, over: Partial<DevModuleView> = {}): DevModuleView => ({ folder: FOLDER, id: "my-thing", version: "0.1.0", moduleApi: "^1.32", rev, entry: entry(rev), styles: [], host: { "@cutex-desktop/module-api": ["defineModule"] }, error: null, ...over });
 const viewOf = (...modules: DevModuleView[]): ModuleDevView => ({ enabled: true, internal: false, skipped: false, modules });
 
 function build(title: string, over: Partial<AppModule> = {}) {
   return {
-    moduleApi: "^1.31",
+    moduleApi: "^1.32",
     module: { id: "my-thing", titleKey: "my-thing.title", ...over } as AppModule,
     messages: { en: { "my-thing.title": title }, "zh-CN": { "my-thing.title": title } },
   };
@@ -221,8 +221,8 @@ it("an installed pack replacing a folder module clears its old developer-running
   await t.loader.apply(viewOf(row(1, { version: "1.0.0" })));
   expect(t.running.get("my-thing")?.version).toBe("1.0.0");
   const signed = build("Signed replacement", { displayName: "Signed replacement" });
-  const pack = { id: "my-thing", version: "2.0.0", moduleApi: "^1.31", compat: "ok", entry: "cutex-module://my-thing/2.0.0/index.js", styles: [], host: {} };
-  const packView = { appModuleApi: "1.31", installed: [pack], broken: [], index: null, operation: null, lastError: null, local: { allowed: true, internal: false, safeStart: null, held: [], error: null } } as any;
+  const pack = { id: "my-thing", version: "2.0.0", moduleApi: "^1.32", compat: "ok", entry: "cutex-module://my-thing/2.0.0/index.js", styles: [], host: {} };
+  const packView = { appModuleApi: "1.32", installed: [pack], broken: [], index: null, operation: null, lastError: null, local: { allowed: true, internal: false, safeStart: null, held: [], error: null } } as any;
   const bridge = { onState: () => () => {}, state: async () => packView, localFailed: async () => packView } as any;
   const packs = createPackLoader({ host: t.host, bundled: [], bundledVersions: {}, bridge, importEntry: async () => signed });
   try {

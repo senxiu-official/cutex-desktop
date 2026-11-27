@@ -21,6 +21,8 @@ import { zhCN } from "../src/renderer/src/modules/services/i18n";
 import { en } from "../src/renderer/src/modules/services/i18n.en";
 import { locales } from "../src/renderer/src/modules/services/i18n.locales";
 
+const serviceLocales = import.meta.glob<Record<string, string>>("../src/renderer/src/modules/locales.*.ts", { eager: true, import: "services" });
+
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const view = (extra: Partial<ServiceView> = {}): ServiceView => ({ slug: "web", displayName: "Web", host: "fixture", port: 31481, path: null,
   ownerCutexSessionId: null, projectId: null, runtime: "managed", lifetime: "persistent", health: "reachable", createdAt: "2026-11-04T00:00:00Z",
@@ -70,5 +72,5 @@ it("shows the actual sleep time on the service card without a tile fetch or wake
 it("provides explicit direct-port guidance and translations for every app locale", () => {
   const keys = Object.keys(zhCN).filter(key => key.startsWith("services.idleStop") || ["services.wake", "services.health.stoppedIdle", "services.idleWakeFailed"].includes(key)) as (keyof typeof zhCN)[];
   expect(zhCN["services.idleStop.hint"]).toContain("直连端口"); expect(en["services.idleStop.hint"]).toContain("direct-port");
-  for (const values of [en, ...Object.values(locales)]) for (const key of keys) expect(values[key]).toBeTruthy();
+  for (const values of [en, ...Object.values(locales), ...Object.values(serviceLocales)]) for (const key of keys) expect(values[key]).toBeTruthy();
 });

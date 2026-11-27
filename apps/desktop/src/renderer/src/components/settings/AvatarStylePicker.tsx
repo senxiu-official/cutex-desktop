@@ -15,6 +15,7 @@ import { Notice, Segmented } from "./Form";
 import type { ProfilePortraitThemeProblem } from "../../../../shared/profilePortraitThemes";
 import { portraitProblemText } from "../../lib/portraitThemeDraft";
 import { settingsControlChanged } from "../../lib/settingsDrafts";
+import { PortraitThemesHint } from "../PortraitDownloadHint";
 
 type Kind = AvatarStyle["kind"] | "inherit";
 
@@ -73,6 +74,7 @@ function PortraitChooser({ value, disabled, blocked, onChange }: { value: readon
     <div className="space-y-3" data-style-portrait="">
       <p className="text-xs text-subtle">{t("avatarStyle.portrait.aiGenerated")}</p>
       <p className="text-xs text-subtle" data-portrait-enabled={shown}>{t("avatarStyle.portrait.count", { n: shown, total: themes.length })}</p>
+      <PortraitThemesHint keys={value} />
       {packs.map((list) => {
         const keys = list.map((th) => th.key);
         const all = keys.every((k) => on.has(k));

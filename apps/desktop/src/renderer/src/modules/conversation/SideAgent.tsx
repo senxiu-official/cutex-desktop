@@ -5,7 +5,7 @@
 // The store keeps it live while this body is mounted (retainView). The agent open in the main area
 // shows a placeholder here (已在主区打开 · 换回) instead of rendering twice.
 import { isImeComposing } from "../../lib/ime";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeftRight, ArrowUp, Square } from "lucide-react";
 import { useI18n } from "../../i18n";
 import { agentFeaturesOf, lacks } from "../../lib/agentFeatures";
@@ -36,6 +36,7 @@ import { useAgentResource, useInMain, useSince } from "./sideAgentData";
 import { useNames } from "./turnPeekData";
 import { useOwnerWindow } from "../../lib/ownerContext";
 import { resizeObserverFor } from "../../lib/ownerWindow";
+import { useReadOnSight } from "../../lib/readOnSight";
 
 const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -182,6 +183,9 @@ export function SideAgentConversation({ sessionId, hostId, name, resource }: { s
     stick.current = next.stick;
     if (next.snap) el.scrollTop = el.scrollHeight;
   };
+  // Design 061: on a host with cross-device read state, the newest reply is read once it is on screen here.
+  const stuckNow = useCallback(() => stick.current, []);
+  useReadOnSight(hostId, sessionId, scroller, stuckNow, view);
   const turnKey = turnFollowKey(view?.timeline);
   useLayoutEffect(() => {
     const el = scroller.current;

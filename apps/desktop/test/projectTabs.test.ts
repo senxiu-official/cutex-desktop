@@ -3,7 +3,7 @@
 import { describe, expect, it } from "vitest";
 import type { ServiceView } from "../src/shared/ipc";
 import { mergeProjectTabs, type ProjectTabEntry } from "../src/renderer/src/lib/projectTabs";
-import { DEFAULT_LIBRARY, libraryQuery, libraryScopeKey } from "../src/renderer/src/modules/artifacts/model";
+import { DEFAULT_LIBRARY, libraryFiltered, libraryFilterKey, libraryQuery, libraryScopeKey } from "../src/renderer/src/modules/artifacts/model";
 import { compareOrganizedServices, organizedServiceSections, projectServiceList, serviceSection } from "../src/renderer/src/modules/services/model";
 import type { MessageKey } from "../src/renderer/src/i18n";
 
@@ -32,7 +32,22 @@ describe("mergeProjectTabs", () => {
 describe("libraryQuery", () => {
   it("asks for one project's scope on the 项目 page and the session's publish scope in the side card", () => {
     expect(libraryQuery({ project: "scp" }, DEFAULT_LIBRARY, 100)).toEqual({ project: "scp", archived: "false", limit: 100 });
-    expect(libraryQuery({ forSession: "s1" }, { q: "fig", kind: "figure", archived: "all" }, 50, "100")).toEqual({ forSession: "s1", q: "fig", kind: "figure", archived: "all", limit: 50, cursor: "100" });
+    expect(libraryQuery({ forSession: "s1" }, { ...DEFAULT_LIBRARY, q: "fig", kind: "figure", archived: "all" }, 50, "100")).toEqual({ forSession: "s1", q: "fig", kind: "figure", archived: "all", limit: 50, cursor: "100" });
+  });
+
+  it("artifact-audience: opens on 呈阅, the chips replace the old kind filter; an older host gets none of them", () => {
+    expect(libraryQuery({ project: "scp" }, DEFAULT_LIBRARY, 100, undefined, true)).toEqual({ project: "scp", view: "forOwner", archived: "false", limit: 100 });
+    const chips = { ...DEFAULT_LIBRARY, kind: "figure" as const, view: "all" as const, fileKind: "slides" as const, purpose: "deliverable" as const };
+    expect(libraryQuery({ project: "scp" }, chips, 100, "c2", true)).toEqual({ project: "scp", view: "all", fileKind: "slides", purpose: "deliverable", archived: "false", limit: 100, cursor: "c2" });
+    // 未标用途 and 呈阅 with the archive filter as chosen (cutex excludes archived from 呈阅 by default as well).
+    expect(libraryQuery({ project: "scp" }, { ...DEFAULT_LIBRARY, purpose: "unset", archived: "true" }, 100, undefined, true)).toEqual({ project: "scp", view: "forOwner", purpose: "unset", archived: "true", limit: 100 });
+    expect(libraryQuery({ project: "scp" }, chips, 100)).toEqual({ project: "scp", kind: "figure", archived: "false", limit: 100 });
+    // A filter change restarts the list; on an older host the audience filters do not.
+    expect(libraryFilterKey(chips, true)).not.toBe(libraryFilterKey({ ...chips, fileKind: "page" }, true));
+    expect(libraryFilterKey(chips, false)).toBe(libraryFilterKey({ ...chips, fileKind: "page", view: "forOwner" }, false));
+    expect(libraryFiltered({ ...DEFAULT_LIBRARY, view: "all" }, true)).toBe(false);
+    expect(libraryFiltered({ ...DEFAULT_LIBRARY, purpose: "report" }, true)).toBe(true);
+    expect(libraryFiltered({ ...DEFAULT_LIBRARY, purpose: "report" }, false)).toBe(false);
   });
 
   it("keys the two scopes apart", () => {

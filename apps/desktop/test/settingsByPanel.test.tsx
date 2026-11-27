@@ -33,12 +33,12 @@ afterEach(() => {
 
 describe("the 面板 group (lib/settingsNav)", () => {
   it("panel pages show as their own group right after 应用, in a fixed order; the rest keep their group and order", () => {
-    const pages = [page("g", "general", "app"), page("a", "appearance", "app"), page("sd", "sides", "app"), page("c", "conversation", "app"), page("sb", "sidebar", "app"), page("n", "notifications", "app"), page("t", "tray", "app"), page("d", "desktop", "app"), page("st", "status", "app"), page("h", "hosts", "connection"), page("m", "modules", "system")];
+    const pages = [page("g", "general", "app"), page("a", "appearance", "app"), page("sd", "sides", "app"), page("c", "conversation", "app"), page("sb", "sidebar", "app"), page("n", "notifications", "app"), page("t", "tray", "app"), page("d", "desktop", "app"), page("h", "hosts", "connection"), page("m", "modules", "system")];
     const groups = settingsNavGroups(pages);
     expect(groups.map((g) => g.group)).toEqual(["app", "panels", "connection", "system"]);
     expect(groups[0]!.entries.map((e) => e.item.page)).toEqual(["general", "appearance", "notifications"]);
-    expect(groups[1]!.entries.map((e) => e.item.page)).toEqual(["sidebar", "conversation", "status", "sides", "tray", "desktop"]);
-    expect(PANEL_PAGES).toEqual(["sidebar", "conversation", "status", "sides", "tray", "desktop"]);
+    expect(groups[1]!.entries.map((e) => e.item.page)).toEqual(["sidebar", "conversation", "sides", "tray", "desktop"]);
+    expect(PANEL_PAGES).toEqual(["sidebar", "conversation", "sides", "tray", "desktop"]);
     // A display grouping: the module's own `group` is untouched (the contract's SettingsGroupId has no "panels").
     expect(navGroupOf({ page: "tray", group: "app" })).toBe("panels");
     expect(navGroupOf({ page: "appearance", group: "app" })).toBe("app");
@@ -60,14 +60,15 @@ describe("the 面板 group (lib/settingsNav)", () => {
     expect(shell).not.toMatch(/id: "shell\.composer", page: "composer"/);
     for (const id of ["shell.convWidth", "shell.composer", "shell.gutter", "shell.shelfOnly"]) expect(shell).toMatch(new RegExp(`id: "${id.replace(".", "\\.")}", page: "conversation"`));
     expect(shell).toMatch(/titleKey: "settings\.panel\.sidebar"/);
-    expect(shell).toMatch(/titleKey: "settings\.panel\.status"/);
+    // 状态显示 retired (owner 2026-11-28): the status row is a 会话 → 输入 group, the capsule a module page.
+    expect(shell).not.toMatch(/page: "status"/);
     expect(shell).toMatch(/titleKey: "settings\.panel\.shelf"/);
     expect(src("modules/conversation/index.ts")).toMatch(/titleKey: "settings\.panel\.conversation"/);
     const zh = src("i18n/zh-CN.ts");
     expect(zh).toContain('"settings.panel.conversation": "会话"');
     expect(zh).toContain('"settings.group.panels": "面板"');
     // The owner's naming rule (026): no 「列」 in a panel's name.
-    for (const k of ["sidebar", "conversation", "status", "shelf", "tray", "desktop"]) expect(zh.match(new RegExp(`"settings\\.panel\\.${k}": "([^"]*)"`))?.[1]).not.toContain("列");
+    for (const k of ["sidebar", "conversation", "shelf", "tray", "desktop"]) expect(zh.match(new RegExp(`"settings\\.panel\\.${k}": "([^"]*)"`))?.[1]).not.toContain("列");
   });
 
   it("keeps module settings on their panel pages, with page data independently searchable on Shelf", () => {
@@ -177,7 +178,9 @@ describe("「⚙ X 设置…」 (the entries)", () => {
     // The sidebar's own menu may start with 停止空闲的… (design 031); the tail stays last. One menu since the rail
     // went (2026-10-28): the popped sidebar reuses the roster.
     expect(src("components/Sidebar.tsx").match(/contextMenu\(\(\) => (?:\[\.\.\.hostStopIdleEntries\(t, <Power size=\{14\} \/>\), \.\.\.)?sidebarMenuTail\(t\)\]?\)/g)?.length).toBe(1);
-    expect(src("modules/status-capsule/StatusCapsule.tsx")).toMatch(/panelSettingsForetell\("status", "\[data-status-capsule\]"\)/);
+    // The capsule ⋯ menu opens its module page (模块 → 状态胶囊), 「胶囊设置…」.
+    expect(src("modules/status-capsule/StatusCapsule.tsx")).toMatch(/services\.ui\.openSettings\(CAPSULE_SETTINGS_PAGE\)/);
+    expect(src("modules/status-capsule/StatusCapsule.tsx")).toContain('t("status-capsule.settingsMenu")');
     expect(src("modules/home/DeskSurface.tsx")).toMatch(/panelSettingsItem\("desktop"\)/);
   });
 });

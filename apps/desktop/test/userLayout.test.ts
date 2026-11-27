@@ -7,7 +7,7 @@ import type { UserLayout } from "@cutex-desktop/cutex-client";
 
 const a = `ci-${"a".repeat(32)}`, b = `ci-${"b".repeat(32)}`;
 const hosts: LayoutHost[] = [{ id: "local", instanceId: a, label: "Host-A", online: true, supported: true, eligible: true }, { id: "ssh-b", instanceId: b, label: "Remote", online: true, supported: true, eligible: true }];
-const local = (): SidebarLocal => ({ sidebarSections: [{ id: "s", name: "Work", collapsed: false, members: [hostKey("local", "p")] }], starredProjects: [hostKey("ssh-b", "p2")], projectOrder: [hostKey("local", "p")], foldedProjects: [], pinned: [hostKey("local", "agent")], navPins: ["home.nav"] });
+const local = (): SidebarLocal => ({ sidebarSections: [{ id: "s", name: "Work", collapsed: false, members: [hostKey("local", "p")] }], starredProjects: [hostKey("ssh-b", "p2")], projectOrder: [hostKey("local", "p")], foldedProjects: [], pinned: [hostKey("local", "agent")], navPins: ["home.nav"], turnBarPins: { reply: ["copy", "quote"] } });
 function fixture(initial: SidebarDoc | null = null, seed = local()) {
   let revision = 0; let doc = initial; let identity = "owner"; let conflicts = 0;
   let puts = 0; const disk = new Map<string, string>();
@@ -213,5 +213,111 @@ describe("portable home pins", () => {
     const missing = readPortableHome(raw, [hosts[0]!]);
     const connected = readPortableHome(missing, hosts);
     expect(connected.pins![0]!.hostId).toBe("ssh-b"); expect(writePortableHome(connected, hosts).future).toEqual(raw.future);
+  });
+});
+
+describe("settings sync: 侧栏布局 switch (design 056 §12)", () => {
+  it("off: this device keeps its own sidebar and writes nothing; back on: asks again when the synced one differs", async () => {
+    const f = fixture(); await f.store.choose({ instanceId: a, label: "Host-A" });
+    await f.store.refresh();
+    expect(f.store.local()).not.toBeNull();
+    const puts = f.puts();
+    f.store.setFollow(false);
+    expect(f.store.following()).toBe(false);
+    expect(f.store.local()).toBeNull();
+    const before = local(); const after = { ...before, pinned: [...before.pinned, hostKey("local", "extra")] };
+    f.store.edit(before, after);
+    await f.store.refresh();
+    expect(f.puts()).toBe(puts);
+    // Turning it back on compares this device with the synced sidebar again (the same here: no question).
+    f.store.setFollow(true);
+    await f.store.refresh();
+    expect(f.store.state.getState().migration).toBe(false);
+    expect(f.store.local()).not.toBeNull();
+  });
+  it("starts off when this device chose so", async () => {
+    const f = fixture();
+    const store = createUserLayout({ storage: f.storage, backend: () => f.backend, local, follow: false });
+    store.setHosts(hosts); await store.choose({ instanceId: a, label: "Host-A" });
+    expect(store.local()).toBeNull();
+    expect(f.puts()).toBe(0);
+  });
+});
+
+// 操作栏 pins (owner 2026-11-28): synced with the person's layout like navPins — per bar, null = the defaults.
+describe("操作栏 pins in the user layout", () => {
+  const withBars = (reply: string[] | null, user: string[] | null = null): SidebarDoc => ({ ...emptySidebar(), turnBarPins: { reply, user } });
+  const replay = (base: SidebarDoc, after: SidebarDoc) => sidebarEdits(base, after).reduce(applyLayoutOp, base);
+
+  it("pin, unpin, reorder and back to default replay as ordered ops, per bar", () => {
+    const base = withBars(["copy", "fork"]);
+    const pinned = replay(base, withBars(["copy", "fork", "quote"]));
+    expect(pinned.turnBarPins).toEqual({ reply: ["copy", "fork", "quote"], user: null });
+    const moved = replay(pinned, withBars(["quote", "copy"], ["copy"]));
+    expect(moved.turnBarPins).toEqual({ reply: ["quote", "copy"], user: ["copy"] });
+    expect(sidebarEdits(moved, withBars(null, ["copy"]))).toEqual([{ kind: "turnBarDefault", bar: "reply", t: expect.any(Number) }]);
+    expect(replay(moved, withBars(null, ["copy"])).turnBarPins).toEqual({ reply: null, user: ["copy"] });
+  });
+
+  it("two devices' pins both land; an unpin leaves a tombstone a stale pin cannot undo", () => {
+    const base = withBars(["copy"]);
+    const mine = sidebarEdits(base, withBars(["copy", "quote"]), 10);
+    const theirs = sidebarEdits(base, withBars(["copy", "ref:notes.turn"]), 11);
+    expect([...mine, ...theirs].reduce(applyLayoutOp, base).turnBarPins.reply!.sort()).toEqual(["copy", "quote", "ref:notes.turn"]);
+    const unpinned = sidebarEdits(base, withBars([]), 20).reduce(applyLayoutOp, base);
+    expect(applyLayoutOp(unpinned, { kind: "turnBar", bar: "reply", id: "copy", present: true, before: null, t: 15 }).turnBarPins.reply).toEqual([]);
+  });
+
+  it("round trips through the device form: a bar at its defaults is absent locally", () => {
+    const doc = encodeSidebar({ ...local(), turnBarPins: { user: ["copy"] } }, hosts, "local");
+    expect(doc.turnBarPins).toEqual({ reply: null, user: ["copy"] });
+    expect(decodeSidebar(doc, hosts).turnBarPins).toEqual({ user: ["copy"] });
+  });
+
+  it("first-sync merge: a bar set elsewhere wins; this device's list fills a bar still at its defaults", () => {
+    const merged = mergeSidebar(withBars(["fork"]), withBars(["copy", "quote"], ["copy"]));
+    expect(merged.turnBarPins).toEqual({ reply: ["fork"], user: ["copy"] });
+  });
+
+  it("older desktops keep the field: their reads, edits and merges carry it (and unknown keys inside it) unchanged", () => {
+    const doc = { ...withBars(["quote"]), turnBarPins: { reply: ["quote"], user: null, later: ["x"] }, laterField: { a: 1 } } as unknown as SidebarDoc;
+    // What a build without 操作栏 sync does: read, apply its own edit kinds, merge, write the whole document back.
+    const read = readSidebar(JSON.parse(JSON.stringify(doc)));
+    const edited = applyLayoutOp(read, { kind: "nav", id: "home.nav", present: true, before: null, t: 1 });
+    const merged = mergeSidebar(edited, emptySidebar());
+    for (const d of [read, edited, merged]) {
+      expect(d.turnBarPins).toEqual({ reply: ["quote"], user: null, later: ["x"] });
+      expect((d as Record<string, unknown>).laterField).toEqual({ a: 1 });
+    }
+    // A document written before the field existed reads as both bars at their defaults.
+    expect(readSidebar({ ...emptySidebar(), turnBarPins: undefined } as never).turnBarPins).toEqual({ reply: null, user: null });
+  });
+
+  const legacy = (f: ReturnType<typeof fixture>, remote: SidebarDoc) =>
+    f.disk.set(USER_LAYOUT_KEY, JSON.stringify({ memoryHost: { instanceId: a, label: "Host-A" }, hosts: {}, entries: { [a]: { docKey: "owner", revision: 0, confirmed: remote, operations: [], migratedAt: 1 } } }));
+
+  it("a sync set up before this build: this device's pins seed the bars the document leaves at default, once", async () => {
+    const remote = encodeSidebar({ ...local(), turnBarPins: undefined }, hosts, "local");
+    const f = fixture(remote, { ...local(), turnBarPins: { reply: ["copy", "quote"] } });
+    legacy(f, remote);
+    const store = f.make(); store.setHosts(hosts); await store.refresh();
+    expect(f.doc().turnBarPins).toEqual({ reply: ["copy", "quote"], user: null });
+    expect(JSON.parse(f.disk.get(USER_LAYOUT_KEY)!).entries[a].turnBarSeededAt).toBeGreaterThan(0);
+    const count = f.puts(); await store.refresh(); expect(f.puts()).toBe(count);
+  });
+
+  it("…unless the synced list is already set (another device pinned first)", async () => {
+    const remote = { ...encodeSidebar({ ...local(), turnBarPins: undefined }, hosts, "local"), turnBarPins: { reply: ["fork"], user: null } };
+    const f = fixture(remote, { ...local(), turnBarPins: { reply: ["copy", "quote"], user: ["copy"] } });
+    legacy(f, remote);
+    const store = f.make(); store.setHosts(hosts); await store.refresh();
+    expect(f.doc().turnBarPins).toEqual({ reply: ["fork"], user: ["copy"] });
+  });
+
+  it("a migration choice to keep the synced layout is not undone by the seed", async () => {
+    const d = { ...emptySidebar(), pinned: [{ host: a, id: "remote" }] };
+    const f = fixture(d); await f.store.choose({ instanceId: a, label: "Host-A" });
+    await f.store.resolveMigration(false); await f.store.refresh();
+    expect(f.doc().turnBarPins).toEqual({ reply: null, user: null });
   });
 });

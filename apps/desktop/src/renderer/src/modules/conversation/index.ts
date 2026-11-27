@@ -45,7 +45,7 @@ export default defineModule({
     "side.component": [turnPeekComponent, projectionComponent],
     // 并排打开 in every agent menu (sidebar row, title bar, 全部 agent dialog, agent links): a second workspace beside,
     // the same plan as Ctrl/⌘ + click on a sidebar row (lib/workspaceEffects; the shell's own 在旁边打开 row folded into this, 2026-11-05).
-    "ref.action": [{ id: "conversation.openAgentSide", titleKey: "conversation.agent.openSide", icon: Columns2, kinds: ["agent"], run: async (ref) => {
+    "ref.action": [{ id: "conversation.openAgentSide", titleKey: "conversation.agent.openSide", infoKey: "conversation.agent.openSideInfo", icon: Columns2, kinds: ["agent"], run: async (ref) => {
       const sessionId = ref.params.sessionId ?? ref.key;
       if (!sessionId) return;
       const { agentEffect } = await import("../../lib/workspaceEffects");

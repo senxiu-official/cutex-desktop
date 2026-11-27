@@ -33,9 +33,18 @@ externalInputDeliveries?: Array<ExternalInputDelivery>,
  */
 externalInputControlVersion?: number,
 /**
+ * One launch-bound cutex-asks ANSWER turn through the owner-Stop gate,
+ * without globally resuming ExternalInput. Absent on older servers.
+ */
+externalInputStopAnswer?: number,
+/**
  * Atomic owner input + canonical ExternalInput envelopes on turn/start and turn/steer.
  */
 ownerInputCarries?: number,
+/**
+ * Ordered original owner prefix plus carrier, admitted as one new turn.
+ */
+ownerInputBatch?: number,
 /**
  * cutex fork: `thread/toolGate/set` and `thread/toolGate/changed` on the
  * bound receiver (agent pause at the next tool boundary). Absent on older

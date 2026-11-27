@@ -387,6 +387,27 @@ export function writeShelfTemplate(windowScope: string, template: SideLayout): v
   writePanesFile(file);
 }
 
+/** Settings sync (lib/settingsSync, opt-in): every host scope's default Shelf layout as stored (raw parts). */
+export function shelfTemplateParts(): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [scope, entry] of Object.entries(readPanesFile().convShelves ?? {})) {
+    if (scope.startsWith("host:") && convScopeOf(scope) === scope && entry?.template) out[scopeHost(scope)] = entry.template;
+  }
+  return out;
+}
+
+/** Settings sync: a host scope's default Shelf layout as synced (a raw part; null = none). Read back through partLayout. */
+export function writeShelfTemplatePart(hostId: string, part: unknown): void {
+  const scope = `host:${hostId}`;
+  const file = readPanesFile();
+  const all = { ...(file.convShelves ?? {}) };
+  const entry: ConvShelfScope = all[scope] ? { ...all[scope]! } : { template: null, shared: null, conv: {} };
+  entry.template = part && typeof part === "object" ? (part as ConvShelfScope["template"]) : null;
+  all[scope] = entry;
+  file.convShelves = all;
+  writePanesFile(file);
+}
+
 /**
  * Settings → Shelf Rail 在 Shelf 的 外侧 / 内侧 (owner 2026-10-21): every stored Shelf of every scope — the default
  * layout, the shared pages, each conversation's own — gets the placement. Returns how many changed.

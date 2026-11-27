@@ -168,6 +168,7 @@ export async function buildPack(id, outDir, opts = {}) {
   const packJsonPath = join(moduleDir, "pack.json");
   if (!existsSync(packJsonPath)) throw new Error(`modules/${id}/pack.json is missing: only modules with a pack.json can be packs`);
   const packJson = JSON.parse(readFileSync(packJsonPath, "utf8"));
+  if (opts.version !== undefined) packJson.version = opts.version;
   for (const k of Object.keys(packJson)) if (!["version", "moduleApi", "styles", "packOnly"].includes(k)) throw new Error(`modules/${id}/pack.json: unknown field ${k}`);
   if (!/^(0|[1-9]\d{0,5})\.(0|[1-9]\d{0,5})\.(0|[1-9]\d{0,5})$/.test(packJson.version ?? "")) throw new Error(`modules/${id}/pack.json: version must be M.m.p`);
   const vite = await import("vite");
@@ -294,20 +295,25 @@ async function main(argv) {
   const ids = [];
   let out = null;
   let styles;
+  let version;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--out") out = argv[++i];
     else if (a === "--styles") styles = true;
+    else if (a === "--version") {
+      version = argv[++i];
+      if (!version) throw Error("--version requires a version");
+    }
     else if (a === "--all") ids.push(...packableModules());
     else if (a.startsWith("-")) throw new Error(`unknown option ${a}`);
     else ids.push(a);
   }
-  if (!out || !ids.length) {
-    console.error("usage: build.mjs <id…> | --all  --out DIR [--styles]");
+  if (!out || !ids.length || (version && ids.length !== 1)) {
+    console.error("usage: build.mjs <id…> | --all  --out DIR [--styles] [--version VERSION (single id)]");
     return 2;
   }
   for (const id of [...new Set(ids)]) {
-    const { entry } = await buildPack(id, resolve(out), styles ? { styles } : {});
+    const { entry } = await buildPack(id, resolve(out), { styles, version });
     console.log(`${entry.archive.name}  ${entry.archive.size} bytes  sha256 ${entry.archive.sha256}`);
   }
   return 0;

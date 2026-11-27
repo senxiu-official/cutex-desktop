@@ -16,7 +16,8 @@ export default defineModule({
   descriptionKey: "desk-pet.description",
   defaultEnabled: false,
   contributes: {
-    "settings.page": [{ id: "desk-pet.page", page: "desk-pet", group: "app", order: 900, icon: PawPrint, titleKey: "desk-pet.nav", source: "local", hintKey: "desk-pet.pageHint", Page: DeskPetPage, subPages: { all: { titleKey: "desk-pet.allPets", hintKey: "desk-pet.allPetsHint", Page: AllPets } } }],
+    // A detail page under 模块 (docs/desktop-modules.md §5.1, owner 2026-11-27): no nav row; 「设置」 on its module row.
+    "settings.page": [{ id: "desk-pet.page", page: "desk-pet", group: "app", order: 900, navParent: "modules", icon: PawPrint, titleKey: "desk-pet.nav", source: "local", hintKey: "desk-pet.pageHint", Page: DeskPetPage, subPages: { all: { titleKey: "desk-pet.allPets", hintKey: "desk-pet.allPetsHint", Page: AllPets } } }],
     "tray.entry": [{ id: "desk-pet.tray", order: 100, Button: DeskPetTrayButton }],
     "identity.menu": [{ id: "desk-pet.identity", order: 100, entries: identityRows }],
   },

@@ -32,6 +32,11 @@ const cache = new Map<string, ProfileSnapshot>();
 const inflight = new Map<string, Promise<ProfileSnapshot>>();
 const lastLists = new Map<string, ProfileList | null>();
 const listInflight = new Map<string, Promise<ProfileList | null>>();
+/** Who shows a host's list without owning it (the first-run card): told when a cached list changes. */
+const listListeners = new Set<() => void>();
+const listsChanged = () => {
+  for (const listener of [...listListeners]) listener();
+};
 const dropHost = (hostId: string) => {
   for (const key of [...cache.keys()]) if (key.startsWith(`${hostId}
 `)) cache.delete(key);
@@ -39,6 +44,7 @@ const dropHost = (hostId: string) => {
 `)) inflight.delete(key);
   lastLists.delete(hostId);
   listInflight.delete(hostId);
+  listsChanged();
 };
 // Profiles belong to a host: another daemon has other profiles (or the same names, other settings).
 // The focus host starts over on a switch (as before); a replaced / removed connection drops its host.
@@ -47,8 +53,15 @@ onHostSwitch(() => {
   inflight.clear();
   lastLists.clear();
   listInflight.clear();
+  listsChanged();
 });
 onHostReset(dropHost);
+
+/** Subscribe to changes of any host's cached list (read it with cachedProfileList; useSyncExternalStore-shaped). */
+export function onProfileListChange(listener: () => void): () => void {
+  listListeners.add(listener);
+  return () => void listListeners.delete(listener);
+}
 
 export function cachedProfile(name: string, hostId = focusHostId()): ProfileSnapshot | null {
   return cache.get(keyOf(hostId, name)) ?? null;
@@ -61,6 +74,7 @@ export function cachedProfileList(hostId = focusHostId()): ProfileList | null {
 export function rememberProfileList(list: ProfileList | null, hostId = focusHostId(), current: () => boolean = () => true): void {
   if (!current()) return;
   lastLists.set(hostId, list);
+  listsChanged();
   // Avatars (colour, 头像主题) of every host's agents read their Profile from here (lib/profileLooks).
   if (list) noteProfileLooks(hostId, list.profiles);
   if (list) noteAccountProfiles(hostId, list.profiles);

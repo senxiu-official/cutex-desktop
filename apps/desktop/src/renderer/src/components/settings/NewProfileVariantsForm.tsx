@@ -20,7 +20,7 @@ import { AddressRow } from "./newProfile/AddressRow";
 import { AuthStep } from "./newProfile/AuthStep";
 import { ProviderCards, ProviderHeader } from "./newProfile/ProviderCards";
 import { NameStep } from "./newProfile/NameStep";
-import { addressSpecOf, choiceFor, choiceForPreset, createPlanOf, defaultChoice, needsClaudeAccount, providerCards, resolveChoice, type NewProfileChoice } from "../../lib/newProfileModel";
+import { addressSpecOf, cardChoice, choiceFor, choiceForPreset, choiceForStart, createPlanOf, defaultChoice, needsClaudeAccount, providerCards, resolveChoice, type NewProfileChoice, type NewProfileStart } from "../../lib/newProfileModel";
 import { NewClaudeAccountRow } from "./ProfileClaudeAccount";
 import { useTargetApi, useTargetFeatures, useTargetHostId } from "../../lib/targetHost";
 import { useSettingsCard } from "../../lib/settingsDrafts";
@@ -62,8 +62,10 @@ function RuntimeChoice({ row, checked, onChange, isDefault, experimentalAllowed 
   );
 }
 
-export function NewProfileVariantsForm({ existing, onCreated, onCancel, initialPreset, initialKimiAccount }: {
+export function NewProfileVariantsForm({ existing, onCreated, onCancel, initialPreset, initialKimiAccount, initialKind }: {
   existing: string[]; onCreated(detail: ProfileDetail): void; onCancel(): void; initialPreset?: string;
+  /** 引导's Profile card pick (ChatGPT / Claude open on that provider and sign-in). */
+  initialKind?: NewProfileStart;
   /** Kimi accounts → 用这个账户新建 Profile: the form opens on the Kimi provider with this account chosen. */
   initialKimiAccount?: string;
 }) {
@@ -73,7 +75,7 @@ export function NewProfileVariantsForm({ existing, onCreated, onCancel, initialP
   const hostId = useTargetHostId();
   const presets = useProfilePresets();
   const cards = useMemo(() => providerCards(presets, features), [presets, features]);
-  const initialChoice = () => initialKimiAccount ? { card: "kimi" as const, option: "kimiAccount", group: "", preset: "" } : initialPreset ? choiceForPreset(cards, initialPreset) : null;
+  const initialChoice = () => initialKimiAccount ? { card: "kimi" as const, option: "kimiAccount", group: "", preset: "" } : initialPreset ? choiceForPreset(cards, initialPreset) : initialKind ? choiceForStart(cards, initialKind) : null;
   const [choice, setChoice] = useState<NewProfileChoice | null>(initialChoice);
   const resolved = choice ? resolveChoice(cards, choice) : null;
   const provider: NewProfileProvider = resolved?.option.auth === "kimiAccount" ? "kimi" : resolved?.option.auth === "chatgpt" ? "chatgpt" : resolved?.option.runtime === "claude" ? "claude" : "apiKey";
@@ -227,7 +229,7 @@ export function NewProfileVariantsForm({ existing, onCreated, onCancel, initialP
       <div data-new-profile-variants="">
         <StepTitle>{t("newProfile.step.provider")}</StepTitle>
         {!resolved ? <>
-          <SettingsGroup navigation agents="none" source="host"><div><ProviderCards cards={cards} disabled={saving} onPick={(card) => choose(defaultChoice(card))} /></div></SettingsGroup>
+          <SettingsGroup navigation agents="none" source="host"><div><ProviderCards cards={cards} disabled={saving} onPick={(card) => choose(cardChoice(card, initialKind))} /></div></SettingsGroup>
           <div className="flex justify-end pt-3"><Button onClick={onCancel}>{t("dialog.cancel")}</Button></div>
         </> : <>
         <SettingsGroup navigation agents="none" source="host"><div><ProviderHeader card={resolved.card} disabled={saving} onChange={() => choose(null)} /></div></SettingsGroup>

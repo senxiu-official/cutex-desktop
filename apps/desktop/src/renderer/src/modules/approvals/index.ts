@@ -18,6 +18,8 @@ const ApprovalRulesAll = lazyPage(() => import("./ApprovalRules").then((m) => m.
 
 export default defineModule({
   id: "approvals",
+  // Locked on (module-dependencies-20261126, owner 2026-11-26): turning it off removed the way to handle work that goes on.
+  required: true,
   titleKey: "approvals.title",
   descriptionKey: "approvals.description",
   requires: { capabilities: [APPROVALS_FEATURE] },

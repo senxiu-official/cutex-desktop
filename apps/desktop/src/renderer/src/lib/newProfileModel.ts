@@ -170,6 +170,29 @@ export function choiceFor(card: ProviderCard, option: AuthOption, groupKey?: str
   return { card: card.id, option: option.id, group: group?.key ?? "", preset: group?.presets[0]?.id ?? "" };
 }
 
+/** What the onboarding's Profile card (引导 → 添加第一个 Profile) had picked when 添加 Profile opened the form. */
+export type NewProfileStart = "apiKey" | "chatgpt" | "claude";
+
+/**
+ * The form's first choice for that pick (owner 2026-11-26: don't ask for the provider again): ChatGPT → Codex with
+ * ChatGPT login, Claude → Claude with the subscription. An API key names no provider yet: null (the cards stay).
+ */
+export function choiceForStart(cards: readonly ProviderCard[], start: NewProfileStart): NewProfileChoice | null {
+  const auth = start === "chatgpt" ? "chatgpt" : start === "claude" ? "claudeSubscription" : null;
+  if (!auth) return null;
+  for (const card of cards) {
+    const option = card.options.find((o) => o.auth === auth);
+    if (option) return choiceFor(card, option);
+  }
+  return null;
+}
+
+/** A provider card picked in the form: its usual first option, or (引导 picked API key) its first key option. */
+export function cardChoice(card: ProviderCard, start?: NewProfileStart): NewProfileChoice {
+  const keyOption = start === "apiKey" ? card.options.find((o) => !o.advanced && takesKey(o.auth)) : undefined;
+  return keyOption ? choiceFor(card, keyOption) : defaultChoice(card);
+}
+
 /** `initialPreset` (编辑页「用这个服务商新建」): the card and API-key option holding that preset. */
 export function choiceForPreset(cards: readonly ProviderCard[], presetId: string): NewProfileChoice | null {
   const key = presetId.toLowerCase();

@@ -1,77 +1,17 @@
-// The setup cards of the onboarding flow (components/OnboardingFlow, lib/onboardingFlow; owner 2026-10-24: one
-// decision group per card, big enough to read at a glance): language, theme with its colours, scale, animation, wording. Each applies at
-// once through the same setters as Settings (通用 / 外观). Strings in modules/onboarding/i18n.ts.
+// The look choices of Settings → 自定义桌面 (modules/start; once the cards of the first-run flow, owner 2026-10-24: one
+// decision group each, big enough to read at a glance): theme with its colours, scale, animation, wording. Each applies at
+// once through the same setters as Settings (通用 / 外观). Strings in modules/onboarding/i18n.ts. The language: components/LanguageChoice.
 import { useEffect, useState } from "react";
 import { englishCatalog, loadedCatalog, useI18n, type Locale, type MessageKey } from "../i18n";
 import { setAppearance, useAppearance } from "../lib/appearance";
-import { LANGUAGES, isTraditionalLocale, traditionalRegionOf, traditionalLocale, preferredTraditionalRegion } from "../lib/languages";
-import { Segmented, Toggle } from "./settings/Form";
 import { applyTermPreset, currentTermPreset, presetOverrides, termPresets, type TermPreset } from "../lib/termPresets";
 import { applyDarkPalette, applyLightPalette, applyTheme, DARK_PALETTES, LIGHT_PALETTES, loadDarkPalette, loadLightPalette, loadTheme, PALETTE_SWATCH, type DarkPalette, type LightPalette, type ThemePref } from "../lib/theme";
 import { applyTerms, resolveTerms, useTermOverrides, type TermLocale } from "../lib/terms";
 import { PERF_MODES, setUiPref, useUiPrefs, type PerfMode } from "../lib/prefs";
-import { OnboardingClaudeRuntime } from "./OnboardingClaudeRuntime";
 import { useOwnerWindow } from "../lib/ownerContext";
 
 const TILE = "rounded-xl border-2 text-left transition-colors focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none";
 const tile = (on: boolean) => `${TILE} ${on ? "border-accent bg-accent/10" : "border-border bg-background hover:bg-hover"}`;
-
-/** Learn about the chosen profile kind without installing anything until explicitly requested. */
-export function ProfileStep() {
-  const { t } = useI18n();
-  const [kind, setKind] = useState<"apiKey" | "chatgpt" | "claude">("apiKey");
-  return <div className="mt-3" data-onboarding-profile="">
-    <div className="flex flex-wrap gap-2" role="group" aria-label={t("onboarding.profile.title")}>
-      {(["apiKey", "chatgpt", "claude"] as const).map(value => <button type="button" key={value} data-onboarding-profile-kind={value} aria-pressed={kind === value} onClick={() => setKind(value)} className={`${tile(kind === value)} px-3 py-2 text-sm`}>
-        {t(`onboarding.guide.profile.${value}.title`)}
-      </button>)}
-    </div>
-    {kind === "claude" && <OnboardingClaudeRuntime />}
-  </div>;
-}
-
-/** Every UI language named in itself (lib/languages, as in Settings → 通用); a click switches at once. */
-export function LanguageStep() {
-  const { t, locale, setLocale } = useI18n();
-  const region = traditionalRegionOf(locale);
-  const traditional = isTraditionalLocale(locale);
-  const [lastNonCN, setLastNonCN] = useState<"HK" | "MO" | "TW">(() => region && region !== "CN" ? region : preferredTraditionalRegion());
-  const jiahao = region === "CN";
-  const toggle = (on: boolean) => {
-    if (region && region !== "CN") setLastNonCN(region);
-    setLocale(on ? traditionalLocale("CN") : traditionalLocale(lastNonCN));
-  };
-  return (
-    <>
-      <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3" role="radiogroup" aria-label={t("onboarding.language.title")}>
-        {LANGUAGES.map((l) => {
-          const selected = l.value === "zh-Hant-CN" ? traditional : locale === l.value;
-          return <button key={l.value} role="radio" aria-checked={selected} lang={l.value} onClick={() => {
-            // A manual family pick starts with CN; an already-selected family retains its region.
-            if (l.value === "zh-Hant-CN") { if (!traditional) setLocale(traditionalLocale("CN")); }
-            else setLocale(l.value);
-          }} className={`${tile(selected)} truncate px-3 py-2 text-title font-normal`}>{l.label}</button>;
-        })}
-      </div>
-      {traditional && (
-        <div className="mt-auto flex max-w-full flex-col items-start gap-2 pt-4" data-traditional-onboarding="">
-          <label className="flex cursor-pointer items-center gap-2 text-sm">
-            <Toggle checked={jiahao} onChange={toggle} label={t("onboarding.language.jiahao" as MessageKey)} />
-            {t("onboarding.language.jiahao" as MessageKey)}
-          </label>
-          {jiahao ? <p className="text-xs text-subtle" data-jiahao-caption="">{t("onboarding.language.jiahaoCaption" as MessageKey)}</p> : (
-            <Segmented
-              label={t("shell.language.traditional.region" as MessageKey)}
-              value={region ?? lastNonCN}
-              options={(["HK", "MO", "TW"] as const).map((value) => ({ value, label: t(`shell.language.traditional.${value}` as MessageKey) }))}
-              onChange={(value) => { setLastNonCN(value); setLocale(traditionalLocale(value)); }}
-            />
-          )}
-        </div>
-      )}
-    </>
-  );
-}
 
 /** A tiny window in fixed colours (the theme tiles show what light / dark look like before choosing). */
 function MiniWindow({ bg, side, line, accent }: { bg: string; side: string; line: string; accent: string }) {

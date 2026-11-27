@@ -37,6 +37,29 @@ export const mock: ModuleMock = {
         event(chat, "turn/completed", { threadId: chat.threadId, turn: { id: turnId, status: "completed", completedAt: Date.now() / 1000 } });
       }, 450);
     };
+    /**
+     * 「思考演示」 / "thinking demo": 思考 then the answer, streamed slowly the way the Claude adapter's Side records them
+     * (through claude-r24): each `item/started` keeps the live item, so a read mid-stream finds it already holding what
+     * streamed after it (model.ts startedWithoutStreamedText). The preview should still show every sentence once.
+     */
+    const stream = (chat: SideChat, turnId: string, thought: string[], answer: string[]) => {
+      const live = (item: Record<string, unknown>) => { event(chat, "item/started", { threadId: chat.threadId, turnId, item }); return item; };
+      const steps: (() => void)[] = [];
+      const reasoning = { id: `${turnId}-think`, type: "reasoning", summary: [] as string[], content: [] };
+      steps.push(() => { live(reasoning); reasoning.summary.push(""); event(chat, "item/reasoning/summaryPartAdded", { threadId: chat.threadId, turnId, itemId: reasoning.id, summaryIndex: 0 }); });
+      for (const part of thought) steps.push(() => { reasoning.summary[0] += part; event(chat, "item/reasoning/summaryTextDelta", { threadId: chat.threadId, turnId, itemId: reasoning.id, delta: part, summaryIndex: 0 }); });
+      steps.push(() => event(chat, "item/completed", { threadId: chat.threadId, turnId, item: structuredClone(reasoning) }));
+      const reply = { id: `${turnId}-reply`, type: "agentMessage", text: "" };
+      steps.push(() => { live(reply); });
+      for (const part of answer) steps.push(() => { reply.text += part; event(chat, "item/agentMessage/delta", { threadId: chat.threadId, turnId, itemId: reply.id, delta: part }); });
+      steps.push(() => {
+        event(chat, "item/completed", { threadId: chat.threadId, turnId, item: structuredClone(reply) });
+        chat.status = "ready"; chat.activeTurnId = null;
+        event(chat, "turn/completed", { threadId: chat.threadId, turn: { id: turnId, status: "completed", completedAt: Date.now() / 1000 } });
+      });
+      const next = () => { if (chat.status !== "running" || chat.activeTurnId !== turnId) return; steps.shift()?.(); if (steps.length) setTimeout(next, 700); };
+      next();
+    };
     return {
       async sideOpen(sessionId, input = {}) {
         const model = sideModel(input.model);
@@ -74,7 +97,11 @@ export const mock: ModuleMock = {
         const answer = /standalone note|总结|summariz/i.test(input.text)
           ? "# Notes 的查找规则\n\n- 默认保存为会话笔记。\n- 项目和主机总览自然收录它。\n- Pin 是额外标记，取消不会删除笔记。\n\n未决事项：无。"
           : "侧边对话与主对话隔离。未标记的笔记也能在项目和主机的全部笔记里找到；标记只帮助查找。";
-        if (/审批演示|approval demo/i.test(input.text)) {
+        if (/思考演示|thinking demo/i.test(input.text)) {
+          setTimeout(() => stream(chat, turnId,
+            ["先确认问题出在哪一层。", "主对话里提到构建缓存保留了旧的修改时间，", "所以重新导出后 Cargo 没有重新编译。"],
+            ["原因是复用的导出目录保留了旧的修改时间，", "Cargo 认为源码没变。", "删掉对应的目标目录或强制重建即可。"]), 400);
+        } else if (/审批演示|approval demo/i.test(input.text)) {
           chat.pendingRequests.push({ id: `approve-${turnId}`, method: "item/commandExecution/requestApproval", params: { threadId: chat.threadId, turnId, itemId: "mock-command", command: "Get-ChildItem", cwd: "D:\\demo", availableDecisions: ["accept", "decline"] } }); changed(chat);
         } else setTimeout(() => finish(chat, turnId, answer), 650);
         return { ...copy(chat), turnId };

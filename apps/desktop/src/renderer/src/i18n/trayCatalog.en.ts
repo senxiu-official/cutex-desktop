@@ -107,6 +107,7 @@ export const trayEn: Record<keyof typeof trayZhCN, string> = {
   "tray.close": "Close",
   "workspace.threeColumns": "Allow 3 workspaces",
   "workspace.threeColumnsHint": "Up to 3 workspaces side by side (default 2); each needs at least 400 px, so a narrow window will not add one",
+  "workspace.sideBySide": "Side-by-side workspaces",
   "tray.closeTitle": "Close {name} (leaves the tray)",
   "tray.needsYou": "Needs you {n}",
   "tray.needsYouTitle": "Open the one that needs you: {name}",

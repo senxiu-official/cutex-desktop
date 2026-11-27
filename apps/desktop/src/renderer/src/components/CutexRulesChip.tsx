@@ -7,7 +7,7 @@
 // asks before revoking the whole rule where it would not (1 小时 / 今天 on a host without approval-rule-exact-narrow);
 // a Director identity grant is paused / resumed as a whole, never deleted.
 import { memo, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { Crown, FolderOpen, Globe, Infinity as InfinityIcon, MousePointerClick, Send, Server, TriangleAlert, UserCog, Users, Workflow } from "lucide-react";
+import { Crown, FilePen, FolderOpen, Globe, Infinity as InfinityIcon, MousePointerClick, Send, Server, TriangleAlert, UserCog, Users, Workflow } from "lucide-react";
 import type { ApprovalKind, ApprovalRule, ApprovalRuleDraft, ApprovalRuleExpiryMode, ApprovalRulesView, DaemonApi } from "../../../shared/ipc";
 import type { Icon } from "../modules/slots";
 import { TypedRuleConfirmation } from "./TypedRuleConfirmation";
@@ -41,6 +41,7 @@ const KIND_LOOK: Record<ApprovalKind, [Icon, number]> = {
   browser_open: [Globe, 196],
   agent_profile: [UserCog, 145],
   workflow_run: [Workflow, 238],
+  personal_assistant_write: [FilePen, 18],
 };
 const tileStyle = (hue: number): CSSProperties => ({ color: `hsl(${hue} 60% 48%)`, background: `color-mix(in srgb, hsl(${hue} 60% 48%) 15%, transparent)` });
 

@@ -14,12 +14,21 @@ import { en as crossHostMessages } from "../lib/crossHostMessages";
 import { en as effortLabelMessages } from "../lib/effortLabelMessages";
 import { en as interruptSendMessages } from "../lib/interruptSendMessages";
 import { en as moduleTagsMessages } from "../modules/moduleTagsMessages";
-import { en as promptEnhanceMessages } from "../lib/promptEnhanceMessages";
+import { en as moduleListMessages } from "../modules/moduleListMessages";
+import { en as settingsSyncMessages } from "../lib/settingsSyncMessages";
+import { en as promptEnhanceMessages } from "../lib/inputRefinementKeysMessages";
+import { en as keySchemesMessages } from "../lib/keySchemesMessages";
+import { en as openBesideMessages } from "../lib/openBesideMessages";
+import { en as sidebarSearchMessages } from "../lib/sidebarSearchMessages";
+import { en as atMentionOrderMessages } from "../lib/atMentionOrderMessages";
+import { en as runtimeConfigMessages } from "../lib/runtimeConfigMessages";
+import { en as imageEditMessages } from "../lib/imageEditMessages";
+import { en as portraitCollectionsMessages } from "../lib/portraitCollectionsMessages";
 import { en as queueRowTimeMessages } from "../lib/queueRowTimeMessages";
 import { en as backgroundOpsMessages } from "../lib/backgroundOpsMessages";
 import { en as agentLifecycleMessages } from "../lib/agentLifecycleMessages";
 import { en as turnErrorSurfaceMessages } from "../lib/turnErrorSurfaceMessages";
-import { en as teachingMessages } from "../lib/teachingMessages";
+import { en as calloutMessages } from "../lib/calloutMessages";
 import { en as settingsProviderMessages } from "../lib/settingsProviderMessages";
 import { en as avatarStyleMessages } from "../lib/avatarStyleMessages";
 import { en as deskMessages } from "../lib/deskMessages";
@@ -34,7 +43,7 @@ import { en as modelContextEnAU } from "../lib/modelContextMessages";
 import { en as newProfileMessages } from "../lib/newProfileMessages";
 import { settingsIaEn as settingsIaExtra0 } from "../lib/settingsIaMessages";
 import { modulesEn } from "../modules/i18nCatalogEn";
-import { modulesLocale } from "../modules/i18nCatalogLocales";
+import { moduleLocale } from "../modules/locales.en-AU";
 import { trayEn } from "./trayCatalog.en";
 import { gestureEn } from "./gestureCatalog.en";
 import type { zhCN } from "./zh-CN";
@@ -71,13 +80,12 @@ export const enAU: Record<keyof typeof zhCN, string> = {
   "settings.pageHint.conversation": "Adjust message display, the composer and the reading layout for conversations. These interface settings are saved in the desktop app.",
   "settings.pageHint.nci": "Set up job status updates and completion notifications from NCI Gadi for the selected host. Follow the steps below to configure the connection and notification mailbox.",
   "settings.pageHint.notifications": "Set notification levels and delivery methods for events. Host notification rules and the desktop app’s alert options are saved separately.",
-  "settings.pageHint.whats-new": "Explore features introduced in version 0.2 and where to find them. Features that require host support are marked.",
+  "settings.pageHint.whats-new": "What changed in each version from 0.2 on, newest first.",
   "settings.pageHint.help": "Replay getting-started guides and tips, read the documentation or report a problem.",
   "proxy.settingsPageHint": "Configure separate proxies for the desktop app's updates and network requests from the selected host. Desktop connections to hosts always remain direct.",
   "settings.pageHint.appearance": "Adjust colors, fonts, interface density and avatar display. Interface preferences are saved in the desktop app; {{agent}} avatar changes are saved on their hosts.",
   "settings.pageHint.sidebar": "Adjust grouping, row details and appearance for projects and {{agents}} in the sidebar. Layout can follow you through a memory host; other display options stay in the desktop app.",
   "settings.pageHint.sides": "Adjust where {{shelf}} pages open, along with navigation, width and loading behavior. These layout settings are saved in the desktop app.",
-  "settings.pageHint.status": "Choose where status information such as goals, plans and jobs appears, and adjust the status capsule layout. These interface settings are saved in the desktop app.",
   "settings.pageHint.tray": "Adjust the position and appearance of the shortcut tray at the window edge. These layout settings are saved in the desktop app.",
   "settings.pageHint.desktop": "Set the desktop background, brightness and home content. Home content is saved on hosts that support it; other display options stay in the desktop app.",
   "settings.pageHint.me": "Manage your name, picture and identity, and review your access on each host. Identity details can sync to linked hosts.",
@@ -148,12 +156,21 @@ export const enAU: Record<keyof typeof zhCN, string> = {
   ...effortLabelMessages,
   ...interruptSendMessages,
   ...moduleTagsMessages,
+  ...moduleListMessages,
+  ...settingsSyncMessages,
   ...promptEnhanceMessages,
+  ...keySchemesMessages,
+  ...openBesideMessages,
+  ...sidebarSearchMessages,
+  ...atMentionOrderMessages,
+  ...runtimeConfigMessages,
+  ...imageEditMessages,
+  ...portraitCollectionsMessages,
   ...queueRowTimeMessages,
   ...backgroundOpsMessages,
   ...agentLifecycleMessages,
   ...turnErrorSurfaceMessages,
-  ...teachingMessages,
+  ...calloutMessages,
   ...settingsProviderMessages,
   ...avatarStyleMessages,
   ...deskMessages,
@@ -352,8 +369,6 @@ export const enAU: Record<keyof typeof zhCN, string> = {
   "identity.person.keyErrorLength": "The identity key is incomplete or has extra characters; copy the whole key again",
   "identity.person.keyErrorChecksum": "The identity key's checksum does not match: a character is wrong; copy it again",
   "identity.person.keyErrorKey": "This identity key cannot be used: {message}",
-  "firstRun.empty.noProfile": "This host has no Profile yet (a model account: API key or ChatGPT login). Add one first, then click “New {{agent}}” (the person + icon at the left of the window bar) to create the first {{agent}}.",
-  "firstRun.empty.addProfile": "Add a Profile",
   "profiles.order.up": "Move up",
   "profiles.order.down": "Move down",
   "profiles.order.top": "Move to top",
@@ -397,8 +412,6 @@ export const enAU: Record<keyof typeof zhCN, string> = {
   "agent-config.profile.imageHistoryTrimKeep": "Keep newest",
   "agent-config.profile.imageHistoryTrimInvalid": "Keep 1–50 images; “When more than” must be larger than that, up to 500",
   "firstRun.noHost.title": "No host yet",
-  "firstRun.noHost.body": "There is no cutex on this computer (the macOS build is a front end only). Add a host that runs cutex over SSH to use its {{agents}} here.",
-  "firstRun.noHost.add": "Add an SSH host",
   "restore.chip": "Restore {count}",
   "markdown.close": "Close",
   "markdown.copied": "Copied",
@@ -637,6 +650,8 @@ export const enAU: Record<keyof typeof zhCN, string> = {
   "navMore.title": "More",
   "navMore.pin": "Pin to the window bar",
   "navMore.unpin": "Unpin from the window bar",
+  "turnBar.pin": "Pin to the action bar",
+  "turnBar.unpin": "Unpin from the action bar",
   "navMore.attention": "Something folded here needs you",
   "shortcuts.menuFlyout": "Menus: → enters a submenu, ← goes back",
   "shortcuts.menuToggle": "Menus: Space flips the row's pin",
@@ -1043,6 +1058,7 @@ export const enAU: Record<keyof typeof zhCN, string> = {
   "needsYou.openApprovals": "Open approvals",
   "needsYou.otherHosts": "Other hosts: {n}",
   "needsYou.otherHostsHint": "{n} items wait for you on connected hosts outside the view scope",
+  "needsYou.readStateLocal": "Read and closed items stay on this device for now: the host has to confirm who you are first",
   "float.more": "{n} more",
   "hostLists.connecting": "{host} is connecting; its entries are not listed yet",
   "hostLists.offline": "{host} is not connected; its entries are not listed",
@@ -1083,19 +1099,13 @@ export const enAU: Record<keyof typeof zhCN, string> = {
   "daemon.error": "cutex returned an error",
   "daemon.notInstalled": "cutex is not installed on this computer",
   "daemon.notRunning": "cutex is not running",
-  "firstRun.notInstalled.title": "cutex is not installed on this computer yet",
-  "firstRun.notInstalled.body": "The Cutex desktop app is a front end for cutex: {{agents}}, sessions and model accounts all live in cutex. Install and start cutex on this computer first.",
   "firstRun.notInstalled.step1": "Install cutex following AGENT-INSTALL.md (you can hand that file to your coding assistant)",
   "firstRun.notInstalled.step2": "Start the cutex management service (a step in the same guide)",
   "firstRun.notInstalled.step3": "Come back here: the app retries every few seconds and connects on its own; then create your first {{agent}}",
-  "firstRun.notRunning.title": "cutex is not running",
   "firstRun.notRunning.body": "cutex is configured on this computer, but its management service does not answer ({url}). Start it and the app connects on its own; AGENT-INSTALL.md explains how.",
   "firstRun.retry": "Retry now",
   "firstRun.hostSettings": "Manage hosts",
   "firstRun.openLogs": "Open log folder",
-  "firstRun.detail": "Details",
-  "firstRun.empty.title": "No {{agents}} yet",
-  "firstRun.empty.body": "Click “New {{agent}}” (the person + icon at the left of the window bar) to create the first one; add model accounts under Settings → Profile.",
   "sidebar.search": "Search",
   "sidebar.peek.label": "Sidebar",
   "sidebar.peek.pin": "Pin",
@@ -1217,7 +1227,6 @@ export const enAU: Record<keyof typeof zhCN, string> = {
   "settings.panel.pageWidthHint": "When a page (project, delegations, services…) newly opens in a {{shelf}} narrower than 640 px, the {{shelf}} widens to 640 px once (taking only from its own conversation, stopping at its minimum). Fixed",
   "settings.panel.menu.sidebar": "Sidebar settings…",
   "settings.panel.menu.conversation": "Conversation settings…",
-  "settings.panel.menu.status": "Status display settings…",
   "settings.panel.menu.sides": "{{shelf}} settings…",
   "settings.panel.menu.tray": "Tray settings…",
   "settings.panel.menu.desktop": "Desktop settings…",
@@ -1344,11 +1353,10 @@ export const enAU: Record<keyof typeof zhCN, string> = {
   "settings.scope.local.body": "These settings are saved in the desktop app. They don't sync to other desktop apps or change the host's settings.",
   "settings.scope.except": " A card tagged with another place follows its own tag.",
   "settings.scope.host.label": "Host · {host}",
-  "settings.scope.host.shownTitle": "Host settings on this page are from {host}",
   "settings.scope.host.short": "Host",
   "settings.scope.host.body": "Saved in the cutex running on {host}, where the {{agents}} run; every device connected to {host} sees the same.",
   "settings.scope.codex.label": "Host · {host} · Codex config",
-  "settings.scope.codex.short": "Host · Codex config",
+  "settings.scope.codex.short": "Codex config",
   "settings.scope.codex.body": "Saved in the Codex runtime's own config on {host} (cute-codex, the Codex fork Cutex maintains). Codex {{agents}} read it when they start; Claude {{agents}} don't.",
   "settings.scope.agents.none": "Doesn't affect {{agents}}",
   "settings.scope.agents.none.title": "Doesn't affect {{agents}}",
@@ -1386,7 +1394,7 @@ export const enAU: Record<keyof typeof zhCN, string> = {
   "pane.width": "{{shelf}} width",
   "pane.resizeHint": "Drag to resize, double-click to reset (arrow keys when focused)",
   "pane.openBeside": "Open beside",
-  "pane.openBesideHint": "Open beside ({key}click / middle click)",
+  "pane.openBesideHint": "Open side by side ({key}click / middle click)",
   "pane.close": "Close this column",
   "window.minimize": "Minimise",
   "window.maximize": "Maximise / Restore",
@@ -1685,6 +1693,16 @@ export const enAU: Record<keyof typeof zhCN, string> = {
   "appearance.palette.ink": "Ink",
   "appearance.accent": "Accent colour",
   "appearance.accentHint": "Used by switches, links, focus rings and selection; light and dark are each adjusted so text stays readable",
+  "appearance.appIcon": "App icon",
+  "appearance.appIconHint": "The icon Cutex uses for its windows, tray, notifications and inside the app. Your choice syncs with Appearance to your other desktops; each changes it wherever its system allows.",
+  "appearance.appIcon.style": "Icon style",
+  "appearance.appIcon.previewTitle": "Preview",
+  "appearance.appIcon.size": "{n} px",
+  "appearance.appIcon.where.win32": "Changes right away: the window and its taskbar button, the tray, notifications, the logos in the app, and the Cutex shortcuts in the Start menu, on the desktop and pinned to the taskbar (Windows may take a moment to refresh its icon cache). cutex.exe keeps its default icon.",
+  "appearance.appIcon.shortcuts": "{n} shortcuts updated.",
+  "appearance.appIcon.noShortcuts": "This run manages no shortcuts (a development build or a separate instance), so they stay as they are.",
+  "appearance.appIcon.where.darwin": "Changes right away: the logos in the app, the menu bar icon and the Dock icon while Cutex runs. Once it quits, the Dock and Finder show the default icon again (macOS doesn't allow changing a signed app's own icon).",
+  "appearance.appIcon.where.linux": "Changes right away: windows, the tray, notifications and the logos in the app. Your desktop's launcher keeps its icon.",
   "appearance.accent.blue": "Blue",
   "appearance.accent.indigo": "Indigo",
   "appearance.accent.violet": "Violet",
@@ -3981,6 +3999,8 @@ export const enAU: Record<keyof typeof zhCN, string> = {
   "gutter.demo.hint": "Demo entries of the browser preview: click a row to open the reference; right-click to choose how",
   "gutter.demo.action": "Copy reference (JSON)",
   "gutter.demo.note": "Demo: margin content",
+  "launch.columns.all": "All {provider} Profiles",
+  "launch.columns.other": "Other",
   "launch.portrait.choose": "Choose a provider",
   "launch.portrait.profile": "{provider} profile: {profile}",
   "launch.portrait.select": "Choose {provider} · {profile}",
@@ -3989,7 +4009,7 @@ export const enAU: Record<keyof typeof zhCN, string> = {
   ...modulesEn,
   ...trayEn,
   ...gestureEn,
-  ...modulesLocale("en-AU"),
+  ...moduleLocale,
   "about.thirdParty": "Third-party licences",
   "about.license": "Licence",
   // ---- fix/settings-host-scope (UI-01 / UI-02, review 2026-10-15): lead merges this block ----
@@ -4341,6 +4361,8 @@ export const enAU: Record<keyof typeof zhCN, string> = {
   "inputLedger.delivery.turn.unknown": "Working",
   "inputLedger.delivery.finishing": "Finishing",
   "inputLedger.delivery.held.hostBusy": "Host busy; delivery pending",
+  "inputLedger.delivery.held.deadline": "waits up to {n}s more",
+  "inputLedger.delivery.held.deadlineHint": "Sent the way you chose (a queued message stays queued) as soon as the host is free. If the host is still busy at the limit, it is not sent; you can retry it.",
   "inputLedger.delivery.held.paused": "Paused",
   "inputLedger.delivery.held.delegationLease": "Delegation holds delivery",
   "inputLedger.delivery.held.eventLease": "Delivering delegation results",
@@ -4480,7 +4502,6 @@ export const enAU: Record<keyof typeof zhCN, string> = {
   "modules.section.all": "All modules",
   "settings.ia.avatarLink": "Avatars and identity marks",
   "settings.ia.storageLink": "View host storage",
-  "status-capsule.section": "Status capsule (legacy)",
   "settings.ia.pageWidthNote": "When opening a page, the {{shelf}} widens if space allows. Minimum width:",
   "settings.ia.bulkScope": "Change avatars for {n} {{agents}} on {hosts}. Changes are saved on each host and visible on other devices.",
   "storage.cleanup.target": "Cleanup applies to data on host {host}.",

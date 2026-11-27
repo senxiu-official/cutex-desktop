@@ -33,7 +33,7 @@ describe("localization audit guards (2026-10-13)", () => {
     expect(zhCN["project-view.count.jobs"]).toBe("作业");
     expect(zhCN["project-view.job"]).toBe("作业");
     expect(zhCN["plan.statusTitle"]).toBe("计划");
-    expect(zhCN["shell.statusPlace.bar"]).toBe("状态行");
+    expect(zhCN["shell.statusRow.items"]).toBe("状态行里显示");
     expect(zhCN["onboarding.guide.project.text"]).not.toContain("看板");
     expect(en["onboarding.guide.project.text"]).toContain("Project view and activity");
   });
@@ -258,7 +258,7 @@ describe("copy round 2 guards (2026-11-25)", () => {
     "conversation.turnSummary", "conversation.turnSummary.hint", "conversation.turnSummary.latestExpanded", "agentMsg.kind.noteHint",
     "agentMsg.kind.wakeHint", "agentMsg.wakeHint", "agentMsg.pending.afterTurn", "composer.queueSend", "queue.turn.queue",
     "queue.turn.follows", "queue.turn.numberHint", "queue.turn.yielded", "queue.turn.afterStop", "queue.turn.afterStopHint",
-    "queue.turn.heldStopHint", "reply.revertHint", "menu.revertConfirm", "asksPause.gateTitle", "side-chat.open", "side-chat.source",
+    "queue.turn.heldStopHint", "reply.revertHint", "menu.revertConfirm", "asksPause.gateTitle", "side-chat.open", "side-chat.sourceTitle", "side-chat.turnEarlier", "side-chat.turnThis",
     "notes.addToTurn", "bookmarks.showRibbon", "diff.turnBadge", "claude-accounts.usage.turns", "delegations.upgrade.tree.continuing",
     "onboarding.panel.sidebar.runtime.detail",
   ];

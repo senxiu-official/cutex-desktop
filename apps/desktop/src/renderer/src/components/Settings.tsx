@@ -7,7 +7,7 @@ import { isImeComposing } from "../lib/ime";
 // SettingsNav as its Aside. Multi-host (P1 step 2c, RFC §9.3): host pages get a host picker in their
 // header (lib/settingsHost) and read / write that host (lib/targetHost provider).
 import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
-import { preloadOnIntent } from "../lib/lazyPage";
+import { preloadPage } from "../lib/lazyPage";
 import { ArrowLeft, Check, Search, SlidersHorizontal, X } from "lucide-react";
 import { bridge } from "../bridge";
 import { useI18n, type MessageKey } from "../i18n";
@@ -19,14 +19,13 @@ import { profileSearchAnchor } from "../lib/settingsProfileSearch";
 import { en as searchEn, zhCN as searchZh } from "../lib/settingsSearchIaMessages";
 import { hostPickerMode } from "../lib/hostPick";
 import { openSettingsShelf } from "../lib/settingsShelf";
-import { AllHostsContext, SETTINGS_HOST_PAGES, SETTINGS_MEMBER_PAGES, setSettingsHost, useSettingsHost, useSettingsTarget } from "../lib/settingsHost";
+import { AllHostsContext, SETTINGS_HOST_PAGES, SETTINGS_MEMBER_PAGES, useSettingsHost, useSettingsHostFollowsFocus, useSettingsTarget } from "../lib/settingsHost";
 import { useSettingsAllHosts } from "../lib/settingsAllHosts";
 import { TargetHostContext } from "../lib/targetHost";
 import { useHostAccess } from "../lib/hostAccess";
 import { useHostScope } from "../lib/useHostScope";
 import { isSettingsHostPage, settingsPageHasHostPicker } from "../lib/settingsGate";
-import { HostPicker } from "./HostPicker";
-import { SettingsHostFrame } from "./SettingsHostFrame";
+import { SettingsHostFrame, SettingsHostSwitcher } from "./SettingsHostFrame";
 import { ItemBoundary } from "../modules/Outlet";
 import { useSlot } from "../modules/react";
 import type { AppSlotEntry, PageParams } from "../modules/slots";
@@ -46,10 +45,13 @@ function NavRow({ entry, current }: { entry: AppSlotEntry<"settings.page">; curr
   const badge = item.useBadge?.() ?? null;
   const Icon = item.icon;
   const disabled = entry.mode !== "show";
+  const preload = () => { if (!disabled) void preloadPage(item.Page); };
   return (
     <button
       aria-current={current ? "page" : undefined}
       disabled={disabled}
+      onPointerEnter={preload}
+      onFocus={preload}
       title={disabled && !entry.waiting ? t("modules.needsCapability", { list: entry.missing.join(", ") }) : undefined}
       onClick={() => {
         // Hold the current page until the next one is ready (no building up card by card).
@@ -74,16 +76,14 @@ function NavRow({ entry, current }: { entry: AppSlotEntry<"settings.page">; curr
 export function SettingsNav({ params }: { params: PageParams }) {
   const win = useOwnerWindow();
   const tab = settingsTab(params);
-  // The other Settings pages load in idle time once Settings is open (lib/lazyPage): switching to one is instant.
-  useEffect(() => void preloadOnIntent(), []);
   const { t } = useI18n();
   const closePage = useApp((s) => s.closePage);
   const pages = useSlot("settings.page");
   const [query, setQuery] = useState("");
   const input = useRef<HTMLInputElement>(null);
-  // Leaving Settings: the 关于 dragon starts small next time; the host pages edit the focus host again.
+  // Leaving Settings: the 关于 app icon starts small next time; the host pages edit the focus host again.
   useEffect(() => resetDragonSize, []);
-  useEffect(() => () => setSettingsHost(null), []);
+  useSettingsHostFollowsFocus();
   // Ctrl+F (anywhere) or "/" (outside a text field) focuses the search box while Settings is open.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -406,6 +406,8 @@ export function Settings({ params }: { params: PageParams }) {
     <main className="flex min-w-0 flex-1">
       <PageBody
         scrollKey={scrollKey}
+        // A page with a way back (a sub-page, a Profile, 添加, a page with a back link): back restores where the owner left.
+        nested={!!sub || !!params.profile || !!params.create || !!back}
         aside={
           item.Aside ? (
             <ItemBoundary moduleId={entry.moduleId} resetKey={tab}>
@@ -431,17 +433,13 @@ export function Settings({ params }: { params: PageParams }) {
                   </span>
                 ) : undefined
               }
+              hostId={allHosts.on ? undefined : hostId}
               host={
-                settingsPageHasHostPicker(item) && mode !== "none" ? (
-                  <HostPicker
-                    chip
-                    value={hostId}
-                    onChange={(id) => {
+                settingsPageHasHostPicker(item) && sub?.hostPicker !== false && mode !== "none" ? (
+                  <SettingsHostSwitcher
+                    onPick={() => {
                       if (allHosts.on) allHosts.set(false);
-                      setSettingsHost(id);
                     }}
-                    mode={mode}
-                    title={t("hostPicker.settingsTitle")}
                     all={allHosts.offered ? { label: t("hostPicker.allHosts"), hint: t("hostPicker.allHostsCount", { n: allHosts.offered.hostIds.length }), selected: allHosts.on, onSelect: () => allHosts.set(true) } : undefined}
                   />
                 ) : undefined

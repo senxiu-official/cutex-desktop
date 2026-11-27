@@ -22,15 +22,28 @@ import icon32 from "../../resources/icons/icon-32.png?asset";
 import icon48 from "../../resources/icons/icon-48.png?asset";
 import icon64 from "../../resources/icons/icon-64.png?asset";
 import icon256 from "../../resources/icons/icon-256.png?asset";
+import icon512 from "../../resources/icons/icon-512.png?asset";
+import { DEFAULT_APP_ICON, appIconDir, appIconMaxSize, isAppIconId } from "../shared/appIcons";
 import { addAttentionDot, overlayPng } from "./icon";
 
-/** The owner's logo at the sizes built by scripts/make-icons.mjs. */
-const LOGO: Record<number, string> = { 16: icon16, 24: icon24, 32: icon32, 48: icon48, 64: icon64, 256: icon256 };
+/** The default style (螺钿, also the build's icon) at the sizes built by scripts/make-app-icons.mjs, bundled with main. */
+const LOGO: Record<number, string> = { 16: icon16, 24: icon24, 32: icon32, 48: icon48, 64: icon64, 256: icon256, 512: icon512 };
+
+/**
+ * A size of an 外观 → 应用图标 style (shared/appIcons.ts): the default style from the bundled files, another style from
+ * resources/app-icons/<id> next to the app (scripts/make-app-icons.mjs; packaged as resources/app/resources).
+ */
+export function appIconFile(id: string, size: number): string {
+  if (id === DEFAULT_APP_ICON) return LOGO[size]!;
+  return join(app.getAppPath(), "resources", appIconDir(id), `icon-${size}.png`);
+}
 
 /** One representation per size (first = scale 1); `dot` adds the attention dot. */
-function iconImage(dot: boolean, sizes: number[]): NativeImage {
+function iconImage(dot: boolean, sizes: number[], style: string = DEFAULT_APP_ICON): NativeImage {
   const rep = (size: number): Buffer => {
-    const logo = nativeImage.createFromPath(LOGO[size]!);
+    let logo = nativeImage.createFromPath(appIconFile(style, size));
+    // A style whose files are missing (a broken drop-in) shows the default style rather than nothing.
+    if (logo.isEmpty()) logo = nativeImage.createFromPath(LOGO[size]!);
     if (!dot) return logo.toPNG();
     const bitmap = logo.toBitmap(); // BGRA on Windows / Linux
     addAttentionDot(bitmap, size, "bgra");
@@ -123,9 +136,57 @@ export class DesktopShell {
     return editMenuLabels(this.locale);
   }
 
+  /** 外观 → 应用图标 in use here. */
+  get appIconStyle(): string {
+    return this.prefs.appIcon ?? DEFAULT_APP_ICON;
+  }
+
+  /** Windows shortcuts showing the style (ShellState.appIcon.shortcuts); set by main/index.ts after it updates them. */
+  appIconShortcuts: number | null = null;
+  /** Called after the style changed (main/index.ts: Windows shortcuts + each window's taskbar relaunch icon). */
+  onAppIconChanged: ((style: string) => void) | null = null;
+
   /** Window icon (same art as the tray). */
   appIcon(): NativeImage {
-    return iconImage(false, [32, 64, 256]);
+    return iconImage(false, [32, 64, 256], this.appIconStyle);
+  }
+
+  /** 外观 → 应用图标: store and apply at once to the tray, every window and (macOS, while running) the Dock. */
+  setAppIcon(id: string): ShellState {
+    if (!isAppIconId(id)) throw new Error("unknown app icon");
+    if (id !== this.appIconStyle) {
+      if (id === DEFAULT_APP_ICON) delete this.prefs.appIcon;
+      else this.prefs.appIcon = id;
+      this.save();
+      this.applyAppIcon();
+      this.onAppIconChanged?.(id);
+    }
+    return this.state();
+  }
+
+  private trayIcons(): { normal: NativeImage; dot: NativeImage; overlay: NativeImage } {
+    const style = this.appIconStyle;
+    return { normal: iconImage(false, [16, 24, 32, 48], style), dot: iconImage(true, [16, 24, 32, 48], style), overlay: nativeImage.createFromBuffer(overlayPng(16)) };
+  }
+
+  /** The current style on the tray (keeping the attention dot), the windows' icons and the running Dock icon. */
+  applyAppIcon(): void {
+    if (this.tray) {
+      this.icons = this.trayIcons();
+      this.tray.setImage(this.attention > 0 ? this.icons.dot : this.icons.normal);
+    }
+    if (process.platform === "darwin") {
+      // Only while running: Finder and the Dock show the bundle's icon when the app is closed (a custom icon on the
+      // signed .app would break its signature and be replaced by the next update).
+      try {
+        app.dock?.setIcon(nativeImage.createFromPath(appIconFile(this.appIconStyle, appIconMaxSize(this.appIconStyle))));
+      } catch {
+        // no Dock (a side run without a bundle)
+      }
+      return;
+    }
+    const icon = this.appIcon();
+    for (const win of [this.getWindow(), ...(this.desks?.windows() ?? [])]) if (win && !win.isDestroyed()) win.setIcon(icon);
   }
 
   /** Call once after app ready. */
@@ -133,7 +194,7 @@ export class DesktopShell {
     // Linux / macOS shutdown or logout: let close→hide through.
     powerMonitor.on("shutdown", () => (this.quitting = true));
     try {
-      this.icons = { normal: iconImage(false, [16, 24, 32, 48]), dot: iconImage(true, [16, 24, 32, 48]), overlay: nativeImage.createFromBuffer(overlayPng(16)) };
+      this.icons = this.trayIcons();
       this.tray = new Tray(this.icons.normal);
       this.tray.setToolTip(trayTooltip(0, this.locale, this.prefs.terms));
       this.rebuildMenu();
@@ -250,7 +311,7 @@ export class DesktopShell {
     const trayHostMissing = process.platform === "linux" && this.trayHost === "absent";
     const { updateProxyAuth: _auth, ...stored } = this.prefs;
     const prefs = { ...stored, closeBehavior: effectiveCloseBehavior(this.prefs, process.platform, this.trayHost) };
-    return { prefs, trayAvailable: this.tray !== null, ...(trayHostMissing ? { trayHostMissing } : {}), notificationsSupported, osUserName: osUserName() };
+    return { prefs, trayAvailable: this.tray !== null, ...(trayHostMissing ? { trayHostMissing } : {}), notificationsSupported, osUserName: osUserName(), appIcon: { id: this.appIconStyle, shortcuts: this.appIconShortcuts } };
   }
 
   /** This device's off switches (Settings → 通知 → 本设备). */

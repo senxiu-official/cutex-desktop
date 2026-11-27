@@ -24,6 +24,12 @@ const row = (r: Partial<PackRow>): PackRow => ({ id: "pilot", bundled: false, bu
 const avail = (version: string) => ({ id: "pilot", version, moduleApi: "^1.16", compat: "ok" as const, size: 1 });
 
 describe("moduleFacts", () => {
+  it.each(["baidu-pan", "claude-science", "nci", "whatsapp"])("marks %s optional regardless of its source", (id) => {
+    const tags = [{ kind: "optional", tone: "plain" }];
+    expect(moduleFacts({ id, required: false, pack: null, appVersion: "0.2.4" })).toMatchObject({ origin: "bundled", tags });
+    expect(moduleFacts({ required: false, pack: row({ id }), appVersion: "0.2.4" })).toMatchObject({ origin: "available", tags });
+  });
+
   it("core and bundled modules carry the app's version; no version while it is unknown", () => {
     expect(moduleFacts({ required: true, pack: null, appVersion: "0.2.4" })).toEqual({ origin: "core", version: "0.2.4", versionOf: "app", tags: [] });
     expect(moduleFacts({ required: false, pack: null, appVersion: "0.2.4" })).toEqual({ origin: "bundled", version: "0.2.4", versionOf: "app", tags: [] });
@@ -65,9 +71,9 @@ describe("moduleFacts", () => {
     expect(moduleFacts({ required: true, pack: null, appVersion: "0.2.4", dev: { version: "1", host: {} } }).origin).toBe("core");
   });
 
-  it("pack-only: 可下载 with the newest offered version; a damaged copy is 已安装 · 未验证 · 已损坏, never 已下载", () => {
-    expect(moduleFacts({ required: false, pack: row({ available: [avail("0.3.0"), avail("0.2.0")] }), appVersion: "0.2.4" })).toEqual({ origin: "available", version: "0.3.0", versionOf: "module", tags: [] });
-    expect(moduleFacts({ required: false, pack: row({}), appVersion: "0.2.4" })).toEqual({ origin: "available", version: null, versionOf: null, tags: [] });
+  it("pack-only: 可下载 (可选 · 未下载) with the newest offered version; a damaged copy is 已安装 · 未验证 · 已损坏, never 已下载", () => {
+    expect(moduleFacts({ required: false, pack: row({ available: [avail("0.3.0"), avail("0.2.0")] }), appVersion: "0.2.4" })).toEqual({ origin: "available", version: "0.3.0", versionOf: "module", tags: [{ kind: "optional", tone: "plain", optional: "missing" }] });
+    expect(moduleFacts({ required: false, pack: row({}), appVersion: "0.2.4" })).toEqual({ origin: "available", version: null, versionOf: null, tags: [{ kind: "optional", tone: "plain", optional: "missing" }] });
     expect(moduleFacts({ required: false, pack: row({ broken: { version: "1.0.1", error: "hash" } }), appVersion: "0.2.4" })).toEqual({
       origin: "installed", version: "1.0.1", versionOf: "module", tags: [{ kind: "unverified", tone: "warn" }, { kind: "broken", tone: "danger", version: "1.0.1", error: "hash" }],
     });

@@ -55,14 +55,15 @@ beforeAll(async () => {
   upstream = join(root, "upstream");
   mkdirSync(upstream);
   git(upstream, "init", "-q", "--template=", "-b", "main");
-  const commit = (name: string) => {
-    writeFileSync(join(upstream, "f.txt"), name);
-    git(upstream, "add", "f.txt");
-    git(upstream, "commit", "-q", "-m", name);
-    commits[name] = git(upstream, "rev-parse", "HEAD");
-  };
-  commit("m1");
-  commit("m2");
+  const file = join(upstream, "f.txt");
+  writeFileSync(file, "m1");
+  git(upstream, "add", "f.txt");
+  git(upstream, "commit", "-qm", "m1");
+  writeFileSync(file, "m2");
+  git(upstream, "commit", "-qam", "m2");
+  const [m1, m2] = git(upstream, "rev-parse", "HEAD^", "HEAD").split(/\r?\n/);
+  commits.m1 = m1!;
+  commits.m2 = m2!;
   mainOnly = join(root, "main-only");
   cpSync(upstream, mainOnly, { recursive: true });
 
@@ -71,7 +72,9 @@ beforeAll(async () => {
   git(olderRelease, "branch", "release", commits.m1!);
 
   git(upstream, "checkout", "-q", "-b", "release", commits.m1!);
-  commit("r2");
+  writeFileSync(file, "r2");
+  git(upstream, "commit", "-qam", "r2");
+  commits.r2 = git(upstream, "rev-parse", "HEAD");
   git(upstream, "checkout", "-q", "main");
 });
 
@@ -88,12 +91,17 @@ afterEach(() => {
 /** Copy a clean checkout so fetch, config edits and branch switches stay local to each test. */
 function copyCheckout(destination: string, origin: string, start: string) {
   let templates = checkoutTemplates.get(origin);
-  if (!templates) checkoutTemplates.set(origin, templates = new Map());
+  if (!templates) {
+    const main = mkdtempSync(join(root, "checkout-"));
+    git(root, "clone", "-q", "--template=", "-c", "maintenance.auto=false", origin, main);
+    templates = new Map([["main", main]]);
+    checkoutTemplates.set(origin, templates);
+  }
   let template = templates.get(start);
   if (!template) {
     template = mkdtempSync(join(root, "checkout-"));
-    git(root, "clone", "-q", "--template=", "-c", "maintenance.auto=false", origin, template);
-    if (start !== "main") git(template, "checkout", "-q", "--detach", start);
+    cpSync(templates.get("main")!, template, { recursive: true });
+    git(template, "checkout", "-q", "--detach", start);
     templates.set(start, template);
   }
   cpSync(template, destination, { recursive: true });

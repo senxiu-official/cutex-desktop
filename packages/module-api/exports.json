@@ -1,5 +1,5 @@
 {
-  "moduleApi": "1.31",
+  "moduleApi": "1.33",
   "shared": [
     "react",
     "react/jsx-runtime",

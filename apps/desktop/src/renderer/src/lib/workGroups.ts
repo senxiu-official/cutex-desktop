@@ -31,7 +31,8 @@ export type ToolEntry = Extract<TimelineEntry, { kind: "tool" }>;
 export type StepEntry = ToolEntry | ReasoningEntry;
 
 export type Segment =
-  | { kind: "entry"; entry: TimelineEntry }
+  /** `gathered`: the turn's entries sharing this tool row (segmentEntries `gather`), this one first. */
+  | { kind: "entry"; entry: TimelineEntry; gathered?: ToolEntry[] }
   | { kind: "work"; id: string; turnId: string; steps: StepEntry[]; open: boolean; summary: WorkSummary };
 
 /** One-line detail of a tool row: the command, the files, `server.tool`, `namespace.tool`, … */
@@ -173,12 +174,15 @@ export function summarize(steps: StepEntry[]): WorkSummary {
  * `reasoning: false` (Settings → 推理过程 = 隐藏) leaves reasoning out entirely. Reasoning with no
  * text (encrypted / summaries off) is never a step: the turn's live line says 推理中 instead.
  */
-export function segmentEntries(entries: TimelineEntry[], opts: { reasoning?: boolean; interactions?: boolean; standalone?: (item: RawItem) => boolean } = {}): Segment[] {
+export function segmentEntries(entries: TimelineEntry[], opts: { reasoning?: boolean; interactions?: boolean; standalone?: (item: RawItem) => boolean; gather?: (item: RawItem) => string | null } = {}): Segment[] {
   const showReasoning = opts.reasoning ?? true;
   // Settings → 在时间线中保留已处理的交互 off: a hidden row must not split a work group either.
   const showInteractions = opts.interactions ?? true;
   // A selected module can keep its card outside the foldable work group.
   const standalone = opts.standalone ?? (() => false);
+  // One row for several calls of a turn (timeline.tool `gather`, project memory edits): the first holds the place.
+  const gatherOf = opts.gather ?? (() => null);
+  const gathered = new Map<string, ToolEntry[]>();
   const out: Segment[] = [];
   let group: StepEntry[] | null = null;
   const close = () => {
@@ -191,6 +195,20 @@ export function segmentEntries(entries: TimelineEntry[], opts: { reasoning?: boo
     if (entry.kind === "interaction" && !showInteractions) continue;
     if (entry.kind === "reasoning") {
       if (showReasoning && reasoningText(entry)) (group ??= []).push(entry);
+      continue;
+    }
+    const gatherKey = entry.kind === "tool" ? gatherOf(entry.item) : null;
+    if (entry.kind === "tool" && gatherKey !== null) {
+      const key = `${entry.turnId}\u0000${gatherKey}`;
+      const row = gathered.get(key);
+      if (row) {
+        row.push(entry);
+        continue;
+      }
+      close();
+      const rows: ToolEntry[] = [entry];
+      gathered.set(key, rows);
+      out.push({ kind: "entry", entry, gathered: rows });
       continue;
     }
     if (entry.kind === "tool" && !standalone(entry.item)) {

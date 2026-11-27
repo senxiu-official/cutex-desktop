@@ -32,6 +32,26 @@ import * as componentsPage from "../components/Page";
 import * as componentsServiceLogs from "../components/ServiceLogs";
 import * as componentsSettingsForm from "../components/settings/Form";
 import * as componentsStatusIcon from "../components/StatusIcon";
+import * as libCopyFeedback from "../lib/copyFeedback";
+import * as libDateText from "../lib/dateText";
+import * as libHostLists from "../lib/hostLists";
+import * as libLazyPage from "../lib/lazyPage";
+import * as libMenus from "../lib/menus";
+import * as libNciSetup from "../lib/nciSetup";
+import * as libOwnerContext from "../lib/ownerContext";
+import * as libRemoteJobs from "../lib/remoteJobs";
+import * as libRemoteMode from "../lib/remoteMode";
+import * as libSettingsDrafts from "../lib/settingsDrafts";
+import * as libSettingsNav from "../lib/settingsNav";
+import * as libTextNodes from "../lib/textNodes";
+import * as libTime from "../lib/time";
+import * as libViewHost from "../lib/viewHost";
+import * as libComponentCard from "../lib/componentCard";
+import * as componentsArmedButton from "../components/ArmedButton";
+import * as componentsButton from "../components/Button";
+import * as componentsComponentCard from "../components/ComponentCard";
+import * as componentsEntityIcon from "../components/EntityIcon";
+import * as componentsMaskedText from "../components/MaskedText";
 import { MODULE_API_HOST } from "../moduleApi/hostTable.generated";
 
 type Namespace = Readonly<Record<string, unknown>>;
@@ -60,6 +80,26 @@ export const PACK_HOST_MODULES: Readonly<Record<string, Namespace>> = Object.fre
   "@cutex-desktop/app/components/ServiceLogs": componentsServiceLogs,
   "@cutex-desktop/app/components/settings/Form": componentsSettingsForm,
   "@cutex-desktop/app/components/StatusIcon": componentsStatusIcon,
+  "@cutex-desktop/app/lib/copyFeedback": libCopyFeedback,
+  "@cutex-desktop/app/lib/dateText": libDateText,
+  "@cutex-desktop/app/lib/hostLists": libHostLists,
+  "@cutex-desktop/app/lib/lazyPage": libLazyPage,
+  "@cutex-desktop/app/lib/menus": libMenus,
+  "@cutex-desktop/app/lib/nciSetup": libNciSetup,
+  "@cutex-desktop/app/lib/ownerContext": libOwnerContext,
+  "@cutex-desktop/app/lib/remoteJobs": libRemoteJobs,
+  "@cutex-desktop/app/lib/remoteMode": libRemoteMode,
+  "@cutex-desktop/app/lib/settingsDrafts": libSettingsDrafts,
+  "@cutex-desktop/app/lib/settingsNav": libSettingsNav,
+  "@cutex-desktop/app/lib/textNodes": libTextNodes,
+  "@cutex-desktop/app/lib/time": libTime,
+  "@cutex-desktop/app/lib/viewHost": libViewHost,
+  "@cutex-desktop/app/lib/componentCard": libComponentCard,
+  "@cutex-desktop/app/components/ArmedButton": componentsArmedButton,
+  "@cutex-desktop/app/components/Button": componentsButton,
+  "@cutex-desktop/app/components/ComponentCard": componentsComponentCard,
+  "@cutex-desktop/app/components/EntityIcon": componentsEntityIcon,
+  "@cutex-desktop/app/components/MaskedText": componentsMaskedText,
   ...MODULE_API_HOST,
 }) as Readonly<Record<string, Namespace>>;
 

@@ -22,6 +22,7 @@ import { BrowserDesktopLoopbackSettings } from "./BrowserDesktopLoopbackSettings
 import { useBrowserIdentities } from "./identities";
 import { DEFAULT_BROWSER_IDENTITY_ID } from "../../../../shared/browserIdentity";
 import { BrowserIdentitiesSection, BrowserResearchSection, BrowserSearchHistorySection } from "./IdentitySettings";
+import { BrowserIdentitySyncSection } from "./IdentitySyncSettings";
 
 /** The host rows need the relay; a host without it shows 「需要升级 cutex」. */
 const HOST_PART_REQUIRES = ["browser-relay-v1"] as const;
@@ -151,7 +152,7 @@ export function BrowserSettings() {
   }
   // Two parts (review 2026-10-15 UI-02): this computer's browser, then the Settings target host's
   // agent permissions (the host pages' picker; never the focus host in its place).
-  return <><SettingsDevicePart title={t("browser.part.device")} hint={t("browser.part.deviceHint")}><BrowserIdentitiesSection /><BrowserSearchHistorySection /><Section title={t("browser.settings")} hint={t("browser.owner.settingsHint")}
+  return <><SettingsDevicePart title={t("browser.part.device")} hint={t("browser.part.deviceHint")}><BrowserIdentitiesSection /><BrowserIdentitySyncSection /><BrowserSearchHistorySection /><Section title={t("browser.settings")} hint={t("browser.owner.settingsHint")}
     actions={<ResetButton onClick={() => save(DEFAULT_BROWSER_CONTROL_SETTINGS)} title={t("browser.settingsReset")} />}>
     <BrowserCursorSettings />
     <SettingRow agents="now" source="local" label={t("browser.hiddenTarget")} hint={t("browser.hiddenTargetHint")} reset={<ResetButton disabled={settings.hiddenTarget === DEFAULT_BROWSER_CONTROL_SETTINGS.hiddenTarget} onClick={() => save({ ...settings, hiddenTarget: DEFAULT_BROWSER_CONTROL_SETTINGS.hiddenTarget })} />}>

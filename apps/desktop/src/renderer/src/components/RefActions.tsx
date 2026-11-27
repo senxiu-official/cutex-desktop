@@ -12,24 +12,21 @@ import type { AppSlotEntry } from "../modules/slots";
 import { useApp } from "../store";
 import { useHostEntryGate } from "../lib/hostGatingView";
 
-/** The `ref.action` items as icon buttons in the message action rows (components/MessageActions; owner
- * 2026-10-11, again 2026-10-15). Same ref.action contract as menus; `useState().active` = filled icon.
- * `hoverBar` (design 040 step 10, a message's floating bar): only the items that ask for it (`inline`, e.g. 书签) or whose
- * live state is on (a turn with notes); the rest are rows of that bar's 「⋯」 (lib/refActions refActionEntries). */
-export function RefActionButtons({ kind, build, hoverBar = false }: { kind: string; build(): CutexRef | null; hoverBar?: boolean }) {
+/** The `ref.action` items as icon buttons (agent toasts). Same ref.action contract as menus; `useState().active` =
+ * filled icon. A message's floating bar draws its own, by the owner's pins (components/MessageActions PinnedBar). */
+export function RefActionButtons({ kind, build }: { kind: string; build(): CutexRef | null }) {
   const entries = useSlot("ref.action");
   const ref = build();
   const onHost = useHostEntryGate(ref?.hostId);
   if (!ref) return null;
-  return <>{entries.filter(e => refActionApplies(e, kind) && onHost(e)).map(entry => <RefActionButton key={entry.item.id} entry={entry} cref={ref} build={build} hoverBar={hoverBar} />)}</>;
+  return <>{entries.filter(e => refActionApplies(e, kind) && onHost(e)).map(entry => <RefActionButton key={entry.item.id} entry={entry} cref={ref} build={build} />)}</>;
 }
 
-function RefActionButton({ entry, cref, build, hoverBar }: { entry: AppSlotEntry<"ref.action">; cref: CutexRef; build(): CutexRef | null; hoverBar?: boolean }) {
+function RefActionButton({ entry, cref, build }: { entry: AppSlotEntry<"ref.action">; cref: CutexRef; build(): CutexRef | null }) {
   const { t } = useI18n();
   const state = entry.item.useState?.(cref);
   const Icon = entry.item.icon;
   const label = state?.tooltip ? `${t(state?.titleKey ?? entry.item.titleKey)} · ${state.tooltip}` : state?.disabledReason ?? t(state?.titleKey ?? entry.item.titleKey);
-  if (hoverBar && !entry.item.inline && !state?.active) return null;
   return <button title={label} aria-label={label} aria-pressed={state?.active} disabled={!!state?.disabledReason}
     className={`flex size-6 items-center justify-center rounded-ctl hover:bg-hover disabled:opacity-40 ${state?.active ? "text-accent" : "text-muted hover:text-foreground"}`}
     onClick={() => {

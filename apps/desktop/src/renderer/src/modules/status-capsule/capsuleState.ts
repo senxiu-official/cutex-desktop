@@ -7,6 +7,9 @@ import { toggleFoldedId } from "../../lib/statusItems";
 import { windowOfDocument } from "../../lib/ownerWindow";
 import { activeAppDocument } from "../../lib/appWindowSet";
 
+/** The module's own settings page (under 模块; owner 2026-11-28). */
+export const CAPSULE_SETTINGS_PAGE = "status-capsule";
+
 /** DOM id of a capsule section's header (scroll target). */
 export const capsuleSectionId = (itemId: string) => `capsule-${itemId}`;
 

@@ -26,6 +26,8 @@ export interface PaHost {
   supported: boolean;
   /** What its cutex offers beyond r295 (定期任务, owner views, qualified refs, cross-host scope). */
   features: PaHostFeatures;
+  /** The host's whole feature list (the phase-1 contract checks its own features, ./phase1Contract). */
+  featureSet?: ReadonlySet<string>;
   projects: ProjectSummary[];
   /** cutexSessionId → display name. */
   names: ReadonlyMap<string, string>;
@@ -54,6 +56,7 @@ export function usePaHosts(): PaHost[] {
         instanceId: pa[look.id]?.instanceId ?? (daemon?.kind === "connected" ? daemon.instanceId : undefined) ?? null,
         supported: !!d?.features.has(PERSONAL_ASSISTANTS_FEATURE),
         features: paFeatures(d?.features),
+        featureSet: d?.features,
         projects: (sidebar?.projects?.projects ?? []).filter((p) => p.lifecycle !== "archived"),
         names,
       };
@@ -152,6 +155,12 @@ export function paRows(hosts: readonly PaHost[], byHost: Record<string, HostPa>,
     for (const a of rows) out.push({ hostId: h.hostId, assistant: a, view: data.views[a.id] ?? null, requests: data.requests[a.id] ?? [] });
   }
   return out;
+}
+
+/** The assistant whose conversation `sessionId` on `hostId` is (as last read). */
+export function assistantOfSession(byHost: Record<string, HostPa>, hostId: string | null | undefined, sessionId: string | null | undefined): PaAssistant | null {
+  if (!hostId || !sessionId) return null;
+  return byHost[hostId]?.assistants.find((a) => a.sessionId === sessionId) ?? null;
 }
 
 export const rowKey = (hostId: string, id: string) => `${hostId}\n${id}`;

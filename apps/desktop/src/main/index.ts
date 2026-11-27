@@ -10,8 +10,8 @@ import { localFileAction, localFileOpenInfo } from "./localFiles";
 import { runFileConfirm } from "./localFileRunPrompt";
 import { createRemoteCopies } from "./remoteCopiesIpc";
 import { initialCaption, isOverlayColor, isSymbolColor } from "../shared/windowChrome";
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, protocol, session, shell, webContents, type IpcMainInvokeEvent, type MenuItemConstructorOptions } from "electron";
 import { EVENT_CHANNEL, HOST_METHOD_NAMES, INVOKE_CHANNEL, SHELL_CHANNEL, TITLEBAR_HEIGHT, UPDATE_CHANNEL, WINDOW_CHANNEL, type DaemonApi, type DaemonEvents, type DesktopApi, type DesktopEvents, type HostApi, type InvokeMethod, type ShellRequest, type UpdateRequest, type WindowAction } from "../shared/ipc";
 import { isCloseBehavior, isShellLocale, isUpdateCheckMinutes } from "../shared/shell";
@@ -35,6 +35,10 @@ import { nativeImage } from "electron";
 import { randomUUID } from "node:crypto";
 import { DirectorAvatarStore, handleDirectorAvatarsRequest } from "./directorAvatars";
 import { DIRECTOR_AVATAR_DIR, DIRECTOR_AVATAR_PX, DIRECTOR_AVATARS_CHANNEL, type DirectorAvatarsRequest } from "../shared/directorAvatars";
+import { PortraitCollectionStore, portraitCollectionSource, type LegacyPortraitRoot } from "./portraitCollections";
+import { PORTRAIT_COLLECTIONS_CHANNEL, PORTRAIT_COLLECTIONS_ROOT, type PortraitCollectionsRequest } from "../shared/portraitCollections";
+import { DEFAULT_PORTRAIT_PACK } from "../shared/portraitDefaults";
+import { MAC_ARCHIVED_BUNDLE, MAC_BUNDLE } from "../shared/releases";
 import { handlePortraitPacksRequest, PortraitPackStore } from "./portraitPacks";
 import { FontPackStore, handleFontPackRequest } from "./fontPack";
 import type { Transport } from "./updateTransport";
@@ -43,7 +47,8 @@ import { PORTRAIT_PACK_DIR, PORTRAIT_PACKS_CHANNEL, type PortraitPacksRequest } 
 import { resolveUpdateRemote } from "../shared/update";
 import { resolveQuickstart, type QuickstartTarget } from "../shared/quickstart";
 import { errorFields, logDir, logError } from "./errorLog";
-import { setWindowAppDetails, setWindowsAppId, syncWindowsShortcuts } from "./winShortcuts";
+import { setWindowAppDetails, setWindowsAppId, styleIcoPath, syncWindowsShortcuts } from "./winShortcuts";
+import { DEFAULT_APP_ICON } from "../shared/appIcons";
 import { DeskPetService } from "./deskPet";
 import { packArtOf } from "./deskPetPackArt";
 import { demoOwnerAlertRequested, OwnerAlerts } from "./ownerAlert";
@@ -65,7 +70,7 @@ import { ModuleDataService } from "./moduleData";
 import { moduleDataPrompts } from "./moduleDataPrompts";
 import { MODULE_DATA_CHANNEL, MODULE_DATA_DIR, parseModuleDataRequest } from "../shared/moduleData";
 import { createUpdateNet } from "./updateNet";
-import { BUILT_IN_MODULE_IDS, LOCAL_SAFE_START_ARG, MODULE_PACK_SCHEME, MODULE_PACKS_CHANNEL, parseModulePacksRequest } from "../shared/modulePacks";
+import { MODULE_UPGRADE_PAYLOAD, BUILT_IN_MODULE_IDS, LOCAL_SAFE_START_ARG, MODULE_PACK_SCHEME, MODULE_PACKS_CHANNEL, parseModulePacksRequest } from "../shared/modulePacks";
 import { parseReleaseInfo } from "../shared/update";
 
 import type { HostBinding } from "../shared/hosts";
@@ -117,6 +122,8 @@ if (process.env.CUTEX_DESKTOP_USER_DATA) app.setPath("userData", process.env.CUT
 const primaryInstance = process.env.CUTEX_DESKTOP_MULTI_INSTANCE === "1" || app.requestSingleInstanceLock();
 if (!primaryInstance) app.quit();
 
+/** 外观 → 应用图标's .ico for shortcuts and the taskbar relaunch icon (Windows; null = the default style (螺钿) in the release). */
+let appIconIco: string | null = null;
 const desktopShell = new DesktopShell(
   () => mainWindow,
   () => createWindow(),
@@ -368,10 +375,18 @@ const ALLOWED: ReadonlySet<InvokeMethod> = new Set<InvokeMethod>([
   "cancelRuntimePrunePlan",
   "textRewrite",
   "cancelTextRewrite",
+  "structuredTextRewrite",
+  "textRewriteTemplates",
+  "createTextRewriteTemplate",
+  "patchTextRewriteTemplate",
+  "deleteTextRewriteTemplate",
+  "textRewriteRoute",
+  "patchTextRewriteRoute",
   "featureProfiles",
   "createFeatureProfile",
   "patchFeatureProfile",
   "deleteFeatureProfile",
+  "testFeatureProfile",
   "pruneRuntimes",
   "claudeAccounts",
   "addProfileVariant",
@@ -431,7 +446,8 @@ const ALLOWED: ReadonlySet<InvokeMethod> = new Set<InvokeMethod>([
   "notesList", "notesGet", "notesCreate", "notesUpdate", "notesDelete",
   "sideOpen", "sideList", "sideRead", "sideSend", "sideInterrupt", "sideRespond", "sideClose",
   "sessionSearch", "sessionSearchTurn",
-  "paList", "paGet", "paCreate", "paUpdate", "paAgenda", "paAudit", "paRequests", "paRequest", "paConfirm", "paCancel",
+  "paScopeRules", "paScopeRulesSave", "paBrief", "paBriefSchedule", "paReminderCreate", "ownerPinCreate",
+  "paCreateOptions", "paList", "paGet", "paCreate", "paUpdate", "paAgenda", "paAudit", "paRequests", "paRequest", "paConfirm", "paCancel",
   "paOwnerRequests", "paNotes", "paTemplates", "paTemplateConfirm", "paTemplateStop", "paTemplateRuns", "paCalendar", "paCalendarImport", "paCalendarClear",
   "unsubscribe",
   "submit",
@@ -485,6 +501,9 @@ const ALLOWED: ReadonlySet<InvokeMethod> = new Set<InvokeMethod>([
   "skillArchives",
   "archiveSkill",
   "restoreSkill",
+  "runtimeSkills",
+  "previewSkillCopy",
+  "copySkill",
   "managedMcp",
   "switchProfile",
   "sessionAction",
@@ -671,6 +690,9 @@ const ALLOWED: ReadonlySet<InvokeMethod> = new Set<InvokeMethod>([
   "updateClientToken",
   "ownerNewDevices",
   "ackOwnerNewDevice",
+  "attention",
+  "attentionRead",
+  "attentionDismiss",
   "onlineClients",
   "closeOnlineClient",
   "resetModel",
@@ -745,7 +767,7 @@ ipcMain.handle(INVOKE_CHANNEL, async (event, method: InvokeMethod, args: unknown
   const fn = daemon[method as keyof DaemonApi] as (...a: unknown[]) => Promise<unknown>;
   try {
     // 提示词增强: the call belongs to this renderer (main/textRewrite.ts RewriteOwner), never to a renderer-supplied value.
-    const callArgs = method === "textRewrite" ? [args?.[0], event.sender] : args;
+    const callArgs = method === "textRewrite" || method === "structuredTextRewrite" ? [args?.[0], event.sender] : args;
     const result = (await fn.apply(daemon, callArgs)) as Awaited<ReturnType<DesktopApi[typeof method]>>;
     // A reply from a connection that has since been replaced or closed must not reach the UI.
     fence.check();
@@ -815,6 +837,9 @@ ipcMain.handle(SHELL_CHANNEL, (event, request: ShellRequest) => {
     case "setCloseBehavior":
       if (!isCloseBehavior(request.value)) throw new Error("bad close behavior");
       return desktopShell.setCloseBehavior(request.value);
+    case "setAppIcon":
+      if (typeof request.id !== "string" || Object.keys(request).some((key) => key !== "op" && key !== "id")) throw new Error("bad app icon");
+      return desktopShell.setAppIcon(request.id);
     case "setLocale":
       if (isShellLocale(request.value)) desktopShell.setLocale(request.value);
       board.onLocaleChanged();
@@ -971,10 +996,22 @@ ipcMain.handle(DIRECTOR_AVATARS_CHANNEL, (event, request: DirectorAvatarsRequest
 
 // 拟人头像包: the owner's pack folder in userData (main/portraitPacks.ts); pictures go over as data URLs on request.
 let portraitPacks: PortraitPackStore | null = null;
-ipcMain.handle(PORTRAIT_PACKS_CHANNEL, (event, request: PortraitPacksRequest) => {
+let portraitCollections: PortraitCollectionStore | null = null;
+ipcMain.handle(PORTRAIT_COLLECTIONS_CHANNEL, (event, request: PortraitCollectionsRequest) => {
+  if (!isAppSender(event) || !portraitCollections) throw new Error("portrait collections unavailable");
+  return portraitCollections.request(request);
+});
+ipcMain.handle(PORTRAIT_PACKS_CHANNEL, async (event, request: PortraitPacksRequest) => {
   if (!isAppSender(event)) throw new Error("untrusted sender");
   portraitPacks ??= new PortraitPackStore(join(app.getPath("userData"), PORTRAIT_PACK_DIR));
-  return handlePortraitPacksRequest(portraitPacks, request, (dir) => shell.openPath(dir));
+  const result = await handlePortraitPacksRequest(portraitPacks, request, (dir) => shell.openPath(dir));
+  if (!portraitCollections) return result;
+  if (request.op === "image") return result ?? portraitCollections.image(request.pack, request.theme, request.stem, request.kind);
+  if (result && typeof result === "object") {
+    await portraitCollections.ready();
+    return { ...result, official: portraitCollections.packs() };
+  }
+  return result;
 });
 
 ipcMain.handle(MODULE_PACKS_CHANNEL, async (event, raw: unknown) => {
@@ -987,6 +1024,8 @@ ipcMain.handle(MODULE_PACKS_CHANNEL, async (event, raw: unknown) => {
         return modulePacks.view();
       case "check":
         return await modulePacks.check();
+      case "seedBundled":
+        return modulePacks.seedBundled(request.id);
       case "install":
         return await modulePacks.install(request);
       case "remove":
@@ -1225,7 +1264,7 @@ function createWindow(): void {
   contents.on("destroyed", releaseFrames);
   installEditMenu(mainWindow);
   markOwnerWindow(mainWindow);
-  setWindowAppDetails(mainWindow);
+  setWindowAppDetails(mainWindow, appIconIco);
   desktopShell.attach(mainWindow);
   mainWindow.on("closed", () => {
     // Every window counts for window-all-closed: the pet must not keep the app alive.
@@ -1267,6 +1306,29 @@ function installEditMenu(win: BrowserWindow): void {
     }
     if (items.length && !win.isDestroyed()) Menu.buildFromTemplate(items).popup({ window: win });
   });
+}
+
+/** Look through the portable siblings before the normal old-release cleanup. Every copied byte is checked. */
+function legacyPortraitRoots(): LegacyPortraitRoot[] {
+  const installed = updater.releaseDir();
+  const rendererPath = ["out", "renderer", "avatars", "portraits", DEFAULT_PORTRAIT_PACK];
+  const roots = [{ dir: join(app.getAppPath(), ...rendererPath), label: "running app" }];
+  if (!installed) return roots;
+  const parent = dirname(installed);
+  const resourcePaths = process.platform === "darwin"
+    ? [[MAC_BUNDLE, "Contents", "Resources"], [MAC_ARCHIVED_BUNDLE, "Contents", "Resources"]]
+    : [["resources"]];
+  for (const base of [parent, join(dirname(parent), "old-releases")]) {
+    try {
+      for (const entry of readdirSync(base, { withFileTypes: true }).filter(e => e.isDirectory()).slice(0, 30)) {
+        for (const resources of resourcePaths) {
+          const path = join(base, entry.name, ...resources, "app", ...rendererPath);
+          if (existsSync(path)) roots.push({ dir: path, label: [base === parent ? "releases" : "old-releases", entry.name, ...resources].join("/") });
+        }
+      }
+    } catch { /* No older portable release directory. */ }
+  }
+  return roots;
 }
 
 /** The release page the packaged app records (package.json), for the module index's repository. */
@@ -1371,6 +1433,7 @@ app.whenReady().then(async () => {
     // The updater's own Chromium session (system / manual update proxy); Node once plugin containment is engaged.
     transport: createUpdateNet({ contained: () => pluginNetwork?.engaged() ?? false, proxy: () => desktopShell.updateProxyConfig() }).transport,
     appModuleApi: MODULE_API_VERSION,
+    ...(app.isPackaged ? { upgradePayload: join(app.getAppPath(), MODULE_UPGRADE_PAYLOAD) } : {}),
     local: {
       defaultAllowed: devBuild,
       internal: devBuild,
@@ -1383,6 +1446,17 @@ app.whenReady().then(async () => {
     log: (text) => console.log(`[module-packs] ${text}`),
   });
   const packs = modulePacks;
+  portraitCollections = new PortraitCollectionStore({
+    root: join(app.getPath("userData"), PORTRAIT_COLLECTIONS_ROOT),
+    source: portraitCollectionSource(ownReleasePage(), app.isPackaged, process.env.CUTEX_DESKTOP_PORTRAITS_INDEX),
+    transport: createUpdateNet({ contained: () => pluginNetwork?.engaged() ?? false, proxy: () => desktopShell.updateProxyConfig() }).transport,
+    ...(app.isPackaged ? { legacyProof: join(__dirname, "../renderer/portrait-legacy.json"), legacyRoots: legacyPortraitRoots } : {}),
+    log: (message) => console.warn(`[portraits] ${message}`),
+    onChange: (view, packsChanged) => sendEvent("portraitCollections", { view, packsChanged }),
+  });
+  const collections = portraitCollections;
+  updater.beforeMaintenance = () => collections.ready();
+  void collections.ready().catch(error => console.warn("[portraits] initialization failed", error));
   const devModules = new ModuleDevService({
     file: join(app.getPath("userData"), "module-dev.json"),
     appModuleApi: MODULE_API_VERSION,
@@ -1414,6 +1488,16 @@ app.whenReady().then(async () => {
   // Deny everything except writing the clipboard (copy buttons); reading it stays denied.
   session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => callback(permission === "clipboard-sanitized-write"));
   desktopShell.start();
+  // 外观 → 应用图标: the style's .ico for Windows shortcuts and the taskbar relaunch icon; on a change, every shortcut
+  // of this install and the window follow (tray, window icons and the Dock: DesktopShell.applyAppIcon).
+  appIconIco = process.platform === "win32" ? styleIcoPath(desktopShell.appIconStyle) : null;
+  if (process.platform === "darwin" && desktopShell.appIconStyle !== DEFAULT_APP_ICON) desktopShell.applyAppIcon();
+  desktopShell.onAppIconChanged = (style) => {
+    if (process.platform !== "win32") return;
+    appIconIco = styleIcoPath(style);
+    if (mainWindow && !mainWindow.isDestroyed()) setWindowAppDetails(mainWindow, appIconIco);
+    desktopShell.appIconShortcuts = syncWindowsShortcuts(appIconIco);
+  };
   desks.watchDisplays();
   ownerAlerts.start();
   board.start();
@@ -1433,7 +1517,7 @@ app.whenReady().then(async () => {
   deskPet.register();
   updater.schedule(desktopShell.state().prefs.updateCheckMinutes);
   createWindow();
-  syncWindowsShortcuts();
+  desktopShell.appIconShortcuts = syncWindowsShortcuts(appIconIco);
   updater.watchLaunch((listener) => mainWindow?.webContents.on("render-process-gone", listener));
   // Dev: an isolated local cutex home / port (see AGENTS.md "Dev cutex daemon").
   // P2 person identity: the person key and its per-host claims (main/personIdentity.ts).

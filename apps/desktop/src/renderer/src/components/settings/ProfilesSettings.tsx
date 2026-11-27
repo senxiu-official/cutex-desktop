@@ -7,8 +7,8 @@
 // The sub-page lives in the store (`view.profilePage`), so `openSettings("profiles", {profile})`
 // from anywhere lands on that profile's detail. Lifecycle (cutex profile-create / -duplicate /
 // -delete) is gated per capability. Below the overview's list: the `settings.section` items of
-// page `profiles` (claude-accounts: Claude 账户); `openSettings("profiles", {anchor: <item id>})`
-// scrolls to one.
+// page `profiles` (Claude 账户, Kimi 账户, 从 CC Switch 导入, then 功能 Profile — app features' own endpoints,
+// never offered to agents); `openSettings("profiles", {anchor: <item id>})` scrolls to one.
 import { linkedAppearanceUndoNow } from "../../lib/profileLinkAppearance";
 import type { DeleteProfileOptions } from "../../lib/profileRefs";
 import { useEffect, useState, type KeyboardEvent } from "react";
@@ -31,14 +31,20 @@ import { profileSearchAnchor } from "../../lib/settingsProfileSearch";
 import { flashElement } from "../../lib/focusRequest";
 import { SettingsSections } from "../../modules/Outlet";
 import { KIMI_ACCOUNTS_ALL_SECTION } from "../../lib/kimiAccounts";
+import { FEATURE_PROFILES_ALL_SECTION } from "../../lib/featureProfilesNav";
 import { useScrollToSettingsAnchor } from "../../lib/settingsFocus";
 
 /** Cards of the Profile page's sub-pages (not on the page itself). */
-const PROFILES_SUB_SECTIONS = [KIMI_ACCOUNTS_ALL_SECTION];
+const PROFILES_SUB_SECTIONS = [KIMI_ACCOUNTS_ALL_SECTION, FEATURE_PROFILES_ALL_SECTION];
 /** Profile → Kimi 账户: every account (module kimi-accounts). */
 export function KimiAccountsSubPage() {
   useScrollToSettingsAnchor();
-  return <SettingsSections page="profiles" only={PROFILES_SUB_SECTIONS} />;
+  return <SettingsSections page="profiles" only={[KIMI_ACCOUNTS_ALL_SECTION]} />;
+}
+/** Profile → 全部 N 个功能 Profile: every row, with a filter (module feature-profiles). */
+export function FeatureProfilesSubPage() {
+  useScrollToSettingsAnchor();
+  return <SettingsSections page="profiles" only={[FEATURE_PROFILES_ALL_SECTION]} />;
 }
 import { profilePageOf, useApp } from "../../store";
 import { useSettingsShelf } from "../../lib/settingsShelf";
@@ -330,12 +336,15 @@ function ProfilesBody() {
 
   // Kimi accounts → 用这个账户新建 Profile: openSettings("profiles", { create: true, kimiAccount }).
   const kimiPreselect = page?.kind === "new" && newPreset === undefined ? focus?.kimiAccount : undefined;
+  // 引导 → 添加第一个 Profile: openSettings("profiles", { create: true, createKind }) opens the form on that kind.
+  const kindPreselect = page?.kind === "new" && newPreset === undefined && !kimiPreselect ? focus?.createKind : undefined;
   if (page?.kind === "new" && variantsOn(features))
     return (
       <NewProfileVariantsForm
-        key={newPreset ?? (kimiPreselect ? `kimi:${kimiPreselect}` : "default")}
+        key={newPreset ?? (kimiPreselect ? `kimi:${kimiPreselect}` : kindPreselect ? `kind:${kindPreselect}` : "default")}
         initialPreset={newPreset}
         initialKimiAccount={kimiPreselect}
+        initialKind={kindPreselect}
         existing={names}
         onCancel={toOverview}
         onCreated={(detail) => {
@@ -349,8 +358,9 @@ function ProfilesBody() {
   if (page?.kind === "new")
     return (
       <NewProfileForm
-        key={newPreset ?? "default"}
+        key={newPreset ?? (kindPreselect ? `kind:${kindPreselect}` : "default")}
         initialPreset={newPreset}
+        initialKind={kindPreselect}
         existing={names}
         haveKinds={profiles ? new Set(profiles.map(profileKind)) : null}
         onCancel={toOverview}

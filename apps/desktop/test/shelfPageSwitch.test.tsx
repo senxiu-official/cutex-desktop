@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 // #35 (polish 0.2): Alt+1 / Alt+2 between a Shelf page with panes and an empty page of the same Shelf flickered
 // the conversation column. One conversation is "framed" (in ConversationColumns) only while tool panes are on
 // screen; that was read from the page in view, so the switch moved the conversation to another place in the tree

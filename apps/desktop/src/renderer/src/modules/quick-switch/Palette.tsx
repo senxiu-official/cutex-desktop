@@ -5,11 +5,10 @@
 import type { SessionAvatar } from "@cutex-desktop/protocol";
 import { Search } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { preloadOnIntent } from "../../lib/lazyPage";
 import { Avatar } from "../../components/Avatar";
 import { HostDot } from "../../components/HostMark";
 import { startWorkspaceDrag } from "../../lib/workspaces";
-import { useI18n, type MessageKey } from "../../i18n";
+import { loadEnglish, useI18n, type MessageKey } from "../../i18n";
 import { displayKey } from "../../lib/shortcuts";
 import { useBindingLabel } from "../../lib/useKeybindings";
 import { foretellAfterDelay, setForetell, type Foretell } from "../../lib/foretell";
@@ -152,9 +151,16 @@ export function Palette({
   const live = useRef({ rows, index, scope, scopes, selected, selectedBeside });
   live.current = { rows, index, scope, scopes, selected, selectedBeside };
 
+  useEffect(() => void loadEnglish(), []);
+  const page = selected && !selected.item.disabled && selected.item.target.kind === "page" ? selected.item.target.page : null;
+  const { preloadMainPage } = data;
+  useEffect(() => {
+    if (!page) return;
+    const timer = view.setTimeout(() => preloadMainPage(page), 180);
+    return () => view.clearTimeout(timer);
+  }, [page, preloadMainPage, view]);
+
   // The selected row's foretell, after the delay (keyboard or mouse selection); Ctrl/⌘ held = its beside one.
-  // Pages and panes ⌘K can open load in idle time while it is up (lib/lazyPage).
-  useEffect(() => void preloadOnIntent(), []);
   const owner = useRef<object>({}).current;
   const [modHeld, setModHeld] = useState(false);
   useEffect(() => {

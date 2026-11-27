@@ -3,9 +3,10 @@
 // status-row chip of the same height (no avatars, no role words), so the composer under it never moves. The list is a
 // floating panel (design 040 浮层: rounded-inner, shadow-e2) opened away from the tray's edge, at most a page of rows
 // (lib/needsYouPage); each row is avatar · name (「就在这里」 when it is on screen) and the reason in a few words.
-// A row opens the agent where its need is handled (lib/attentionActivate); × hides it until its need changes.
+// A row opens the agent where its need is handled (lib/attentionActivate); × hides it until its need changes — on a host
+// with cross-device read state (design 061) for the person on every device: exactly those items, by their keys.
 import { useRef, useState, type RefObject } from "react";
-import { Bell, ChevronLeft, ChevronRight, X } from "lucide-react";
+import { Bell, ChevronLeft, ChevronRight, ConciergeBell, X } from "lucide-react";
 import { useI18n } from "../i18n";
 import { activateAttention } from "../lib/attentionActivate";
 import { ALL_HOSTS } from "../lib/hostScope";
@@ -16,7 +17,8 @@ import { needReason, useNeedsYouView, type NeedItem } from "../lib/needsYouView"
 import { usePanes } from "../lib/paneStore";
 import { useUiPrefs } from "../lib/prefs";
 import { useSide } from "../lib/sideLayoutStore";
-import { markSeenOn } from "../lib/turnUnread";
+import { markReadOn, markSeenOn } from "../lib/turnUnread";
+import { dismissNeeds } from "../lib/hostAttention";
 import { setViewScope } from "../lib/useHostScope";
 import { isOnScreen } from "../lib/workspaces";
 import { AnchoredPanel } from "./AnchoredPanel";
@@ -88,7 +90,7 @@ export function NeedsYouBell() {
 
 export function NeedsYouList({ anchor, side, onClose, onUsed }: { anchor: RefObject<HTMLElement | null>; side: PanelSide; onClose(): void; onUsed?(): void }) {
   const { t } = useI18n();
-  const { items, elsewhere, scope } = useNeedsYouView();
+  const { items, elsewhere, scope, localOnly } = useNeedsYouView();
   // 「就在这里」 follows the panes and Shelves.
   usePanes((s) => s.layout);
   useSide((s) => s.layout);
@@ -100,6 +102,12 @@ export function NeedsYouList({ anchor, side, onClose, onUsed }: { anchor: RefObj
     onUsed?.();
   };
   const dismiss = (item: NeedItem) => {
+    if (item.itemKeys) {
+      // The host keeps it: these items go for the person; a failed reply waiting under 出错 is read (that exact one).
+      dismissNeeds(item.host, item.chip.id, item.itemKeys);
+      if (item.failedUnread) markReadOn(item.host, item.chip.id);
+      return;
+    }
     if (item.chip.signal === "needsYou") return dismissNeed(item.key, item.need);
     const fp = runtimeErrorFingerprint(item.row?.session.runtime);
     if (fp) dismissRuntimeError(item.key, fp);
@@ -119,6 +127,7 @@ export function NeedsYouList({ anchor, side, onClose, onUsed }: { anchor: RefObj
           <Row key={item.key} item={item} scopeMarks={scope.showHostMarks ? scope.host(item.host) : null} onOpen={() => open(item)} onDismiss={() => dismiss(item)} />
         ))}
       </div>
+      {localOnly && <p data-needs-local-only="" className="mx-3 mb-1.5 shrink-0 text-caption text-muted">{t("needsYou.readStateLocal")}</p>}
       {elsewhere > 0 && (
         <button
           type="button"
@@ -165,6 +174,8 @@ function Row({ item, scopeMarks, onOpen, onDismiss }: { item: NeedItem; scopeMar
       >
         {row ? (
           <StatusAvatar name={row.name} initial={row.initial} color={row.color} avatar={row.session.avatar} seed={row.session.cutexSessionId} size={28} signal="idle" />
+        ) : item.assistant ? (
+          <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-attention-soft text-warn-text" data-need-assistant=""><ConciergeBell size={15} /></span>
         ) : (
           <span className="size-7 shrink-0" />
         )}

@@ -1,6 +1,6 @@
 // 浏览器身份 menus (design browser-profiles v3 §2): the switcher's list, the ＋▾ choices and the tab menu's
 // 「用其他身份打开…». Plain builders (no components here, so the component files keep Fast Refresh).
-import { History, Music, Plus, Settings2, Users } from "lucide-react";
+import { History, Music, Plus, Settings2, Trash2, Users } from "lucide-react";
 import { bgplayApplies, isBgplay, setBgplay } from "./bgplay";
 import type { MenuEntry } from "../../lib/contextMenu";
 import { translate } from "../../i18n";
@@ -19,6 +19,7 @@ const list = (): BrowserIdentityView[] => useBrowserIdentities.getState().state?
 const tabsHint = (view: BrowserIdentityView) => translate("browser.identity.tabs", { n: view.openTabs });
 
 export const openIdentitySettings = () => useApp.getState().openSettings("browser", { anchor: "browser-identities" });
+export const openIdentitySyncSettings = () => useApp.getState().openSettings("browser", { anchor: "browser-identity-sync" });
 
 /** Settings → 浏览器 → one identity's page. */
 export function openIdentityPage(id: string): void {
@@ -51,7 +52,14 @@ export function switcherMenu(onNew: () => void): MenuEntry[] {
     { label: translate("browser.history.title"), icon: <History size={ICON} />, onSelect: () => openIdentityHistory(current ?? "default") },
     { label: translate("browser.identity.new"), icon: <Plus size={ICON} />, onSelect: onNew },
     { label: translate("browser.identity.manage"), icon: <Settings2 size={ICON} />, onSelect: () => openIdentitySettings() },
+    // 跨主机同步: identities deleted on another host whose data is still here (清除 / 暂不 in Settings).
+    ...cleanupEntry(),
   ];
+}
+
+function cleanupEntry(): MenuEntry[] {
+  const n = useBrowserIdentities.getState().sync?.cleanups.length ?? 0;
+  return n ? [{ label: translate("browser.sync.cleanup.menu", { n }), icon: <Trash2 size={ICON} />, onSelect: () => openIdentitySyncSettings() }] : [];
 }
 
 /** ＋▾: a new blank tab in any identity, without changing the switcher's current one. */

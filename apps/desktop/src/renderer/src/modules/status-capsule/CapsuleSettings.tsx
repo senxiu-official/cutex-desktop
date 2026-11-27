@@ -1,18 +1,33 @@
-// Settings → 状态显示 → 胶囊外观: the capsule's own geometry (corner, edge, always show, size). A
-// `settings.section` of this module on the shell's page, so it goes away with the module; the
-// generic 放在哪里 table stays with the shell. Values are ui / appearance prefs and survive turning
-// the module off.
+// The status capsule module's own settings page (owner 2026-11-28: 模块 → 状态胶囊 → 设置; was a card of the retired
+// 状态显示 page): which items show in the capsule, then its geometry (corner, edge, always show, size). It exists only
+// while the module is on. Values are ui / appearance prefs and the items' saved places; they survive turning it off.
 import { useI18n, type MessageKey } from "../../i18n";
 import { CAPSULE_CORNERS } from "../../lib/capsuleLayout";
 import { setUiPref, useUiPrefs } from "../../lib/prefs";
 import { AppearanceNumberRow } from "../../components/settings/AppearanceRows";
 import { Section, Segmented, SettingRow, Toggle } from "../../components/settings/Form";
+import { StatusItemChecks } from "../../components/settings/StatusItemChecks";
+import { settingsAnchorId } from "../../lib/settingsNav";
+import { capsuleToggle, inCapsule } from "../../lib/statusItems";
+
+/** 模块 → 状态胶囊 → 设置. */
+export function CapsuleSettingsPage() {
+  const { t } = useI18n();
+  return (
+    <>
+      <Section id={settingsAnchorId("status-capsule-items")} title={t("status-capsule.contents")}>
+        <StatusItemChecks kind="capsule" surface="capsule" title={t("status-capsule.itemsLabel")} hint={t("status-capsule.itemsHint")} checked={(p) => inCapsule(p.place)} next={(p) => capsuleToggle(p.place)} />
+      </Section>
+      <CapsuleSettingsSection />
+    </>
+  );
+}
 
 export function CapsuleSettingsSection() {
   const { t } = useI18n();
   const ui = useUiPrefs();
   return (
-    <Section title={t("status-capsule.section")}>
+    <Section id={settingsAnchorId("status-capsule-look")} title={t("status-capsule.look")}>
       <SettingRow agents="none" source="local" label={t("status-capsule.corner")} hint={t("status-capsule.corner.hint")}>
         <Segmented
           value={ui.capsuleCorner}

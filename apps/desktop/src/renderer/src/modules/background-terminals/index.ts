@@ -15,7 +15,7 @@ export default defineModule({
         order: 300,
         agentFeature: "backgroundTerminals",
         titleKey: "background-terminals.statusTitle",
-        defaultPlace: "capsule",
+        defaultPlace: "both",
         useStatus: useTerminalsStatus,
         Meta: TerminalsMeta,
         Body: TerminalsBody,

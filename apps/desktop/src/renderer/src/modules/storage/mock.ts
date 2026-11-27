@@ -29,12 +29,12 @@ export function mockStorageView(host = "preview-host"): StorageOverview {
   return { host, home: "/preview/cutex", generatedAt: new Date().toISOString(), volume: { totalBytes: 1024 ** 4, freeBytes: 170 * 1024 ** 3 }, totals: { bytes: stores.reduce((n, s) => n + s.bytes, 0), files: stores.reduce((n, s) => n + s.files, 0) }, walk: { state: "idle", startedAt: measuredAt, finishedAt: measuredAt, durationMs: 15193, progress: null, stale: false, error: null }, groups, stores };
 }
 /** An archived agent's local copy (light-homes item naming it, like cutex): a size from its id, so figures are stable. */
-function archivedHome(id: string, name: string): StorageItem {
+function archivedHome(id: string, name: string, state: "retired" | "active" = "retired"): StorageItem {
   let h = 0;
   for (const c of id) h = (h * 31 + c.charCodeAt(0)) >>> 0;
-  return { id: `light-homes-${id}`, path: `runtime/light/agents/${id}`, name, cutexSessionId: id, state: "retired", bytes: (3 + (h % 900)) * 1024 ** 2 + (h % 1000) * 1024, files: 40 + (h % 4000), links: 0, unreadable: 0, oldestAt: "2026-06-02T08:14:00Z", newestAt: "2026-11-01T08:00:00Z", rolloutBytes: (1 + (h % 60)) * 1024 ** 2 };
+  return { id: `light-homes-${id}`, path: `runtime/light/agents/${id}`, name, cutexSessionId: id, state, bytes: (3 + (h % 900)) * 1024 ** 2 + (h % 1000) * 1024, files: 40 + (h % 4000), links: 0, unreadable: 0, oldestAt: "2026-06-02T08:14:00Z", newestAt: "2026-11-01T08:00:00Z", rolloutBytes: (1 + (h % 60)) * 1024 ** 2 };
 }
-export function mockStorageApi(legacy: boolean, emit: (method: string, params: Record<string, unknown>) => void, host?: string, archived: () => { id: string; name: string }[] = () => []): StorageApi {
+export function mockStorageApi(legacy: boolean, emit: (method: string, params: Record<string, unknown>) => void, host?: string, archived: () => { id: string; name: string; state?: "retired" | "active" }[] = () => []): StorageApi {
   const view = mockStorageView(host);
   return {
     async storage() { return legacy ? null : structuredClone(view); },
@@ -59,8 +59,8 @@ export function mockStorageApi(legacy: boolean, emit: (method: string, params: R
         state: storeId === "light-homes" ? index % 3 === 0 ? "retired" : "active" : undefined,
         bytes: Math.round((61 - index) * 1024 ** 2), files: 200, links: 0, unreadable: 0, oldestAt: "2026-06-02T08:14:00Z", newestAt: view.walk.finishedAt, rolloutBytes: storeId === "light-homes" ? 4 * 1024 ** 2 : 0,
       }));
-      // The host's archived agents have their copies here too (设置 → 归档's figures); largest first like cutex.
-      if (storeId === "light-homes") all.push(...archived().map((a) => archivedHome(a.id, a.name)));
+      // The host's agents have their copies here too (设置 → 归档's figures, archived and active); largest first like cutex.
+      if (storeId === "light-homes") all.push(...archived().map((a) => archivedHome(a.id, a.name, a.state)));
       all.sort((a, b) => b.bytes - a.bytes);
       const from = Number(query.cursor ?? 0), limit = query.limit ?? 50;
       return { store: storeId, items: all.slice(from, from + limit), nextCursor: from + limit < all.length ? String(from + limit) : null };
@@ -69,7 +69,7 @@ export function mockStorageApi(legacy: boolean, emit: (method: string, params: R
 }
 export const mock: ModuleMock = {
   features: { new: [STORAGE_FEATURE, ...(typeof location === "undefined" || !new URLSearchParams(location.search).has("nocleanup") ? [STORAGE_CLEANUP_FEATURE] : [])] },
-  api: (core) => ({ ...mockStorageApi(core.legacy, (method, params) => core.emitHost(method, params), undefined, () => core.projectRecords().retired.map((s) => ({ id: s.cutexSessionId, name: s.displayName }))), ...mockCleanupApi(core.legacy, (method, params) => core.emitHost(method, params)) }),
+  api: (core) => ({ ...mockStorageApi(core.legacy, (method, params) => core.emitHost(method, params), undefined, () => { const r = core.projectRecords(); return [...r.retired.map((s) => ({ id: s.cutexSessionId, name: s.displayName })), ...r.active.map((s) => ({ id: s.cutexSessionId, name: s.displayName, state: "active" as const }))]; }), ...mockCleanupApi(core.legacy, (method, params) => core.emitHost(method, params)) }),
   remote: (hostId, emit) => ({ ...mockStorageApi(false, emit, hostId), ...mockCleanupApi(false, emit) }),
 };
 

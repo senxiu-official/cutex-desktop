@@ -52,6 +52,7 @@ export const zhCN = {
   "services.remote.otherHost": "{name} 在 {host} 上：{host} 现在没有能打开的{{agent}}（未连接或没有{{agent}}），无法在应用里打开。",
   "services.remote.needsBrowser": "{name} 在 {host} 上：需要开启「浏览器」模块才能在应用里打开。",
   "services.remote.noSystemBrowser": "另一台设备的服务只能在应用里打开",
+  "services.browserOff": "「浏览器」模块已关闭，{name} 改在系统浏览器里打开。",
   "services.start": "启动",
   "services.stop": "停止",
   "services.restart": "重启",

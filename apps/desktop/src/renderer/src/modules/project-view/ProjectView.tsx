@@ -3,7 +3,7 @@ import { rememberProject } from "./context";
 // picker), the persistent agents (the Director's card, then needs-you / running / recently active, the
 // long idle ones folded into 「空闲 N 个」) and the recent activity (newest first, type chips). Components
 // only; data in data.ts, rules in model.ts.
-import { memo, useEffect, useState, type ReactNode } from "react";
+import { memo, useEffect, useState, type ComponentType, type ReactNode } from "react";
 import { ArrowDownLeft, ArrowUpRight, Bot, Check, ChevronDown, ChevronRight, CircleAlert, FileBox, Globe, History, ListChecks, ListTree, Send, SquareTerminal, Target, Users } from "lucide-react";
 import type { AskSummary } from "../../../../shared/ipc";
 import { StatusAvatar } from "../../components/AgentStatus";
@@ -18,12 +18,16 @@ import { formatElapsed, showsRunningRing } from "../../lib/agentAttention";
 import { openMenuFrom } from "../../lib/contextMenu";
 import { delegationStatus, requesterName, requesterSession, type StatusTone } from "../../lib/delegations";
 import { useStatusWord } from "../../lib/delegationsView";
+import { STATUS_TIP_WORD } from "../../lib/statusTip";
+import { useDelegationStatusHint } from "../../components/DelegationParts";
 import { openDelegationDetail } from "../../lib/delegationOpen";
 import { jobTitle } from "../../lib/jobs";
 import { relativeTime } from "../../lib/sidebarView";
 import { useSizeFlags, widthAtLeast } from "../../lib/sizeFlags";
 import { subscribeTick } from "../../lib/ticker";
 import { featuresOf, sidebarOf, useApp } from "../../store";
+import { isAssistantSession, usePa } from "../../lib/personalAssistantStore";
+import { useSlot } from "../react";
 import { services } from "../app";
 import type { SideBodyProps } from "../slots";
 import { useProjectData, useProjectViewState, type Member, type ProjectData } from "./data";
@@ -54,9 +58,10 @@ const TONE: Record<StatusTone, string> = {
   neutral: "text-muted bg-surface-2",
 };
 
-function Pill({ tone, children, title }: { tone: StatusTone; children: ReactNode; title?: string }) {
+/** A status pill; `tip`: the status word's hover text (the app tooltip, the delegation status look). */
+function Pill({ tone, children, tip }: { tone: StatusTone; children: ReactNode; tip?: string }) {
   return (
-    <span title={title} className={`inline-flex max-w-full shrink-0 items-center gap-1 truncate rounded-full px-1.5 py-px text-caption/[inherit] font-medium ${TONE[tone]}`}>
+    <span data-tip={tip} className={`${tip ? `${STATUS_TIP_WORD} ` : ""}inline-flex max-w-full shrink-0 items-center gap-1 truncate rounded-full px-1.5 py-px text-caption/[inherit] font-medium ${TONE[tone]}`}>
       {children}
     </span>
   );
@@ -127,13 +132,14 @@ function DelegationChip({ d, dir, hostId, data, compact }: { d: AskSummary; dir:
   const word = useStatusWord();
   const other = dir === "in" ? data.nameOf(requesterSession(d.requester), requesterName(d.requester) ?? t("project-view.you")) : data.nameOf(d.target, d.targetName ?? null);
   const status = delegationStatus(d);
+  const hint = useDelegationStatusHint(status);
   const Icon = dir === "in" ? ArrowDownLeft : ArrowUpRight;
   const who = t(dir === "in" ? "project-view.dlgIn" : "project-view.dlgOut", { name: other ?? "" });
   return (
     <button
       type="button"
       className="press flex w-full min-w-0 items-center gap-1.5 rounded-md px-1 py-0.5 text-left text-meta/[inherit] hover:bg-hover"
-      title={`${who}: ${d.title}`}
+      data-tip={`${who}: ${d.title}`}
       onClick={(e) => {
         e.stopPropagation();
         openDelegationDetail(hostId, d.askId, { title: d.title });
@@ -142,7 +148,7 @@ function DelegationChip({ d, dir, hostId, data, compact }: { d: AskSummary; dir:
       <Icon size={12} className={`shrink-0 ${dir === "in" ? "text-accent" : "text-subtle"}`} />
       <span className="shrink-0 text-muted">{compact ? other : who}</span>
       <span className="min-w-0 flex-1 truncate">{d.title}</span>
-      <Pill tone={status.tone}>{word(status, other ?? "")}</Pill>
+      <Pill tone={status.tone} tip={hint}>{word(status, other ?? "")}</Pill>
     </button>
   );
 }
@@ -572,7 +578,26 @@ export function ProjectViewPanel({ state, setState }: { state: ViewState; setSta
   );
 }
 
+/** The pane kind 个人助理 contributes for an assistant's conversation (looked up by id: no import of that module). */
+const ASSISTANT_TODAY_KIND = "personal-assistants.today";
+
 export function ProjectViewBody(props: SideBodyProps<ViewState>) {
+  // 「今日」 (owner 2026-11-27): an assistant's coordination project is internal, so a context-following view shows
+  // the assistant's 今日 in its place while an assistant's conversation is the selected agent.
+  const following = !(props.instance.state.projectId && props.instance.state.hostId);
+  const hostId = useApp((s) => s.selectedHost ?? s.hosts?.active ?? "local");
+  const sessionId = useApp((s) => s.selectedId);
+  const assistant = usePa((s) => following && isAssistantSession(s, hostId, sessionId));
+  const kinds = useSlot("pane.kind");
+  const today = assistant ? kinds.find((e) => e.item.id === ASSISTANT_TODAY_KIND && e.mode === "show") : undefined;
+  if (today) {
+    const Today = today.item.Body as ComponentType<SideBodyProps<unknown>>;
+    return <div className="h-full" data-project-view-today=""><Today {...(props as SideBodyProps<unknown>)} hostId={hostId} sessionId={sessionId} /></div>;
+  }
+  return <ProjectViewFollowing {...props} />;
+}
+
+function ProjectViewFollowing(props: SideBodyProps<ViewState>) {
   const state = useProjectViewState(props.instance.id, props.instance.state);
   return <ProjectViewPanel state={state} setState={(next) => {
     if (next.hostId && next.projectId) rememberProject({ hostId: next.hostId, projectId: next.projectId });

@@ -4,7 +4,15 @@
 // schedule, a short history, coordination notes, an imported calendar and 定期任务: a daily 项目状态 that ran (sent,
 // merged, refused, cancelled runs), a weekly 到期请求 whose Director changed (needs 重新确认), a paused one and a
 // cancelled one. Other hosts have none. `?pa=empty`: no assistants anywhere (the empty desk); `?pa=vacant`: proto has no
-// Director; `?pa=r295`: the host advertises r295 only (no 定期任务 / notes / owner views; polled).
+// Director; `?pa=r295`: the host advertises r295 only (no 定期任务 / notes / owner views; polled); `?pa=r296`: an r296
+// host without r299 readiness (no create-options, capability details, agenda zones or source states). Otherwise the
+// host is r299: create-options (claude usable, the others with the host's reasons), evaluated `capabilityDetails` and
+// the agenda in the asked zone with per-source states (研究助理's projects can't be read); `?pa=agendaFail`: after
+// the first read, every agenda read fails (today keeps what it read, marked old).
+// r299 also runs assistants as normal agents (`personal-assistants-agent-v1`: 生活助理 自动, 研究助理 still the old
+// restricted kind) and the phase-1 calls (shared/personalAssistantsPhase1.ts) (范围规则, 简报 times, adding a reminder;
+// 记一下 is in the 备忘 mock): 生活助理 has a project rule and a 08:30 brief, 研究助理 has no brief (off).
+// `?pa=noPhase1`: an host with grant support without the phase-1 features.
 // Writes behave like cutex: action ids replay, revisions are checked (409 revision_conflict), confirm moves a request to
 // queued and re-reads the project's current seat, a template confirms only the current seat; each committed write
 // announces `cutex/personalAssistant/changed` like r296. Each host reports its own instance id in the list
@@ -13,11 +21,59 @@ import type { DesktopApi } from "../../../../shared/ipc";
 import type {
   PaAssistant, PaAuditRow, PaCalendarEvent, PaChange, PaConfig, PaNote, PaRequest, PaRule, PaRun, PaSeat, PaTemplate, PaView,
 } from "../../../../shared/personalAssistants";
-import { PA_CHANGED_EVENT, PA_OWNER_VIEWS_FEATURE, PA_QUALIFIED_REFS_FEATURE, PA_RECURRING_FEATURE, PERSONAL_ASSISTANTS_FEATURE } from "../../../../shared/personalAssistants";
+import type { PaPermissionMode, PaProjectRef, PaReminder, PaRuntime, PaRuntimePolicy } from "../../../../shared/personalAssistants";
+import { PA_BRIEF_FEATURE, PA_REMINDERS_WRITE_FEATURE, PA_SCOPE_RULES_FEATURE, type PaBriefView, type PaScope, type PaScopeRule } from "../../../../shared/personalAssistantsPhase1";
+import { PA_AGENT_FEATURE, PA_CHANGED_EVENT, PA_OWNER_VIEWS_FEATURE, PA_QUALIFIED_REFS_FEATURE, PA_READINESS_FEATURE, PA_RECURRING_FEATURE, PERSONAL_ASSISTANTS_FEATURE, type PaCapabilityDetails } from "../../../../shared/personalAssistants";
 import type { MockCore, ModuleMock } from "../../dev/mockTypes";
 
 const QUERY = new URLSearchParams(typeof location === "undefined" ? "" : location.search);
 const MODE = QUERY.get("pa") ?? "";
+/** r299 readiness (every mode but the older hosts). */
+const READINESS = MODE !== "r295" && MODE !== "r296";
+const HOST_ZONE = "UTC";
+/** Phase 1 (shared/personalAssistantsPhase1.ts): 范围规则, 简报, adding a reminder. */
+const PHASE1 = READINESS && MODE !== "noPhase1";
+/** Like the host would: the most specific scope wins; same rank → the more careful role; none → 协调. */
+function effectiveRoles(rules: readonly PaScopeRule[], refs: readonly PaProjectRef[]) {
+  const rank = { all: 0, group: 1, host: 2, project: 3 } as const;
+  const care = { observe: 0, coordinate: 1, confirmForYou: 2 } as const;
+  const same = (a: PaProjectRef, b: PaProjectRef) => a.instanceId === b.instanceId && a.projectId === b.projectId;
+  const covers = (s: PaScope, r: PaProjectRef) => s.kind === "all" || (s.kind === "group" && s.members.some((m) => same(m, r))) || (s.kind === "host" && s.instanceId === r.instanceId) || (s.kind === "project" && same(s.ref, r));
+  return refs.map((ref) => {
+    let best: PaScopeRule | null = null;
+    for (const r of rules) if (covers(r.scope, ref) && (!best || rank[r.scope.kind] > rank[best.scope.kind] || (rank[r.scope.kind] === rank[best.scope.kind] && care[r.role] < care[best.role]))) best = r;
+    return { ref, role: best?.role ?? "coordinate", ruleId: best?.id ?? null };
+  });
+}
+const assistantRefs = (a: PaAssistant): PaProjectRef[] => a.config.projectRefs ?? a.config.projectIds.map((projectId) => ({ instanceId: a.config.homeInstanceId, projectId }));
+/** r299 create-options of the mock Profiles: only the Claude subscription one has the assistant tools. */
+const CREATE_OPTIONS = [
+  { id: "p-claude", name: "claude", runtime: "claude", eligible: true, reason: null, runtimePin: "claude-r58" },
+  { id: "p-claude-work", name: "claude-work", runtime: "claude", eligible: false, reason: "assistant_account_unavailable", runtimePin: null },
+  { id: "p-gamma", name: "gamma", runtime: "codex", eligible: false, reason: "assistant_profile_runtime_unsupported", runtimePin: null },
+  { id: "p-omega", name: "omega", runtime: "codex", eligible: false, reason: "assistant_profile_runtime_unsupported", runtimePin: null },
+  { id: "p-relay", name: "relay", runtime: "codex", eligible: false, reason: "assistant_profile_runtime_unsupported", runtimePin: null },
+  { id: "p-glm", name: "GLM", runtime: "codex", eligible: false, reason: "assistant_profile_runtime_unsupported", runtimePin: null },
+  { id: "p-gemini", name: "Gemini", runtime: "codex", eligible: false, reason: "assistant_profile_runtime_unsupported", runtimePin: null },
+];
+const DETAIL_KEYS = ["agenda", "notes", "reminders", "readOnlyCalendarSnapshot", "qualifiedProjectRefs", "localDirectorRequests", "recurringDirectorTemplates", "crossHostProjectScope", "projectAdmin", "liveServices", "kitActivation", "publishing", "destructive", "fullOwner"] as const;
+/** Executors this host does not have (cross-host scope, project admin, owner operations, full owner). */
+const UNSUPPORTED = new Set(["crossHostProjectScope", "projectAdmin", "liveServices", "kitActivation", "publishing", "destructive", "fullOwner"]);
+const BINDING_REASON: Record<string, string> = { disabled: "assistant_disabled", provisioning: "provisioning_in_progress", runtimeUnsupported: "assistant_runtime_unsupported" };
+/** r299 `capabilityDetails`: configured from the saved grants, effective only with a ready binding and a host executor. */
+function capabilityDetails(a: PaAssistant, availability: string): PaCapabilityDetails {
+  const ops = ["liveServices", "kitActivation", "publishing", "destructive"];
+  const configured = (key: string) => key === "fullOwner" ? a.grants.fullOwner
+    : key === "projectAdmin" ? a.grants.tier === "projectAdmin" || a.grants.tier === "operational"
+    : ops.includes(key) ? a.grants.tier === "operational" && (a.grants.operations as string[]).includes(key)
+    : true;
+  return Object.fromEntries(DETAIL_KEYS.map((key) => {
+    const c = configured(key);
+    const unsupported = UNSUPPORTED.has(key);
+    const reason = unsupported ? "host_unsupported" : availability !== "ready" ? (BINDING_REASON[availability] ?? "session_inactive") : !c ? "not_granted" : null;
+    return [key, { configured: c, effective: reason === null, unsupported, reason }];
+  }));
+}
 
 class Refusal extends Error {
   constructor(code: string, message = code) {
@@ -209,6 +265,59 @@ function mockPaApi(state: HostState, core: MockCore | null): Partial<DesktopApi>
     if (!a) throw new Refusal("assistant_not_found");
     return a;
   };
+  // r299 normal-agent runtime: the first assistant (or one created here) runs as an agent; the others are the old kind.
+  const runtimes = new Map<string, PaRuntime>();
+  const agentRuntime = (a: PaAssistant, mode: PaPermissionMode, policy?: PaRuntimePolicy): PaRuntime => ({
+    behavior: "agent", permissionMode: mode, workspace: `~/.cutex/personal-assistants/${a.coordinationProjectId}`,
+    policy: policy ?? { version: 1, initialPermissionMode: mode, checkInFullAccess: false, authorizedWriteProjects: [] },
+  });
+  const runtimeOf = (a: PaAssistant): PaRuntime => {
+    const known = runtimes.get(a.id);
+    if (known) return structuredClone(known);
+    const r: PaRuntime = a.id === state.assistants[0]?.id ? agentRuntime(a, "auto") : { behavior: "legacyRestricted", permissionMode: null, policy: null, workspace: null };
+    runtimes.set(a.id, r);
+    return structuredClone(r);
+  };
+  // Phase 1: rules, brief times, reminders added here.
+  const rules = new Map<string, { revision: number; rules: PaScopeRule[] }>();
+  const rulesOf = (a: PaAssistant) => {
+    let r = rules.get(a.id);
+    if (!r) {
+      const wave = a.id === state.assistants[0]?.id && a.config.projectIds.includes("waveline");
+      r = { revision: 1, rules: wave ? [{ id: "rule-wave", scope: { kind: "project", ref: { instanceId: a.config.homeInstanceId, projectId: "waveline" } }, role: "observe", note: "只看进度，先不替我发请求" }] : [] };
+      rules.set(a.id, r);
+    }
+    return r;
+  };
+  const ruleSet = (a: PaAssistant) => {
+    const r = rulesOf(a);
+    return { revision: r.revision, rules: structuredClone(r.rules), effective: effectiveRoles(r.rules, assistantRefs(a)) };
+  };
+  const briefs = new Map<string, PaBriefView>();
+  const briefOf = (a: PaAssistant): PaBriefView => {
+    let b = briefs.get(a.id);
+    if (!b) {
+      const first = a.id === state.assistants[0]?.id;
+      b = first
+        ? { revision: 1, times: ["08:30", "17:30"], timezone: null, latest: { at: todayAt(8, 30), text: "早上好。今天有 2 件等你确认：Waveline 推送排查要不要交给主管、cutex-desktop 的发布说明。\n在办 3 件，其中设置页拆分已被主管接手。17:00 提醒你确认本周发布说明。", sources: ["requests", "reminders", "calendar"] }, pending: null, stale: false }
+        : { revision: 0, times: [], timezone: null, latest: null, pending: null, stale: false };
+      // `?pa=briefWriting`: the 17:30 run is being written, done a few seconds later (announced as `brief`);
+      // `?pa=briefStale`: the 12:00 run was replaced by 17:30 unwritten (the 08:30 brief stays).
+      if (first && MODE === "briefWriting") {
+        b.pending = { runId: "brief-run-1730", scheduledAt: todayAt(17, 30), queued: true };
+        setTimeout(() => {
+          const cur = briefs.get(a.id);
+          if (!cur?.pending) return;
+          briefs.set(a.id, { ...cur, revision: cur.revision + 1, pending: null, stale: false, latest: { at: new Date().toISOString(), text: "下午好。等你确认的都处理完了；Waveline 推送排查已交给主管。明早 08:30 再写一份。", sources: ["requests", "reminders"] } });
+          changed(a.id, "brief");
+        }, 8000);
+      }
+      if (first && MODE === "briefStale") b.stale = true;
+      briefs.set(a.id, b);
+    }
+    return structuredClone(b);
+  };
+  const added = new Map<string, PaReminder[]>();
   const availability = (a: PaAssistant) => (!a.enabled ? "disabled" : !a.sessionId ? "provisioning" : state.native.has(a.sessionId) ? "runtimeUnsupported" : "ready");
   const activeProfile = (a: PaAssistant) => (a.sessionId ? (state.profiles[a.sessionId] ?? a.config.profile) : null);
   const view = (a: PaAssistant): PaView => {
@@ -218,6 +327,7 @@ function mockPaApi(state: HostState, core: MockCore | null): Partial<DesktopApi>
     return {
       assistant: structuredClone(a), overlaps, moreOverlaps: false, availability: availability(a), activeProfile: activeProfile(a),
       capabilities: { localDirectorRequests: true, agenda: true, requiresHandoffConfirmation: true, ownerOperationDelegation: false, recurringDirectorTemplates: MODE !== "r295", readOnlyCalendarSnapshot: MODE !== "r295", qualifiedProjectRefs: MODE !== "r295", crossHostProjectScope: false },
+      ...(READINESS ? { capabilityDetails: capabilityDetails(a, availability(a)), runtime: runtimeOf(a) } : {}),
     };
   };
   const audit = (a: PaAssistant, verb: string, actionId: string, detail: unknown) => {
@@ -255,19 +365,72 @@ function mockPaApi(state: HostState, core: MockCore | null): Partial<DesktopApi>
   };
   const withSeq = (rows: readonly PaRequest[]) => rows.map((row) => ({ seq: state.requests.indexOf(row) + 1, row }));
   const today = (iso: string | null | undefined) => !!iso && new Date(iso).toDateString() === new Date().toDateString();
+  /** `?pa=agendaFail`: agenda reads so far per assistant (the first one succeeds). */
+  const agendaReads = new Map<string, number>();
   return {
+    ...(READINESS ? {
+      async paCreateOptions() {
+        await delay();
+        return { permissionModes: ["auto", "fullAccess"], defaultPermissionMode: "auto", homeInstanceId: state.instance, profiles: structuredClone(CREATE_OPTIONS), capabilities: { localDirectorRequests: true, agenda: true, requiresHandoffConfirmation: true, ownerOperationDelegation: false, recurringDirectorTemplates: true, readOnlyCalendarSnapshot: true, qualifiedProjectRefs: true, crossHostProjectScope: false }, observedAt: new Date().toISOString(), hostTimezone: HOST_ZONE };
+      },
+    } : {}),
+    ...(PHASE1 ? {
+      async paScopeRules(id: string) {
+        await delay();
+        return ruleSet(find(id));
+      },
+      async paScopeRulesSave(id: string, body: { actionId: string; expectedRevision: number; rules: PaScopeRule[] }) {
+        await delay();
+        return structuredClone(once(body.actionId, [id, body.expectedRevision, body.rules], () => {
+          const a = find(id);
+          const r = rulesOf(a);
+          if (r.revision !== body.expectedRevision) throw new Refusal("revision_conflict");
+          rules.set(id, { revision: r.revision + 1, rules: structuredClone(body.rules) });
+          audit(a, "configure", body.actionId, { scopeRules: body.rules.length });
+          changed(id, "assistant");
+          return ruleSet(a);
+        }));
+      },
+      async paBrief(id: string) {
+        await delay();
+        return briefOf(find(id));
+      },
+      async paBriefSchedule(id: string, body: { actionId: string; expectedRevision: number; times: string[]; timezone: string | null }) {
+        await delay();
+        return structuredClone(once(body.actionId, [id, body.expectedRevision, body.times, body.timezone], () => {
+          const a = find(id);
+          const b = briefOf(a);
+          if (b.revision !== body.expectedRevision) throw new Refusal("revision_conflict");
+          // A schedule reset clears `stale` (cutex r299).
+          const next = { ...b, revision: b.revision + 1, times: [...new Set(body.times)].sort(), timezone: body.timezone, stale: false };
+          briefs.set(id, next);
+          changed(id, "brief");
+          return next;
+        }));
+      },
+      async paReminderCreate(id: string, body: { actionId: string; at: string; message: string }) {
+        await delay();
+        return structuredClone(once(body.actionId, [id, body.at, body.message], () => {
+          find(id);
+          const r: PaReminder = { alarmId: `al-${body.actionId.slice(-8)}`, at: body.at, message: body.message, state: "pending" };
+          added.set(id, [...(added.get(id) ?? []), r]);
+          changed(id, "assistant");
+          return r;
+        }));
+      },
+    } : {}),
     async paList() {
       await delay();
-      const status = MODE === "r295" ? null : Object.fromEntries(state.assistants.map((a) => [a.id, { availability: availability(a), activeProfile: activeProfile(a) }]));
+      const status = MODE === "r295" ? null : Object.fromEntries(state.assistants.map((a) => [a.id, { availability: availability(a), activeProfile: activeProfile(a), ...(READINESS ? { capabilityDetails: capabilityDetails(a, availability(a)), runtime: runtimeOf(a) } : {}) }]));
       return { homeInstanceId: state.instance, items: structuredClone(state.assistants), status, nextCursor: null };
     },
     async paGet(id) {
       await delay();
       return view(find(id));
     },
-    async paCreate({ actionId, config }) {
+    async paCreate({ actionId, config, permissionMode }) {
       await delay();
-      const reply = once(actionId, config, () => {
+      const reply = once(actionId, [config, permissionMode ?? null], () => {
         if (config.homeInstanceId !== state.instance) throw new Refusal("home_instance_mismatch");
         const id = `pa-${Math.random().toString(16).slice(2).padEnd(32, "0").slice(0, 32)}`;
         const session = `${id}-session`;
@@ -276,6 +439,7 @@ function mockPaApi(state: HostState, core: MockCore | null): Partial<DesktopApi>
         state.profiles[session] = config.profile;
         if (config.profile === "codex") state.native.add(session);
         state.calendars.set(id, { revision: 0, source: null, observedAt: null, events: [] });
+        if (READINESS) runtimes.set(id, agentRuntime(a, permissionMode ?? "auto"));
         audit(a, "create", actionId, { state: "provisioning" });
         changed(id, "assistant");
         return view(a);
@@ -290,10 +454,13 @@ function mockPaApi(state: HostState, core: MockCore | null): Partial<DesktopApi>
           if (a.revision !== expectedRevision) throw new Refusal("revision_conflict");
           if (change.kind === "grants" && change.grants.fullOwner && !a.grants.fullOwner) throw new Refusal("full_owner_native_confirmation_required", "Granting full owner access requires native owner confirmation, which this host does not support yet.");
           if (change.kind === "scopedSettings" && change.projectRefs.some((r) => r.instanceId !== state.instance)) throw new Refusal("destination_scope_required");
+          if (change.kind === "runtime" && !READINESS) throw new Refusal("unsupported_change");
           const before = structuredClone(a);
-          apply(a, change);
+          const beforeRuntime = runtimeOf(a);
+          if (change.kind === "runtime") runtimes.set(id, agentRuntime(a, change.policy.initialPermissionMode, change.policy));
+          else apply(a, change);
           a.revision += 1;
-          audit(a, "configure", actionId, { before: pick(before, change), after: pick(a, change) });
+          audit(a, "configure", actionId, change.kind === "runtime" ? { before: beforeRuntime.policy, after: change.policy } : { before: pick(before, change), after: pick(a, change) });
           changed(id, "assistant");
           return view(a);
         }),
@@ -302,17 +469,33 @@ function mockPaApi(state: HostState, core: MockCore | null): Partial<DesktopApi>
     async paAgenda(id, q = {}) {
       await delay();
       const a = find(id);
+      const reads = (agendaReads.get(id) ?? 0) + 1;
+      agendaReads.set(id, reads);
+      if (MODE === "agendaFail" && reads > 1) throw new Refusal("host_unreachable", "The host did not answer.");
+      const now = new Date().toISOString();
+      const src = (status: string, reason: string | null = null, observedAt: string | null = now, timezone: string | null = HOST_ZONE) => ({ instanceId: state.instance, timezone, observedAt, status, reason });
+      const zones = READINESS ? {
+        displayTimezone: q.displayTimezone ?? HOST_ZONE, hostTimezone: HOST_ZONE, observedAt: now,
+        sources: {
+          requests: src("ready"), reminders: src("ready"), schedules: src("ready"), dueRequests: src("ready"),
+          projects: a.id === state.assistants[0]?.id ? src("ready") : src("unknown", "directory_unavailable", null),
+          calendar: (state.calendars.get(id)?.source ? src("snapshot", "imported_snapshot", state.calendars.get(id)!.observedAt, "UTC") : src("disconnected", "calendar_disconnected", null, "UTC")),
+        },
+      } : {};
       const items = state.requests.filter((r) => r.assistantId === id && a.config.projectIds.includes(r.projectId) && !["completed", "declined", "cancelled"].includes(r.state));
       const own = a.id === state.assistants[0]?.id;
       const seat = seats(core);
       const cal = state.calendars.get(id) ?? { revision: 0, source: null, observedAt: null, events: [] };
       const r296 = MODE !== "r295";
       return {
-        date: q.date ?? new Date().toISOString().slice(0, 10), timezone: "host", items: structuredClone(items), nextCursor: null,
-        reminders: own ? [
-          { alarmId: "al-1", at: todayAt(9, 30), message: "看一下 Waveline 推送排查的进展", state: "delivered" },
-          { alarmId: "al-2", at: todayAt(17, 0), message: "提醒你确认本周发布说明", state: "pending" },
-        ] : [],
+        date: q.date ?? new Date().toISOString().slice(0, 10), timezone: READINESS ? (q.displayTimezone ?? HOST_ZONE) : "host", ...zones, items: structuredClone(items), nextCursor: null,
+        reminders: [
+          ...(own ? [
+            { alarmId: "al-1", at: todayAt(9, 30), message: "看一下 Waveline 推送排查的进展", state: "delivered" },
+            { alarmId: "al-2", at: todayAt(17, 0), message: "提醒你确认本周发布说明", state: "pending" },
+          ] : []),
+          ...structuredClone(added.get(id) ?? []),
+        ].sort((x, y) => x.at.localeCompare(y.at)),
         nextReminderCursor: null,
         schedules: own ? [{ id: "sch-1", name: "每日议程整理", nextRunAt: todayAt(21, 0) }] : [],
         nextScheduleCursor: null,
@@ -496,16 +679,17 @@ function apply(a: PaAssistant, change: PaChange): void {
   if (change.kind === "settings") Object.assign(a.config, { name: change.name, projectIds: [...change.projectIds] });
   else if (change.kind === "scopedSettings") Object.assign(a.config, { name: change.name, projectIds: change.projectRefs.map((r) => r.projectId).sort(), projectRefs: structuredClone(change.projectRefs) });
   else if (change.kind === "grants") a.grants = structuredClone(change.grants);
-  else a.enabled = change.enabled;
+  else if (change.kind === "enabled") a.enabled = change.enabled;
 }
 function pick(a: PaAssistant, change: PaChange): unknown {
   if (change.kind === "settings" || change.kind === "scopedSettings") return { name: a.config.name, projectIds: a.config.projectIds };
   if (change.kind === "grants") return a.grants;
+  if (change.kind === "runtime") return change.policy;
   return { enabled: a.enabled };
 }
 
 export const mock: ModuleMock = {
   api: (core) => mockPaApi(localState(core), core),
   remote: (hostId) => mockPaApi(remoteState(hostId), null),
-  features: { new: MODE === "r295" ? [PERSONAL_ASSISTANTS_FEATURE] : [PERSONAL_ASSISTANTS_FEATURE, PA_RECURRING_FEATURE, PA_QUALIFIED_REFS_FEATURE, PA_OWNER_VIEWS_FEATURE] },
+  features: { new: MODE === "r295" ? [PERSONAL_ASSISTANTS_FEATURE] : [PERSONAL_ASSISTANTS_FEATURE, PA_RECURRING_FEATURE, PA_QUALIFIED_REFS_FEATURE, PA_OWNER_VIEWS_FEATURE, ...(READINESS ? [PA_READINESS_FEATURE, PA_AGENT_FEATURE] : []), ...(PHASE1 ? [PA_SCOPE_RULES_FEATURE, PA_BRIEF_FEATURE, PA_REMINDERS_WRITE_FEATURE] : [])] },
 };

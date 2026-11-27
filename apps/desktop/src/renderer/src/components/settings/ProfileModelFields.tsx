@@ -131,9 +131,9 @@ export function ProfileModelFields({ detail, models, cfg, set }: { detail: Profi
  *  its newest model), with the ids it covers; the window falls back to the first known one. */
 function claudeContextOf(list: readonly CatalogModel[], id: string | null | undefined): { row: CatalogModel | null; fold: FoldedModel<CatalogModel> | null; ids: string[]; window: number | null } {
   const folded = foldClaudeModels(list, (r) => r.id, (r) => r.displayName, id ?? null);
-  const fold = folded.find((f) => f.item.id === id || f.folded.includes(id ?? "")) ?? null;
+  const fold = folded.find((f) => f.item.id === id) ?? folded.find((f) => f.folded.includes(id ?? "")) ?? null;
   const row = fold?.item ?? list.find((x) => x.id === id) ?? null;
-  const ids = row ? [row.id, ...(fold?.folded ?? [])] : [];
+  const ids = row ? [row.id, ...(fold?.folded ?? []), ...(fold?.follows ? [fold.follows] : [])] : [];
   const windowOf = (r: CatalogModel) => r.effective.contextWindow ?? r.maxContextWindow ?? null;
   const window = (row && (windowOf(row) ?? ids.map((x) => list.find((r) => r.id === x)).map((r) => r && windowOf(r)).find((w) => w != null))) ?? list.find((x) => x.effective.contextWindow)?.effective.contextWindow ?? null;
   return { row, fold, ids, window };

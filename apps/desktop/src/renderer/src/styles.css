@@ -2290,8 +2290,8 @@ nav[data-sidebar-roster="roster"] .project-block-tint > .project-block-header[da
 }
 .group\/card details[open] > summary:not(.list-none)::before { transform: rotate(90deg); }
 
-/* Callout cards (教学模式, components/MarkdownCallout): the marker line shows in the card's head, not in the text; a
-   marker-only first paragraph leaves no gap. The plain quote (pref off) keeps both. */
+/* Callout cards (Markdown alerts, components/MarkdownCallout): the marker line shows in the card's head, not in the
+   text; a marker-only first paragraph leaves no gap. A plain quote (no supported marker) has neither. */
 .markdown-callout [data-callout-head] { display: none; }
 .markdown-callout > p[data-callout-head-only] { display: none; }
 .markdown-callout > :is(p, ul, ol):first-of-type { margin-top: 0; }

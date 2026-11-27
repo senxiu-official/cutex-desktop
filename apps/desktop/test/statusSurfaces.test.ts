@@ -12,6 +12,7 @@ vi.mock("../src/renderer/src/bridge", () => ({ api: {}, bridge: {}, onEvent: () 
 const { MODULES } = await import("../src/renderer/src/modules/registry");
 const { SLOT_SPECS } = await import("../src/renderer/src/modules/slots");
 const { createModuleHost } = await import("../src/renderer/src/modules/host");
+const { MODULES_PREFS_KEY } = await import("../src/renderer/src/modules/types");
 const S = await import("../src/renderer/src/lib/statusSurfaces");
 const { overlayInsets, withReservation } = await import("../src/renderer/src/lib/overlayLayout");
 const { capsuleViewMounted, registerCapsuleView, revealInCapsule } = await import("../src/renderer/src/modules/status-capsule/capsuleState");
@@ -36,8 +37,9 @@ const providers = (capsule: "on" | "disabled" | "failed" | "absent" | "not-ready
 });
 
 const hosts: AppModuleHost[] = [];
+// An install that uses the capsule: off by default on new installs since 2026-11-27 (existing installs keep it on).
 const storage = () => {
-  const data = new Map<string, string>();
+  const data = new Map<string, string>([[MODULES_PREFS_KEY, JSON.stringify({ v: 1, enabled: { "status-capsule": true }, place: {} })]]);
   return { data, getItem: (k: string) => data.get(k) ?? null, setItem: (k: string, v: string) => void data.set(k, v) };
 };
 async function appHost(modules: readonly AppModule[] = MODULES, saved = storage()) {
@@ -61,7 +63,21 @@ describe("S1 resolver: saved choice × capsule state", () => {
     const effective = (capsule: Parameters<typeof providers>[0]) =>
       Object.fromEntries(PLACES.map((p) => [p, S.resolvePlacement(p, both, providers(capsule)).effective.join("+") || "none"]));
     expect(effective("on")).toEqual({ bar: "bar", capsule: "capsule", both: "bar+capsule", off: "none" });
-    for (const state of ["disabled", "failed", "absent", "not-ready"] as const) {
+    // Turned off or removed (owner 2026-11-28): what was placed in the capsule shows in the status row instead.
+    for (const state of ["disabled", "absent"] as const) {
+      expect(effective(state), state).toEqual({ bar: "bar", capsule: "bar", both: "bar", off: "none" });
+      for (const p of PLACES) {
+        const r = S.resolvePlacement(p, both, providers(state));
+        expect(r.requested).toBe(p);
+        expect(r.unavailable).toEqual([]);
+      }
+      expect(S.capsuleOff(providers(state))).toBe(true);
+      // An item the row cannot show keeps its reason (nothing to fall back to).
+      expect(S.resolvePlacement("capsule", ["capsule"], providers(state))).toEqual({ requested: "capsule", effective: [], unavailable: [{ surface: "capsule", reason: state }] });
+    }
+    // Failed / still starting: passing states, the saved place keeps its meaning.
+    for (const state of ["failed", "not-ready"] as const) {
+      expect(S.capsuleOff(providers(state))).toBe(false);
       expect(effective(state), state).toEqual({ bar: "bar", capsule: "none", both: "bar", off: "none" });
       for (const p of PLACES) {
         const r = S.resolvePlacement(p, both, providers(state));
@@ -171,9 +187,10 @@ describe("S3 reveal: view / edit routing", () => {
     for (const place of PLACES) expect(run(place, "on", "edit"), place).toEqual({ result: { status: "opened", surface: "bar" }, calls: ["bar"] });
   });
 
-  it("capsule off: capsule-only items fall back to the bar panel; without one the result says why", () => {
+  it("capsule off: capsule-only items show in the bar; without a bar panel or a bar part the result says why", () => {
     expect(run("capsule", "disabled", "view")).toEqual({ result: { status: "opened", surface: "bar" }, calls: ["bar"] });
-    expect(run("capsule", "disabled", "view", false)).toEqual({ result: { status: "unavailable", unavailable: [{ surface: "capsule", reason: "disabled" }] }, calls: [] });
+    expect(run("capsule", "disabled", "view", false)).toEqual({ result: { status: "unavailable", unavailable: [] }, calls: [] });
+    expect(run("capsule", "failed", "view", false)).toEqual({ result: { status: "unavailable", unavailable: [{ surface: "capsule", reason: "failed" }] }, calls: [] });
     // An item without a bar part and no capsule: unavailable, never a silent success.
     expect(run("capsule", "disabled", "view", true, ["capsule"])).toEqual({ result: { status: "unavailable", unavailable: [{ surface: "capsule", reason: "disabled" }] }, calls: [] });
   });
@@ -226,10 +243,12 @@ describe("S4 reveal: stale scope and provider restarts", () => {
 });
 
 describe("S5 plan checklist", () => {
-  it("the timeline shows the full checklist when no surface shows 计划 (capsule-only with the capsule off)", () => {
+  it("the timeline shows the full checklist when no surface shows 计划 (capsule-only with the capsule failed)", () => {
     const supported = ["bar", "capsule"] as const;
     expect(S.shownSomewhere(S.resolvePlacement("capsule", supported, providers("on")))).toBe(true);
-    expect(S.shownSomewhere(S.resolvePlacement("capsule", supported, providers("disabled")))).toBe(false);
+    // Capsule turned off: 计划 shows in the status row (owner 2026-11-28), so no full checklist.
+    expect(S.shownSomewhere(S.resolvePlacement("capsule", supported, providers("disabled")))).toBe(true);
+    expect(S.shownSomewhere(S.resolvePlacement("capsule", supported, providers("failed")))).toBe(false);
     expect(S.shownSomewhere(S.resolvePlacement("both", supported, providers("disabled")))).toBe(true);
     expect(S.shownSomewhere(S.resolvePlacement("off", supported, providers("on")))).toBe(false);
     expect(S.shownSomewhere(null)).toBe(false); // the plan module itself off
@@ -239,7 +258,7 @@ describe("S5 plan checklist", () => {
 });
 
 describe("S6 turning the capsule off releases it", () => {
-  it("its overlay, surface and settings section leave the slots; prefs stay; turning it on restores the same items", async () => {
+  it("its overlay, surface and settings page leave the slots; prefs stay; turning it on restores the same items", async () => {
     const host = await appHost();
     const ids = (slot: "conversation.overlay" | "conversation.statusSurface" | "settings.section") => host.snapshot(slot).map((e) => e.item.id);
     expect(ids("conversation.overlay")).toContain("status-capsule.overlay");
@@ -250,7 +269,7 @@ describe("S6 turning the capsule off releases it", () => {
     await host.setEnabled("status-capsule", false);
     expect(ids("conversation.overlay")).toEqual(otherOverlays);
     expect(ids("conversation.statusSurface")).toEqual(["shell.statusBar"]);
-    expect(ids("settings.section")).not.toContain("status-capsule.settings");
+    expect(host.snapshot("settings.page").filter((e) => e.mode === "show").map((e) => e.item.page)).not.toContain("status-capsule");
     expect(JSON.stringify(getUiPrefs())).toBe(ui); // corner / edge / size / folds kept
     await host.setEnabled("status-capsule", true);
     expect(host.snapshot("conversation.overlay").find(e => e.item.id === "status-capsule.overlay")!.item).toBe(overlay);
@@ -282,30 +301,15 @@ describe("S6 turning the capsule off releases it", () => {
   });
 });
 
-describe("S7 settings with the capsule off", () => {
-  it("the placement table (状态显示 `status`, design 006 v1) stays, only the capsule's own section goes", async () => {
+describe("S7 settings with the capsule off (owner 2026-11-28)", () => {
+  it("no 状态显示 page; the capsule's settings are its module's own page under 模块, gone with the module", async () => {
     const host = await appHost();
+    const page = () => host.snapshot("settings.page").find((e) => e.item.page === "status-capsule");
+    expect(host.snapshot("settings.page").some((e) => e.item.page === "status")).toBe(false);
+    expect(page()?.mode).toBe("show");
+    expect(page()?.item.navParent).toBe("modules");
     await host.setEnabled("status-capsule", false);
-    const page = host.snapshot("settings.page").find((e) => e.item.page === "status");
-    expect(page?.item.id).toBe("shell.status");
-    expect(page?.mode).toBe("show");
+    expect(page()?.mode ?? "gone").not.toBe("show");
     expect(host.snapshot("settings.section").filter((e) => e.item.page === "status" && e.mode === "show")).toEqual([]);
-  });
-
-  it("capsule / both cannot be picked as a new choice; a saved one stays readable with its reason", () => {
-    const supported = ["bar", "capsule"] as const;
-    expect(PLACES.map((p) => S.placeSelectable(p, supported, providers("disabled")))).toEqual([true, false, false, true]);
-    expect(PLACES.map((p) => S.placeSelectable(p, supported, providers("on")))).toEqual([true, true, true, true]);
-    // Settings do not depend on a mounted conversation: a not-mounted capsule is still selectable.
-    expect(S.placeSelectable("capsule", supported, providers("on", () => "not-ready"))).toBe(true);
-    expect(S.resolvePlacement("capsule", supported, providers("disabled")).unavailable).toEqual([{ surface: "capsule", reason: "disabled" }]);
-  });
-
-  it("every unavailable reason has its note in both locales", () => {
-    for (const reason of ["unsupported", "absent", "disabled", "unavailable", "not-ready", "failed"]) {
-      const key = `shell.statusPlace.unavailable.${reason}`;
-      expect((zhCN as Record<string, string>)[key], key).toBeTruthy();
-      expect((en as Record<string, string>)[key], key).toBeTruthy();
-    }
   });
 });

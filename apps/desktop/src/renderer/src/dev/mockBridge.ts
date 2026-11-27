@@ -1,6 +1,6 @@
+import { DEFAULT_APP_ICON } from "../../../shared/appIcons";
 import { ownerDispositionSupport } from "../../../shared/ownerDispositions";
 import { mockAnsweredAsksFeatures, mockAnsweredAsksPage } from "./mockAnsweredAsks";
-import { mockCancelTextRewrite, mockTextRewrite } from "./mockTextRewrite";
 import type { BrowserSitePermissionForget } from "../../../shared/browser";
 import { mockLayoutInstance, mockUserLayoutApi, prepareMockLayout } from "./mockUserLayout";
 import { mockNotificationPage, mockNotificationRows, registerMockOwnerNotes } from "./mockNotificationPages";
@@ -28,6 +28,7 @@ import type { CutexBuild, LiveDeltaFrame, ProfileImageKind } from "@cutex-deskto
 import type { EventEnvelope, GuidesPreferences, QueueItem, SessionBootstrap, SessionResource } from "@cutex-desktop/protocol";
 import { mockFrames } from "./mockFrames";
 import { mockModuleDev, mockModulePacks } from "./mockModulePacks";
+import { mockPortraitCollections } from "./mockPortraitCollections";
 import type { DesktopApi, ExtraInput, SubmitOptions, DesktopEvents, ModelOption, PreloadBridge, ProfilePreset, QuotaGauge, QuotaReaderConfig, SessionSandboxExtras, ShellState, SidebarSnapshot, UnavailableModel, UpdateStatus } from "../../../shared/ipc";
 import { HOST_TAGGED_EVENTS, MESSAGES_WAKE_METHOD } from "../../../shared/ipc";
 import { multiWindowChange } from "../../../shared/shell";
@@ -42,6 +43,7 @@ import { classifySshPrompt, type SshPromptAnswer, type SshPromptView } from "../
 import { fileNameType } from "../../../shared/localFiles";
 import { MOCK_BASE_FEATURES, MOCK_NEW_FEATURES, mockScenarioFeatures } from "./mockFeatures";
 import { mockNameHistory, mockRename, mockRestoreRefusal, seedMockNames } from "./mockAgentRename";
+import { mockAttentionApi, mockAttentionTurnEnded, mockAttentionTurnStarted, mockAttentionUnbound, startMockAttention } from "./mockAttention";
 import { mockCreatorPathsRefusal, mockReapprovePaths } from "./mockCreatorPaths";
 import { mockRetiredModelRefusal, mockRetiredModelSave } from "./mockRetiredModel";
 import { mockPromote } from "./mockQuickChatPromote";
@@ -451,6 +453,12 @@ if (typeof location !== "undefined" && new URLSearchParams(location.search).has(
     const base = i % 3 === 0 ? mockProfiles["claude-work"]! : mockProfiles.gamma!;
     const name = `scale-${i % 3 === 0 ? "claude" : "gpt"}-${String(i + 1).padStart(2, "0")}`;
     mockProfiles[name] = { ...structuredClone(base), name, color: colors[i % colors.length]! };
+  }
+}
+// `?moreprofiles` (New Agent opening, 2026-11-27): Codex with 4 Profiles and Claude with 5, a normal window fits them all.
+if (typeof location !== "undefined" && new URLSearchParams(location.search).has("moreprofiles")) {
+  for (const [base, names] of [["gamma", ["gamma-work", "gamma-lab", "gamma-old"]], ["claude-work", ["example-claude-work", "example-claude-lab", "example-claude-review"]]] as const) {
+    for (const name of names) mockProfiles[name] = { ...structuredClone(mockProfiles[base]!), name, color: null };
   }
 }
 /** profile-auto-pick inputs (dev/mockAutoPick). */
@@ -1523,6 +1531,11 @@ const threadRead = {
           { type: "agentMessage", id: "a31", text: "测试有一个失败：flush 时没校验队列 revision，两个 flush 并发会重复投递。我加一个 CAS 检查。" },
           { type: "fileChange", id: "f31", status: "completed", changes: [{ path: "src/management/v2/user_input.rs" }, { path: "src/management/v2/server.rs" }] },
           { type: "commandExecution", id: "c34", command: "cargo test --lib management::v2::user_input", status: "completed", exitCode: 0, durationMs: 38000, aggregatedOutput: "test result: ok. 41 passed; 0 failed" },
+          // 「更新项目记忆 · …」 (modules/projects/MemoryEditRow): Claude Write of a new entry, Edit of one, the index line.
+          { type: "fileChange", id: "f32", status: "completed", changes: [{ path: "C:\\Users\\sam\\.cutex\\projects\\desktop-5a3c9e17d2b4\\memory\\feedback-flush-cas.md", kind: { type: "add" }, diff: "---\nname: feedback-flush-cas\ndescription: queue flush checks the revision with a CAS\nmetadata:\n  type: feedback\n---\n\nTwo concurrent flushes delivered twice: dispatch now compares the queue revision first.\n\n**Why:** test user_input::flush_respects_revision failed.\n**How to apply:** any new flush path goes through dispatch_queue_flush.\n" }] },
+          { type: "commandExecution", id: "c35", command: "cargo test --lib management::v2", status: "completed", exitCode: 0, durationMs: 52000, aggregatedOutput: "test result: ok. 212 passed; 0 failed" },
+          { type: "fileChange", id: "f33", status: "completed", changes: [{ path: "C:\\Users\\sam\\.cutex\\projects\\desktop-5a3c9e17d2b4\\memory\\feedback-plain-words.md", kind: { type: "update", move_path: null }, diff: "@@ -6,3 +6,3 @@\n Write reports in plain words.\n \n-**How to apply:** short sentences, name the decision first.\n+**How to apply:** short sentences, name the decision first; test counts as numbers.\n" }] },
+          { type: "fileChange", id: "f34", status: "completed", changes: [{ path: "C:\\Users\\sam\\.cutex\\projects\\desktop-5a3c9e17d2b4\\memory\\MEMORY.md", kind: { type: "update", move_path: null }, diff: "@@ -1,3 +1,4 @@\n+- [Flush CAS](feedback-flush-cas.md) — queue flush checks the revision with a CAS\n - [Plain words](feedback-plain-words.md) — owner wants plain words in reports, no jargon\n - [Decisions](decisions.md) — architecture choices the team agreed on\n - [Windows ACL](windows-acl.md) — why dev homes live under the user profile\n" }] },
           { type: "subAgentActivity", id: "sa1", kind: "started", agentThreadId: "thread-sub-explorer", agentPath: "/root/explorer" },
           { type: "collabAgentToolCall", id: "s30", tool: "spawnAgent", status: "completed", senderThreadId: "thread-eva", receiverThreadIds: ["thread-sub-explorer"], prompt: "找出所有调用 queue flush 的地方，列出每处是否校验了 revision。只读，不要改代码。", model: null, reasoningEffort: null, agentsStates: { "thread-sub-explorer": { status: "running", message: null } } },
           { type: "subAgentActivity", id: "sa2", kind: "started", agentThreadId: "thread-sub-acl", agentPath: "/root/acl_checker" },
@@ -2181,6 +2194,9 @@ const nativeEvent = (sessionId: string, method: string, params: unknown) => {
   const e = envelope(sessionId, { source: "app_server", native: { kind: "notification", message: { method, params } } });
   emit("sessionEvent", { sessionId, envelope: e });
   emit("hostEvent", e);
+  // ?readstate: the host's attention state records the reply (dev/mockAttention).
+  if (method === "turn/completed") mockAttentionTurnEnded(sessionId, params);
+  if (method === "turn/started") mockAttentionTurnStarted(sessionId, params);
 };
 startMockDiagTaskEvents(nativeEvent);
 
@@ -3184,6 +3200,8 @@ function mockApiFor(api: DesktopApi, hostId: string): DesktopApi {
         return c && { ...c, ...(c.user ? { user: mockConnectionUser(hostId) } : {}) };
       },
     } : {}),
+    // ?readstate: other hosts are multi-person hosts this device is not bound on (dev/mockAttention).
+    ...mockAttentionUnbound,
     async daemonState() {
       return mockDaemonOf(hostId);
     },
@@ -3445,7 +3463,7 @@ function startPreviewGuides(): void {
   if (q.has("tips") || one) {
     const ask = q.get("tips") === "ask";
     void import("../lib/guides").then((g) => {
-      const seen = one ? g.GUIDES.filter((x) => x.id !== one).map((x) => x.id) : ["onboarding", "onboarding.v02"];
+      const seen = one ? g.GUIDES.filter((x) => x.id !== one).map((x) => x.id) : ["onboarding"];
       localStorage.setItem(g.GUIDES_KEY, JSON.stringify({ schema: 1, seen, asked: !ask }));
       g.reloadGuideState();
       if (one) setTimeout(() => g.replayGuide(one), 2500);
@@ -3506,7 +3524,7 @@ export function startPreviewOnboarding(): void {
   localStorage.setItem("cutex-desktop.onboarding", JSON.stringify(state));
   setTimeout(() => {
     void setup.then(() => import("../lib/onboarding")).then((m) => {
-      m.openOnboarding(mode === "whatsnew" ? { kind: "whatsNew", version: "0.2.0" } : { kind: "intro", auto: mode === "ask", at: q.get("step") ?? undefined });
+      m.openOnboarding(mode === "whatsnew" ? { kind: "whatsNew", version: "0.2.0" } : { kind: "intro", auto: mode === "ask" });
       if (q.get("profileKind") === "claude") {
         let attempts = 0;
         const choose = () => {
@@ -3531,6 +3549,9 @@ export function installMockBridge(): void {
     if (eva) eva.runtime.activeTurnId = null;
     busy.delete("eva"); currentTurn.delete("eva");
   }
+  // A new agent's shape (createHumanAgent copies a session): kept from the full snapshot, so ?fresh (no agents) can create one.
+  const sessionTemplate = snapshot.active[0]!;
+  const hostRowTemplate = snapshot.hostRows[sessionTemplate.cutexSessionId]!;
   // ?fresh: nothing on this machine yet (set here: module-level mock data indexes the full snapshot).
   if (FRESH) snapshot = { active: [], retired: [], projects: { ...snapshot.projects!, projects: [] }, hostRows: {} };
   // ?fresh=empty: a brand-new cutex has no Profile either (the empty state offers 添加 Profile).
@@ -3557,10 +3578,18 @@ export function installMockBridge(): void {
   // one approved, one declined with its reason — and a network request without a tool row.
   if (new URLSearchParams(location.search).has("autoreview")) startAutoReviewDemo();
   for (const { mock } of MODULE_MOCKS) mock.start?.(core);
+  // ?readstate: the local host's cross-device read state, and the person's other device (dev/mockAttention).
+  startMockAttention(snapshot.active.map((s) => s.cutexSessionId), (id) => mockThread(id).thread.turns as never, (change) => emitOn("local", "attentionChanged", change), async () => {
+    const api = bridge.api;
+    const [approvals, asks, notes] = await Promise.all([api.approvals("pending").catch(() => null), api.asks({ state: "open", background: true }).catch(() => null), api.ownerNotifications({}).catch(() => [])]);
+    return { approvals, asks, notes };
+  }, (id) => snapshot.active.find((s) => s.cutexSessionId === id)?.runtime ?? null, (live) => emitOn("local", "attentionFeed", { live }));
   // ?operator: canonical Operator roster, role badges and pending runtime notice.
   if (new URLSearchParams(location.search).has("operator")) void import("./devOperator").then(m => m.installDevOperator(new URLSearchParams(location.search), core));
   // ?gutter: the two-sides demo (dev/devGutter.tsx: sample refs in the left gutter, a margin note).
   if (new URLSearchParams(location.search).has("gutter")) void import("./devGutter").then((m) => m.installDevGutter());
+  // ?imagezoom: the enlarged image view open over the app (dev/devImageZoom.tsx; with ?caption, the caption overlay).
+  if (/[?&]imagezoom\b/.test(location.search)) void import("./devImageZoom").then((m) => m.installDevImageZoom());
   // ?desktop / ?homeprofile / ?homeedit: the desktop layer, the 个人页, 编辑主页 (dev/devDesktop.ts).
   if (/[?&](desktop|homeprofile|homeedit|services|autoapproval|autoapprovalSettings)\b/.test(location.search)) void import("./devDesktop").then((m) => m.installDevDesktop(new URLSearchParams(location.search)));
   // ?shelves: two Shelves with pages (dev/devShelves.ts; `window.__shelves` drives the menu / a drag for screenshots).
@@ -3572,7 +3601,9 @@ export function installMockBridge(): void {
   // Identity menu: the OS account name is the owner's default name (`?longname`: a very long one).
   let multiWindowMigration = true;
   prepareMockLayout();
-  const shellState: ShellState = { prefs: { closeBehavior: "tray", locale: null, updateCheckMinutes: 10, notifyOff: { desktop: false, sound: false, bigAlert: false } }, trayAvailable: true, osUserName: LONG_NAME ? "maximilian-alexander-wolfeschlegelsteinhausen" : "sam", quickstart: true };
+  // ?keySchemes[=builtin|nosync|legacy]: shortcut schemes in Settings → 键盘快捷键 (dev/mockKeySchemes.ts).
+  if (/[?&]keySchemes\b/.test(location.search)) void import("./mockKeySchemes").then((m) => m.installMockKeySchemes(new URLSearchParams(location.search).get("keySchemes") ?? ""));
+  const shellState: ShellState = { prefs: { closeBehavior: "tray", locale: null, updateCheckMinutes: 10, notifyOff: { desktop: false, sound: false, bigAlert: false } }, trayAvailable: true, osUserName: LONG_NAME ? "maximilian-alexander-wolfeschlegelsteinhausen" : "sam", quickstart: true, appIcon: { id: DEFAULT_APP_ICON, shortcuts: MOCK_PLATFORM === "win32" ? 3 : null } };
   // Self-update: an update is waiting (?update=none hides it, ?update=fail makes the build fail).
   const updateMode = new URLSearchParams(location.search).get("update");
   // ?update=nosource: a package copied to another machine; ?update=unreachable: its remote is down (retry).
@@ -3621,6 +3652,11 @@ export function installMockBridge(): void {
       },
       async setCloseBehavior(value) {
         shellState.prefs.closeBehavior = value;
+        return structuredClone(shellState);
+      },
+      // 外观 → 应用图标 (main/shell.ts setAppIcon): the mock's Windows install has three shortcuts (Start menu, desktop, pin).
+      async setAppIcon(id) {
+        shellState.appIcon = { id, shortcuts: shellState.appIcon?.shortcuts ?? null };
         return structuredClone(shellState);
       },
       // 多窗口 (main-owned): main's rules (shared/shell.ts multiWindowChange; the page's first load is the "first run").
@@ -4501,6 +4537,8 @@ export function installMockBridge(): void {
       async renameFormalAgent(id, request) {
         return mockRename(snapshot, id, request);
       },
+      // ?readstate: cross-device read state (design 061, dev/mockAttention); without it the routes answer 404.
+      ...mockAttentionApi,
       async formalNameHistory(id, before) {
         return mockNameHistory(snapshot, id, before);
       },
@@ -4528,11 +4566,11 @@ export function installMockBridge(): void {
         const requested = profilePick?.picked ?? request.profile ?? mockSettings.defaultProfile;
         if (LEGACY && requested && mockProfiles[requested]?.cliKind === "claude") throw new Error("unsupported_profile: Claude subscription profiles are not supported by this creator");
         const id = request.name.toLowerCase().replace(/[^a-z0-9]+/g, "-");
-        const base = snapshot.active[0]!;
+        const base = snapshot.active[0] ?? sessionTemplate;
         // profile-runtime-variants: the binding is fixed here (dev/mockProfileVariants.ts).
         const launchBinding = bindNewSession(requested ? mockProfiles[requested] : undefined, request.variantId, id);
         const bound = launchBinding ? { launchBinding, ...(launchBinding.runtime === "dsh" ? { native: { threadId: null, schema: dshSession().native.schema } } : {}) } : {};
-        snapshot = { ...snapshot, active: [...snapshot.active, { ...base, ...bound, cutexSessionId: id, displayName: request.name, avatar: null, profile: requested, configuredProfile: requested, launchedProfile: requested, createdAt: new Date().toISOString(), runtime: { ...base.runtime, ...(launchBinding?.runtime === "dsh" ? { backend: "dsh" } : {}), status: request.start ? "online" : "offline", activeTurnId: null } }], hostRows: { ...snapshot.hostRows, [id]: { ...snapshot.hostRows[base.cutexSessionId]!, projectId: request.projectId ?? null } } };
+        snapshot = { ...snapshot, active: [...snapshot.active, { ...base, ...bound, cutexSessionId: id, displayName: request.name, avatar: null, profile: requested, configuredProfile: requested, launchedProfile: requested, createdAt: new Date().toISOString(), runtime: { ...base.runtime, ...(launchBinding?.runtime === "dsh" ? { backend: "dsh" } : {}), status: request.start ? "online" : "offline", activeTurnId: null } }], hostRows: { ...snapshot.hostRows, [id]: { ...(snapshot.hostRows[base.cutexSessionId] ?? hostRowTemplate), projectId: request.projectId ?? null } } };
         // agent-create-effort-fallback: GLM's profile default `max` → the model's `high` (design 028 (c)).
         const effortFallback = requested === "GLM" && !request.launch?.reasoningEffort ? { model: "glm-5.3", requested: "max", used: "high", reason: "not_offered_by_model" } : null;
         return { cutexSessionId: id, effortFallback, profilePick };
@@ -4553,14 +4591,6 @@ export function installMockBridge(): void {
       },
       async listProfiles() {
         return { defaultProfile: mockSettings.defaultProfile, profiles: Object.values(mockProfiles).map((p) => mockProfileItem(p.name)) };
-      },
-      // text-rewrite-v1 (提示词增强; dev/mockTextRewrite.ts): the agent's own Profile is the default one here.
-      async textRewrite(request) {
-        if (LEGACY) throw new Error("route_not_found: POST /v2/text-rewrite");
-        return mockTextRewrite(request, mockProfileItem(mockSettings.defaultProfile ?? Object.keys(mockProfiles)[0]!).id);
-      },
-      cancelTextRewrite(requestId) {
-        mockCancelTextRewrite(requestId);
       },
       async getProfile(name) {
         return mockProfileDetail(name);
@@ -5273,6 +5303,8 @@ export function installMockBridge(): void {
   // Signed module packs: the preview plays main's store; the pilot pack is really built + imported (dev/mockModulePacks.ts).
   bridge.modulePacks = mockModulePacks();
   bridge.moduleDev = mockModuleDev();
+  // 完整头像主题: the catalogue, downloads and their progress events (dev/mockPortraitCollections.ts).
+  bridge.portraitCollections = mockPortraitCollections((view, packsChanged) => emit("portraitCollections", { view, packsChanged }));
   for (const { mock } of MODULE_MOCKS) if (mock.bridge) Object.assign(bridge, mock.bridge(core));
   if (SETTINGS_LISTS) {
     let carrierFrameRate: 15 | 30 = 15;

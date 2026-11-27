@@ -2,7 +2,7 @@
 // version identity (pinned vs latest, after the research demo's workspaceTabs.ts), producer and
 // attribution text, preview kinds, a small CSV reader, and the `artifact_publish` tool call.
 // Wire shapes: shared/artifactStore.ts (docs/research/artifacts-api-v1.md).
-import { ARTIFACT_KINDS, ARTIFACT_PUBLISH_TOOL, parseArtifactRef, type ArtifactContent, type ArtifactDetail, type ArtifactDiff, type ArtifactKind, type ArtifactListQuery, type ArtifactProducer, type ArtifactSummary, type ArtifactVersion } from "../../../../shared/artifactStore";
+import { ARTIFACT_FILE_KINDS, ARTIFACT_KINDS, ARTIFACT_PUBLISH_TOOL, ARTIFACT_PURPOSE_FILTERS, parseArtifactRef, type ArtifactContent, type ArtifactDetail, type ArtifactDiff, type ArtifactFileKind, type ArtifactKind, type ArtifactListQuery, type ArtifactProducer, type ArtifactPurposeFilter, type ArtifactSummary, type ArtifactVersion, type ArtifactView } from "../../../../shared/artifactStore";
 import { canonicalMime, isGenericMime } from "../../lib/fileKinds";
 import { toolArgs, toolResult } from "../../lib/taskRows";
 import type { MessageKey } from "../../i18n";
@@ -114,36 +114,68 @@ export interface LibraryState {
   sort: LibrarySort;
   layout: "list" | "grid";
   archived: ArchivedFilter;
+  /**
+   * `artifact-audience` hosts (cutex docs/artifact-audience.md): 呈阅 (forOwner: meant for the owner or
+   * starred, where the library opens) or 全部; a file-kind and a purpose chip ("" = any, "unset" =
+   * 未标用途). 呈阅 keeps the archive filter (cutex excludes archived there by default too). Other hosts
+   * ignore these three and filter by `kind` as before.
+   */
+  view: ArtifactView;
+  fileKind: ArtifactFileKind | "";
+  purpose: ArtifactPurposeFilter | "";
 }
-export const DEFAULT_LIBRARY: LibraryState = { q: "", kind: "", producer: "", sort: "updated", layout: "list", archived: "false" };
+export const DEFAULT_LIBRARY: LibraryState = { q: "", kind: "", producer: "", sort: "updated", layout: "list", archived: "false", view: "forOwner", fileKind: "", purpose: "" };
 
 /** Whose library: the scope a session publishes to (side card) or one project (项目 page tab, §21). */
 export type LibraryScope = { forSession: string } | { project: string };
 
-/** The list request of a library view (one page; `cursor` for the next). */
-export function libraryQuery(scope: LibraryScope, filter: { q: string; kind: ArtifactKind | ""; archived: ArchivedFilter }, limit: number, cursor?: string): ArtifactListQuery {
+export type LibraryFilter = Pick<LibraryState, "q" | "kind" | "archived" | "view" | "fileKind" | "purpose">;
+
+/**
+ * The list request of a library view (one page; `cursor` for the next). `audience`: the host has
+ * `artifact-audience` — then view / fileKind / purpose replace the old kind filter; without it
+ * none of them is sent (an older cutex would refuse or ignore them).
+ */
+export function libraryQuery(scope: LibraryScope, filter: LibraryFilter, limit: number, cursor?: string, audience = false): ArtifactListQuery {
   return {
     ...("project" in scope ? { project: scope.project } : { forSession: scope.forSession }),
     ...(filter.q ? { q: filter.q } : {}),
-    ...(filter.kind ? { kind: filter.kind } : {}),
+    ...(audience
+      ? { view: filter.view, ...(filter.fileKind ? { fileKind: filter.fileKind } : {}), ...(filter.purpose ? { purpose: filter.purpose } : {}) }
+      : filter.kind ? { kind: filter.kind } : {}),
     archived: filter.archived,
     limit,
     ...(cursor ? { cursor } : {}),
   };
 }
 
+/** The filters a list depends on, as one key (a change restarts pagination). */
+export function libraryFilterKey(filter: LibraryFilter, audience: boolean): string {
+  return audience ? `a|${filter.q}|${filter.view}|${filter.fileKind}|${filter.purpose}|${filter.archived}` : `k|${filter.q}|${filter.kind}|${filter.archived}`;
+}
+
+/** Whether a filter beyond the view narrows the list (「没有匹配」 rather than the empty text). */
+export function libraryFiltered(state: LibraryState, audience: boolean): boolean {
+  return !!state.q || !!state.producer || state.archived !== "false" || (audience ? !!state.fileKind || !!state.purpose : !!state.kind);
+}
+
 /** A stable key of a library scope (reload when it changes). */
 export const libraryScopeKey = (scope: LibraryScope): string => ("project" in scope ? `p:${scope.project}` : `s:${scope.forSession}`);
+
+const pick = <T extends string>(values: readonly T[], v: unknown): T | "" => ((values as readonly unknown[]).includes(v) ? (v as T) : "");
 
 export function restoreLibrary(raw: Json): LibraryState {
   if (!isRecord(raw)) return DEFAULT_LIBRARY;
   return {
     q: typeof raw.q === "string" ? raw.q.slice(0, 200) : "",
-    kind: (ARTIFACT_KINDS as readonly string[]).includes(raw.kind as string) ? (raw.kind as ArtifactKind) : "",
+    kind: pick(ARTIFACT_KINDS, raw.kind),
     producer: typeof raw.producer === "string" && raw.producer.length <= 300 ? raw.producer : "",
     sort: LIBRARY_SORTS.includes(raw.sort as LibrarySort) ? (raw.sort as LibrarySort) : "updated",
     layout: raw.layout === "grid" ? "grid" : "list",
     archived: raw.archived === "true" || raw.archived === "all" ? raw.archived : "false",
+    view: raw.view === "all" ? "all" : "forOwner",
+    fileKind: pick(ARTIFACT_FILE_KINDS, raw.fileKind),
+    purpose: pick(ARTIFACT_PURPOSE_FILTERS, raw.purpose),
   };
 }
 

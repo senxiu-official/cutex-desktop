@@ -205,9 +205,11 @@ describe("sidebar 查找旧任务", () => {
     await act(async () => root.render(h(I18nProvider, null, h(Sidebar))));
     await settle();
     await type("[data-sidebar-search]", "flush");
-    const sender = $("[data-old-tasks-sender] select") as HTMLSelectElement;
+    // 发送方 is in 筛选's 消息记录 group (design A), greyed without v2.
+    await click("[data-search-filters-toggle]");
+    const sender = $("[data-search-filter-group=history] select") as HTMLSelectElement;
     expect(sender.disabled).toBe(true);
-    expect($("[data-old-tasks-sender] [data-search-greyed=sender]")!.getAttribute("data-tip")).toBe(en["sidebar.sessionSearch.senderUnavailable"]);
+    expect($("[data-search-filter-group=history] [data-search-greyed=sender]")!.getAttribute("data-tip")).toBe(en["sidebar.sessionSearch.senderUnavailable"]);
     expect([...sender.options].map((o) => o.text)).toEqual([en["sidebar.sessionSearch.sender.all"], en["sidebar.sessionSearch.sender.owner"], en["sidebar.sessionSearch.sender.agents"].replace("{{agents}}", "agents")]);
     await click("[data-old-tasks-start]");
     expect($$("[data-old-task]").map((b) => JSON.parse(b.getAttribute("data-old-task")!)[2])).toEqual(["new", "mid", "old"]);
@@ -369,13 +371,18 @@ describe("search v2: sidebar and page", () => {
     await act(async () => root.render(h(I18nProvider, null, h(Sidebar))));
     await settle();
     await type("[data-sidebar-search]", "flush");
-    expect($("[data-old-tasks-sender]")).toBeNull();
-    expect($$("[data-old-tasks-filters] select").map((x) => [x.getAttribute("data-search-filter"), (x as HTMLSelectElement).disabled])).toEqual([["sender", false], ["kind", false], ["time", false]]);
+    await click("[data-search-filters-toggle]");
+    expect($("[data-search-filter-group=history] [data-search-greyed]")).toBeNull();
+    expect($$("[data-search-filter-group=history] select").map((x) => [x.getAttribute("data-search-filter"), (x as HTMLSelectElement).disabled])).toEqual([["sender", false], ["kind", false], ["time", false]]);
     await click("[data-old-tasks-start]");
     expect(calls.at(-1)!.query).toEqual({ mode: "tasks", q: "flush", version: 2, order: "newest" });
     expect($$("[data-old-task] [data-search-hit-kind]").map((x) => x.textContent)).toEqual(["Results"]);
     expect($$("[data-old-task] [data-search-hit-sender]").map((x) => x.textContent)).toEqual(["Sent by me", "Sent by agents"]);
-    await pick("[data-old-tasks-filters] [data-search-filter=sender]", "agents");
+    await pick("[data-search-filter-group=history] [data-search-filter=sender]", "agents");
+    // Closed panel: the set condition stays as a chip, and the button counts it.
+    await click("[data-search-filters-done]");
+    expect($$("[data-search-chip]").map((x) => x.getAttribute("data-search-chip"))).toEqual(["sender"]);
+    expect($("[data-search-filters-count]")!.textContent).toBe("1");
     expect(calls.at(-1)!.query).toEqual({ mode: "tasks", q: "flush", version: 2, order: "newest", sender: "agent" });
     expect($$("[data-old-task]")).toHaveLength(1);
   });

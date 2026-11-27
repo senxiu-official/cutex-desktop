@@ -32,7 +32,12 @@ export const TEXT_REWRITE_ATTEMPT_CATEGORIES = [
   "invalid_output", "timeout", "upstream", "cancelled",
 ] as const;
 export type TextRewriteAttemptCategory = (typeof TEXT_REWRITE_ATTEMPT_CATEGORIES)[number];
-export interface TextRewriteAttempt { profileId: string; category: TextRewriteAttemptCategory }
+export interface TextRewriteAttempt {
+  profileId: string;
+  category: TextRewriteAttemptCategory;
+  /** cutex r298: how long a `timeout` attempt waited (ms). */
+  elapsedMs?: number;
+}
 
 export interface TextRewriteUsed {
   profileId: string;
@@ -45,8 +50,8 @@ export interface TextRewriteUsed {
 
 /** What the renderer can act on; anything else from cutex becomes `failed`. */
 export const TEXT_REWRITE_ERROR_CODES = [
-  "cancelled", "rewrite_failed", "rewrite_busy", "rewrite_input_too_large", "invalid_rewrite_request",
-  "invalid_rewrite_route", "rewrite_profiles_unavailable", "unsupported", "forbidden", "unreachable", "timeout", "failed",
+  "cancelled", "rewrite_failed", "rewrite_busy", "rewrite_input_too_large", "rewrite_protection_too_large", "rewrite_protection_invalid", "invalid_rewrite_request",
+  "invalid_rewrite_route", "rewrite_profiles_unavailable", "rewrite_template_not_found", "rewrite_templates_unavailable", "unsupported", "forbidden", "unreachable", "timeout", "failed",
 ] as const;
 export type TextRewriteErrorCode = (typeof TEXT_REWRITE_ERROR_CODES)[number];
 
@@ -136,7 +141,8 @@ export function textRewriteAttempts(details: unknown): TextRewriteAttempt[] {
     const x = a as Partial<TextRewriteAttempt> | null;
     if (!x || typeof x.profileId !== "string" || !ID.test(x.profileId)) continue;
     if (!TEXT_REWRITE_ATTEMPT_CATEGORIES.includes(x.category as TextRewriteAttemptCategory)) continue;
-    out.push({ profileId: x.profileId, category: x.category as TextRewriteAttemptCategory });
+    const ms = x.category === "timeout" && Number.isFinite(x.elapsedMs) && (x.elapsedMs as number) >= 0 ? Math.min(Math.round(x.elapsedMs as number), 600_000) : null;
+    out.push({ profileId: x.profileId, category: x.category as TextRewriteAttemptCategory, ...(ms === null ? {} : { elapsedMs: ms }) });
   }
   return out;
 }

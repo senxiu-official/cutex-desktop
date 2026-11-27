@@ -448,7 +448,7 @@ function PendingChatBody({ target }: { target: CreateHost }) {
   const effortHover = effortTip(t, effortView);
 
   return (
-    <LaunchPage intro={drafts.length === 0 ? <LaunchIntro showArtGreeting portraits={{ profileId: item?.id, profiles: available, selected: portraitSelected, disabled: locked, onSelect: (id) => { if (locked) return; setPortraitSelected(true); update({ profile: id, launch: keptMode(launch) }); } }} provider={item ? profileProvider(item) : undefined} icon={<MessageSquarePlus size={24} />} title={t("quick-chats.title")} hint={t("chat.draftHint")} /> : null}>
+    <LaunchPage intro={drafts.length === 0 ? <LaunchIntro showArtGreeting columns={{ hostId, profileId: item?.id, profiles: available, selected: portraitSelected, auto: false, unavailable: () => null, disabled: locked, onSelect: (id) => { if (locked) return; setPortraitSelected(true); update({ profile: id, launch: keptMode(launch) }); } }} provider={item ? profileProvider(item) : undefined} icon={<MessageSquarePlus size={24} />} title={t("quick-chats.title")} hint={t("chat.draftHint")} /> : null}>
       <div className="relative min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto max-w-3xl px-6 pt-4 pb-8">
           {drafts.map((d, i) => (

@@ -17,6 +17,7 @@ import { approvalCardInDetail, reviewCardInDetail, takeDetailFocus, useDetailFoc
 import { attemptRowKey, attemptSeconds, delegationStatus, openContinuationWait, formatSpan, isOwnerRequest, peerSideOf, requesterName, requesterSession } from "../../lib/delegations";
 import { hasDelegationViews, loadDelegationDetail, useDelegation, useDelegations } from "../../lib/delegationStore";
 import { useAgentNames, useAgentProfile, useDelegationContext } from "../../lib/delegationsView";
+import { STATUS_TIP_WORD } from "../../lib/statusTip";
 import { hostKey } from "../../lib/hostKeys";
 import { rawIdTitle, useModelName } from "../../lib/modelDisplay";
 import { taskTag } from "../../lib/tasks";
@@ -201,7 +202,7 @@ function AttemptTable({ attempts, closed, limited }: { attempts: readonly AskAtt
           return (
             <li key={a.n ?? i} className="flex min-w-0 items-baseline gap-2" data-attempt-state={key}>
               <span className="shrink-0 text-subtle tabular-nums">{t("delegation.attempts.n", { n: a.n ?? attempts.length - i })}</span>
-              <span className={`min-w-0 truncate ${key === "failed" ? "text-danger" : key === "running" ? "text-accent" : "text-muted"}`} title={error ?? undefined}>{word}</span>
+              <span className={`min-w-0 truncate ${key === "failed" ? "text-danger" : key === "running" ? "text-accent" : "text-muted"} ${error ? STATUS_TIP_WORD : ""}`} data-tip={error ?? undefined}>{word}</span>
               <span className="ml-auto shrink-0 text-subtle tabular-nums" title={a.startedAt ?? undefined}>{when(a.startedAt)}</span>
             </li>
           );

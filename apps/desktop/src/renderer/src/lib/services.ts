@@ -33,25 +33,60 @@ const daemonOf = (hostId: string | undefined) => (!hostId || hostId === focusId(
 
 /**
  * Open a service: in an in-app browser tab (`cutex:service/<slug>/…`, opened by component id — the
- * tab starts an on-demand service and reaches a remote host's service too), else when that tab
- * cannot open (browser module off) or `external`, in the system browser.
+ * tab starts an on-demand service and reaches a remote host's service too; openServiceTab), or with
+ * `external` (the menu's 「在系统浏览器中打开」) in the system browser.
  */
-export async function openService(s: Pick<ServiceView, "slug"> & { runtime?: ServiceView["runtime"] }, hostId = focusId(), path = "/", opts: { external?: boolean } = {}): Promise<void> {
+export async function openService(s: Pick<ServiceView, "slug"> & { runtime?: ServiceView["runtime"]; displayName?: string | null }, hostId = focusId(), path = "/", opts: { external?: boolean } = {}): Promise<void> {
   // A background service has no page: it is shown on the 服务 page (lib/serviceWorker).
   if (isWorker(s as Pick<ServiceView, "runtime">) || isWorkerOn(hostId, s.slug)) return showWorker(s.slug);
-  if (!opts.external && openInApp(s.slug, hostId, path)) return;
-  await openServiceExternal(s, hostId, path);
+  if (opts.external) return void (await openServiceExternal(s, hostId, path));
+  await openServiceTab(s, hostId, path);
+}
+
+/**
+ * Every default open of a service (服务 page, chat links, tray / desktop pins, ⌘K, reveals, service notifications; owner
+ * 2026-11-28 「服务的打开方式又变成了默认系统浏览器」): the in-app tab, on its host's Shelf. While the Shelf shows another host
+ * (所有主机 with another host's agent open) it switches there first — this machine's services too, not only remote ones
+ * (since 8f5a1a03c only remote services did; this machine's went to the system browser silently). The system browser
+ * only while the browser module is off, with a toast saying so; a remote host's never (systemBrowserOpens). Resolves
+ * how it ended: "opened" (the tab, the 服务 page for a background service, or the owner moved on meanwhile: nothing
+ * more to do), "system" (the system browser), "browser-off" (a remote host's with the module off), "failed" (a toast
+ * said why).
+ */
+export type ServiceTabOutcome = "opened" | "system" | "browser-off" | "failed";
+export async function openServiceTab(s: Pick<ServiceView, "slug"> & { displayName?: string | null }, hostId = focusId(), path = "/"): Promise<ServiceTabOutcome> {
+  if (isWorkerOn(hostId, s.slug)) {
+    showWorker(s.slug);
+    return "opened";
+  }
+  const why = sideShowsHost(hostId) ? tabOpen(s.slug, hostId, path) : await openOnItsHost(s.slug, hostId, path);
+  if (why === "opened" || why === "moved") return "opened";
+  // The browser module is off: this machine's service in the system browser, saying why; a remote host's never.
+  if (why === "browser-off" && systemBrowserOpens(hostId)) {
+    showShelfToast(translate("services.browserOff", { name: s.displayName || s.slug }));
+    return (await openServiceExternal(s, hostId, path)) ? "system" : "failed";
+  }
+  remoteServiceNotice(s, hostId, why);
+  return why === "browser-off" ? "browser-off" : "failed";
 }
 
 /** The in-app browser tab only (false = it cannot open: browser module off, another host's side). */
 export function openInApp(slug: string, hostId: string, path: string): boolean {
+  return tabOpen(slug, hostId, path) === "opened";
+}
+
+/** The in-app browser tab: "opened", "browser-off" (its component is unavailable: the module is off or lacks a
+ *  capability), or "no-tab" (another host's side, or the open failed otherwise). */
+function tabOpen(slug: string, hostId: string, path: string): "opened" | "browser-off" | "no-tab" {
   // The right side shows the open agent's host only: another host's tab would open out of view.
-  if (!sideShowsHost(hostId)) return false;
+  if (!sideShowsHost(hostId)) return "no-tab";
   try {
     const url = `cutex:service/${slug}${path.startsWith("/") ? path : `/${path}`}`;
-    return services.side.open(SERVICE_COMPONENT, { url }, { binding: { kind: "host", hostId }, reveal: true, focus: true }).status === "opened";
+    const r = services.side.open(SERVICE_COMPONENT, { url }, { binding: { kind: "host", hostId }, reveal: true, focus: true });
+    if (r.status === "opened") return "opened";
+    return r.status === "unavailable" && ["module-off", "capability", "unknown-kind"].includes(r.reason) ? "browser-off" : "no-tab";
   } catch {
-    return false;
+    return "no-tab";
   }
 }
 
@@ -121,9 +156,9 @@ export const SHELF_SWITCH_MS = 4000;
 /**
  * "opened"; "no-agent" (no candidate to open); "not-switched" (the Shelf did not reach the host in time: the agent
  * opened in another window, or the open failed); "moved" (the owner went elsewhere meanwhile: nothing more is done);
- * "no-tab" (reached, but the tab could not open: the browser module is off).
+ * "no-tab" (reached, but the tab could not open); "browser-off" (reached, but the browser module is off).
  */
-export type OpenOnHostOutcome = "opened" | "no-agent" | "not-switched" | "moved" | "no-tab";
+export type OpenOnHostOutcome = "opened" | "no-agent" | "not-switched" | "moved" | "no-tab" | "browser-off";
 
 /**
  * A remote host's service while the Shelf shows another host (Director 2026-11-24, auto-switch): the Shelf follows the
@@ -167,7 +202,7 @@ export async function openOnItsHost(slug: string, hostId: string, path: string):
   });
   if (reached === "moved") return "moved";
   if (reached === "late") return "not-switched";
-  return openInApp(slug, hostId, path) ? "opened" : "no-tab";
+  return tabOpen(slug, hostId, path);
 }
 
 /**
@@ -177,7 +212,7 @@ export async function openOnItsHost(slug: string, hostId: string, path: string):
 export function remoteServiceNotice(s: Pick<ServiceView, "slug"> & { displayName?: string | null }, hostId: string, why?: OpenOnHostOutcome): void {
   const name = s.displayName || s.slug;
   const host = useApp.getState().hosts?.hosts.find((h) => h.id === hostId)?.label ?? hostId;
-  const key: MessageKey = why === "not-switched" ? "services.remote.notSwitched" : sideShowsHost(hostId) ? "services.remote.needsBrowser" : "services.remote.otherHost";
+  const key: MessageKey = why === "not-switched" ? "services.remote.notSwitched" : why === "no-tab" || why === "browser-off" || sideShowsHost(hostId) ? "services.remote.needsBrowser" : "services.remote.otherHost";
   // The window-wide toast (components/side/ShelfToast, in every window): the composer notice shows only beside an open
   // conversation, so on the home page / the 服务 page the click would look dead (cross-review 2026-11-23).
   showShelfToast(translate(key, { name, host }));

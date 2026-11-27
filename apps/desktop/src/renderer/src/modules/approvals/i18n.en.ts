@@ -124,6 +124,8 @@ export const en: Record<keyof typeof zhCN, string> = {
   "approvals.state.expired": "Expired",
   "approvals.kind.workflow_run": "Run workflows",
   "approvals.reason.workflow_run": "An {{agent}} wants to run a workflow; its run plan needs your approval first",
+  "approvals.kind.personal_assistant_write": "Personal assistant editing another project",
+  "approvals.reason.personal_assistant_write": "A personal assistant wants to change files in another project; approving allows this one edit only, which it then retries",
   "approvals.field.description": "Description",
   "approvals.field.phases": "Phases",
   "approvals.field.stepProfiles": "Step profiles",

@@ -51,6 +51,10 @@ export interface NoteDiagnostics {
   /** cutex asks-start-catchup: `deliveryDiagnostics.retryBlocked: true` — the note is already an item in the recipient's
    *  conversation, which is why Retry is gone. Only the explicit marker counts (never inferred from missing actions). */
   retryBlocked?: boolean;
+  /** cutex `deliveryDiagnostics.readNowDisabledReason`: 现在读取 is refused for this note. `orderedBatchPending` /
+   *  `orderedBindingReplaced`: an automatic delivery batch holds it (agent_bus_state.rs ordered_read_now_block);
+   *  `other`: a reason this desktop does not know (still refused). Absent = not blocked. */
+  readNowBlocked?: "orderedBatchPending" | "orderedBindingReplaced" | "other";
 }
 
 const str = (v: unknown): string | null => (typeof v === "string" && v.trim() ? v : null);
@@ -65,6 +69,7 @@ export function noteDiagnostics(record: Pick<InputRecord, "details">): NoteDiagn
   const stage = str(d?.stage);
   const waiting = str(d?.waitingFor);
   const code = str(failure?.code);
+  const readNowBlock = str(d?.readNowDisabledReason);
   return {
     stage: stage && (NOTE_STAGES as readonly string[]).includes(stage) ? (stage as NoteStage) : null,
     since: str(d?.since),
@@ -75,6 +80,7 @@ export function noteDiagnostics(record: Pick<InputRecord, "details">): NoteDiagn
     blockedByInputId: str(d?.blockedByInputId) ?? str(details.blockedByInputId) ?? str(failure?.blockedByInputId),
     projection: code ? { code, message: str(failure?.message), attempts: typeof failure?.attempts === "number" ? failure.attempts : 0 } : null,
     ...(d?.retryBlocked === true ? { retryBlocked: true } : {}),
+    ...(readNowBlock ? { readNowBlocked: readNowBlock === "orderedBatchPending" || readNowBlock === "orderedBindingReplaced" ? readNowBlock : "other" } : {}),
   };
 }
 
@@ -132,7 +138,7 @@ export function releaseLiftsPauseOnly(record: Pick<InputRecord, "details">): boo
 }
 
 /** Codes this flow handles in its own words (handoff §错误码); anything else keeps the generic failure. */
-export const NOTE_ACTION_CODES = ["read_notes_unsupported", "read_notes_unavailable", "bus_redrive_failed", "revision_conflict", "input_not_holdable", "input_not_found", "request_outcome_unknown"] as const;
+export const NOTE_ACTION_CODES = ["read_notes_unsupported", "read_notes_unavailable", "bus_redrive_failed", "revision_conflict", "input_not_holdable", "input_not_found", "request_outcome_unknown", "ordered_batch_pending"] as const;
 export type NoteActionCode = (typeof NOTE_ACTION_CODES)[number];
 
 /** The handled cutex code in an action error (after the IPC hop the message holds `code: text` somewhere). */

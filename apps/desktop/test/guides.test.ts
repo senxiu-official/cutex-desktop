@@ -94,13 +94,13 @@ describe("seen state", () => {
     const g = await load();
     g.skipAllGuides("0.2.0");
     g.resetGuides();
-    expect(g.getGuides()).toEqual({ schema: 1, seen: ["onboarding", "onboarding.v02"], asked: true });
+    expect(g.getGuides()).toEqual({ schema: 1, seen: ["onboarding"], asked: true });
   });
 
   it("再看一次: an onboarding guide replays; a tip is forgotten and its host told", async () => {
     const g = await load();
-    g.replayGuide("onboarding.v02");
-    expect(opened).toEqual([{ kind: "whatsNew", version: "0.2.0" }]);
+    g.replayGuide("onboarding");
+    expect(opened).toEqual([{ kind: "intro" }]);
     g.markGuideSeen("tip.tray");
     const told: string[] = [];
     const off = g.onGuideReplay((id) => told.push(id));

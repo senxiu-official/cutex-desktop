@@ -12,6 +12,10 @@ import { pathToFileURL } from "node:url";
 import { gunzipSync } from "node:zlib";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { stubServices } from "./serviceStub";
+import { MODULE_API_VERSION } from "@cutex-desktop/plugin-sdk";
+import { BAIDU_PAN_FEATURE } from "../src/shared/baiduPan";
+import { INBOUND_MAIL_FEATURE } from "../src/shared/remoteJobs";
+import { JOB_SERVICE_FEATURE } from "../src/renderer/src/lib/jobs";
 import type { KeyValueStorage } from "../src/renderer/src/modules/types";
 import { BUILT_IN_MODULE_IDS } from "../src/shared/modulePacks";
 import type { ModulePacksBridge, ModulePacksView } from "../src/shared/modulePacks";
@@ -48,7 +52,7 @@ describe("pack builder", () => {
   });
 
   it("the packable modules are named here", () => {
-    expect(packableModules()).toEqual(["claude-science", "desk-pet"]);
+    expect(packableModules()).toEqual(["baidu-pan", "claude-science", "desk-pet", "nci"]);
   });
 
   it("builds the pilot as one ES module that reads shared code from the host only", () => {
@@ -211,6 +215,67 @@ describe("end to end: build → sign (test key) → serve → download → verif
       expect(swapped).not.toBe(bundledDef);
       expect(swapped.contributes?.["main.page"]?.[0]?.id).toBe("claude-science.page");
       expect(host.statuses().get("claude-science")?.state.kind).not.toBe("failed");
+    } finally {
+      loader.dispose();
+      await host.dispose();
+    }
+  }, 120_000);
+
+  it("loads NCI and Baidu separately from the application bundle and keeps their capability gates", async () => {
+    const ids = ["nci", "baidu-pan"] as const;
+    const packsDir = join(tmp, "on-demand");
+    const builds = await Promise.all(ids.map(id => buildPack(id, packsDir, { logLevel: "silent" })));
+    const { index } = await makeIndex({ packsDir, baseUrl: `${base}/optional` });
+    const bytes = Buffer.from(JSON.stringify(index));
+    served.set("/optional/modules.json", bytes);
+    served.set("/optional/modules.json.minisig", Buffer.from(signMinisig(bytes, "modules.json")));
+    for (const { entry, archivePath } of builds) served.set(`/optional/${entry.archive.name}`, readFileSync(archivePath));
+    const service = new ModulePackService({
+      root: join(tmp, "new-device"),
+      source: modulePackSource({ releasePage: null, packaged: false, env: { CUTEX_DESKTOP_MODULES_INDEX: `${base}/optional/modules.json` } }),
+      transport: nodeTransport(), appModuleApi: MODULE_API_VERSION,
+    });
+    expect((await service.check()).index?.packs.map(pack => pack.id).sort()).toEqual(["baidu-pan", "nci"]);
+    const initial = MODULES.filter(module => ids.every(id => id !== module.id));
+    const data = new Map<string, string>();
+    const storage: KeyValueStorage = { getItem: key => data.get(key) ?? null, setItem: (key, value) => void data.set(key, value) };
+    const local = { id: "local", kind: "local" as const, features: new Set([JOB_SERVICE_FEATURE]) };
+    const host = createModuleHost({ modules: initial, slots: SLOT_SPECS, host: local, storage, services: () => stubServices(), log() {} });
+    const bridge: ModulePacksBridge = {
+      state: async () => service.view(), check: () => service.check(), install: request => service.install(request), remove: request => service.remove(request),
+      installLocal: async () => service.view(), allowLocal: async () => service.view(), localFailed: async () => service.view(), onState: () => () => {},
+    };
+    const loader = createPackLoader({
+      host, bundled: initial, bundledVersions: {}, bridge,
+      async importEntry(url) {
+        const id = service.view().installed.find(pack => pack.entry === url)!.id;
+        const response = service.respond(new Request(url));
+        expect(response.status).toBe(200);
+        const file = join(tmp, `${id}-signed.mjs`);
+        writeFileSync(file, Buffer.from(await response.arrayBuffer()));
+        return import(/* @vite-ignore */ pathToFileURL(file).href);
+      },
+    });
+    try {
+      await loader.start();
+      for (const id of ids) expect(host.modules.some(module => module.id === id)).toBe(false);
+      for (const id of ids) {
+        const view = await service.install({ id });
+        expect(view.lastError).toBeNull();
+        await loader.apply(view);
+        expect(packRuntime().active[id]).toBe("1.1.0");
+        expect(host.isEnabled(id)).toBe(false);
+        await host.setEnabled(id, true);
+      }
+      expect(host.snapshot("settings.page").some(item => item.moduleId === "nci" && item.mode === "show")).toBe(false);
+      expect(host.snapshot("side.component").some(item => item.moduleId === "baidu-pan" && item.mode === "show")).toBe(false);
+      await host.setHost({ ...local, features: new Set([JOB_SERVICE_FEATURE, INBOUND_MAIL_FEATURE, BAIDU_PAN_FEATURE]) });
+      expect(host.snapshot("settings.page").find(item => item.moduleId === "nci" && item.mode === "show")?.item.navParent).toBe("modules");
+      expect(host.snapshot("side.component").find(item => item.moduleId === "baidu-pan" && item.mode === "show")?.item.id).toBe("baidu-pan.page");
+      for (const id of ids) {
+        await loader.apply(await service.remove({ id }));
+        expect(host.modules.some(module => module.id === id)).toBe(false);
+      }
     } finally {
       loader.dispose();
       await host.dispose();

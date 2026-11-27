@@ -8,7 +8,7 @@ import { appModules } from "../modules/app";
 import { useSlot } from "../modules/react";
 import type { AppSlotEntry, CutexRef } from "../modules/slots";
 import { RefActionLabel } from "../components/RefActionLabel";
-import type { MenuEntry } from "./contextMenu";
+import type { MenuAction, MenuEntry } from "./contextMenu";
 import { useApp } from "../store";
 import { entryGateNow } from "./hostGatingView";
 import { refActionApplies } from "./refActionApplies";
@@ -42,24 +42,29 @@ export function refActionEntries(ref: CutexRef | null, lead = false, skipInline 
   if (!ref) return [];
   const actions = refActionsFor(ref.kind).filter((e) => entryGateNow(ref.hostId, e).ok && !(skipInline && e.item.inline));
   if (!actions.length) return [];
-  const rows: MenuEntry[] = actions.map((e) => {
-    const Icon = e.item.icon;
-    return {
-      label: translate(e.item.titleKey),
-      icon: createElement(Icon, { size: ICON }),
-      labelNode: e.item.useState ? createElement(RefActionLabel, { entry: e, cref: ref }) : undefined,
-      submenu: e.item.submenu ? async () => {
-        try { return await e.item.submenu!(ref); }
-        catch (err) { useApp.getState().notify(err instanceof Error ? err.message : String(err), "error"); return []; }
-      } : undefined,
-      onSelect: async () => {
-        try {
-          await e.item.run(ref);
-        } catch (err) {
-          useApp.getState().notify(err instanceof Error ? err.message : String(err), "error");
-        }
-      },
-    };
-  });
+  const rows: MenuEntry[] = actions.map((e) => refActionRow(e, ref));
   return lead ? ["separator", ...rows] : rows;
+}
+
+/** One `ref.action` item as a menu row for `ref` (its live label, ⓘ, submenu; errors become a notice). */
+export function refActionRow(e: ActionEntry, ref: CutexRef): MenuAction {
+  const Icon = e.item.icon;
+  return {
+    label: translate(e.item.titleKey),
+    // v1.33 `infoKey`: the row's ⓘ (contextMenu MenuAction.info).
+    info: e.item.infoKey ? translate(e.item.infoKey) : undefined,
+    icon: createElement(Icon, { size: ICON }),
+    labelNode: e.item.useState ? createElement(RefActionLabel, { entry: e, cref: ref }) : undefined,
+    submenu: e.item.submenu ? async () => {
+      try { return await e.item.submenu!(ref); }
+      catch (err) { useApp.getState().notify(err instanceof Error ? err.message : String(err), "error"); return []; }
+    } : undefined,
+    onSelect: async () => {
+      try {
+        await e.item.run(ref);
+      } catch (err) {
+        useApp.getState().notify(err instanceof Error ? err.message : String(err), "error");
+      }
+    },
+  };
 }

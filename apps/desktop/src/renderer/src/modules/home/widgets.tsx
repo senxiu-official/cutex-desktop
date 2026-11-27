@@ -4,22 +4,20 @@
 // instance has the service as its source). Each fills the box the surface gives it. 少框 (owner 2026-10-24,
 // .claude/previews/preview-widgets-v1.html): only the list (需要你) keeps the shell's acrylic card; 名片, 用量 and the
 // tiles are bare — white text with a shadow on the wallpaper (.home-bare), a faint acrylic on hover when they
-// open something (.home-bare-hit), an agent tile its cut-out portrait. Data through the home module's hooks (useHomeSource, useScopedAttention, useHomeUsage) only.
+// open something (.home-bare-hit), an agent tile its cut-out portrait. Data through the home module's hooks (useHomeSource, useNeedsYouView, useHomeUsage) only.
 // Opening goes through the widget's `actions` (guide rule 4), with two home-only exceptions the actions do not
 // cover: 名片 opens the home module's own 个人页 pane (openProfile) and a tile opens its pin, which may be an
 // artifact, a link or a page pin (openPin). A widget of another module has neither: it uses `actions` only.
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Activity, Bell, Clock3, LayoutGrid, UserRound } from "lucide-react";
+import { Activity, Bell, Clock3, ConciergeBell, LayoutGrid, UserRound } from "lucide-react";
 import type { HomePin, HomeTileSize } from "../../../../shared/home";
 import { useI18n, type MessageKey } from "../../i18n";
 import { formatDate } from "../../lib/dateText";
-import { attentionChips, type AttentionChip } from "../../lib/agentAttention";
+import type { AttentionChip } from "../../lib/agentAttention";
 import { signalLabel } from "../../lib/attentionView";
 import { hostKey } from "../../lib/hostKeys";
 import { useIdentity } from "../../lib/identityView";
-import { useScopedAttention, useScopedSidebar } from "../../lib/scopedSidebarView";
-import { turnMarksOn } from "../../lib/turnUnread";
-import type { AgentRow } from "../../lib/sidebar";
+import { useNeedsYouView } from "../../lib/needsYouView";
 import { StatusAvatar } from "../../components/AgentStatus";
 import { sidebarOf, useApp } from "../../store";
 import type { DesktopWidgetItem, DesktopWidgetProps, WidgetInstanceRef, WidgetSteps } from "../widgetTypes";
@@ -97,20 +95,25 @@ function ClockWidget({ now, height, width }: DesktopWidgetProps) {
   );
 }
 
-/** 「需要你」: the agents waiting for the owner (or failed), across the scope's hosts — as many as the box holds. */
+/**
+ * 「需要你」: the agents waiting for the owner (or failed), across the scope's hosts — as many as the box holds. The same
+ * items as the 需要你 list (lib/needsYouView): what was closed there (on a host with cross-device read state: on any
+ * device of the person) is gone here too.
+ */
 function NeedsWidget({ height, arranging, actions }: DesktopWidgetProps) {
   const { t } = useI18n();
-  const scoped = useScopedSidebar();
-  const { rows, signals, needs, marks } = useScopedAttention(scoped.model, scoped.scope);
-  const focus = scoped.scope.focus;
-  const chips = useMemo(() => {
-    const markOf = (row: AgentRow) => ((row.hostId ?? focus) === focus ? marks[row.id] : turnMarksOn(row.hostId!)[row.id]);
-    return attentionChips(rows, signals, needs, markOf, null).filter((c) => c.signal !== "done");
-  }, [rows, signals, needs, marks, focus]);
-  const byKey = useMemo(() => new Map(rows.map((r) => [hostKey(r.hostId ?? focus, r.id), r])), [rows, focus]);
+  const { items, scope } = useNeedsYouView();
+  const focus = scope.focus;
+  const chips = useMemo(() => items.map((i) => i.chip), [items]);
+  const needs = useMemo(() => new Map(items.map((i) => [i.chip.key, i.need])), [items]);
+  const byKey = useMemo(() => new Map(items.map((i) => [i.key, i.row])), [items]);
+  // 个人助理 requests waiting for the owner (lib/assistantNeeds): open the assistant's 请求 tab.
+  const assistants = useMemo(() => new Map(items.flatMap((i) => (i.assistant ? [[i.chip.key, i.assistant.assistantId] as const] : []))), [items]);
   const open = (c: AttentionChip) => {
     if (arranging) return;
     const host = c.hostId ?? focus;
+    const assistant = assistants.get(c.key);
+    if (assistant) return actions.openPage("personal-assistants.page", { host, id: assistant, tab: "requests" });
     const n = needs.get(c.key);
     if (c.signal === "needsYou" && n?.reasons.length === 1 && n.reasons[0] === "approval") actions.openPage("approvals.page");
     else void actions.openAgent(host, c.id);
@@ -137,10 +140,10 @@ function NeedsWidget({ height, arranging, actions }: DesktopWidgetProps) {
         const row = byKey.get(hostKey(c.hostId ?? focus, c.id));
         return (
           <button key={c.key} ref={i === 0 ? first : undefined} onClick={() => open(c)} className="flex w-full items-start gap-2.5 rounded-ctl px-1 py-2 text-left text-ui/[inherit] hover:bg-[rgba(127,127,140,0.12)]" data-home-need={c.signal}>
-            {row ? <StatusAvatar name={row.name} initial={row.initial} color={row.color} avatar={row.session.avatar} seed={row.session.cutexSessionId} size={20} signal="idle" /> : <span className="size-[22px]" />}
+            {row ? <StatusAvatar name={row.name} initial={row.initial} color={row.color} avatar={row.session.avatar} seed={row.session.cutexSessionId} size={20} signal="idle" /> : assistants.has(c.key) ? <span className="flex size-[22px] shrink-0 items-center justify-center rounded-full bg-attention-soft text-warn-text"><ConciergeBell size={12} /></span> : <span className="size-[22px]" />}
             <span className="min-w-0">
               <span className="block truncate">{c.name}</span>
-              <span className={`block truncate text-caption/[inherit] font-semibold ${c.signal === "error" ? "text-danger" : "text-warn-text"}`}>{signalLabel(t, c.signal, needs.get(c.key))}</span>
+              <span className={`block truncate text-caption/[inherit] font-semibold ${c.signal === "error" ? "text-danger" : "text-warn-text"}`}>{assistants.has(c.key) ? t("personal-assistants.needs.reason", { n: c.count }) : signalLabel(t, c.signal, needs.get(c.key))}</span>
             </span>
           </button>
         );

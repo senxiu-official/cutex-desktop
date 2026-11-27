@@ -9,10 +9,12 @@ import { useOwnerNotify } from "./ownerNotifyStore";
 import { isPending, OWNER_NOTIFY_FEATURE } from "../../../shared/ownerNotify";
 import { LOCAL_HOST_ID } from "../../../shared/hosts";
 import { sumHosts } from "./hostScope";
+import { attentionOn, subscribeHostAttention } from "./hostAttention";
 
 /** The tray / taskbar attention count: agents waiting for an answer, owner approvals waiting for a
  *  decision, pending agent → owner messages — of every connected host (multi-host RFC §10: hosts
- *  outside the scope count too). */
+ *  outside the scope count too). A host with cross-device read state (design 061) counts its agents with 需要你 items
+ *  the owner person has not dismissed (the host's `needsYouCount`, the same on every device). */
 export function appAttention(state = useApp.getState(), notes = useOwnerNotify.getState().byId, others = useOwnerNotify.getState().others): number {
   return sumHosts(Object.values(attentionByHost(state, notes, others)), (n) => n);
 }
@@ -23,9 +25,9 @@ type AttentionState = Pick<ReturnType<typeof useApp.getState>, "sessions" | "app
 export function attentionByHost(state: AttentionState = useApp.getState(), notes = useOwnerNotify.getState().byId, others = useOwnerNotify.getState().others): Record<string, number> {
   const pending = (records: Record<string, Parameters<typeof isPending>[0]>) => Object.values(records).filter(isPending).length;
   const out: Record<string, number> = { [state.hosts?.active ?? LOCAL_HOST_ID]: // An open agent of another host is counted with that host (its slice), not here.
-    Object.keys(pendingByAgent(focusSessionViews(state), state.hostWaiting)).length + (state.approvals?.length ?? 0) + (state.features.has(OWNER_NOTIFY_FEATURE) ? pending(notes) : 0) };
+    attentionOn(state.hosts?.active ?? LOCAL_HOST_ID)?.needsYouCount ?? (Object.keys(pendingByAgent(focusSessionViews(state), state.hostWaiting)).length + (state.approvals?.length ?? 0) + (state.features.has(OWNER_NOTIFY_FEATURE) ? pending(notes) : 0)) };
   for (const [hostId, slice] of Object.entries(state.byHost ?? {})) {
-    out[hostId] = Object.keys(slice.waiting).length + (slice.approvals?.length ?? 0) + (slice.features.has(OWNER_NOTIFY_FEATURE) ? pending(others[hostId] ?? {}) : 0);
+    out[hostId] = attentionOn(hostId)?.needsYouCount ?? Object.keys(slice.waiting).length + (slice.approvals?.length ?? 0) + (slice.features.has(OWNER_NOTIFY_FEATURE) ? pending(others[hostId] ?? {}) : 0);
   }
   return out;
 }
@@ -60,6 +62,7 @@ export function useDesktopShell(locale: Locale): void {
     const unsubscribe = useApp.subscribe((state, previous) => {
       if (state.sessions !== previous.sessions || state.approvals !== previous.approvals || state.features !== previous.features || state.byHost !== previous.byHost) schedule();
     });
+    const unsubscribeHosts = subscribeHostAttention(schedule);
     const unsubscribeNotes = useOwnerNotify.subscribe((state, previous) => {
       if (state.byId !== previous.byId || state.others !== previous.others) schedule();
     });
@@ -70,6 +73,7 @@ export function useDesktopShell(locale: Locale): void {
       if (timer) clearTimeout(timer);
       unsubscribe();
       unsubscribeNotes();
+      unsubscribeHosts();
       off();
     };
   }, []);

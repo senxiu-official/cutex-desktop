@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 import { beforeEach, expect, it, vi } from "vitest";
 import type { SessionResource } from "@cutex-desktop/protocol";
 vi.mock("../src/renderer/src/bridge", () => ({ api: {}, onEvent: () => () => {} }));

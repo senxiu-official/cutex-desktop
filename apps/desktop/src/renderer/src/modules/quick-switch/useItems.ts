@@ -1,8 +1,9 @@
 // The palette's item list (hooks only): built from what the app already holds, once per data change.
 // The only fetch is the artifact lists, started when the palette opens (artifacts.ts caches them).
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { ARTIFACTS_FEATURE } from "../../../../shared/artifactStore";
 import { useI18n } from "../../i18n";
+import { preloadPage } from "../../lib/lazyPage";
 import { hostData, type HostLook } from "../../lib/hostScope";
 import { useScopedAttention, useScopedSidebar } from "../../lib/scopedSidebarView";
 import { featuresOf, useApp } from "../../store";
@@ -23,6 +24,7 @@ export interface PaletteData {
   loadingArtifacts: boolean;
   /** Host look by id, for the host chips; null = no chips (one-host scope without marks). */
   hostLook(hostId: string | undefined): HostLook | null;
+  preloadMainPage(id: string): void;
 }
 
 export function usePaletteItems(): PaletteData {
@@ -32,6 +34,10 @@ export function usePaletteItems(): PaletteData {
   const servicesFocus = useApp((s) => s.services);
   const byHost = useApp((s) => s.byHost);
   const nav = useSlot("nav.primary");
+  const pages = useSlot("main.page");
+  const preloadMainPage = useCallback((id: string) => {
+    void preloadPage(pages.find((entry) => entry.mode === "show" && entry.item.id === id)?.item.Page);
+  }, [pages]);
 
   // 成果: per project of each host with `artifacts` (sidebar order), fetched once per open.
   const projects = useMemo<ProjectRef[]>(() => {
@@ -103,5 +109,5 @@ export function usePaletteItems(): PaletteData {
     return (hostId: string | undefined) => (marks && hostId ? (looks.get(hostId) ?? null) : null);
   }, [scoped.scope]);
   // The Shelf pages scope is always there: 新建空页 makes the first page too.
-  return { items, shelves: true, loadingArtifacts: loading && artifacts.length === 0, hostLook };
+  return { items, shelves: true, loadingArtifacts: loading && artifacts.length === 0, hostLook, preloadMainPage };
 }

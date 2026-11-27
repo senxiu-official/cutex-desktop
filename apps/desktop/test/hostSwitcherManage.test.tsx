@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // The host switcher's rows: › opens that host's own page (picked for Settings), 连接 appears in words only
-// on a host that is not connected, and disconnecting is not offered here. The version shows only when a
-// host differs from the others.
+// on a host that is not connected, and disconnecting is not offered here. Every online host shows its cutex
+// version after its name (owner 2026-11-28); a host whose version differs keeps the attention tag.
 import { act, createElement as h } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -42,7 +42,7 @@ const look = (id: string, connected: boolean, version: string, status = connecte
   connected,
   inScope: true,
   version,
-  build: { kind: "dev" },
+  build: version.startsWith("r") ? { release: version } : { commit: version },
   view: { kind: "ssh", label: id },
   indicator: { status },
 });
@@ -94,10 +94,31 @@ describe("host switcher rows", () => {
     expect(fx.view).not.toHaveBeenCalled();
   });
 
-  it("shows a version only on the host that differs", async () => {
+  const ver = (name: string) => row(name).querySelector<HTMLElement>("[data-host-version]");
+  it("shows every online host's version after its name, also when all agree", async () => {
+    fx.hosts = [look("local", true, "r298"), look("a", true, "r298")];
+    await openMenu();
+    expect(ver("local")?.textContent).toBe(" · r298");
+    expect(ver("a")?.textContent).toBe(" · r298");
+    expect(box.querySelector("[data-version-differs]")).toBeNull();
+    // Not as an attention tag when they agree.
+    expect(ver("a")!.querySelector("[data-tip]")!.getAttribute("data-tip")).toMatch(/^cutex r298/);
+  });
+  it("a host whose version differs keeps the attention tag (版本不一致 tip) in the same place", async () => {
     fx.hosts = [look("local", true, "r300"), look("a", true, "r300"), look("c", true, "r299")];
     await openMenu();
-    expect(row("c").textContent).toContain("r299");
-    expect(row("a").textContent).not.toContain("r300");
+    expect(ver("c")?.textContent).toContain("r299");
+    expect(ver("c")!.hasAttribute("data-version-differs")).toBe(true);
+    expect(ver("c")!.querySelector("[data-tip]")!.getAttribute("data-tip")).toContain("Another cutex version");
+    expect(ver("a")?.textContent).toContain("r300");
+    expect(ver("a")!.hasAttribute("data-version-differs")).toBe(false);
+  });
+  it("no version on a host that is not online or whose version is unknown; a dev build says so", async () => {
+    fx.hosts = [look("local", true, "abc1234"), look("a", false, "r300"), look("c", true, "r300", "connecting"), { ...look("d", true, "r300"), version: null, build: null }];
+    await openMenu();
+    expect(ver("local")?.textContent).toBe(" · dev build abc1234");
+    expect(ver("a")).toBeNull();
+    expect(ver("c")).toBeNull();
+    expect(ver("d")).toBeNull();
   });
 });

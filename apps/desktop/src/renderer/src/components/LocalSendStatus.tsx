@@ -6,12 +6,14 @@ import { useState } from "react";
 import { useI18n, type MessageKey } from "../i18n";
 import type { LedgerOwnerOutbox } from "../lib/inputLedger/owner";
 import { LOCAL_HIDE_FAILED, NEXT_UP_EFFECTS, NEXT_UP_STATES, langOf, localSendView, stateLabelKey, type NextUpEffectId } from "../lib/inputLedger/nextUpRegistry";
-import { REFUSAL_TEXT } from "../lib/inputLedger/actionResult";
+import { REFUSAL_TEXT, failureReason } from "../lib/inputLedger/actionResult";
 import { bridge } from "../bridge";
 import { useApp } from "../store";
 
 const TONE = { neutral: "text-subtle", warn: "text-warn-text", danger: "text-danger-text" } as const;
 const RESEND_FAILED = { zh: "未能重新发送，这一行还在", en: "Could not resend; the row stays" } as const;
+/** The same with the error's reason: this row has no 查看详情, so the toast says why (owner 2026-11-28). */
+const RESEND_FAILED_REASON = { zh: "未能重新发送，这一行还在：{reason}", en: "Could not resend; the row stays: {reason}" } as const;
 
 export function LocalSendStatus({ entry, sessionId, hostId, readOnly = false }: { entry: LedgerOwnerOutbox; sessionId: string; hostId: string; readOnly?: boolean }) {
   const { t, locale } = useI18n();
@@ -27,7 +29,8 @@ export function LocalSendStatus({ entry, sessionId, hostId, readOnly = false }: 
         if (result && !result.ok && REFUSAL_TEXT[result.reason]) tell(REFUSAL_TEXT[result.reason]!);
       } catch (error) {
         bridge.shell?.logError({ kind: "reported", message: `local resend failed (${entry.inputId}): ${error instanceof Error ? error.message : String(error)}` });
-        tell(RESEND_FAILED);
+        const reason = failureReason(error);
+        tell(reason ? { zh: RESEND_FAILED_REASON.zh.replace("{reason}", reason), en: RESEND_FAILED_REASON.en.replace("{reason}", reason) } : RESEND_FAILED);
       }
     },
     hideLocal: () => { if (!useApp.getState().discardLedgerOutbox(sessionId, entry.inputId, hostId)) tell(LOCAL_HIDE_FAILED); },

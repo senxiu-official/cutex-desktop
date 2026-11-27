@@ -12,7 +12,6 @@ import { Server } from "lucide-react";
 import { SERVICES_PERSIST_APPROVAL_FEATURE } from "../../../../shared/servicesSettings";
 import { pageTitle } from "../react";
 import { defineModule } from "../slots";
-import { ProjectServicesTab, ServicesPage } from "./ServicesPage";
 import { useProjectServicesSummary } from "./summary";
 import { startServiceReveals } from "./live";
 import { ServiceToasts } from "./Toasts";
@@ -22,6 +21,8 @@ import type { Json } from "../types";
 import { lazyPage } from "../../lib/lazyPage";
 
 // Loaded on first open (lib/lazyPage).
+const ServicesPage = lazyPage(() => import("./ServicesPage").then((m) => m.ServicesPage));
+const ProjectServicesTab = lazyPage(() => import("./ServicesPage").then((m) => m.ProjectServicesTab));
 const PersistApprovalSection = lazyPage(() => import("./PersistApprovalSection").then((m) => m.PersistApprovalSection));
 
 export default defineModule({

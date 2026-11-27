@@ -100,6 +100,7 @@ export const en: Record<keyof typeof zhCN, string> = {
   "conversation.turnPeek.retry": "Retry",
   "conversation.agent": "{{Agent}}",
   "conversation.agent.openSide": "Open side by side",
+  "conversation.agent.openSideInfo": "Ctrl+click (⌘+click on a Mac) or middle-click an {{agent}} in the sidebar to open it side by side too. When the window has no room for a second column, it opens in the current one instead, replacing the {{agent}} you are viewing.",
   "conversation.agent.openMain": "Open in main area",
   "conversation.agent.openMainHint": "Open this {{agent}} in the main area; the main area's {{agent}} moves here",
   "conversation.agent.inMain": "{name} is open in the main area",

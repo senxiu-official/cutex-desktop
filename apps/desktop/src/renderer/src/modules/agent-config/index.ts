@@ -6,11 +6,13 @@ import { pageTitle } from "../react";
 import { defineModule } from "../slots";
 import { COLLAB_SEARCH, DEFAULTS_SEARCH, INSTRUCTIONS_SEARCH, PROFILES_SEARCH } from "./settingsSearch";
 import { lazyPage } from "../../lib/lazyPage";
+import { FEATURE_PROFILES_ALL_SECTION, FEATURE_PROFILES_SUB } from "../../lib/featureProfilesNav";
 
 // Loaded on first open (lib/lazyPage).
 const NewAgentPage = lazyPage(() => import("./NewAgentPage").then((m) => m.NewAgentPage));
 const ProfilesPage = lazyPage(() => import("../../components/settings/ProfilesSettings").then((m) => m.ProfilesPage));
 const KimiAccountsSubPage = lazyPage(() => import("../../components/settings/ProfilesSettings").then((m) => m.KimiAccountsSubPage));
+const FeatureProfilesSubPage = lazyPage(() => import("../../components/settings/ProfilesSettings").then((m) => m.FeatureProfilesSubPage));
 const ProfileModelsSubPage = lazyPage(() => import("../../components/settings/ProfileModelsSubPage").then((m) => m.ProfileModelsSubPage));
 const DefaultsPage = lazyPage(() => import("../../components/settings/GlobalSettings").then((m) => m.DefaultsPage));
 const InstructionsPage = lazyPage(() => import("../../components/settings/GlobalSettings").then((m) => m.InstructionsPage));
@@ -34,6 +36,8 @@ export default defineModule({
       { id: "agent-config.profiles", page: "profiles", group: "agents", order: 100, icon: Boxes, titleKey: "agent-config.profiles", hintKey: "settings.pageHint.profiles", source: "host", Page: ProfilesPage, ...PROFILES_SEARCH,
         subPages: {
           kimi: { titleKey: "kimi-accounts.section", hintKey: "kimi-accounts.sectionHint", Page: KimiAccountsSubPage, anchors: ["kimi-accounts.all"] },
+          // 功能 Profile → 全部 N 个 (module feature-profiles; empty on a host without the capability, like kimi).
+          [FEATURE_PROFILES_SUB]: { titleKey: "feature-profiles.section", hintKey: "feature-profiles.sectionHint", Page: FeatureProfilesSubPage, anchors: [FEATURE_PROFILES_ALL_SECTION] },
           models: { titleKey: "settings.modelContext.catalog", hintKey: "settings.modelContext.subPageHint", Page: ProfileModelsSubPage, anchors: ["models-all"] },
         } },
       { id: "agent-config.defaults", page: "defaults", group: "agents", order: 200, icon: Sparkles, titleKey: "agent-config.defaults", source: "host", hintKey: "settings.pageHint.defaults", Page: DefaultsPage, ...DEFAULTS_SEARCH },

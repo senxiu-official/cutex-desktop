@@ -266,9 +266,9 @@ describe("opening: in place vs beside per kind", () => {
 
   it("services: the owner browser tab (system browser when the browser module is off / another host)", () => {
     const plan = planOpen({ kind: "service", hostId: "local", slug: "audiobook" }, false, shows);
-    expect(plan).toEqual({ via: "panes", kind: "browser.service", params: { url: "cutex:service/audiobook/" }, beside: false, fallback: { via: "serviceExternal", hostId: "local", slug: "audiobook" } });
+    expect(plan).toEqual({ via: "panes", kind: "browser.service", params: { url: "cutex:service/audiobook/" }, beside: false, fallback: { via: "serviceTab", hostId: "local", slug: "audiobook" } });
     expect(planOpen({ kind: "service", hostId: "local", slug: "a" }, true, shows, "听书")).toEqual({ via: "workspace", ref: { kind: "service", hostId: "local", key: "a", title: "听书" }, mode: "beside" });
-    expect(planOpen({ kind: "service", hostId: "ssh-b", slug: "a" }, false, shows)).toEqual({ via: "serviceExternal", hostId: "ssh-b", slug: "a" });
+    expect(planOpen({ kind: "service", hostId: "ssh-b", slug: "a" }, false, shows)).toEqual({ via: "serviceTab", hostId: "ssh-b", slug: "a" });
   });
 
   it("artifacts: artifacts.view in the tool area; another host's through its ref", () => {
@@ -334,7 +334,7 @@ describe("opening: in place vs beside per kind", () => {
     return {
       panesOpen: vi.fn((..._args: Parameters<OpenDeps["panesOpen"]>) => panes),
       refsOpen: vi.fn(async () => ({ status: "opened", where: "card" }) as const),
-      openServiceExternal: vi.fn(async () => {}),
+      openServiceTab: vi.fn(async () => {}),
       openShelfPage: vi.fn((pageId: string) => pageId !== "gone"),
       openRef: vi.fn(async (..._args: Parameters<OpenDeps["openRef"]>) => true),
     } satisfies OpenDeps;
@@ -357,15 +357,15 @@ describe("opening: in place vs beside per kind", () => {
   it("falls back when the pane kind is unavailable; reports why otherwise", async () => {
     const off = deps({ status: "unavailable", reason: "module-off" });
     expect(await runOpen(planOpen({ kind: "service", hostId: "local", slug: "a" }, false, shows), off)).toEqual({ ok: true });
-    expect(off.openServiceExternal).toHaveBeenCalledWith("a", "local");
+    expect(off.openServiceTab).toHaveBeenCalledWith("a", "local");
     expect(await runOpen(planOpen({ kind: "artifact", hostId: "local", ref: "af@latest", name: "n" }, false, shows), off)).toEqual({ ok: true });
     expect(off.refsOpen).toHaveBeenCalledWith({ hostId: "local", kind: "artifact", key: "af@latest", title: "n", params: {} });
     expect(await runOpen(planOpen({ kind: "agent", hostId: "local", sessionId: "s" }, false, shows), off)).toEqual({ ok: false, reason: "module-off" });
     const stale = deps({ status: "stale" });
     expect(await runOpen(planOpen({ kind: "page", page: "a.b" }, false, shows), stale)).toEqual({ ok: false, reason: "stale" });
     const broken = deps();
-    broken.openServiceExternal.mockRejectedValueOnce(new Error("boom"));
-    expect(await runOpen({ via: "serviceExternal", hostId: "x", slug: "y" }, broken)).toEqual({ ok: false, reason: "boom" });
+    broken.openServiceTab.mockRejectedValueOnce(new Error("boom"));
+    expect(await runOpen({ via: "serviceTab", hostId: "x", slug: "y" }, broken)).toEqual({ ok: false, reason: "boom" });
   });
 });
 

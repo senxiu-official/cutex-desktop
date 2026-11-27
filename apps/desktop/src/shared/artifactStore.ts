@@ -19,6 +19,27 @@ export const ARTIFACT_PUBLISH_TOOL = "artifact_publish";
 export const ARTIFACT_KINDS = ["report", "figure", "table", "data", "plan", "handoff", "other"] as const;
 export type ArtifactKind = (typeof ARTIFACT_KINDS)[number];
 
+/**
+ * cutex capability `artifact-audience` (cutex docs/artifact-audience.md): summaries carry audience /
+ * purpose / fileKind and the list takes view / audience / purpose / fileKind. Without it the desktop
+ * shows the full library as before (no 呈阅).
+ */
+export const ARTIFACT_AUDIENCE_FEATURE = "artifact-audience";
+/** owner: the publisher meant it for the owner (呈阅); team: for collaborators (内部). */
+export const ARTIFACT_AUDIENCES = ["owner", "team"] as const;
+export type ArtifactAudience = (typeof ARTIFACT_AUDIENCES)[number];
+export const ARTIFACT_PURPOSES = ["report", "deliverable", "preview", "evidence"] as const;
+export type ArtifactPurpose = (typeof ARTIFACT_PURPOSES)[number];
+/** List filter only: "unset" matches artifacts without a declared purpose. */
+export const ARTIFACT_PURPOSE_FILTERS = [...ARTIFACT_PURPOSES, "unset"] as const;
+export type ArtifactPurposeFilter = (typeof ARTIFACT_PURPOSE_FILTERS)[number];
+/** Read-only, derived by cutex from the latest version's media type and source suffix. */
+export const ARTIFACT_FILE_KINDS = ["page", "slides", "image", "document", "data", "archive", "other"] as const;
+export type ArtifactFileKind = (typeof ARTIFACT_FILE_KINDS)[number];
+/** forOwner: owner audience or starred (呈阅); all: everything (the wire default). */
+export const ARTIFACT_VIEWS = ["forOwner", "all"] as const;
+export type ArtifactView = (typeof ARTIFACT_VIEWS)[number];
+
 /** `af-<32 lowercase hex>`. */
 export const ARTIFACT_ID = /^af-[0-9a-f]{32}$/;
 /** `af-…@<n>` (pinned) or `af-…@latest`. */
@@ -79,6 +100,10 @@ export interface ArtifactSummary {
   scope: ArtifactScope;
   name: string;
   kind: ArtifactKind;
+  /** `artifact-audience` hosts only (absent from older ones). */
+  audience?: ArtifactAudience;
+  purpose?: ArtifactPurpose | null;
+  fileKind?: ArtifactFileKind;
   latestVersion: number;
   revision: number;
   starred: boolean;
@@ -174,6 +199,11 @@ export interface ArtifactListQuery {
   kind?: ArtifactKind;
   producer?: string;
   archived?: "false" | "true" | "all";
+  /** `artifact-audience` hosts only; combined by cutex before pagination. */
+  view?: ArtifactView;
+  audience?: ArtifactAudience;
+  purpose?: ArtifactPurposeFilter;
+  fileKind?: ArtifactFileKind;
   limit?: number;
   cursor?: string;
 }
@@ -187,6 +217,12 @@ export interface ArtifactPublishRequest {
   path: string;
   name?: string;
   kind?: ArtifactKind;
+  /**
+   * `artifact-audience` hosts only; cutex defaults an owner publish to owner. Only the owner or the
+   * session that published v1 may change them on a later publish (another publisher's change is refused).
+   */
+  audience?: ArtifactAudience;
+  purpose?: ArtifactPurpose;
   note?: string;
 }
 
@@ -237,6 +273,10 @@ export function artifactMarkdown(text: string, ref: string): string {
 const SCOPE_ID = /^[A-Za-z0-9._:-]{1,200}$/;
 const isRecord = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 const isKind = (v: unknown): v is ArtifactKind => typeof v === "string" && (ARTIFACT_KINDS as readonly string[]).includes(v);
+function oneOf<T extends string>(values: readonly T[], v: unknown, what: string): T {
+  if (typeof v !== "string" || !(values as readonly string[]).includes(v)) throw new Error(`bad ${what}`);
+  return v as T;
+}
 
 function text(v: unknown, max: number, what: string): string {
   if (typeof v !== "string" || !v.trim() || v.length > max) throw new Error(`bad ${what}`);
@@ -283,6 +323,10 @@ export function artifactListQuery(input: unknown): Record<string, string | numbe
     if (input.archived !== "false" && input.archived !== "true" && input.archived !== "all") throw new Error("bad archived");
     out.archived = input.archived;
   }
+  if (input.view !== undefined) out.view = oneOf(ARTIFACT_VIEWS, input.view, "view");
+  if (input.audience !== undefined) out.audience = oneOf(ARTIFACT_AUDIENCES, input.audience, "audience");
+  if (input.purpose !== undefined) out.purpose = oneOf(ARTIFACT_PURPOSE_FILTERS, input.purpose, "purpose");
+  if (input.fileKind !== undefined) out.fileKind = oneOf(ARTIFACT_FILE_KINDS, input.fileKind, "fileKind");
   if (input.limit !== undefined) {
     if (typeof input.limit !== "number" || !Number.isSafeInteger(input.limit) || input.limit < 1 || input.limit > ARTIFACT_LIST_MAX) throw new Error("bad limit");
     out.limit = input.limit;
@@ -337,6 +381,8 @@ export function artifactPublishBody(input: unknown): ArtifactPublishRequest {
     if (!isKind(input.kind)) throw new Error("bad kind");
     body.kind = input.kind;
   }
+  if (input.audience !== undefined) body.audience = oneOf(ARTIFACT_AUDIENCES, input.audience, "audience");
+  if (input.purpose !== undefined) body.purpose = oneOf(ARTIFACT_PURPOSES, input.purpose, "purpose");
   if (input.note !== undefined && input.note !== "") body.note = text(input.note, 4000, "note").trim();
   return body;
 }

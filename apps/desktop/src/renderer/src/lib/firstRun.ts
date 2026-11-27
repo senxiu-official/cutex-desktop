@@ -1,4 +1,4 @@
-// What the empty main area shows on this machine (components/FirstRun): cutex not installed / not
+// What the empty main area shows on this machine (the 开始使用 card, modules/start): cutex not installed / not
 // running (a colleague's first run: desktop and cutex are installed separately), connected with no
 // agents yet, no host at all (macOS without a local cutex: add an SSH host), or nothing special (the
 // usual 「从左侧选择」 hint). Pure; remote hosts keep the banner.

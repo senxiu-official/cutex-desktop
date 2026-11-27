@@ -1,5 +1,5 @@
 // 历史 (contract 审计): newest first by `seq`, paged with 加载更早的记录. A row: when, who (你 / cutex / the agent's
-// name for a session), what (known verbs in words, others as cutex wrote them) and the details as cutex stored them
+// name for a session; the assistant's own session by the assistant's name, not its session's), what (known verbs in words, others as cutex wrote them) and the details as cutex stored them
 // (folded). The authenticated owner actions and the assistant's / Director's own actions are both listed.
 import { useCallback, useEffect, useState } from "react";
 import { useI18n, type MessageKey } from "../../i18n";
@@ -11,7 +11,7 @@ import { paErrorText, sessionName, type PaHost } from "./paHooks";
 
 const VERBS = new Set(["create", "bind", "configure", "confirm", "cancel", "prepare", "revise", "directorResponse", "memoryWrite"]);
 
-export function AuditList({ hostId, assistantId, host, refreshKey }: { hostId: string; assistantId: string; host: PaHost | undefined; refreshKey: unknown }) {
+export function AuditList({ hostId, assistantId, host, refreshKey, self }: { hostId: string; assistantId: string; host: PaHost | undefined; refreshKey: unknown; /** The assistant's session and name. */ self?: { sessionId: string | null; name: string } }) {
   const { t } = useI18n();
   const [rows, setRows] = useState<PaAuditRow[] | null>(null);
   const [next, setNext] = useState<number | null>(null);
@@ -46,7 +46,7 @@ export function AuditList({ hostId, assistantId, host, refreshKey }: { hostId: s
       setBusy(false);
     }
   };
-  const actor = (a: string) => (a === "owner" ? t("personal-assistants.history.actor.owner") : a === "system" ? t("personal-assistants.history.actor.system") : (sessionName(host, a) ?? a));
+  const actor = (a: string) => (a === "owner" ? t("personal-assistants.history.actor.owner") : a === "system" ? t("personal-assistants.history.actor.system") : self?.sessionId && a === self.sessionId ? self.name : (sessionName(host, a) ?? a));
   const at = (iso: string) => {
     const ms = Date.parse(iso);
     return Number.isFinite(ms) ? formatAbsolute(Math.floor(ms / 1000)) : iso;

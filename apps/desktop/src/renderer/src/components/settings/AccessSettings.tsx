@@ -13,37 +13,24 @@ import { useSlot } from "../../modules/react";
 import { useI18n } from "../../i18n";
 import { useHostAccess } from "../../lib/hostAccess";
 import { useHostOwnership } from "../../lib/hostOwnership";
-import { hostPickerMode } from "../../lib/hostPick";
-import { setSettingsHost, useSettingsTarget } from "../../lib/settingsHost";
+import { useSettingsTarget } from "../../lib/settingsHost";
 import { useScrollToSettingsAnchor } from "../../lib/settingsFocus";
 import { useHostScope } from "../../lib/useHostScope";
 import { SettingsSections } from "../../modules/Outlet";
-import { HostPicker } from "../HostPicker";
 import { SettingsHostFrame } from "../SettingsHostFrame";
 import { Diagnostics, HostConnectionSection, ownerName } from "./ConnectionSettings";
-import { Banner, EmptyState, PartSource, Section, SubPageRow } from "./Form";
+import { Banner, EmptyState, Section, SubPageRow } from "./Form";
 import { HostInfoSection, HostRightsSection } from "./HostSections";
 import { MeHereSection, OwnDevicesSection } from "./MeOnHost";
 import { OwnerDevicesBanner } from "./OwnerDevices";
 
-/** The tag picker of the host cards: 「cutex 后端 · HOST ▾」. */
-function useHostTagPicker(hostId: string): ReactNode {
-  const { t } = useI18n();
-  const scope = useHostScope();
-  const mode = hostPickerMode(scope, hostId);
-  return <HostPicker chip value={hostId} onChange={(id) => setSettingsHost(id)} mode={mode === "none" ? "label" : mode} title={t("hostPicker.settingsTitle")} />;
-}
-
 /** Host cards that read through the host's API: on the Settings host (offline frame), each tagged. */
 function HostCards({ hostId, children }: { hostId: string; children: ReactNode }) {
   const target = useSettingsTarget();
-  const picker = useHostTagPicker(hostId);
-  // The 混合设置 header names (and picks) the host these cards show.
+  // The page header's host switcher names (and picks) the host these cards show.
   return (
     <SettingsHostFrame key={hostId} target={target}>
-      <PartSource   picker={picker}>
-        {children}
-      </PartSource>
+      {children}
     </SettingsHostFrame>
   );
 }
@@ -118,13 +105,10 @@ export function AdvancedSubPage() {
   useScrollToSettingsAnchor();
   const hostId = useSettingsTarget().hostId;
   const access = useHostAccess(hostId);
-  const picker = useHostTagPicker(hostId);
   return (
     <>
-      <PartSource picker={picker}>
-        <HostInfoSection hostId={hostId} />
-        <HostRightsSection hostId={hostId} />
-      </PartSource>
+      <HostInfoSection hostId={hostId} />
+      <HostRightsSection hostId={hostId} />
       <HostCards hostId={hostId}>
         {access.isOwner && <SettingsSections page="access" only={ADVANCED_SECTIONS} />}
         <HeavyReadSection hostId={hostId} />

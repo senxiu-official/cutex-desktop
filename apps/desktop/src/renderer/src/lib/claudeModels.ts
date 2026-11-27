@@ -9,8 +9,10 @@
 //   handshake's display version (shared/modelResolution), else the catalog name of the model that last answered
 //   (`observedVersion`, set by the composer), else none (「Opus」) — never the catalog's newest version. Menus mark
 //   alias rows with the 「跟随最新」 tag (`tag`), so an alias and its fixed model of the same version stay apart;
-// - the alias's target (the reported resolution, else the newest fixed id of the family) and its `[1m]` form fold
-//   into that row (the current models already have a 1M window), unless one of them is the current selection;
+// - the alias's `[1m]` form folds into that row (the current models already have a 1M window), unless it is the
+//   current selection. The alias's target (the reported resolution, else the newest fixed id of the family) does NOT
+//   fold: it stays a fixed row under 「更多」 so the current generation can be pinned (owner 2026-11-28; it was
+//   folded away before, leaving only older fixed versions); the alias row records it as `follows`;
 // - older fixed models, `[1m]` forms of fixed ids (labelled with their window), the modes and unknown
 //   ids follow, in that order. The current selection is never folded away.
 
@@ -63,8 +65,11 @@ export interface FoldedModel<T> {
   name: string;
   /** What the extra tag says, if anything (translated by the caller). */
   tag: FoldedLabelKey | null;
-  /** Other ids this row stands for (its alias target, `[1m]` form). */
+  /** Other ids this row stands for (an alias's `[1m]` form). */
   folded: string[];
+  /** An alias row: the fixed id it currently resolves to in this list (its own row under 「更多」), for settings that
+   *  read the same model's window / per-model values. */
+  follows?: string | null;
   /** false: below the newest model of each family (the picker's 「更多」). */
   primary: boolean;
   /** A family alias (`opus`, `opus[1m]`): `name` is the family; `version` from the handshake, else the last answer. */
@@ -103,17 +108,13 @@ export function foldClaudeModels<T>(items: readonly T[], idOf: (item: T) => stri
     // What the alias stands for in this list: the reported target when listed, else the family's newest fixed id.
     const target = (resolved && infos.find((x) => x.id.toLowerCase() === resolved.resolvedModel.toLowerCase() && x.info.kind === "pinned")) || newest.get(family);
     const folded: string[] = [];
-    if (target && !isCurrent(target.id)) {
-      folded.push(target.id);
-      used.add(target.id);
-    }
     const oneM = infos.find((x) => x.info.kind === "alias" && x.info.family === family && x.info.oneM);
     if (oneM && !isCurrent(oneM.id)) {
       folded.push(oneM.id);
       used.add(oneM.id);
     }
     used.add(alias.id);
-    out.push({ item: alias.item, name: cap(family), tag: "latest", folded, primary: true, alias: { version: versionOf(alias) } });
+    out.push({ item: alias.item, name: cap(family), tag: "latest", folded, follows: target?.id ?? null, primary: true, alias: { version: versionOf(alias) } });
   }
   // A family with only fixed ids: its newest one is primary.
   for (const family of FAMILIES) {

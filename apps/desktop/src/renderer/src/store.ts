@@ -1,4 +1,5 @@
 import { noteOwnerMessage } from "./lib/activityFeed";
+import type { NewProfileStart } from "./lib/newProfileModel";
 import { BACKGROUND_WORK_METHOD, BackgroundWorkProjection, backgroundWorkChange } from "../../shared/backgroundWork";
 import { CLAUDE_DIAGNOSTICS_METHOD, claudeDiagnosticsChange, withoutClaudeDiagnostics } from "../../shared/claudeDiagnostics";
 import { runtimeUnreachableWire } from "../../shared/runtimeUnreachable";
@@ -57,7 +58,7 @@ import { withoutDeliveredOwnerItems } from "./lib/legacyDelivery/ownerInputDeliv
 import { OUTCOME_CHECK_DELAYS_MS, OUTCOME_EVENT_MIN_GAP_MS, OUTCOME_SLOW_POLLS_MS, rawErrorText, steerOutcome } from "./lib/legacyDelivery/steerOutcome";
 import { hasImageInput, imageDeliveryOf, imageSteerMode, refusesImageSteer } from "./lib/imageSteer";
 import { parseQueueSteerError } from "../../shared/queueSteer";
-import { mergedText, planQueueMerge } from "../../shared/queueMerge";
+import { mergedText, planQueueMerge, queueItemText } from "../../shared/queueMerge";
 import { QUOTA_NATIVE_FEATURE, QUOTA_UPDATED_EVENT, quotaEventProfiles } from "./lib/quota";
 import { newPendingSteer, recordedSteers, resolveChecked, settlePendingSteers, steerTurnIsLive, type PendingSteer, type SettleOptions, type SteerSettlement } from "./lib/legacyDelivery/pendingSteers";
 import { runtimeOf } from "./lib/agentList";
@@ -114,6 +115,7 @@ import type { ItemId, PageParams } from "./modules/types";
 import type { CustomizeRegion } from "./lib/customize";
 import { openPageElsewhere, pageInShelfShown } from "./lib/pageOpener";
 import { closeSettingsShelf, openSettingsShelf, resetSettingsSubPage, setSettingsShelfMaximized, useSettingsShelf } from "./lib/settingsShelf";
+import { movedSettingsRoute } from "./lib/settingsNav";
 import { isViewOf, viewKey, viewKeyParts, type ViewKey } from "./lib/viewKey";
 import { FrameBatch, isStreamDelta } from "./lib/streamBatch";
 import { forgetAgentPicture } from "./lib/agentPicture";
@@ -176,17 +178,7 @@ export function agentState<T>(map: Readonly<Record<ViewKey, T>>, hostId: string,
   return map[viewKey(hostId, sessionId)];
 }
 
-/** Plain text of a queued input (cute-codex UserInput[]). */
-/**
- * A queued message's own text, byte for byte: its text parts joined by a line break (empty ones too), other items left
- * out. Send paths (再发一次, insert) use it, so it must never be a display preview; rows use queuedRowText.
- */
-export function queueItemText(item: QueueItem): string {
-  return (item.input as { type: string; text?: string }[])
-    .filter((part) => part.type === "text")
-    .map((part) => part.text ?? "")
-    .join("\n");
-}
+export { queueItemText };
 
 export type ProjectTab = "overview" | "agents" | "tasks" | "memory" | "settings";
 
@@ -435,7 +427,7 @@ interface AppState {
   notify(text: string, tone?: "info" | "error", agent?: AgentAddress): void;
   /** Where Settings should land (e.g. `/logout` → this profile's account section). */
   /** `kimiAccount`: the new-Profile form opens on that Kimi account (Kimi accounts → 用这个账户新建 Profile). */
-  settingsFocus: { profile?: string; anchor?: string; kimiAccount?: string } | null;
+  settingsFocus: { profile?: string; anchor?: string; kimiAccount?: string; createKind?: NewProfileStart } | null;
   /**
    * 在主界面调整 (components/CustomizeHost; owner 2026-10-21): the region of the real UI in edit state while
    * the Settings Shelf shows its settings page (`page`) beside it, or null. `back`: the Settings Shelf
@@ -523,7 +515,8 @@ interface AppState {
   /** Agents whose queue is transiently stopped by interrupt-and-send (not shown as paused). */
   queueHandoff: Record<ViewKey, boolean>;
   /** `focus.profile` (tab "profiles") opens that profile's detail page; `focus.create` the 添加 form. */
-  openSettings(tab?: SettingsTab, focus?: { profile?: string; anchor?: string; create?: boolean; kimiAccount?: string; sub?: string }): void;
+  /** `createKind`: the onboarding Profile card's pick, preselected in the 添加 form. */
+  openSettings(tab?: SettingsTab, focus?: { profile?: string; anchor?: string; create?: boolean; kimiAccount?: string; createKind?: NewProfileStart; sub?: string }): void;
   /** Shows a `main.page` item (= services.ui.openPage, modules/app.ts). */
   openPage(page: ItemId, params?: PageParams): void;
   /** The 审批 page for an approval of `hostId`: a host outside the view scope shows 所有设备 first (as a notification click). */
@@ -3125,7 +3118,9 @@ export const useApp = selectionAware(create<AppState>((set, get) => {
       insertComposerDraft(hostId ?? hostOf(sessionId), sessionId, text, mode, extra);
     },
 
-    openSettings(tab = "general", focus) {
+    openSettings(tabAsked = "general", focusAsked) {
+      // A page that became a card of another page (功能 Profile → a card of Profile): its old links still land.
+      const { tab, focus } = movedSettingsRoute(tabAsked, focusAsked);
       const sub = focus?.sub ? { sub: focus.sub } : tab !== "profiles" ? {} : focus?.create ? { create: "1" } : focus?.profile ? { profile: focus.profile } : {};
       // The Settings Shelf (lib/settingsShelf) beside the conversation; the view stays. Another page than
       // the one a live edit (在主界面调整) belongs to: the owner moved on, the edit ends where it is.

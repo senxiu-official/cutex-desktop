@@ -334,6 +334,8 @@ const viewOf = (packs: readonly PortraitPack[], dir: string | null, skipped: num
 
 let view = viewOf(BUNDLED_PORTRAIT_PACKS, null, 0, false);
 let loading: Promise<void> | null = null;
+let followsCollections = false;
+let refreshAfterLoad = false;
 const images = new Map<string, string | null>();
 const pending = new Set<string>();
 const listeners = new Set<() => void>();
@@ -343,7 +345,15 @@ const emit = () => {
 
 function apply(state: PortraitPacksState | null): void {
   const user = (state?.packs ?? []).map((p) => packOf(p.id, p, "user"));
-  view = viewOf(mergePacks(BUNDLED_PORTRAIT_PACKS, user), typeof state?.dir === "string" ? state.dir : null, state?.skipped ?? 0, true);
+  // An installed official theme augments the starter pack while user packs keep their replacement rule.
+  const official = (state?.official ?? []).map(p => packOf(p.id, p, "user"));
+  const bundled = BUNDLED_PORTRAIT_PACKS.map(pack => {
+    const extension = official.find(p => p.id === pack.id);
+    if (!extension) return pack;
+    const byTheme = new Map(extension.themes.map(theme => [theme.id, theme]));
+    return { ...pack, themes: pack.themes.map(theme => byTheme.get(theme.id) ?? theme) };
+  });
+  view = viewOf(mergePacks(bundled, user), typeof state?.dir === "string" ? state.dir : null, state?.skipped ?? 0, true);
   images.clear();
   emit();
 }
@@ -353,6 +363,17 @@ export function loadPortraitPacks(refresh = false): Promise<void> {
   if (loading) return loading;
   if (view.ready && !refresh) return Promise.resolve();
   const source = bridge();
+  if (!followsCollections) {
+    const preload = (globalThis as { cutex?: PreloadBridge }).cutex;
+    if (preload?.portraitCollections) {
+      followsCollections = true;
+      preload.on("portraitCollections", ({ packsChanged }) => {
+        if (!packsChanged) return;
+        if (loading) refreshAfterLoad = true;
+        else void loadPortraitPacks(true);
+      });
+    }
+  }
   if (!source) {
     apply(null);
     return Promise.resolve();
@@ -362,6 +383,10 @@ export function loadPortraitPacks(refresh = false): Promise<void> {
     .then(apply, () => apply(null))
     .finally(() => {
       loading = null;
+      if (refreshAfterLoad) {
+        refreshAfterLoad = false;
+        void loadPortraitPacks(true);
+      }
     });
   return loading;
 }
@@ -389,6 +414,12 @@ export function usePortraitPacks(): PortraitPacksView {
     void loadPortraitPacks();
   }, []);
   return useSyncExternalStore(subscribe, snapshot, snapshot);
+}
+
+/** A missing official picture can be fetched by theme. The stored reference remains authoritative. */
+export function missingOfficialPortrait(index: PortraitIndex, ref: PortraitRef): string | null {
+  return BUNDLED_PORTRAIT_PACKS.some(pack => pack.id === ref.pack && pack.themes.some(theme => theme.id === ref.theme))
+    && !index.byKey.has(portraitKey(ref)) ? ref.theme : null;
 }
 
 /** The index without subscribing to the owner's folder being read (outside React: menus, creation). */

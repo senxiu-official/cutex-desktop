@@ -93,6 +93,8 @@ function identityBridge(options: BrowserPreloadOptions): BrowserIdentityBridge {
     update: (id, expectedRevision, change) => call({ op: "update", id, expectedRevision, ...change }),
     setCurrent: (id) => call({ op: "setCurrent", id }),
     signOut: (id) => call({ op: "signOut", id }),
+    signOutHost: (id, hostId) => call({ op: "signOutHost", id, hostId }),
+    clearLeftover: (id, hostId) => call({ op: "clearLeftover", id, hostId }),
     remove: (id) => call({ op: "remove", id }),
     storage: (id) => call({ op: "storage", id }),
     signedInSites: (id, hostId) => call({ op: "signedInSites", id, hostId }),
@@ -111,6 +113,9 @@ function identityBridge(options: BrowserPreloadOptions): BrowserIdentityBridge {
     promptAnswer: (promptId, choice) => call({ op: "promptAnswer", promptId, choice }),
     fill: (offerId, loginId) => call({ op: "fill", offerId, loginId }),
     dismissOffer: (offerId) => call({ op: "dismissOffer", offerId }),
+    syncState: () => call({ op: "syncState" }),
+    setHostSync: (hostId, enabled) => call({ op: "setHostSync", hostId, enabled }),
+    confirmCleanup: (identityId, deletionRevision) => call({ op: "confirmCleanup", identityId, deletionRevision }),
     subscribe: (listener) => options.subscribeIdentities?.(listener) ?? (() => {}),
   };
 }

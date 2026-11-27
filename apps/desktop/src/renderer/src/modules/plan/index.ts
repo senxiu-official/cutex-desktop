@@ -11,7 +11,7 @@ export default defineModule({
   descriptionKey: "plan.moduleDescription",
   contributes: {
     "conversation.status": [
-      { id: "plan.status", order: 200, titleKey: "plan.statusTitle", defaultPlace: "capsule", useStatus: usePlanStatus, Meta: PlanMeta, Body: PlanBody, Bar: PlanStatusBar, icon: ListTodo },
+      { id: "plan.status", order: 200, titleKey: "plan.statusTitle", defaultPlace: "both", useStatus: usePlanStatus, Meta: PlanMeta, Body: PlanBody, Bar: PlanStatusBar, icon: ListTodo },
     ],
   },
 });

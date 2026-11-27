@@ -24,12 +24,8 @@ export function ThreadDefaultRows({ current, builtin, onPatch }: { kind: ThreadK
     const hint = [changed.has(field) ? t("agent-config.threadDefaults.builtin", { value: describe(field) }) : null, extraHint].filter(Boolean).join("；");
     return (
       <SettingRow agents="newAgents" source="host"
-        label={
-          <span className="flex items-center gap-1.5">
-            {label}
-            {changed.has(field) && <span className="h-1.5 w-1.5 rounded-full bg-accent" title={t("agent-config.threadDefaults.changed")} />}
-          </span>
-        }
+        // A plain label: SettingRow's 「改过」 bar and 恢复默认 already mark a changed default (no dot of its own).
+        label={label}
         hint={hint || undefined}
         reset={<ResetButton title={t("agent-config.threadDefaults.reset")} disabled={!changed.has(field)} onClick={() => onPatch({ [field]: null })} />}
       >

@@ -84,6 +84,17 @@ export class PersonIdentityService {
     return { publicKey: this.key?.publicKey ?? null, fingerprint: this.key?.fingerprint ?? null, ...(this.keyError ? { error: this.keyError } : {}), claims: { ...this.live } };
   }
 
+  /**
+   * 浏览器身份 跨主机同步 (cutex r297): the desktop's enrollment proof for one daemon — Ed25519 over
+   * "cutex-browser-identities-v1\n<instanceId>\n<publicKey>" (LF, no trailing LF) — once this host's claim of the current
+   * key is recorded. null: no key, or not claimed there yet.
+   */
+  browserIdentityProof(hostId: string, instanceId: string): { publicKey: string; signature: string } | null {
+    const key = this.key;
+    if (!key || this.claims[hostId]?.publicKey !== key.publicKey || !/^[A-Za-z0-9._:-]{1,128}$/.test(instanceId)) return null;
+    return { publicKey: key.publicKey, signature: key.sign(`cutex-browser-identities-v1\n${instanceId}\n${key.publicKey}`) };
+  }
+
   /** A host connection is up (every daemonState `connected`): claim when it is due. */
   onConnected(target: ClaimTarget): void {
     if (this.running.has(target.hostId)) {

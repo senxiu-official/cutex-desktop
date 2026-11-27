@@ -3,6 +3,7 @@ import { act, createElement as h } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
+vi.mock("../src/renderer/src/modules/Outlet", () => ({ SettingsSections: () => null }));
 vi.mock("../src/renderer/src/bridge", () => ({ api: { openExternal: vi.fn() } }));
 vi.mock("../src/renderer/src/i18n", () => ({ useI18n: () => ({ t: (key: string) => key.endsWith(".text") ? `${key} first line\nFull guide second line` : key }) }));
 vi.mock("../src/renderer/src/lib/update", () => ({ useUpdateStatus: () => ({ current: { version: "0.2.0" } }) }));

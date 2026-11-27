@@ -1,26 +1,34 @@
-// Settings → 功能 Profile (cutex feature-profiles; owner 2026-11-25): the host's model endpoints for app features
-// (提示词增强 first), never agents'. A list (R6: the first ones on the page, all with a filter on 全部 N), add / edit
-// inline, remove with a second click. The API key is write-only: a new one is typed once (add, or 更换密钥 on edit),
-// sent through main and cleared with the form; the page only shows whether one is set.
-import { useState } from "react";
-import { KeyRound, TriangleAlert } from "lucide-react";
+// Settings → Profile → 功能 Profile (cutex feature-profiles; owner 2026-11-25, on the Profile page since 2026-11-26):
+// the host's model endpoints for app features (提示词增强 first), never agents'. A list (R6: the first ones on the
+// page, all with a filter on the sub-page 全部 N), add / edit inline, remove with a second click. Shaped like the
+// Profile page's other cards and its new-Profile form (owner 2026-11-26: 「tag风格、host picker什么的都不统一」):
+// rows declare host / no agents (the page header's host picker and the card's chips), 未设置 API key reads as on a
+// Profile card, the fields use the Profile form's words and widths. The API key is write-only: a new one is typed
+// once (add, or 更换 API key on edit), sent through main and cleared with the form; the page only shows whether one
+// is set. 测试连接 (cutex feature-profile-test-v1; hidden on hosts without it): a saved row tests with its stored key,
+// the form tests what is typed there (a draft with the typed key; nothing is saved). The result shows inline, in plain
+// words per error class.
+import { useEffect, useRef, useState } from "react";
+import { Check, KeyRound, Loader2, TriangleAlert, X } from "lucide-react";
 import {
   FEATURE_PROFILE_LIMIT, FEATURE_PROFILE_MODEL_MAX, FEATURE_PROFILE_NAME_MAX, FEATURE_PROFILE_PROTOCOLS, FEATURE_PROFILE_QUOTA_TYPES,
+  FEATURE_PROFILE_TEST_FEATURE,
   type FeatureProfile, type FeatureProfileCreate, type FeatureProfileProtocol, type FeatureProfileQuotaType,
+  type FeatureProfileTestRequest, type FeatureProfileTestResult,
 } from "../../../../shared/featureProfiles";
-import { AddButton, ArmedRemove, Button, ErrorNote, IconButton, ListFilter, ListRow, Loading, RefreshButton, Section, Segmented, Select, SettingRow, SubPageRow, TextInput } from "../../components/settings/Form";
+import { AddButton, ArmedRemove, Button, EmptyState, ErrorNote, IconButton, ListFilter, ListRow, Loading, RefreshButton, Section, Segmented, Select, SettingRow, SettingsGroup, SubPageRow, TextInput, type SettingsRowDecoration as RowEffect } from "../../components/settings/Form";
 import { useI18n, type MessageKey } from "../../i18n";
 import { dropFeatureProfile, putFeatureProfile, useFeatureProfiles } from "../../lib/featureProfiles";
 import { matchesFilter } from "../../lib/listFilter";
 import { settingsAnchorId } from "../../lib/settingsNav";
+import { FEATURE_PROFILES_ALL_SECTION, FEATURE_PROFILES_SECTION, FEATURE_PROFILES_SUB } from "../../lib/featureProfilesNav";
 import { useSettingsCard } from "../../lib/settingsDrafts";
-import { useTargetApi, useTargetHostId } from "../../lib/targetHost";
+import { useTargetApi, useTargetFeatures, useTargetHostId } from "../../lib/targetHost";
 import { useApp } from "../../store";
 import { Pencil } from "lucide-react";
 
 /** Rows on the page; all of them are on the sub-page (R6). */
 export const FEATURE_PROFILES_ON_PAGE = 5;
-export const FEATURE_PROFILES_SUB = "all";
 
 const PROTOCOL_LABEL: Record<FeatureProfileProtocol, string> = { openaiResponses: "OpenAI Responses", anthropicMessages: "Anthropic Messages" };
 const BASE_PLACEHOLDER: Record<FeatureProfileProtocol, string> = { openaiResponses: "https://api.openai.com/v1", anthropicMessages: "https://api.anthropic.com" };
@@ -50,6 +58,57 @@ function hostOf(url: string): string {
   try { return new URL(url).host || url; } catch { return url; }
 }
 
+type TestState = { kind: "running" } | { kind: "done"; result: FeatureProfileTestResult } | { kind: "error"; text: string } | null;
+
+/** One 测试连接 at a time per row / form; a later run or clear() wins over an answer still on its way. */
+function useConnectionTest() {
+  const api = useTargetApi();
+  const problemText = useProblemText();
+  const [state, setState] = useState<TestState>(null);
+  const run = useRef(0);
+  useEffect(() => () => { run.current++; }, []);
+  const test = async (request: FeatureProfileTestRequest, baseUrl?: string) => {
+    const mine = ++run.current;
+    setState({ kind: "running" });
+    try {
+      const result = await api.testFeatureProfile(request);
+      if (run.current === mine) setState({ kind: "done", result });
+    } catch (e) {
+      if (run.current === mine) setState({ kind: "error", text: problemText(e, baseUrl) });
+    }
+  };
+  const clear = () => { run.current++; setState(null); };
+  return { state, test, clear, running: state?.kind === "running" };
+}
+
+/** ✓ 可以连上 · N ms · model, or ✗ and the reason in plain words (the host's short message on hover; shown for other). */
+function TestOutcome({ state }: { state: TestState }) {
+  const { t } = useI18n();
+  if (!state) return null;
+  if (state.kind === "running") {
+    return <span className="inline-flex items-center gap-1 text-subtle" role="status" data-feature-profile-test="running"><Loader2 size={12} className="animate-spin" aria-hidden />{t("feature-profiles.test.running")}</span>;
+  }
+  if (state.kind === "error") {
+    return <span className="inline-flex items-center gap-1 text-danger" role="status" data-feature-profile-test="error"><X size={12} className="shrink-0" aria-hidden />{state.text}</span>;
+  }
+  const { ok, latencyMs, model, error } = state.result;
+  if (ok) {
+    const parts = [t("feature-profiles.test.ok"), latencyMs !== null ? t("feature-profiles.test.ms", { n: latencyMs }) : null, model].filter(Boolean);
+    return (
+      <span className="inline-flex min-w-0 items-center gap-1 text-ok-text" role="status" data-feature-profile-test="ok">
+        <Check size={12} className="shrink-0" aria-hidden /><span className="min-w-0 truncate">{parts.join(" · ")}</span>
+      </span>
+    );
+  }
+  const cls = error?.class ?? "other";
+  return (
+    <span className="inline-flex min-w-0 items-start gap-1 text-danger" role="status" title={error?.message || undefined} data-feature-profile-test={cls}>
+      <X size={12} className="mt-0.5 shrink-0" aria-hidden />
+      <span className="min-w-0">{t(`feature-profiles.test.fail.${cls}` as MessageKey)}{cls === "other" && error?.message ? `（${error.message}）` : ""}</span>
+    </span>
+  );
+}
+
 export function FeatureProfilesSection() {
   const hostId = useTargetHostId();
   return <ProfilesCard key={hostId} hostId={hostId} all={false} />;
@@ -64,13 +123,14 @@ export function FeatureProfilesAll() {
 function ProfilesCard({ hostId, all }: { hostId: string; all: boolean }) {
   const { t } = useI18n();
   const { list, damaged, error, reload } = useFeatureProfiles(hostId);
+  const canTest = useTargetFeatures().has(FEATURE_PROFILE_TEST_FEATURE);
   const [editing, setEditing] = useState<string | "new" | null>(null);
   const [filter, setFilter] = useState("");
   const full = (list?.length ?? 0) + damaged.length >= FEATURE_PROFILE_LIMIT;
   const shown = all ? list?.filter((p) => matchesFilter(filter, p.name, p.model, p.baseUrl)) : list?.filter((p, i) => i < FEATURE_PROFILES_ON_PAGE || p.id === editing);
   return (
     <Section
-      id={settingsAnchorId(all ? "feature-profiles.all" : "feature-profiles.list")}
+      id={settingsAnchorId(all ? FEATURE_PROFILES_ALL_SECTION : FEATURE_PROFILES_SECTION)}
       title={all ? t("feature-profiles.all", { n: list?.length ?? 0 }) : t("feature-profiles.section")}
       hint={all ? undefined : t("feature-profiles.sectionHint")}
       actions={
@@ -81,17 +141,21 @@ function ProfilesCard({ hostId, all }: { hostId: string; all: boolean }) {
       }
     >
       <div data-feature-profiles="">
-        {editing === "new" && <Editor hostId={hostId} profile={null} onDone={() => setEditing(null)} />}
+        {editing === "new" && <Editor hostId={hostId} profile={null} canTest={canTest} onDone={() => setEditing(null)} />}
         {!list && !error && <Loading rows={2} />}
-        {list && list.length === 0 && damaged.length === 0 && editing !== "new" && <p className="py-2 text-xs text-subtle">{t("feature-profiles.empty")}</p>}
+        {list && list.length === 0 && damaged.length === 0 && editing !== "new" && <EmptyState>{t("feature-profiles.empty")}</EmptyState>}
         {all && <div role="search" className="contents"><ListFilter count={list?.length ?? 0} value={filter} onChange={setFilter} /></div>}
+        {/* Each row a host setting no agent reads (like a Kimi account row's 下次启动): the card's chips and the page
+            header's host picker come from these, also while no form is open. */}
         {shown?.map((p) => (
-          <Row key={p.id} hostId={hostId} profile={p} editing={editing === p.id} onEdit={(on) => setEditing(on ? p.id : null)} />
+          <SettingsGroup key={p.id} agents="none" source="host">{(effect) => (
+            <Row effect={effect} hostId={hostId} profile={p} canTest={canTest} editing={editing === p.id} onEdit={(on) => setEditing(on ? p.id : null)} />
+          )}</SettingsGroup>
         ))}
         {/* Damaged records stay visible on both pages until deleted (they still take one of the host's slots). */}
-        {list && damaged.map((id) => <DamagedRow key={id} hostId={hostId} id={id} />)}
+        {list && damaged.map((id) => <SettingsGroup key={id} agents="none" source="host">{(effect) => <DamagedRow effect={effect} hostId={hostId} id={id} />}</SettingsGroup>)}
         {!all && list && list.length > FEATURE_PROFILES_ON_PAGE && (
-          <SubPageRow title={t("feature-profiles.all", { n: list.length })} onOpen={() => useApp.getState().openSettings("feature-profiles", { sub: FEATURE_PROFILES_SUB })} />
+          <SubPageRow title={t("feature-profiles.all", { n: list.length })} onOpen={() => useApp.getState().openSettings("profiles", { sub: FEATURE_PROFILES_SUB })} />
         )}
         {error && <ErrorNote>{error}</ErrorNote>}
       </div>
@@ -99,12 +163,16 @@ function ProfilesCard({ hostId, all }: { hostId: string; all: boolean }) {
   );
 }
 
-function Row({ hostId, profile: p, editing, onEdit }: { hostId: string; profile: FeatureProfile; editing: boolean; onEdit(on: boolean): void }) {
+function Row({ hostId, profile: p, canTest, editing, onEdit, effect }: { hostId: string; profile: FeatureProfile; canTest: boolean; editing: boolean; onEdit(on: boolean): void; effect?: RowEffect }) {
   const { t } = useI18n();
   const api = useTargetApi();
   const problemText = useProblemText();
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
+  const test = useConnectionTest();
+  // A result belongs to the settings it tested: a saved edit (a new row object) or opening the form drops it.
+  const clearTest = test.clear;
+  useEffect(() => clearTest(), [p, editing]); // eslint-disable-line react-hooks/exhaustive-deps
   const remove = async () => {
     setBusy(true);
     setProblem(null);
@@ -119,37 +187,51 @@ function Row({ hostId, profile: p, editing, onEdit }: { hostId: string; profile:
       setBusy(false);
     }
   };
+  // As a Profile card's grey line: what kind of endpoint first, then the model.
   const detail = [
-    p.model,
     isProtocol(p.protocol) ? PROTOCOL_LABEL[p.protocol] : p.protocol,
+    p.model,
     hostOf(p.baseUrl),
     isQuota(p.quotaType) ? t(`feature-profiles.quota.${p.quotaType}` as MessageKey) : p.quotaType,
   ].filter(Boolean).join(" · ");
   return (
     <ListRow
+      effect={effect}
       frame={editing ? "bg-surface-2/40" : undefined}
       leading={<span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-surface-2 text-muted"><KeyRound size={14} aria-hidden /></span>}
-      title={<span data-feature-profile={p.id}>{p.name}</span>}
+      title={
+        <>
+          <span data-feature-profile={p.id}>{p.name}</span>
+          {/* As a Profile card's problems beside its name (⚠ 未设置 API key). */}
+          {!p.keyPresent && <span className="ml-2 text-xs text-warn" data-feature-profile-key-missing="">⚠ {t("feature-profiles.key.missing")}</span>}
+        </>
+      }
       detail={
         <>
           {detail}
-          {!p.keyPresent && <span className="text-warn-text"> · {t("feature-profiles.key.missing")}</span>}
           {problem && <span className="text-danger"> · {problem}</span>}
         </>
       }
       actions={editing ? undefined : (
         <>
+          {canTest && (
+            <Button disabled={busy || test.running || !p.keyPresent} title={p.keyPresent ? undefined : t("feature-profiles.test.noKey")} onClick={() => void test.test({ profileId: p.id })}>
+              {t("feature-profiles.test.run")}
+            </Button>
+          )}
           <IconButton label={t("feature-profiles.edit")} disabled={busy} onClick={() => onEdit(true)}><Pencil size={13} /></IconButton>
           <ArmedRemove title={t("feature-profiles.remove")} disabled={busy} onRemove={() => void remove()} />
         </>
       )}
-      below={editing ? <Editor hostId={hostId} profile={p} onDone={() => onEdit(false)} /> : undefined}
+      below={editing
+        ? <Editor hostId={hostId} profile={p} canTest={canTest} onDone={() => onEdit(false)} />
+        : test.state ? <div className="mt-1 pl-[38px] text-xs" data-feature-profile-test-row={p.id}><TestOutcome state={test.state} /></div> : undefined}
     />
   );
 }
 
 /** A record the host could not read (list `errors`): its ID and delete; nothing to edit. */
-function DamagedRow({ hostId, id }: { hostId: string; id: string }) {
+function DamagedRow({ hostId, id, effect }: { hostId: string; id: string; effect?: RowEffect }) {
   const { t } = useI18n();
   const api = useTargetApi();
   const problemText = useProblemText();
@@ -170,6 +252,7 @@ function DamagedRow({ hostId, id }: { hostId: string; id: string }) {
   };
   return (
     <ListRow
+      effect={effect}
       leading={<span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-warn/15 text-warn-text"><TriangleAlert size={14} aria-hidden /></span>}
       title={<span data-feature-profile-damaged={id}>{t("feature-profiles.damaged")}</span>}
       detail={
@@ -204,8 +287,16 @@ function draftProblem(d: Draft, key: string | null, creating: boolean): MessageK
   return null;
 }
 
+/** The fields 测试连接 needs, as cutex checks them (name and quota type play no part). */
+function connectionProblem(d: Draft): MessageKey | null {
+  if (!d.protocol) return "feature-profiles.form.badProtocol";
+  if (!/^(https:\/\/|http:\/\/(127\.0\.0\.1|localhost|\[::1\]))/i.test(d.baseUrl.trim())) return "feature-profiles.form.badBaseUrl";
+  if (!d.model.trim() || /\s/.test(d.model.trim()) || d.model.trim().length > FEATURE_PROFILE_MODEL_MAX) return "feature-profiles.form.badModel";
+  return null;
+}
+
 /** Add (profile null) or edit inline. The key: required on add; on edit only after 更换密钥. */
-function Editor({ hostId, profile, onDone }: { hostId: string; profile: FeatureProfile | null; onDone(): void }) {
+function Editor({ hostId, profile, canTest, onDone }: { hostId: string; profile: FeatureProfile | null; canTest: boolean; onDone(): void }) {
   const { t } = useI18n();
   const api = useTargetApi();
   const problemText = useProblemText();
@@ -217,7 +308,27 @@ function Editor({ hostId, profile, onDone }: { hostId: string; profile: FeatureP
   const [key, setKey] = useState<string | null>(creating ? "" : null);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
-  const change = (patch: Partial<Draft>) => { setD((x) => ({ ...x, ...patch })); setProblem(null); };
+  const test = useConnectionTest();
+  const change = (patch: Partial<Draft>) => { setD((x) => ({ ...x, ...patch })); setProblem(null); test.clear(); };
+  // 测试连接 in the form: a key typed here makes a draft test; without one, an unchanged saved row tests by ID (its
+  // stored key); a changed endpoint without a key can't be tested (the stored key never comes back to the desktop).
+  const typedKey = key?.trim() || null;
+  const endpointChanged = !creating && (d.protocol !== initial.protocol || d.baseUrl.trim() !== initial.baseUrl || d.model.trim() !== initial.model);
+  const testBlocked: MessageKey | null = typedKey ? null
+    : creating ? "feature-profiles.form.badKey"
+    : endpointChanged ? "feature-profiles.test.needKey"
+    : !profile.keyPresent ? "feature-profiles.test.noKey" : null;
+  const runTest = () => {
+    if (testBlocked) return;
+    if (typedKey) {
+      const bad = connectionProblem(d);
+      if (bad) return setProblem(t(bad));
+      setProblem(null);
+      void test.test({ draft: { protocol: d.protocol as FeatureProfileProtocol, baseUrl: d.baseUrl.trim(), model: d.model.trim(), apiKey: typedKey } }, d.baseUrl);
+    } else if (profile) {
+      void test.test({ profileId: profile.id });
+    }
+  };
   const save = async () => {
     const bad = draftProblem(d, key, creating);
     if (bad) return setProblem(t(bad, { n: FEATURE_PROFILE_NAME_MAX }));
@@ -254,7 +365,7 @@ function Editor({ hostId, profile, onDone }: { hostId: string; profile: FeatureP
         <Segmented value={d.protocol as FeatureProfileProtocol} options={FEATURE_PROFILE_PROTOCOLS.map((p) => ({ value: p, label: PROTOCOL_LABEL[p] }))} disabled={busy} onChange={(protocol) => change({ protocol })} />
       </SettingRow>
       <SettingRow agents="none" source="host" label={t("feature-profiles.form.baseUrl")} info={t("feature-profiles.form.baseUrlInfo")}>
-        <TextInput mono width="w-72" value={d.baseUrl} placeholder={BASE_PLACEHOLDER[d.protocol || "openaiResponses"]} disabled={busy} onChange={(v) => change({ baseUrl: v })} />
+        <TextInput mono width="w-80" label={t("feature-profiles.form.baseUrl")} value={d.baseUrl} placeholder={BASE_PLACEHOLDER[d.protocol || "openaiResponses"]} disabled={busy} onChange={(v) => change({ baseUrl: v })} />
       </SettingRow>
       <SettingRow agents="none" source="host" label={t("feature-profiles.form.model")}>
         <TextInput mono width="w-64" value={d.model} maxLength={FEATURE_PROFILE_MODEL_MAX} placeholder={d.protocol === "anthropicMessages" ? "claude-haiku-5-5" : "gpt-6.2-mini"} disabled={busy} onChange={(v) => change({ model: v })} />
@@ -269,13 +380,23 @@ function Editor({ hostId, profile, onDone }: { hostId: string; profile: FeatureP
           <Button disabled={busy} onClick={() => setKey("")}>{t("feature-profiles.key.replace")}</Button>
         ) : (
           <>
-            <TextInput type="password" mono width="w-64" value={key} label={t("feature-profiles.form.key")} placeholder={t("feature-profiles.form.keyPlaceholder")} disabled={busy} onChange={(v) => { setKey(v); setProblem(null); }} />
-            {!creating && <Button disabled={busy} onClick={() => setKey(null)}>{t("feature-profiles.key.keep")}</Button>}
+            <TextInput type="password" mono width="w-80" value={key} label={t("feature-profiles.form.key")} placeholder={t("feature-profiles.form.keyPlaceholder")} disabled={busy} onChange={(v) => { setKey(v); setProblem(null); test.clear(); }} />
+            {!creating && <Button disabled={busy} onClick={() => { setKey(null); test.clear(); }}>{t("feature-profiles.key.keep")}</Button>}
           </>
         )}
       </SettingRow>
+      {canTest && (
+        <div className="flex min-h-9 flex-wrap items-center gap-2 border-t border-border py-2" data-feature-profile-test-form="">
+          <Button disabled={busy || test.running || testBlocked !== null} title={testBlocked ? t(testBlocked) : t("feature-profiles.test.draftHint")} onClick={runTest}>
+            {t("feature-profiles.test.run")}
+          </Button>
+          <span className="min-w-0 flex-1 text-xs">
+            {test.state ? <TestOutcome state={test.state} /> : testBlocked === "feature-profiles.test.needKey" ? <span className="text-subtle">{t(testBlocked)}</span> : null}
+          </span>
+        </div>
+      )}
       <div className="flex items-center justify-end gap-2 py-2">
-        {problem && <span className="min-w-0 flex-1 text-xs text-danger" data-feature-profile-problem="">{problem}</span>}
+        {problem &&<span className="min-w-0 flex-1 text-xs text-danger" data-feature-profile-problem="">{problem}</span>}
         <Button disabled={busy} onClick={() => { setKey(creating ? "" : null); onDone(); }}>{t("dialog.cancel")}</Button>
         <Button primary disabled={busy} onClick={() => void save()}>{creating ? t("feature-profiles.form.create") : t("settings.save")}</Button>
       </div>

@@ -17,6 +17,7 @@ const fx = vi.hoisted(() => ({
   put: vi.fn(async (skippedThrough: string | null) => ({ schema: 1, skippedThrough, updatedAt: "now" })),
 }));
 vi.mock("../src/renderer/src/i18n", () => ({ useI18n: () => ({ t: (k: string) => k }) }));
+vi.mock("../src/renderer/src/modules/Outlet", () => ({ SettingsSections: () => null }));
 vi.mock("../src/renderer/src/bridge", () => ({ api: { openExternal: fx.external, guidesPreferences: async () => fx.prefs, putGuidesPreferences: fx.put }, apiFor: () => ({guidesPreferences: async () => fx.prefs, putGuidesPreferences: fx.put}) }));
 vi.mock("../src/renderer/src/store", () => ({
   useApp: Object.assign((select: (s: unknown) => unknown) => select({ hosts: { active: fx.host } }), { getState: () => ({ openSettings: fx.openSettings, hosts: {active: fx.host} }) }),
@@ -156,12 +157,13 @@ describe("帮助", () => {
   it("lists every live guide with 再看一次, resets tips, skips all, links out", () => {
     act(() => root.render(h(HelpPage)));
     const listed = [...mount.querySelectorAll("[data-help-guide]")].map((e) => e.getAttribute("data-help-guide"));
-    expect(listed.sort()).toEqual(guides.liveGuides("0.2.0").map((g) => g.id).sort());
+    // The introduction is 帮助 → 开始使用 (module start, onboarding v3), not a guide row.
+    expect(listed.sort()).toEqual(guides.liveGuides("0.2.0").filter((g) => g.kind !== "onboarding").map((g) => g.id).sort());
     click(mount.querySelector("[data-help-skip] button"));
     expect(mount.querySelector("[data-help-guide='tip.tray']")!.getAttribute("data-seen")).toBe("true");
     click(mount.querySelector("[data-help-reset] button"));
     expect(mount.querySelector("[data-help-guide='tip.tray']")!.getAttribute("data-seen")).toBe("false");
-    expect(mount.querySelector("[data-help-guide='onboarding']")!.getAttribute("data-seen")).toBe("true");
+    expect(guides.guideSeen("onboarding")).toBe(true);
     const links = [...mount.querySelectorAll("[data-link-row]")];
     click(links.at(-1)!);
     expect(fx.external).toHaveBeenCalledWith(expect.stringMatching(/^https:\/\/github\.com\/.+\/issues$/));

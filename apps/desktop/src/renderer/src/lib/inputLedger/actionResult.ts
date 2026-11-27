@@ -24,3 +24,17 @@ export const REFUSAL_TEXT = {
   changed: { zh: "状态刚变了，请再点一次", en: "The status just changed; click again" },
   refused: null,
 } as const satisfies Record<InputActionRefusal, Text | null>;
+
+/**
+ * The reason a failed action's error gives, for the toast when the row has no 查看详情 / 查看原因 (owner 2026-11-28:
+ * 「…「查看详情」/「查看原因」里有原因」 on a row without either). A leading `code: ` is dropped (the code is in the
+ * diagnostic log); empty → null. Clipped: a toast is one or two lines.
+ */
+export function failureReason(error: unknown, max = 200): string | null {
+  const raw = (error instanceof Error ? error.message : String(error ?? "")).trim();
+  // Electron's IPC wrapper, then `Error:` / `SomethingError:` prefixes, then the cutex code.
+  const text = raw.replace(/^Error invoking remote method '[^']*':\s*/, "").replace(/^(?:[A-Za-z]*Error:\s*)+/, "")
+    .replace(/^[a-z][a-z0-9]*(?:_[a-z0-9]+)+:\s*/, "").trim() || raw;
+  if (!text) return null;
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+}

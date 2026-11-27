@@ -205,6 +205,14 @@ function persistLocale(locale: Locale): void {
   }
 }
 
+/** The mounted provider's setLocale (settings sync takes the synced language through it). */
+let externalSetLocale: ((locale: Locale) => void) | null = null;
+/** Switch the UI language from outside React (lib/settingsSync); no provider yet: stored for the next start. */
+export function requestLocale(locale: Locale): void {
+  if (externalSetLocale) externalSetLocale(locale);
+  else persistLocale(locale);
+}
+
 export function I18nProvider({ children }: { children: ReactNode }) {
   const [startLocale] = useState(detectLocale);
   // null = the start-up locale's catalog is still loading (render nothing meanwhile).
@@ -242,6 +250,10 @@ export function I18nProvider({ children }: { children: ReactNode }) {
     }
     loadLocale(next).then(apply, (error: unknown) => console.warn(`i18n: could not load ${next}`, error));
   }, []);
+  useEffect(() => {
+    externalSetLocale = setLocale;
+    return () => { if (externalSetLocale === setLocale) externalSetLocale = null; };
+  }, [setLocale]);
   const overrides = useTermOverrides();
   const terms = useMemo(() => resolveTerms(overrides, locale), [overrides, locale]);
   const t = useCallback((key: MessageKey, vars?: Record<string, string | number>) => format(locale, terms, key, vars), [locale, terms]);

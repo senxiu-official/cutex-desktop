@@ -5,8 +5,10 @@
 // is given and the host has it; otherwise the caller's fallback (a file chip) shows.
 import { useContext, useEffect, useReducer, useState, type ReactNode, type MouseEventHandler } from "react";
 import { createPortal } from "react-dom";
-import { Copy, Download, Image as ImageIcon, X } from "lucide-react";
+import { Copy, Download, Image as ImageIcon, SquarePen, X } from "lucide-react";
 import { PanZoomImage, usePanZoom } from "./PanZoom";
+import { captionBand } from "./WindowControls";
+import { ImageEditor } from "./ImageEditor";
 import type { MessageImage } from "../../../shared/input";
 import { EVENT_MEDIA_BLOBS_FEATURE, parseCutexBlobRef, parseMediaBlob } from "../../../shared/mediaBlobs";
 import { useI18n } from "../i18n";
@@ -15,17 +17,21 @@ import { fileVersion, useThumbnail } from "../lib/fileThumbnails";
 import { captureMediaAuthority, mediaKey, parseMediaRef, readHistoryMedia, useMediaAuthority } from "../lib/historyMedia";
 import { MediaLoaderContext } from "../lib/mediaLoader";
 import { HOST_FILE_READ_FEATURE } from "../lib/workspace";
-import { featuresOf, hostApi, useApp } from "../store";
+import { featuresOf, hostApi, sidebarOf, useApp } from "../store";
 import { api } from "../bridge";
 import { copyImage } from "../lib/imageCopy";
 import { isMac } from "../lib/openModifiers";
 import { displayKey } from "../lib/shortcuts";
-import { contextMenu } from "../lib/contextMenu";
+import { contextMenu, type MenuEntry } from "../lib/contextMenu";
+import { convHostOf, convSessionOf, useConvScope } from "../lib/conversationScope";
+import { agentFeaturesOf, maxImageBytes } from "../lib/agentFeatures";
+import { insertComposerDraft } from "../lib/composerDrafts";
 import { fileActions } from "../lib/fileActions";
 import { imageBox, imageDimensions, zoomImageBox, type ImageBounds } from "../lib/imageDimensions";
 import { rememberedImageSize, rememberImageSize } from "../lib/imageSizes";
 import { useLazyDataSrc } from "../lib/lazyImageSrc";
 import { useOwnerWindow } from "../lib/ownerContext";
+import { useTrackOverlay } from "../lib/openOverlays";
 
 // The copy key of the enlarged view (a key of this view only, like Esc; not a window shortcut).
 const COPY_CODE = "KeyC";
@@ -36,8 +42,9 @@ const ZOOM_BTN = "flex h-8 w-8 items-center justify-center rounded-md bg-black/5
  * 复制图片, 图片另存为… (when the image has a host read), 关闭; Ctrl/⌘+C copies (unless text is selected). The
  * wheel zooms at the cursor and a drag pans; zoomed, a click no longer closes (components/PanZoom, shared with
  * the side-pane preview, components/SideImage). Portaled: a `fixed` overlay inside a pane is boxed by it.
+ * `onEditAttach`: 编辑后附加 (图片编辑) — the caller closes this view and opens the editor.
  */
-export function ImageZoom({ src, onClose, onContextMenu, dimensions, onCopy, onSave }: { src: string; onClose(): void; onContextMenu?: MouseEventHandler; dimensions?: { width: number; height: number }; onCopy?(): Promise<boolean>; onSave?(): void }) {
+export function ImageZoom({ src, onClose, onContextMenu, dimensions, onCopy, onSave, onEditAttach }: { src: string; onClose(): void; onContextMenu?: MouseEventHandler; dimensions?: { width: number; height: number }; onCopy?(): Promise<boolean>; onSave?(): void; onEditAttach?(): void }) {
   const win = useOwnerWindow();
   const { t } = useI18n();
   const [failed, setFailed] = useState(false);
@@ -49,31 +56,48 @@ export function ImageZoom({ src, onClose, onContextMenu, dimensions, onCopy, onS
     return () => clearTimeout(timer);
   }, [copied]);
   const runCopy = onCopy && (() => void onCopy().then(setCopied));
+  // A modal view (owner 2026-11-28: Esc closed it AND stopped the agent's turn): counted as an open overlay (the
+  // input box's Esc, lib/openOverlays) and a dialog in the page (the conversation's Esc, lib/escInterrupt), and its
+  // Esc is taken in the capture phase — nothing under it sees that key press.
+  useTrackOverlay(true);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") return onClose();
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        return onClose();
+      }
       const mod = isMac() ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
       if (!onCopy || !mod || e.altKey || e.shiftKey || e.code !== COPY_CODE) return;
       if (win.getSelection()?.toString()) return; // copying selected text stays the text's
       e.preventDefault();
       runCopy?.();
     };
-    win.addEventListener("keydown", onKey);
-    return () => win.removeEventListener("keydown", onKey);
+    win.addEventListener("keydown", onKey, true);
+    return () => win.removeEventListener("keydown", onKey, true);
   }, [onClose, onCopy, win]);
   const copyTip = `${t("image.copy")} (${displayKey("Ctrl+C", isMac())})`;
   const pz = usePanZoom();
+  // Its toolbar sits under the window bar's band, clear of the window's own buttons (components/WindowControls): in
+  // that band the OS draws them over this overlay, on the right (Windows) or the left (macOS).
+  const band = captionBand();
   return createPortal(
     <div
       ref={pz.frameRef}
       {...pz.frameProps}
-      className="fixed inset-0 z-[150] flex items-center justify-center bg-black/70 p-8"
+      role="dialog"
+      aria-modal="true"
+      aria-label={t("image.enlarge")}
+      // No window drag under any of it (the window bar's drag strip would take the clicks: Linux has no caption band).
+      className="fixed inset-0 z-[150] flex items-center justify-center bg-black/70 p-8 [app-region:no-drag]"
       onClick={() => !pz.view && !pz.dragged() && onClose()}
       onContextMenu={onContextMenu}
       data-testid="message-image-zoom"
       data-zoomed={pz.view ? "" : undefined}
     >
-      <div data-image-zoom-toolbar="" role="toolbar" aria-label={t("image.toolbar")} className="absolute top-3 right-3 z-10 flex gap-1.5" onClick={(e) => e.stopPropagation()} onContextMenu={(e) => e.stopPropagation()}>
+      {/* A press on a button never reaches the frame: zoomed, the frame captures the pointer for a pan and the click
+          went to it instead of the button (owner 2026-11-28: 关闭 did nothing). */}
+      <div data-image-zoom-toolbar="" role="toolbar" aria-label={t("image.toolbar")} className="absolute right-3 z-10 flex gap-1.5 [app-region:no-drag]" style={{ top: `calc(${band}px + 0.75rem)` }} onPointerDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()} onContextMenu={(e) => e.stopPropagation()}>
         {!failed && pz.canActual && (
           <button type="button" data-image-zoom-actual="" title={t(pz.view ? "image.fit" : "image.actual")} aria-label={t(pz.view ? "image.fit" : "image.actual")} onClick={pz.toggleActual} className={`${ZOOM_BTN} w-auto px-2 text-xs font-medium`}>
             {pz.view ? t("image.fitShort") : "100%"}
@@ -82,6 +106,11 @@ export function ImageZoom({ src, onClose, onContextMenu, dimensions, onCopy, onS
         {onCopy && !failed && (
           <button type="button" data-image-zoom-copy="" title={copyTip} aria-label={t("image.copy")} onClick={runCopy} className={ZOOM_BTN}>
             <Copy size={16} aria-hidden />
+          </button>
+        )}
+        {onEditAttach && !failed && (
+          <button type="button" data-image-zoom-edit="" title={t("imageEdit.editAttach")} aria-label={t("imageEdit.editAttach")} onClick={onEditAttach} className={ZOOM_BTN}>
+            <SquarePen size={16} aria-hidden />
           </button>
         )}
         {onSave && !failed && (
@@ -94,7 +123,7 @@ export function ImageZoom({ src, onClose, onContextMenu, dimensions, onCopy, onS
         </button>
       </div>
       {copied !== null && (
-        <span data-image-zoom-notice="" role="status" className={`absolute top-14 right-3 z-10 rounded-md px-2.5 py-1 text-xs shadow ${copied ? "bg-black/70 text-white" : "bg-danger-solid text-white"}`}>
+        <span data-image-zoom-notice="" role="status" style={{ top: `calc(${band}px + 3.5rem)` }} className={`absolute right-3 z-10 rounded-md px-2.5 py-1 text-xs shadow ${copied ? "bg-black/70 text-white" : "bg-danger-solid text-white"}`}>
           {t(copied ? "image.copied" : "image.actionFailed")}
         </span>
       )}
@@ -105,6 +134,12 @@ export function ImageZoom({ src, onClose, onContextMenu, dimensions, onCopy, onS
     </div>,
     win.document.body,
   );
+}
+
+/** The per-image byte limit of the agent an edited copy is attached to (Claude 5 MB, else 8 MB). */
+function editLimit(hostId: string, sessionId: string): number {
+  const bar = sidebarOf(useApp.getState(), hostId);
+  return maxImageBytes(agentFeaturesOf([...(bar?.active ?? []), ...(bar?.retired ?? [])].find((r) => r.cutexSessionId === sessionId)));
 }
 
 /** The src of `image`: its data URL, or a host path's bytes read through cutex (null while unknown / unreadable). */
@@ -162,8 +197,13 @@ function imageMetadata(image: MessageImage): string {
  * the image; `fallback` shows when there is nothing to render (a path the host cannot read).
  * `rememberSize`: a host path without a size from cutex reserves the box it had when it last loaded here (lib/imageSizes).
  */
-export function ImageThumb({ image, hostId, title, className, imgClassName, fallback, bounds, loadingPreview, rememberSize = false }: { image: MessageImage; hostId?: string | null; title?: string; className: string; imgClassName: string; fallback: ReactNode; bounds?: ImageBounds; loadingPreview?: string; rememberSize?: boolean }) {
+export function ImageThumb({ image, hostId, title, className, imgClassName, fallback, bounds, loadingPreview, rememberSize = false, editAttach = true, menuExtra }: { image: MessageImage; hostId?: string | null; title?: string; className: string; imgClassName: string; fallback: ReactNode; bounds?: ImageBounds; loadingPreview?: string; rememberSize?: boolean;
+  /** 编辑后附加 in the enlarged view and the menu (图片编辑): off for the composer's own attachments, which edit in place. */
+  editAttach?: boolean;
+  /** Entries before the image's own in its right-click menu. */
+  menuExtra?: () => MenuEntry[] }) {
   const { t } = useI18n();
+  const scope = useConvScope();
   // A provided media loader (the iPad) has no host bridge: no copy / save / file actions.
   const bridged = !useContext(MediaLoaderContext);
   const pathText = image.kind === "path" && image.delivery === "pathText";
@@ -180,6 +220,8 @@ export function ImageThumb({ image, hostId, title, className, imgClassName, fall
   const dimensions = recorded ?? (sizePath ? rememberedImageSize(hostId!, sizePath) : undefined);
   const box = imageBox(dimensions, bounds);
   const [zoom, setZoom] = useState(false);
+  // 编辑后附加: the shown bytes, and the composer they go to (the conversation's agent when the editor opened).
+  const [editing, setEditing] = useState<{ src: string; hostId: string; sessionId: string } | null>(null);
   const [broken, setBroken] = useState<string | null>(null);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
   useEffect(() => { setZoom(false); setActionNotice(null); }, [key, retry]);
@@ -208,7 +250,28 @@ export function ImageThumb({ image, hostId, title, className, imgClassName, fall
       } catch { if (current()) setActionNotice(t("image.actionFailed")); }
     };
   })();
+  const editTarget = () => {
+    const s = useApp.getState();
+    const sessionId = convSessionOf(scope, s);
+    return sessionId ? { hostId: convHostOf(scope, s), sessionId } : null;
+  };
+  const openEditor = (shown: string) => {
+    const target = editTarget();
+    const notify = useApp.getState().notify;
+    if (!target) return notify(t("imageEdit.noComposer"), "error");
+    setZoom(false);
+    setEditing({ src: shown, ...target });
+  };
+  const canEditAttach = editAttach && bridged;
   const menu = contextMenu(() => {
+    const extra = menuExtra?.() ?? [];
+    const own = ownMenu();
+    const edit = canEditAttach && src && broken !== src ? [{ label: t("imageEdit.editAttach"), onSelect: () => openEditor(src) }] : [];
+    // The caller's entries first (编辑… in the composer), then the image's own (复制图片 …), then 编辑后附加.
+    const groups = [extra, own, edit].filter((g) => g.length);
+    return groups.flatMap((g, i) => (i ? ["separator" as const, ...g] : g));
+  });
+  const ownMenu = (): MenuEntry[] => {
     if (!bridged) return [];
     const current = authority();
     const copyEntry = src && broken !== src ? [{ label: t("image.copy"), onSelect: async () => void (await copy(src, current)) }] : [];
@@ -216,7 +279,7 @@ export function ImageThumb({ image, hostId, title, className, imgClassName, fall
     const target = hostInput(image, hostId);
     if (!target || !hostId) return copyEntry;
     return [{ label: t("image.copy"), onSelect: async () => void (await copy(src && broken !== src ? src : null, current)) }, ...(save ? [{ label: t("image.save"), onSelect: () => save(current) }] : [])];
-  });
+  };
   const metadata = imageMetadata(image);
   if (loading && !src) return <span ref={ref} style={box} data-image-box={dimensions ? "reserved" : undefined} onContextMenu={menu} role="status" title={`${t("image.loading")} ${metadata}`} aria-label={`${t("image.loading")} ${metadata}`} className={`flex items-center gap-1 overflow-hidden bg-surface-2 p-1 text-xs text-subtle ${className}`}><ImageIcon size={12} className="shrink-0" /><span className="min-w-0 truncate">{t("image.loading")}{metadata && ` · ${metadata}`}</span></span>;
   if (!src || broken === src) return <span ref={ref} onContextMenu={menu} className="inline-flex flex-col gap-1" data-image-failed="">
@@ -247,7 +310,19 @@ export function ImageThumb({ image, hostId, title, className, imgClassName, fall
         }} onError={() => !pending && setBroken(src)} className={imgClassName} />
       </button>
       {actionNotice && <span role="status" className="text-xs text-muted">{actionNotice}</span>}
-      {zoom && <ImageZoom key={src} src={src} dimensions={dimensions} onContextMenu={menu} onClose={() => setZoom(false)} onCopy={bridged ? () => copy(src) : undefined} onSave={save && (() => void save())} />}
+      {zoom && <ImageZoom key={src} src={src} dimensions={dimensions} onContextMenu={menu} onClose={() => setZoom(false)} onCopy={bridged ? () => copy(src) : undefined} onSave={save && (() => void save())} onEditAttach={canEditAttach ? () => openEditor(src) : undefined} />}
+      {editing && <ImageEditor
+        src={editing.src}
+        maxBytes={editLimit(editing.hostId, editing.sessionId)}
+        saveLabel={t("imageEdit.attach")}
+        saveUnchanged
+        onCancel={() => setEditing(null)}
+        onSave={(r) => {
+          insertComposerDraft(editing.hostId, editing.sessionId, "", "append", [{ type: "image", url: r.url }]);
+          setEditing(null);
+          useApp.getState().notify(t("imageEdit.attached"));
+        }}
+      />}
     </>
   );
 }

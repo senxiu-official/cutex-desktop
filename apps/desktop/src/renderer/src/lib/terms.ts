@@ -293,6 +293,16 @@ export function getTermOverrides(): TermOverrides {
   return current;
 }
 
+/** Settings sync (lib/settingsSync): every term as synced from another device (validated like a stored copy). */
+export function replaceTermOverrides(next: unknown): void {
+  save(parseOverrides(next));
+}
+
+export function subscribeTerms(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
 export function useTermOverrides(): TermOverrides {
   return useSyncExternalStore(
     (l) => {

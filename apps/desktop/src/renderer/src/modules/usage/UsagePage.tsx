@@ -1001,7 +1001,7 @@ function PricesDialog({ prices, host, add, usedModels, unpriced, canMap, onClose
   const mapCols = "grid grid-cols-[minmax(0,1fr)_1rem_minmax(0,1fr)_4.5rem] items-center gap-2";
   return (
     <SettingsGroup agents="none" source="host"><div className="fixed inset-0 z-[150] flex items-center justify-center bg-black/40" onMouseDown={onClose}>
-      <div ref={card.ref} className="flex max-h-[85vh] w-[640px] flex-col rounded-2xl border border-border bg-surface p-5 shadow-2xl" onMouseDown={(e) => e.stopPropagation()}>
+      <div ref={card.ref} role="dialog" aria-modal="true" className="flex max-h-[85vh] w-[640px] flex-col rounded-2xl border border-border bg-surface p-5 shadow-2xl" onMouseDown={(e) => e.stopPropagation()}>
         <div className="mb-1 flex items-center">
           <h3 className="font-semibold">{host ? t("usage.all.pricesOn", { host }) : t("usage.prices")}</h3>
           <span className="ml-auto">

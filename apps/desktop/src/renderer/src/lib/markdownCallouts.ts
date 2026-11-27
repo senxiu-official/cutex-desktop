@@ -1,9 +1,8 @@
-// Callout quotes (教学模式, docs/design/teaching-mode.md P1): a blockquote whose first line starts with a GitHub-style
+// Callout quotes (Markdown alerts; part of normal message rendering since 2026-11-27): a blockquote whose first line starts with a GitHub-style
 // marker — `> [!EXPLAIN] 标题`, `> [!NOTE]`, `[!TIP]`, `[!IMPORTANT]`, `[!WARNING]`, `[!CAUTION]` — is marked for
 // components/MarkdownCallout. The tree change keeps every character in place: the marker and the title stay as an inline
-// `<span data-callout-head>` at the start of the first paragraph, so with 教学模式 off (or any reader that ignores the
-// attributes) the quote renders exactly as plain Markdown; only the card hides that span and shows the title in its head.
-// The result does not depend on the pref, so the hast cache (lib/markdownCache) stays valid when it changes.
+// `<span data-callout-head>` at the start of the first paragraph, so a reader that ignores the attributes (mobile, or
+// an older client) renders the quote exactly as plain Markdown; only the card hides that span and shows the title in its head.
 // Append after sanitize (fixed attribute names, text copied from the tree, no HTML).
 import type { HastNode } from "./markdownPathText";
 

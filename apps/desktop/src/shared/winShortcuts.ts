@@ -23,13 +23,16 @@ export interface ShortcutSpec {
   description: string;
 }
 
-/** Launcher for a portable install: through the `current` link, so updates keep it valid. */
-export function launcherSpec(layout: InstallLayout): ShortcutSpec {
+/**
+ * Launcher for a portable install: through the `current` link, so updates keep it valid. `icon`: the .ico of the
+ * 外观 → 应用图标 style (main copies it under userData); absent = the default style (螺钿) shipped with every release.
+ */
+export function launcherSpec(layout: InstallLayout, icon?: string): ShortcutSpec {
   const current = layout.currentLink;
   return {
     target: `${current}\\cutex.exe`,
     cwd: current,
-    icon: `${current}\\resources\\app\\resources\\icons\\icon.ico`,
+    icon: icon ?? `${current}\\resources\\app\\resources\\icons\\icon.ico`,
     iconIndex: 0,
     appUserModelId: APP_USER_MODEL_ID,
     description: "Cutex",

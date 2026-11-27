@@ -38,8 +38,7 @@
 // first / last message.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from "react";
 import { Check, ChevronDown, ChevronRight, ListChecks, Minimize2, MoreHorizontal, Settings as SettingsIcon } from "lucide-react";
-import { useForetell } from "../../lib/foretell";
-import { openPanelSettings, panelSettingsForetell } from "../../lib/panelSettings";
+import { services } from "../app";
 import { useI18n, type MessageKey } from "../../i18n";
 import { CAPSULE_CORNERS, isLeft, isTop } from "../../lib/capsuleLayout";
 import { getUiPrefs, setUiPref, useUiPrefs, type UiPrefs } from "../../lib/prefs";
@@ -48,7 +47,7 @@ import { capsuleToggle, inCapsule, shownOn, type PlacedStatus } from "../../lib/
 import { setStatusPlace, useStatusItems } from "../../lib/statusItemsView";
 import { ItemBoundary } from "../Outlet";
 import type { OverlayLayout, StatusLine } from "../slots";
-import { capsuleSectionId, registerCapsuleView, revealInCapsule, toggleCapsuleFolded } from "./capsuleState";
+import { CAPSULE_SETTINGS_PAGE, capsuleSectionId, registerCapsuleView, revealInCapsule, toggleCapsuleFolded } from "./capsuleState";
 import { sharedResizeObserver } from "../../lib/resizeHub";
 import { Tag } from "../../components/Tag";
 import { keyVar, matchesCommand } from "../../lib/keybindings";
@@ -170,23 +169,21 @@ const ICON_BUTTON = "flex size-6 shrink-0 items-center justify-center rounded-md
 const CHOICE = "h-7 rounded-md px-2 text-xs";
 const choice = (on: boolean) => `${CHOICE} ${on ? "bg-surface-2 text-foreground" : "text-muted hover:bg-surface-2 hover:text-foreground"}`;
 
-/** The panel's … menu: corner, edge (Settings → 状态显示), size (Settings → 状态显示 → 胶囊外观) and which items show here. */
+/** The panel's … menu's last row: 「胶囊设置…」, the module's own settings page (owner 2026-11-28; was 状态显示). */
 function StatusSettingsRow({ onClose }: { onClose(): void }) {
   const { t } = useI18n();
-  const foretell = useForetell(() => panelSettingsForetell("status", "[data-status-capsule]"));
   return (
     <button
       role="menuitem"
       data-capsule-settings=""
-      {...foretell}
       onClick={() => {
         onClose();
-        openPanelSettings("status");
+        services.ui.openSettings(CAPSULE_SETTINGS_PAGE);
       }}
       className="mt-1 flex h-7 w-full items-center gap-2 rounded-md border-t border-border px-2 pt-1 text-left text-xs text-muted hover:bg-surface-2 hover:text-foreground"
     >
       <SettingsIcon size={13} className="shrink-0" />
-      <span className="min-w-0 truncate">{t("settings.panel.menu.status")}</span>
+      <span className="min-w-0 truncate">{t("status-capsule.settingsMenu")}</span>
     </button>
   );
 }

@@ -5,7 +5,7 @@ import { FileText, FolderTree, GitCompare, LocateFixed } from "lucide-react";
 import { revealHostInTree, revealInTree } from "../../lib/sideOpen";
 import { defineModule } from "../slots";
 import { ChangesBody } from "./Changes";
-import { FilesBody, type FilesState } from "./Files";
+import type { FilesState } from "./Files";
 import { restoreFiles } from "./explorer/state";
 import { PreviewBody } from "./Preview";
 import { baseOf, initPreview, parsePreviewParams, previewKey, restorePreview, type PreviewParams, type PreviewState } from "./previewState";
@@ -13,6 +13,7 @@ import { CHANGES, FILES, PREVIEW } from "./shared";
 import { useChangesTab, useFilesTab, usePreviewTab } from "./tabs";
 import { lazyPage } from "../../lib/lazyPage";
 
+const FilesBody = lazyPage(() => import("./Files").then((m) => m.FilesBody));
 const ViewerSettings = lazyPage(() => import("./ViewerSettings").then((m) => m.ViewerSettings));
 
 const WORKSPACE_FS = "workspace-fs";

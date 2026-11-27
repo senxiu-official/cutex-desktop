@@ -1,18 +1,9 @@
-// The illustrated 0.2.0 tour (owner 2026-10-23): shown instead of the text 新功能 for 0.2.0 only (later versions keep the
-// text list), replayable from Settings → 关于. Pure parts here (tested: test/tour.test.tsx); components/OnboardingFlow draws it.
+// The first-contact portrait choice (owner 2026-10-23), now on Settings → 自定义桌面 (modules/start; the 0.2.0 tour it
+// came from was removed with onboarding v3, owner 2026-11-26). Pure parts here (tested: test/tour.test.tsx).
 //
 // 拟人头像 (owner): the user answers 用 / 先不用 himself — no 「帮我决定」 for that question and 「都帮我决定」 leaves it
 // unanswered; Next waits for an answer; Skip / Esc = today's look (nothing written). Once 用: the theme picker's
 // 「帮我决定」 = every theme (混合); 用 needs at least one theme to go on.
-
-/** The versions with a tour (their 新功能 is the tour). */
-export const TOUR_VERSIONS: readonly string[] = ["0.2.0"];
-
-/** Whether `version`'s 新功能 is a tour (0.2.0 and its pre-releases). */
-export function hasTour(version: string | null | undefined): boolean {
-  if (!version) return false;
-  return TOUR_VERSIONS.some((v) => version === v || version.startsWith(`${v}-`));
-}
 
 /** The answer to 「要不要用拟人头像」: null = not answered yet. */
 export interface PortraitAnswer {

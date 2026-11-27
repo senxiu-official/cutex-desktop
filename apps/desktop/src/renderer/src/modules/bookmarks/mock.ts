@@ -79,12 +79,23 @@ function remoteOf(hostId: string): OwnerPin[] {
 }
 
 function api(list: OwnerPin[], hostId: string, emitHost: (method: string, params: Record<string, unknown>) => void) {
+  const created = new Map<string, OwnerPin>();
   return {
     async ownerPins(query: { state?: "open" | "all"; agentId?: string; limit?: number }): Promise<OwnerPinList> {
       // cutex r289+: limit defaults to and is capped at 200; more is refused with 400.
       if (query.limit !== undefined && (query.limit < 1 || query.limit > 200)) throw new Error("invalid_request: limit must be 1..200");
       const pins = list.filter((p) => (!query.agentId || p.agentId === query.agentId) && (query.state === "all" || p.state === "open"));
       return { hostId, pins: structuredClone(pins), openCount: list.filter((p) => p.state === "open").length };
+    },
+    /** `owner-pins-create-v1` (POST /v2/owner-pins): an owner-written note under an agent (个人助理 今日's 记一下). */
+    async ownerPinCreate(body: { actionId: string; kind: "note"; title: string; detail: string | null; agentId: string | null }): Promise<OwnerPin> {
+      const prior = created.get(body.actionId);
+      if (prior) return structuredClone(prior);
+      const p = pin(body.agentId ?? "owner", body.kind, body.title, 0, { author: "owner", detail: body.detail });
+      list.unshift(p);
+      created.set(body.actionId, p);
+      emitHost("cutex/ownerPin/changed", { pin: structuredClone(p) });
+      return structuredClone(p);
     },
     async ownerPinUpdate(pinId: string, change: OwnerPinChange): Promise<OwnerPinUpdateResult> {
       const i = list.findIndex((p) => p.pinId === pinId);
@@ -139,7 +150,8 @@ function aldenThread() {
 }
 
 export const mock: ModuleMock = {
-  features: { new: ["owner-pins"] },
+  // owner-pins-create-v1: an owner note (个人助理 今日's 记一下; shared/personalAssistantsPhase1.ts).
+  features: { new: ["owner-pins", "owner-pins-create-v1"] },
   api: (core: MockCore) => api(local, "local", (m, params) => core.emitHost(m, params)),
   remote: (hostId, emitHost) => api(remoteOf(hostId), hostId, emitHost),
   thread: (sessionId) => (scene && sessionId === "alden" ? aldenThread() : null),

@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 // Setting a badge or a note is drawn at once (owner 2026-10-27 「设置徽章、备注很慢」): lib/menus updateAgentBadge /
 // setAgentNote hold the new value over every sidebar snapshot until cutex answers (lib/pendingMetadata), roll back on
 // a failure, and a conflict retry still compares against cutex's value, not the held one.

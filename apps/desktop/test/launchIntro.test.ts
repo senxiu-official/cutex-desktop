@@ -12,7 +12,9 @@ vi.mock("../src/renderer/src/modules/react", () => ({ useModuleEnabled: () => st
 vi.mock("../src/renderer/src/lib/prefs", () => ({ useUiPrefs: () => ({ timelineIntro: state.display }) }));
 vi.mock("../src/renderer/src/lib/providerGreetings", () => ({ providerGreetings: () => ["Provider welcome, {name}"] }));
 vi.mock("../src/renderer/src/lib/launchArt", () => ({ useLaunchArtView: () => ({ art: {}, imported: {}, ready: true }) }));
-vi.mock("../src/renderer/src/components/LaunchPortraits", () => ({ LaunchPortraits: () => null }));
+vi.mock("../src/renderer/src/components/LaunchPortraits", () => ({ PortraitImage: () => null }));
+// The New Agent columns pull in the menu stack (it needs a DOM); this file checks the icon intro only.
+vi.mock("../src/renderer/src/components/LaunchProviderColumns", () => ({ LaunchProviderColumns: () => null }));
 
 import { LaunchIntro } from "../src/renderer/src/components/LaunchPage";
 
@@ -29,7 +31,7 @@ it.each([
       const html = renderToStaticMarkup(createElement(LaunchIntro, {
         icon: "icon", title, hint: "Page help", provider: "codex", greeting,
         // Off must also work before profiles have loaded.
-        portraits: { profiles: null, selected: false, disabled: false, onSelect: () => {} },
+        columns: { hostId: "local", profiles: null, selected: false, auto: false, unavailable: () => null, disabled: false, onSelect: () => {} },
       }));
       expect(html).toContain("launch-intro-icon");
       expect(html).toContain(`title="${title}">${title}</h1>`);

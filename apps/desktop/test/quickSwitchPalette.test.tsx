@@ -11,17 +11,16 @@ import type { QsItem } from "../src/renderer/src/modules/quick-switch/model";
 const fx = vi.hoisted(() => ({ items: [] as QsItem[], shelves: false }));
 
 vi.mock("../src/renderer/src/modules/quick-switch/useItems", () => ({
-  usePaletteItems: () => ({ items: fx.items, shelves: fx.shelves, loadingArtifacts: false, hostLook: () => null }),
+  usePaletteItems: () => ({ items: fx.items, shelves: fx.shelves, loadingArtifacts: false, hostLook: () => null, preloadMainPage: vi.fn() }),
 }));
 vi.mock("../src/renderer/src/i18n", () => ({
   I18nProvider: ({ children }: { children: unknown }) => children,
   useI18n: () => ({ t: (key: string) => key, locale: "en" }),
-  // ⌘K preloads the lazy pages and the en search aliases (lib/lazyPage preloadOnIntent).
   loadEnglish: () => Promise.resolve(),
 }));
 vi.mock("../src/renderer/src/components/Avatar", () => ({ Avatar: ({ name }: { name: string }) => h("span", { "data-avatar": name }) }));
 vi.mock("../src/renderer/src/components/HostMark", () => ({ HostDot: () => null }));
-vi.mock("../src/renderer/src/lib/services", () => ({ openServiceExternal: vi.fn(async () => {}) }));
+vi.mock("../src/renderer/src/lib/services", () => ({ openServiceTab: vi.fn(async () => {}) }));
 vi.mock("../src/renderer/src/lib/sideServices", () => ({ sideShowsHost: (id: string) => id === "local" }));
 vi.mock("../src/renderer/src/lib/openModifiers", () => ({ isMac: () => false }));
 vi.mock("../src/renderer/src/modules/quick-switch/shelfPages", () => ({ readShelfPages: () => [], showShelfPage: () => true }));

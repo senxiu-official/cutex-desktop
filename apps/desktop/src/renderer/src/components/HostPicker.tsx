@@ -39,8 +39,12 @@ function HostFace({ host }: { host: HostLook }) {
  * `all`: a first row 「全部主机」 (a settings page that can show every host at once; lib/settingsAllHosts).
  * While `all.selected` the trigger shows it; picking a host (also `value`) calls `onChange`.
  * `only`: list just these hosts (e.g. the ones a 「全部主机」 view includes).
+ * `switcher`: the title bar's host switcher look (components/HostSwitcher: platform icon, dot, name, status, ⌄ on a
+ * quiet button) and always openable, also with one host online: the menu shows the others and why they cannot be
+ * picked (owner 2026-11-28: every Settings host picker is 「顶部那种：可以随时切换」; SettingsHostFrame
+ * SettingsHostSwitcher).
  */
-export function HostPicker({ value, onChange, mode, title, prefix = false, up = false, only, all, chip = false }: { value: string; onChange(hostId: string): void; mode: HostPickerMode; title: string; prefix?: boolean; up?: boolean; only?: readonly string[]; all?: { label: string; hint?: string; selected: boolean; onSelect(): void }; chip?: boolean }) {
+export function HostPicker({ value, onChange, mode, title, prefix = false, up = false, only, all, chip = false, switcher = false }: { value: string; onChange(hostId: string): void; mode: HostPickerMode; title: string; prefix?: boolean; up?: boolean; only?: readonly string[]; all?: { label: string; hint?: string; selected: boolean; onSelect(): void }; chip?: boolean; switcher?: boolean }) {
   const win = useOwnerWindow();
   const { t } = useI18n();
   const scope = useHostScope();
@@ -61,6 +65,7 @@ export function HostPicker({ value, onChange, mode, title, prefix = false, up = 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
   if (mode === "none" || !current) return null;
+  if (switcher) mode = "picker";
   const label = prefix && <span className="shrink-0 text-subtle">{t("hostPicker.label")}：</span>;
   const chipFace = (
     <>
@@ -119,8 +124,11 @@ export function HostPicker({ value, onChange, mode, title, prefix = false, up = 
         aria-haspopup="listbox"
         aria-expanded={open}
         onClick={() => setOpen(!open)}
+        data-settings-host-switcher={switcher ? "" : undefined}
         className={
-          chip
+          switcher
+            ? `press inline-flex h-6 max-w-64 min-w-0 items-center gap-1.5 rounded-md px-2 text-xs text-muted hover:bg-surface-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent ${open ? "bg-surface-2 text-foreground" : ""}`
+            : chip
             ? `inline-flex h-[18px] max-w-48 items-center gap-1 rounded-r-chip bg-accent-soft pr-1.5 text-caption/[inherit] text-accent hover:brightness-125 focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:outline-none ${open ? "brightness-125" : ""}`
             : `inline-flex h-7 max-w-64 items-center gap-1.5 rounded-md border border-border bg-background px-2 text-ui/[inherit] hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-accent/30 focus-visible:outline-none ${open ? "bg-surface-2" : ""}`
         }
@@ -133,13 +141,22 @@ export function HostPicker({ value, onChange, mode, title, prefix = false, up = 
           </>
         ) : chip ? (
           chipFace
+        ) : switcher ? (
+          <>
+            <HostPlatformIcon platform={current.platform} size={13} />
+            <HostDot color={current.color} status={current.indicator.status} />
+            <span className="min-w-0 truncate">
+              <ScriptText text={current.label} />
+            </span>
+            {status(current) && <span className={`shrink-0 ${current.indicator.status === "error" || current.indicator.status === "offline" ? "text-danger" : current.indicator.status === "disconnected" ? "text-subtle" : "text-warn"}`}>{status(current)}</span>}
+          </>
         ) : (
           <>
             <HostFace host={current} />
             {status(current) && <span className="shrink-0 text-xs text-subtle">{status(current)}</span>}
           </>
         )}
-        <ChevronDown size={chip ? 11 : 13} className={`shrink-0 ${chip ? "" : "text-subtle"}`} />
+        <ChevronDown size={chip ? 11 : switcher ? 12 : 13} className={`shrink-0 ${chip || switcher ? "" : "text-subtle"}`} />
       </button>
       {open && (
         <div role="listbox" data-popover="" aria-label={title} className={`float absolute ${up ? "bottom-full mb-1" : "top-full mt-1"} left-0 z-[160] max-h-80 min-w-64 overflow-y-auto p-1 float-scroll`}>

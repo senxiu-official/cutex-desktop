@@ -47,7 +47,10 @@ describe("alias names: the version from the SDK handshake (owner 2026-11-23 labe
   it("the reported target is what folds into the alias row (not the catalog's newest)", () => {
     const list = withRes({ opus: { resolvedModel: "claude-opus-4-8", resolvedModelSource: "sdkHandshake", resolvedDisplayVersion: "4.8" } });
     const rows = foldClaudeModels(list, (m) => m.id, (m) => m.displayName, "sonnet");
-    expect(rows.find((r) => r.item.id === "opus")!.folded).toEqual(["claude-opus-4-8", "opus[1m]"]);
+    const opus = rows.find((r) => r.item.id === "opus")!;
+    expect(opus.folded).toEqual(["opus[1m]"]);
+    expect(opus.follows).toBe("claude-opus-4-8");
+    expect(rows.find((r) => r.item.id === "claude-opus-4-8")!.primary).toBe(false);
     expect(rows.some((r) => r.item.id === "claude-opus-5-5")).toBe(true);
   });
 });
@@ -60,15 +63,17 @@ describe("foldClaudeModels", () => {
     expect(ids(primary)).toEqual(["opus", "sonnet", "fable", "haiku"]);
     expect(primary.map((r) => r.name)).toEqual(["Opus", "Sonnet", "Fable", "Haiku"]);
     expect(primary.map((r) => r.alias)).toEqual([{ version: null }, { version: null }, { version: null }, { version: null }]);
-    expect(rows.find((r) => r.item === "opus")!.folded).toEqual(["claude-opus-5-5", "opus[1m]"]);
-    // 23 ids → 23 − 4 newest fixed ids − 2 [1m] aliases.
-    expect(rows).toHaveLength(17);
-    for (const gone of ["claude-opus-5-5", "claude-sonnet-5-5", "opus[1m]", "sonnet[1m]"]) expect(ids(rows)).not.toContain(gone);
+    expect(rows.find((r) => r.item === "opus")!.folded).toEqual(["opus[1m]"]);
+    expect(rows.find((r) => r.item === "opus")!.follows).toBe("claude-opus-5-5");
+    // 23 ids → 23 − 2 [1m] aliases. The newest fixed ids stay (under 更多) so they can be pinned (2026-11-28).
+    expect(rows).toHaveLength(21);
+    for (const gone of ["opus[1m]", "sonnet[1m]"]) expect(ids(rows)).not.toContain(gone);
+    for (const kept of ["claude-opus-5-5", "claude-sonnet-5-5"]) expect(rows.find((r) => r.item === kept)).toMatchObject({ primary: false, tag: null });
   });
 
   it("lists older models newest first per family, then the modes", () => {
     const more = ids(rows.filter((r) => !r.primary));
-    expect(more.slice(0, 5)).toEqual(["claude-opus-5", "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6", "claude-opus-4-5-20251101"]);
+    expect(more.slice(0, 5)).toEqual(["claude-opus-5-5", "claude-opus-5", "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6"]);
     expect(more.slice(-3)).toEqual(["best", "opusplan", "default"]);
   });
 

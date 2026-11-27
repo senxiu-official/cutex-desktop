@@ -83,12 +83,12 @@ function StepRow({ step, sessionId }: { step: StepEntry; sessionId: string }) {
   return step.kind === "reasoning" ? <ReasoningRow entry={step} /> : <ToolRow item={step.item} sessionId={sessionId} />;
 }
 
-export function ToolRow({ item, sessionId }: { item: RawItem; sessionId: string }) {
+export function ToolRow({ item, sessionId, items }: { item: RawItem; sessionId: string; /** A gathered row's items (timeline.tool `gather`). */ items?: readonly RawItem[] }) {
   const review = autoReviewOf(item);
-  if (!review) return <ToolOutlet item={item} sessionId={sessionId} />;
+  if (!review) return <ToolOutlet item={item} sessionId={sessionId} items={items} />;
   return (
     <>
-      <ToolOutlet item={item} sessionId={sessionId} />
+      <ToolOutlet item={item} sessionId={sessionId} items={items} />
       <AutoReviewLine review={review} />
     </>
   );

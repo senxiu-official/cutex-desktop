@@ -16,6 +16,7 @@ import { BrowserHistory } from "./identity/history";
 import { browserIdentityPartition, DEFAULT_BROWSER_IDENTITY_ID as DEFAULT_ID, type BrowserHistoryTransition } from "../../shared/browserIdentity";
 import { createBrowserPasswordService, createPlatformPasswordStore } from "./passwords";
 import { createOwnerGestures } from "./passwords/gesture";
+import { BrowserIdentitySync } from "./identity/sync";
 import { BROWSER_CHANNEL, DEFAULT_BROWSER_CONTROL_SETTINGS, type BrowserControlSettings, type BrowserEvent, type BrowserRequest, type BrowserMediaView, type BrowserSitePermissionPromptView, type BrowserOwnerNoticeKind, type BrowserTabMount, type BrowserTabView, type BrowserViewMemory, browserHistoryShortcut } from "../../shared/browser";
 import { browserClaimOrigin, type BrowserClaimAutoReason, type BrowserClaimTab } from "../../shared/browserClaim";
 import type { ApprovalRecord } from "../../shared/ipc";
@@ -401,10 +402,11 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
       policies.delete(partition);
       void pending.catch(() => {});
     },
-    forgetAdmissions: id => {
-      desktopLoopback().forgetIdentity(id);
-      sitePermissionsStore().forgetIdentity(id);
-      certificateExceptions().forget(id);
+    forgetAdmissions: (id, hostId) => {
+      desktopLoopback().forgetIdentity(id, hostId);
+      // Site permissions are per identity on every host: only the whole identity's sign-out forgets them.
+      if (hostId === undefined) sitePermissionsStore().forgetIdentity(id);
+      certificateExceptions().forget(id, hostId);
     },
     forgetHostAdmissions: hostId => certificateExceptions().forget(undefined, hostId),
     reload: (id, hostId) => {
@@ -422,11 +424,22 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
       await browserIdentityServices.passwords?.removeIdentity(id);
       await browserIdentityServices.history?.dropIdentity(id);
     },
-    dropHost: async hostId => { await browserIdentityServices.history?.dropHost(hostId); },
+    dropHost: async (hostId, identityId) => { await browserIdentityServices.history?.dropHost(hostId, identityId); },
     retentionChanged: () => { void historyService.pruneAll().catch(() => {}); },
     emit: event => { if (!disposed) browserIdentityServices.emit(event); },
+    directoryChanged: () => identitySync.kick(),
   });
   browserIdentityServices.identities = identitiesService;
+  // 跨主机同步 (./identity/sync.ts): names, colours and existence only; each host's switch; remote deletions' 清除.
+  const identitySync = new BrowserIdentitySync({
+    targets: () => getHosts()?.browserIdentitySyncTargets?.() ?? [],
+    proof: (hostId, instanceId) => getHosts()?.browserIdentityProof?.(hostId, instanceId) ?? null,
+    local: identitiesService,
+    ownerGesture: () => !!appGestures.consume(),
+    emit: state => { if (!disposed) browserIdentityServices.emit({ kind: "sync", state }); },
+  });
+  browserIdentityServices.sync = identitySync;
+  identitySync.start();
   const identityOfPartition = (partition: string) => identitiesService.identityOfPartition(partition);
   const historyService = new BrowserHistory({
     userData: app.getPath("userData"), retention: () => identitiesService.preferences().historyRetention,
@@ -2534,7 +2547,7 @@ export function installBrowser(window: BrowserWindow, getHosts: () => HostManage
   owner.on("render-process-gone", () => { moduleEnabled = false; reset(); });
   const dispose = () => {
     if (disposed) return;
-    reset(); disposed = true; clearInterval(timer); stopSchemes(); ipcMain.removeHandler(BROWSER_CHANNEL); ipcMain.removeHandler(BROWSER_IDENTITY_CHANNEL);
+    reset(); disposed = true; identitySync.dispose(); clearInterval(timer); stopSchemes(); ipcMain.removeHandler(BROWSER_CHANNEL); ipcMain.removeHandler(BROWSER_IDENTITY_CHANNEL);
     passwords.dispose();
     if (lockWatch) { powerMonitor.removeListener("lock-screen", lockPasswords); powerMonitor.removeListener("suspend", lockPasswords); }
     if (browserIdentityServices.passwords === passwords) browserIdentityServices.passwords = undefined;

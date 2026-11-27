@@ -11,7 +11,6 @@ import type { ProjectMemoryView } from "../../../../shared/ipc";
 import { useI18n, type MessageKey } from "../../i18n";
 import { confirmDialog, openMenuFrom, type MenuEntry } from "../../lib/contextMenu";
 import { shortenHome } from "../../lib/workspace";
-import { onlineCount } from "../../lib/sidebar";
 import { useSidebarModel } from "../../lib/sidebarView";
 import { ExternalAgentsSection } from "../../components/settings/SecuritySettings";
 import { sidebarOf, useApp } from "../../store";
@@ -20,13 +19,10 @@ import { ItemBoundary } from "../Outlet";
 import type { ProjectTabEntry } from "../../lib/projectTabs";
 import { useProjectTabs } from "../../lib/projectTabsView";
 import { openProject } from "./projectNav";
-import { OfflineSection } from "../../components/Sidebar";
-import { AgentRowButton } from "../../components/AgentRows";
 import { AgentList, type MemberControls } from "../../components/AgentList";
 import { DelegationList } from "../../components/DelegationList";
 import { ProjectMemoryList } from "../../components/ProjectMemory";
 import { PROJECT_MEMORY_FEATURE } from "../../../../shared/projectMemory";
-import { ServiceLine } from "../../components/ServiceLine";
 import { PageBody } from "../../components/Page";
 import { Button, FormFields, ScopeBaseline, SettingRow, SettingsGroup, Section, Select, TextInput } from "../../components/settings/Form";
 import { ProjectColorPicker } from "../../components/ProjectColorPicker";
@@ -62,6 +58,7 @@ import { ProjectRail } from "./ProjectRail";
 import { splitProjectTabs } from "./projectTable";
 import { noteProjectOpened } from "./recentProjects";
 import { useProjectFacts, type HostProjectRef } from "./useProjectFacts";
+import { ProjectOverview } from "./ProjectOverview";
 
 /** Pseudo project id for the "new project" form. */
 const NEW = "__new__";
@@ -267,6 +264,7 @@ function ProjectDetail({ project, tab, rotate, pick }: { project: ProjectSummary
   // shows the overview; the param stays, so the tab comes back when it is offered again.
   const current = tabs.find((x) => x.tab === tab) ?? tabs[0]!;
   const active = current.tab;
+  const tabNames = useMemo(() => new Set(tabs.map((x) => x.tab)), [tabs]);
   const moduleTab = current.entry;
   const [name, setName] = useState(project.presentation.display_name);
   const [badge, setBadge] = useState(project.presentation.badge_label);
@@ -339,11 +337,6 @@ function ProjectDetail({ project, tab, rotate, pick }: { project: ProjectSummary
   const hasOperators = operatorSupported(operatorWorkspace);
   const grantedOperators = operatorIds(operatorWorkspace);
   const memberIds = useMemo(() => new Set(members.map((s) => s.cutexSessionId)), [members]);
-  const operatorGroups = [
-    { role: "director", title: t("sidebar.director"), match: (row: AgentRow) => row.id === project.director_cutex_session_id },
-    { role: "operator", title: t("projects.operators" as MessageKey), match: (row: AgentRow) => row.id !== project.director_cutex_session_id && memberIds.has(row.id) && grantedOperators.has(row.id) },
-    { role: "member", title: t("projects.membersTitle"), match: (row: AgentRow) => row.id !== project.director_cutex_session_id && !(memberIds.has(row.id) && grantedOperators.has(row.id)) },
-  ];
   const optional = features.has(OPTIONAL_DIRECTOR_FEATURE);
   // users: a non-owner connection may only look (no membership / Director changes; lib/projectMenus).
   const owner = isOwnerFeatures(features);
@@ -578,86 +571,38 @@ function ProjectDetail({ project, tab, rotate, pick }: { project: ProjectSummary
         )}
       </div>
       <TabSummaries tabs={tabs} hostId={hostId} projectId={id} onOpen={setTab} />
-      <div className="grid gap-6 md:grid-cols-[1fr_16rem]">
-        <div className="min-w-0">
-          <h3 className="mb-2 text-sm font-semibold">{t("projects.needsYou")}</h3>
-          {waiting.length > 0 && (
-            <div className="mb-3 rounded-xl border border-warn/40 bg-warn/5 px-2 py-1">
-              {waiting.map((row) => (
-                <AgentRowButton key={row.id} row={row} />
-              ))}
-            </div>
-          )}
-          <DelegationList projectId={id} only={["needsYou"]} />
-          <h3 className="mt-6 mb-2 flex items-center text-sm font-semibold">
-            {t("projects.activeTasks")}
-            <button onClick={() => setTab("tasks")} className="press ml-auto rounded-sm text-xs font-normal text-accent hover:underline">
-              {t("projects.allTasks")} →
+      <ProjectOverview
+        hostId={hostId}
+        projectId={id}
+        isFocus={isFocus}
+        team={team}
+        directorId={project.director_cutex_session_id ?? null}
+        waiting={waiting}
+        services={projectServices}
+        memory={memory}
+        mcp={mcp}
+        tabs={tabNames}
+        setTab={setTab}
+        onError={setError}
+        teamActions={<>
+          {canPickDirector && (
+            <button
+              onClick={() => setPicker("director")}
+              disabled={rotationRunning}
+              title={t(hasDirector ? "projects.changeDirector" : "projects.pickDirector")}
+              aria-label={t(hasDirector ? "projects.changeDirector" : "projects.pickDirector")}
+              className="press-icon rounded p-1 font-normal text-subtle hover:bg-surface-2 hover:text-foreground disabled:opacity-40"
+            >
+              <Crown size={13} />
             </button>
-          </h3>
-          <DelegationList projectId={id} only={["active"]} limit={5} />
-        </div>
-        <aside className="min-w-0">
-          <h3 className="mb-2 flex items-center gap-1 text-sm font-semibold">
-            <span>{t("projects.team")}</span> <span className="font-normal text-subtle">{t("projects.teamOnline", { online: onlineCount(team), total: team.online.length + team.offline.length })}</span>
-            {canPickDirector && (
-              <button
-                onClick={() => setPicker("director")}
-                disabled={rotationRunning}
-                title={t(hasDirector ? "projects.changeDirector" : "projects.pickDirector")}
-                aria-label={t(hasDirector ? "projects.changeDirector" : "projects.pickDirector")}
-                className="press-icon ml-auto rounded p-1 font-normal text-subtle hover:bg-surface-2 hover:text-foreground disabled:opacity-40"
-              >
-                <Crown size={13} />
-              </button>
-            )}
-            {owner && (
-              <button onClick={() => setPicker("add")} title={t("projects.addMember")} aria-label={t("projects.addMember")} className={`${canPickDirector ? "" : "ml-auto "}press-icon rounded p-1 font-normal text-subtle hover:bg-surface-2 hover:text-foreground`}>
-                <Plus size={13} />
-              </button>
-            )}
-          </h3>
-          <div className="mb-4 rounded-xl border border-border bg-surface px-1 py-1">
-            {hasOperators ? operatorGroups.map((group) => {
-              const online = team.online.filter(group.match);
-              const offline = team.offline.filter(group.match);
-              if (group.role !== "operator" && online.length + offline.length === 0) return null;
-              return (
-                <div key={group.role} data-project-role={group.role}>
-                  <h4 className="px-2 pt-2 pb-1 text-xs text-subtle">{group.title}</h4>
-                  {online.map((row) => <AgentRowButton key={row.id} row={row} />)}
-                  <OfflineSection rows={offline} searching={false} onAll={() => setTab("agents")} hostId={isFocus ? undefined : hostId} />
-                  {group.role === "operator" && online.length + offline.length === 0 && <p className="px-2 py-2 text-xs text-subtle">{t("projects.operatorsEmpty" as MessageKey)}</p>}
-                </div>
-              );
-            }) : <>
-            {team.online.map((row) => (
-              <AgentRowButton key={row.id} row={row} />
-            ))}
-            <OfflineSection rows={team.offline} searching={false} onAll={() => setTab("agents")} hostId={isFocus ? undefined : hostId} />
-            </>}
-            {team.online.length + team.offline.length === 0 && <p className="px-2 py-2 text-xs text-subtle">{t("projects.noMembers")}</p>}
-          </div>
-          {projectServices.length > 0 && (
-            <>
-              <h3 className="mb-2 text-sm font-semibold">{t("projects.services")}</h3>
-              <div className="mb-4 rounded-xl border border-border bg-surface px-3">
-                {projectServices.map((s) => (
-                  <ServiceLine key={s.slug} s={s} onError={setError} hostId={hostId} />
-                ))}
-              </div>
-            </>
           )}
-          <button onClick={() => setTab("memory")} className="press mb-2 block w-full rounded-xl border border-border bg-surface px-3 py-2 text-left hover:bg-surface-2/60">
-            <div className="text-sm">{t("projects.memory")}</div>
-            <div className="text-xs text-subtle">{memory ? t("projects.memoryCount", { n: memory.entries.length }) : "…"}</div>
-          </button>
-          <button onClick={() => setTab("settings")} className="press block w-full rounded-xl border border-border bg-surface px-3 py-2 text-left hover:bg-surface-2/60">
-            <div className="text-sm">{t("projects.mcp")}</div>
-            <div className="truncate text-xs text-subtle">{mcp ? Object.keys(mcp.servers).join(" · ") || t("projects.mcpNone") : "…"}</div>
-          </button>
-        </aside>
-      </div>
+          {owner && (
+            <button onClick={() => setPicker("add")} title={t("projects.addMember")} aria-label={t("projects.addMember")} className="press-icon rounded p-1 font-normal text-subtle hover:bg-surface-2 hover:text-foreground">
+              <Plus size={13} />
+            </button>
+          )}
+        </>}
+      />
         </>
       )}
       {moduleTab && <ModuleTabBody entry={moduleTab} hostId={hostId} projectId={id} />}

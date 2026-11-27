@@ -81,6 +81,12 @@ export function reloadFonts(): void {
   void fontController?.reload(current);
 }
 
+/** Settings sync (lib/settingsSync): told after every change. */
+export function subscribeAppearance(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
 export function getAppearance(): Appearance {
   return current;
 }

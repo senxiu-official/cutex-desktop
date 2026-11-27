@@ -245,7 +245,8 @@ vi.mock("../src/main/errorLog", () => ({
 vi.mock("../src/main/winShortcuts", () => ({
   setWindowsAppId() {},
   setWindowAppDetails() {},
-  syncWindowsShortcuts() {}
+  syncWindowsShortcuts: () => null,
+  styleIcoPath: () => null
 }));
 vi.mock("../src/main/ownerAlert", () => ({
   demoOwnerAlertRequested: () => false,

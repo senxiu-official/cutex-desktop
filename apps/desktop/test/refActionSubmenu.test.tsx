@@ -2,7 +2,7 @@ import { beforeEach, expect, it, vi } from "vitest";
 const fixture = vi.hoisted(() => ({ load: vi.fn(), run: vi.fn(), notify: vi.fn() }));
 vi.mock("../src/renderer/src/i18n", () => ({ translate: (key: string) => key }));
 vi.mock("../src/renderer/src/modules/app", () => ({ appModules: () => ({ snapshot: () => [{
-  moduleId: "example", mode: "show", item: { id: "source", kinds: ["artifact"], titleKey: "source", icon: () => null, submenu: fixture.load, run: fixture.run },
+  moduleId: "example", mode: "show", item: { id: "source", kinds: ["artifact"], titleKey: "source", infoKey: "source.info", icon: () => null, submenu: fixture.load, run: fixture.run },
 }] }) }));
 vi.mock("../src/renderer/src/modules/react", () => ({ useSlot: () => [] }));
 vi.mock("../src/renderer/src/lib/hostGatingView", () => ({ entryGateNow: () => ({ ok: true }) }));
@@ -18,6 +18,8 @@ it("adapts module source actions to lazy normal submenus without fetching while 
   const row = refActionEntries(ref)[0] as MenuAction;
   expect(fixture.load).not.toHaveBeenCalled();
   expect(row.flyout).toBeUndefined();
+  // v1.33 infoKey becomes the row's ⓘ.
+  expect(row.info).toBe("source.info");
   expect(typeof row.submenu).toBe("function");
   const loaded = await (row.submenu as () => Promise<unknown[]>)();
   expect(loaded).toEqual([child]);

@@ -7,20 +7,17 @@
 import type { MessageKey } from "../i18n";
 import { useApp, type SettingsTab } from "../store";
 import { queryAppWindows } from "./appWindowSet";
+import type { NewProfileStart } from "./newProfileModel";
 
 export type GuideAction =
-  /** A Settings page in the Settings Shelf; `create`: Profiles opens its 添加 form. */
-  | { kind: "settings"; tab: SettingsTab; create?: boolean }
+  /** A Settings page in the Settings Shelf; `create`: Profiles opens its 添加 form (`createKind`: on that kind). */
+  | { kind: "settings"; tab: SettingsTab; create?: boolean; createKind?: NewProfileStart }
   /** The focused conversation's Shelf on screen: expanded, or a first (empty) page with the launchers. */
   | { kind: "shelf" };
 
-/** The named actions of the flow, the 新版本 dialog and 帮助 (tips and 新功能 cards use `settingsAction`). */
+/** The named actions of the 新版本 dialog and 帮助 (tips and 新功能 cards use `settingsAction`). */
 export const GUIDE_ACTIONS = {
-  "tour.groups": { kind: "settings", tab: "tray" },
-  "tour.pages": { kind: "shelf" },
-  "tour.more": { kind: "settings", tab: "whats-new" },
   "profile.add": { kind: "settings", tab: "profiles", create: true },
-  "tour.allChanges": { kind: "settings", tab: "about" },
   "whatsNew.more": { kind: "settings", tab: "about" },
   "help.features": { kind: "settings", tab: "whats-new" },
 } as const satisfies Record<string, GuideAction>;
@@ -71,7 +68,7 @@ export function flashShown(selector: string, ms = 1800): void {
 export async function runGuideAction(action: GuideAction): Promise<boolean> {
   if (guideActionBlocked(action)) return false;
   if (action.kind === "settings") {
-    if (action.create) useApp.getState().openSettings(action.tab, { create: true });
+    if (action.create) useApp.getState().openSettings(action.tab, { create: true, ...(action.createKind ? { createKind: action.createKind } : {}) });
     else useApp.getState().openSettings(action.tab);
   } else {
     const app = useApp.getState();

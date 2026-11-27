@@ -26,6 +26,7 @@ export function Popover({
   focusContent = false,
   keepMounted = false,
   triggerProps,
+  primaryAction,
 }: {
   trigger: ReactNode;
   /** `dismiss`: close and put focus back on the trigger (Escape inside the panel; a select's pick). */
@@ -50,6 +51,11 @@ export function Popover({
   keepMounted?: boolean;
   /** More trigger attributes (aria-labelledby, a closed-trigger onKeyDown, data-*), e.g. components/EntitySelect. */
   triggerProps?: Omit<ButtonHTMLAttributes<HTMLButtonElement>, "type" | "onClick" | "disabled" | "className" | "children"> & { [data: `data-${string}`]: string | undefined };
+  /**
+   * The trigger is an action button (e.g. the composer's 输入优化 wand): a click runs this and closes the popover;
+   * the popover opens on right-click, Shift+F10 or the context-menu key (all `contextmenu`) and on `openSignal`.
+   */
+  primaryAction?(): void;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -159,9 +165,16 @@ export function Popover({
         aria-expanded={open}
         data-tip={triggerTitle}
         onClick={() => {
+          if (primaryAction) { setOpen(false); primaryAction(); return; }
           if (!open) onOpen?.();
           setOpen(!open);
         }}
+        onContextMenu={primaryAction ? (e) => {
+          e.preventDefault();
+          if (disabled) return;
+          if (!open) onOpen?.();
+          setOpen(true);
+        } : triggerProps?.onContextMenu}
         className={triggerClassName ?? `press flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-muted hover:bg-surface-2 hover:text-foreground ${open ? "bg-surface-2 text-foreground" : ""}`}
       >
         {trigger}

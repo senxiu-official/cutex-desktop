@@ -1,8 +1,8 @@
-// Settings → 关于 easter egg: the cutex dragon wobbles and grows a little on every click until it
-// fills the free space below the page; it starts small again each time Settings is opened
-// (lib/aboutDragon.ts).
+// Settings → 关于 easter egg: the app icon — the 外观 → 应用图标 style, 螺钿 unless another is picked (owner 2026-11-28;
+// it was the ink dragon, now 「旧版墨龙」) — wobbles and grows a little on every click until it fills the free space below
+// the page; it starts small again each time Settings is opened (lib/aboutDragon.ts keeps its old name).
 import { useLayoutEffect, useRef, useState } from "react";
-import cutexLogo from "../../assets/cutex-logo.png";
+import { useAppLogoLarge } from "../../lib/appIcon";
 import { DRAGON_BASE as BASE, dragonSize, setDragonSize } from "../../lib/aboutDragon";
 import { useOwnerWindow } from "../../lib/ownerContext";
 
@@ -14,6 +14,7 @@ export function AboutDragon() {
   const win = useOwnerWindow();
   const box = useRef<HTMLDivElement>(null);
   const img = useRef<HTMLImageElement>(null);
+  const logo = useAppLogoLarge();
   const [size, setSize] = useState(dragonSize);
   const [max, setMax] = useState(Number.POSITIVE_INFINITY);
 
@@ -53,12 +54,12 @@ export function AboutDragon() {
     <div ref={box} className="flex w-full justify-center pt-8">
       <img
         ref={img}
-        src={cutexLogo}
+        src={logo}
         alt=""
         draggable={false}
         onClick={grow}
         style={{ width: shown, height: shown }}
-        className="cursor-pointer select-none rounded-[22%] shadow-lg transition-[width,height] duration-300 ease-out"
+        className="cursor-pointer select-none drop-shadow-lg transition-[width,height] duration-300 ease-out"
       />
     </div>
   );

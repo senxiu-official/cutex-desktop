@@ -9,10 +9,23 @@ import { formatAbsolute, formatWhen } from "../../lib/time";
 import { Button, Card, IconButton, ListRow, SettingsGroup } from "./Form";
 import { SettingsDisclosureRow } from "./SettingsDisclosureRow";
 
-/** Row action: first click arms (「再点一次归档」), the second archives. Restorable, so one confirm. */
-export function ArchiveSkillButton({ name, disabled, onArchive }: { name: string; disabled?: boolean; onArchive(): void }) {
+/**
+ * Row action: first click arms (「再点一次归档」), the second archives. Restorable, so one confirm. `blocked`: why this
+ * skill cannot be archived; the button keeps its place, disabled, with the reason as its tooltip (every skill row
+ * has the same actions).
+ */
+export function ArchiveSkillButton({ name, disabled, blocked, onArchive }: { name: string; disabled?: boolean; blocked?: string; onArchive(): void }) {
   const { t } = useI18n();
   const [armed, setArmed] = useArmed();
+  if (blocked)
+    return (
+      // A disabled button gets no hover: the wrapper carries the reason.
+      <span title={blocked} data-skill-archive-blocked="" className="inline-flex">
+        <IconButton label={blocked} disabled onClick={() => {}}>
+          <Archive size={14} />
+        </IconButton>
+      </span>
+    );
   return armed ? (
     <button
       disabled={disabled}

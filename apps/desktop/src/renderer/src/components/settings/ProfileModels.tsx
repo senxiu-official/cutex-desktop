@@ -132,9 +132,10 @@ export function ModelList({ profile, view, setView, claude, limit, filter }: { p
   const needle = filter?.trim().toLowerCase() ?? "";
   const matching = needle ? all.filter((r) => [shownName(r), r.id, ...(foldOf(r)?.folded ?? [])].some((s) => s.toLowerCase().includes(needle))) : all;
   const rows = limit ? matching.slice(0, limit) : matching;
-  const windowOf = (r: CatalogModel) => r.effective.contextWindow ?? foldOf(r)?.folded.map((id) => view.models.find((x) => x.id === id)?.effective.contextWindow).find((w) => w != null) ?? null;
+  const windowOf = (r: CatalogModel) => r.effective.contextWindow ?? [...(foldOf(r)?.folded ?? []), ...(foldOf(r)?.follows ? [foldOf(r)!.follows!] : [])].map((id) => view.models.find((x) => x.id === id)?.effective.contextWindow).find((w) => w != null) ?? null;
   const effortName = (id: string) => { const key = `composer.effort.${id}` as MessageKey; return t(key) === key ? id : t(key); };
-  const idsOf = (r: CatalogModel) => [r.id, ...(foldOf(r)?.folded ?? [])];
+  // An alias row also covers the fixed model it follows (same model; that fixed id has its own row too).
+  const idsOf = (r: CatalogModel) => [r.id, ...(foldOf(r)?.folded ?? []), ...(foldOf(r)?.follows ? [foldOf(r)!.follows!] : [])];
   const amount = (n: number) => formatTokens(n, locale);
   const run = async (fn: () => Promise<ProfileModelsView>) => {
     setBusy(true);

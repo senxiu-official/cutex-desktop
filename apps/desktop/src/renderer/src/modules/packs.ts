@@ -4,7 +4,7 @@
 // engine: a pack's definition is an ordinary ModuleDefinition in the same host.
 import { useSyncExternalStore } from "react";
 import { MODULE_API_VERSION, moduleApiSatisfies } from "@cutex-desktop/plugin-sdk";
-import { comparePackVersions, isPackModuleId, type AvailablePackView, type InstalledPackView, type ModulePacksBridge, type ModulePacksView } from "../../../shared/modulePacks";
+import { UPGRADE_PACK_BASELINES, comparePackVersions, isPackModuleId, isUpgradePackId, type AvailablePackView, type InstalledPackView, type ModulePacksBridge, type ModulePacksView, type PackMigration } from "../../../shared/modulePacks";
 import { registerModuleMessages, unregisterModuleMessages } from "../i18n";
 import { checkHostImports, checkPublicHostImports, installPackHost } from "./packHost";
 import type { AppModule, AppModuleHost } from "./slots";
@@ -64,6 +64,8 @@ export interface PackRow {
   error: ModulePacksView["lastError"];
   /** The index's entries for this id (newest first): titles for pack-only modules. */
   available: AvailablePackView[];
+  /** Main's answer to moving an enabled bundled copy to its signed pack. */
+  migration?: PackMigration | null;
 }
 
 export function packRow(id: string, rt: PackRuntime, bundled: boolean, bundledVersion: string | null): PackRow {
@@ -91,6 +93,7 @@ export function packRow(id: string, rt: PackRuntime, bundled: boolean, bundledVe
     operation: view?.operation?.id === id ? view.operation : null,
     error: view?.lastError?.id === id ? view.lastError : null,
     available,
+    migration: isUpgradePackId(id) ? view?.migrations?.[id] ?? null : null,
   };
 }
 
@@ -269,5 +272,16 @@ export function startModulePacks(host: AppModuleHost, bundled: readonly AppModul
     },
     log: (text) => console.info(`[module-packs] ${text}`),
   });
-  void loader.start().catch((error) => console.warn("[module-packs] start failed", error));
+  const activeLoader = loader;
+  void (async () => {
+    for (const id of Object.keys(UPGRADE_PACK_BASELINES).filter(isUpgradePackId)) {
+      const marker = `cutex-desktop.modules.seed.${id}`;
+      try {
+        if (localStorage.getItem(marker) === "1") continue;
+        const status = host.isEnabled(id) ? (await bridge.seedBundled?.(id))?.migrations?.[id] : "complete";
+        if (status === "installed" || status === "kept" || status === "complete") localStorage.setItem(marker, "1");
+      } catch { /* The bundled module remains available. */ }
+    }
+    await activeLoader.start();
+  })().catch((error) => console.warn("[module-packs] start failed", error));
 }

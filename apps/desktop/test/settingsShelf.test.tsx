@@ -151,6 +151,18 @@ describe("deep links", () => {
     expect(container.querySelectorAll("[data-settings-shelf]").length).toBe(1);
     expect(container.querySelector("[data-probe]")?.getAttribute("data-probe")).toBe("fake");
   });
+
+  it("an old link to 功能 Profile (a page of 工具 until 2026-11-26) lands on Profile: its card, or its 全部 sub-page", () => {
+    act(() => useApp.getState().openSettings("feature-profiles"));
+    expect(s().params).toEqual({ tab: "profiles" });
+    expect(useApp.getState().settingsFocus).toMatchObject({ anchor: "feature-profiles.list" });
+    act(() => useApp.getState().openSettings("feature-profiles", { sub: "all" }));
+    expect(s().params).toEqual({ tab: "profiles", sub: "features" });
+    expect(useApp.getState().settingsFocus?.anchor).toBeUndefined();
+    // A page that did not move is left as asked.
+    act(() => useApp.getState().openSettings("profiles", { sub: "kimi" }));
+    expect(s().params).toEqual({ tab: "profiles", sub: "kimi" });
+  });
 });
 
 describe("side, width, maximise", () => {

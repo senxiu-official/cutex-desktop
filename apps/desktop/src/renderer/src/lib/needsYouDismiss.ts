@@ -14,6 +14,7 @@ import type { SessionRuntime } from "@cutex-desktop/protocol";
 import { LOCAL_HOST_ID } from "../../../shared/hosts";
 import type { SidebarSnapshot } from "../../../shared/ipc";
 import { hostKey, parseHostKey } from "./hostKeys";
+import { onAttentionReady } from "./hostAttention";
 import type { AttentionChip, NeedsYou } from "./agentAttention";
 import type { AgentRow } from "./sidebar";
 
@@ -138,6 +139,13 @@ function save(next: Dismissals): void {
   }
   for (const l of listeners) l();
 }
+
+// Design 061: a host with cross-device read state keeps the person's dismissals; this device's of it go (the one-time
+// clean start — the host begins with nothing dismissed and everything before it read).
+onAttentionReady((hostId) => {
+  const next = Object.fromEntries(Object.entries(current).filter(([key]) => parseHostKey(key.startsWith("error|") ? key.slice(6) : key)?.[0] !== hostId));
+  if (Object.keys(next).length !== Object.keys(current).length) save(next);
+});
 
 export function getDismissals(): Dismissals {
   return current;

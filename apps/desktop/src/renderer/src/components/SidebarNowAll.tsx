@@ -6,15 +6,17 @@
 // (--motion-medium). The lower half 「全部」 is the roster in compact rows (lib/allRowsCompact) with a filter, drawn by
 // components/Sidebar; the divider between them is dragged (or moved with ↑ / ↓) and its place kept in prefs.
 // No icon row of its own: the entries are in the window bar (sidebar v5, §4.1). What was closed in the 需要你 strip
-// (a need, a runtime error: lib/needsYouDismiss chipDismissed) has no card here either.
+// (a need, a runtime error: lib/needItems, the same rule) has no card here either.
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useI18n, type MessageKey } from "../i18n";
-import { attentionChips, formatElapsed, type AttentionChip } from "../lib/agentAttention";
+import { formatElapsed, type NeedsYou } from "../lib/agentAttention";
 import { activateAttention } from "../lib/attentionActivate";
 import { signalLabel, useNow, type Attention } from "../lib/attentionView";
 import { openMenuFrom } from "../lib/contextMenu";
 import { hostKey } from "../lib/hostKeys";
-import { chipDismissed, needFingerprint, useDismissals } from "../lib/needsYouDismiss";
+import { needFingerprint, useDismissals } from "../lib/needsYouDismiss";
+import { needItems } from "../lib/needItems";
+import { useHostAttentionVersion } from "../lib/hostAttention";
 import { nowCards, stableOrder, type NowCard, type SinceMemo } from "../lib/nowCards";
 import { conversationPanes, paneBinding } from "../lib/paneLayout";
 import { usePanes } from "../lib/paneStore";
@@ -57,13 +59,12 @@ function usePresence<T extends { key: string }>(items: readonly T[]): (T & { lea
 
 const ACTION_KEY: Record<NonNullable<NowCard["action"]>, MessageKey> = { reply: "sidebar.now.act.reply", answer: "sidebar.now.act.answer", approve: "sidebar.now.act.approve", open: "sidebar.now.act.open" };
 
-function NowCardView({ card, row, attention, since, leaving, own, onActivate }: { card: NowCard; row: AgentRow; attention: Attention; since: number | null; leaving?: boolean; own: boolean; onActivate(): void }) {
+function NowCardView({ card, row, attention, need, since, leaving, own, onActivate }: { card: NowCard; row: AgentRow; attention: Attention; need: NeedsYou | undefined; since: number | null; leaving?: boolean; own: boolean; onActivate(): void }) {
   const { t } = useI18n();
   // The last message, one line (the focus host's agents; only this card re-renders when it changes).
   const preview = useApp((s) => (own ? s.activity?.[row.id]?.text : undefined));
   const now = useNow(30_000, since !== null);
   const signal = attention.signals.get(card.key) ?? "idle";
-  const need = attention.needs.get(card.key);
   const status = card.chip ? signalLabel(t, card.chip.signal, need) : null;
   const line = [status, preview].filter(Boolean).join(" · ");
   const name = row.name;
@@ -108,23 +109,26 @@ export function NowSection({ attention, focus, height, notice }: { attention: At
   const byKey = useMemo(() => new Map(rows.map((r) => [rowKey(r), r])), [rows]);
   const byHostKey = useMemo(() => new Map(rows.map((r) => [hostKey(r.hostId ?? focus, r.id), r])), [rows, focus]);
   const dismissals = useDismissals();
-  const chips = useMemo(() => {
+  const hostState = useHostAttentionVersion();
+  const items = useMemo(() => {
     const markOf = (row: AgentRow) => ((row.hostId ?? focus) === focus ? marks[row.id] : turnMarksOn(row.hostId!)[row.id]);
-    return attentionChips(rows, signals, needs, markOf, null).filter((c) => {
-      if (c.signal === "done") return false;
-      const key = hostKey(c.hostId ?? focus, c.id);
-      const row = byHostKey.get(key);
-      return !chipDismissed(dismissals, key, c, needs.get(c.key), row, !!(row && markOf(row)?.failed));
-    });
-  }, [rows, signals, needs, marks, focus, dismissals, byHostKey]);
+    return needItems({ rows, signals, needs, markOf, focus, dismissals });
+  }, [rows, signals, needs, marks, focus, dismissals, hostState]); // eslint-disable-line react-hooks/exhaustive-deps -- `hostState` stands for every host's attention state
+  const chips = useMemo(() => items.map((i) => i.chip), [items]);
+  // A host with cross-device read state words a card from its own items (lib/needItems); others from the row's needs.
+  const needs2 = useMemo(() => {
+    const out = new Map(needs);
+    for (const i of items) if (i.itemKeys && i.need) out.set(i.chip.key, i.need);
+    return out;
+  }, [needs, items]);
   // Stable order: a card's `since` changes only when its need does (lib/nowCards stableOrder).
   const memo = useRef<Map<string, SinceMemo>>(new Map());
   const order = useMemo(() => {
-    const items = chips.map((c) => ({ key: c.key, fp: `${c.signal}|${needFingerprint(needs.get(c.key))}`, at: byKey.get(c.key)?.lastActivity || null }));
+    const items = chips.map((c) => ({ key: c.key, fp: `${c.signal}|${needFingerprint(needs2.get(c.key))}`, at: byKey.get(c.key)?.lastActivity || null }));
     const next = stableOrder(memo.current, items, Date.now());
     memo.current = next.memo;
     return next.order;
-  }, [chips, needs, byKey]);
+  }, [chips, needs2, byKey]);
   const columns = useMemo(
     () =>
       conversationPanes(layout).map((id) => {
@@ -140,7 +144,7 @@ export function NowSection({ attention, focus, height, notice }: { attention: At
     const row = byKey.get(card.key);
     if (!row) return;
     const host = row.hostId ?? focus;
-    if (card.chip) activateAttention(card.chip, needs.get(card.key), host);
+    if (card.chip) activateAttention(card.chip, needs2.get(card.key), host);
     else void useApp.getState().openAgent(row.id, host);
   };
   const restMenu = (el: HTMLElement) =>
@@ -149,7 +153,7 @@ export function NowSection({ attention, focus, height, notice }: { attention: At
       rest.flatMap((card) => {
         const row = byKey.get(card.key);
         if (!row) return [];
-        const label = card.chip ? signalLabel(t, card.chip.signal, needs.get(card.key)) : null;
+        const label = card.chip ? signalLabel(t, card.chip.signal, needs2.get(card.key)) : null;
         return [{ label: label ? `${row.name} · ${label}` : row.name, icon: <EntityIcon entity={{ kind: "agent", id: row.id, name: row.name }} />, onSelect: () => activate(card) }];
       }),
       { owner: "sidebar.nowRest" },
@@ -165,7 +169,7 @@ export function NowSection({ attention, focus, height, notice }: { attention: At
       {cards.map((card) => {
         const row = byKey.get(card.key);
         if (!row) return null;
-        return <NowCardView key={card.key} card={card} row={row} attention={attention} since={card.chip ? (memo.current.get(card.key)?.since ?? null) : null} leaving={card.leaving} own={(row.hostId ?? focus) === focus} onActivate={() => activate(card)} />;
+        return <NowCardView key={card.key} card={card} row={row} attention={attention} need={needs2.get(card.key)} since={card.chip ? (memo.current.get(card.key)?.since ?? null) : null} leaving={card.leaving} own={(row.hostId ?? focus) === focus} onActivate={() => activate(card)} />;
       })}
       {shown.length === 0 && <p className="px-1 py-2 text-meta text-subtle">{t("sidebar.now.empty")}</p>}
       {rest.length > 0 && (

@@ -5,6 +5,8 @@ import { defineModule } from "../slots";
 const StoragePage = lazyPage(() => import("./StoragePage").then((m) => m.StoragePage));
 export default defineModule({
   id: "storage",
+  // Locked on (module-dependencies-20261126, owner 2026-11-26): turning it off removed the way to handle work that goes on.
+  required: true,
   titleKey: "storage.title",
   descriptionKey: "storage.description",
   contributes: {

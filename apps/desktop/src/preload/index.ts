@@ -11,6 +11,7 @@ import { KNOWN_ISSUES_CHANNEL, type KnownIssuesRequest } from "../shared/knownIs
 import { LAUNCH_ART_CHANNEL, type LaunchArtRequest } from "../shared/launchArt";
 import { FONT_PACK_CHANNEL, type FontPackRequest } from "../shared/fontCatalog";
 import { DIRECTOR_AVATARS_CHANNEL, type DirectorAvatarsRequest } from "../shared/directorAvatars";
+import { PORTRAIT_COLLECTIONS_CHANNEL, type PortraitCollectionsRequest } from "../shared/portraitCollections";
 import { PORTRAIT_PACKS_CHANNEL, type PortraitPacksRequest } from "../shared/portraitPacks";
 import {
   EVENT_CHANNEL,
@@ -119,10 +120,18 @@ const METHODS: InvokeMethod[] = [
   "cancelRuntimePrunePlan",
   "textRewrite",
   "cancelTextRewrite",
+  "structuredTextRewrite",
+  "textRewriteTemplates",
+  "createTextRewriteTemplate",
+  "patchTextRewriteTemplate",
+  "deleteTextRewriteTemplate",
+  "textRewriteRoute",
+  "patchTextRewriteRoute",
   "featureProfiles",
   "createFeatureProfile",
   "patchFeatureProfile",
   "deleteFeatureProfile",
+  "testFeatureProfile",
   "pruneRuntimes",
   "claudeAccounts",
   "addProfileVariant",
@@ -182,7 +191,8 @@ const METHODS: InvokeMethod[] = [
   "notesList", "notesGet", "notesCreate", "notesUpdate", "notesDelete",
   "sideOpen", "sideList", "sideRead", "sideSend", "sideInterrupt", "sideRespond", "sideClose",
   "sessionSearch", "sessionSearchTurn",
-  "paList", "paGet", "paCreate", "paUpdate", "paAgenda", "paAudit", "paRequests", "paRequest", "paConfirm", "paCancel",
+  "paScopeRules", "paScopeRulesSave", "paBrief", "paBriefSchedule", "paReminderCreate", "ownerPinCreate",
+  "paCreateOptions", "paList", "paGet", "paCreate", "paUpdate", "paAgenda", "paAudit", "paRequests", "paRequest", "paConfirm", "paCancel",
   "paOwnerRequests", "paNotes", "paTemplates", "paTemplateConfirm", "paTemplateStop", "paTemplateRuns", "paCalendar", "paCalendarImport", "paCalendarClear",
   "unsubscribe",
   "submit",
@@ -236,6 +246,9 @@ const METHODS: InvokeMethod[] = [
   "skillArchives",
   "archiveSkill",
   "restoreSkill",
+  "runtimeSkills",
+  "previewSkillCopy",
+  "copySkill",
   "managedMcp",
   "switchProfile",
   "sessionAction",
@@ -422,6 +435,9 @@ const METHODS: InvokeMethod[] = [
   "updateClientToken",
   "ownerNewDevices",
   "ackOwnerNewDevice",
+  "attention",
+  "attentionRead",
+  "attentionDismiss",
   "onlineClients",
   "closeOnlineClient",
   "resetModel",
@@ -621,6 +637,7 @@ const bridge: PreloadBridge = {
     clear: (id) => invoke(MODULE_DATA_CHANNEL, { op: "clear", id } satisfies ModuleDataRequest),
   },
   modulePacks: {
+    seedBundled: id => invoke(MODULE_PACKS_CHANNEL, { op: "seedBundled", id } satisfies ModulePacksRequest),
     state: () => invoke(MODULE_PACKS_CHANNEL, { op: "state" } satisfies ModulePacksRequest),
     check: () => invoke(MODULE_PACKS_CHANNEL, { op: "check" } satisfies ModulePacksRequest),
     install: (input) => invoke(MODULE_PACKS_CHANNEL, { op: "install", id: input.id, ...(input.version !== undefined ? { version: input.version } : {}), ...(input.allowOlder ? { allowOlder: true } : {}) } satisfies ModulePacksRequest),
@@ -664,6 +681,12 @@ const bridge: PreloadBridge = {
     list: () => invoke(DIRECTOR_AVATARS_CHANNEL, { op: "list" } satisfies DirectorAvatarsRequest),
     openFolder: () => invoke(DIRECTOR_AVATARS_CHANNEL, { op: "openFolder" } satisfies DirectorAvatarsRequest),
   },
+  portraitCollections: {
+    state: () => invoke(PORTRAIT_COLLECTIONS_CHANNEL, { op: "state" } satisfies PortraitCollectionsRequest),
+    check: () => invoke(PORTRAIT_COLLECTIONS_CHANNEL, { op: "check" } satisfies PortraitCollectionsRequest),
+    install: theme => invoke(PORTRAIT_COLLECTIONS_CHANNEL, { op: "install", theme } satisfies PortraitCollectionsRequest),
+    retry: () => invoke(PORTRAIT_COLLECTIONS_CHANNEL, { op: "retry" } satisfies PortraitCollectionsRequest),
+  },
   portraitPacks: {
     list: () => invoke(PORTRAIT_PACKS_CHANNEL, { op: "list" } satisfies PortraitPacksRequest),
     openFolder: () => invoke(PORTRAIT_PACKS_CHANNEL, { op: "openFolder" } satisfies PortraitPacksRequest),
@@ -694,6 +717,7 @@ const bridge: PreloadBridge = {
     filePath: (hostId, path, action) => shellInvoke({ op: "filePath", hostId, path, action }),
     state: () => shellInvoke({ op: "state" }),
     setCloseBehavior: (value) => shellInvoke({ op: "setCloseBehavior", value }),
+    setAppIcon: (id) => shellInvoke({ op: "setAppIcon", id }),
     setLocale: (value) => shellInvoke({ op: "setLocale", value }),
     setTerms: (value) => shellInvoke({ op: "setTerms", value }),
     setAttention: (count) => shellInvoke({ op: "setAttention", count }),

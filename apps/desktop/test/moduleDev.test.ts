@@ -9,14 +9,14 @@ import { parseModuleDevRequest } from "../src/shared/moduleDev";
 
 vi.mock("electron", () => ({ dialog: {} }));
 
-const API = "1.31";
+const API = "1.32";
 let root: string;
 
 function write(folder: string, id: string, code = "export const module = {};", extra: Record<string, unknown> = {}): void {
   const dist = join(folder, "dist");
   mkdirSync(dist, { recursive: true });
   writeFileSync(join(dist, "index.js"), code);
-  writeFileSync(join(dist, "pack.json"), JSON.stringify({ id, version: "0.1.0", moduleApi: "^1.31", entry: "index.js", styles: [], host: { "@cutex-desktop/module-api": ["defineModule"] }, ...extra }));
+  writeFileSync(join(dist, "pack.json"), JSON.stringify({ id, version: "0.1.0", moduleApi: "^1.32", entry: "index.js", styles: [], host: { "@cutex-desktop/module-api": ["defineModule"] }, ...extra }));
 }
 
 const prompts = (over: Partial<ModuleDevPrompts> = {}): ModuleDevPrompts => ({

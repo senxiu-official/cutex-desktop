@@ -44,19 +44,23 @@ export const ACCESS_SEARCH: Search = {
 export const APPEARANCE_SEARCH: Search = {
   sections: [
     { anchor: "colors", titleKey: "appearance.colors", keywords: ["shell.theme", "shell.theme.dark", "shell.theme.light", "appearance.lightPalette", "appearance.darkPalette", "appearance.accent", "appearance.accent.pink", "shell.contrast"] },
+    { anchor: "app-icon", titleKey: "appearance.appIcon", keywords: ["appearance.appIcon.style"] },
     {
       anchor: "fonts",
       titleKey: "appearance.fonts",
       keywords: ["appearance.uiFont", "appearance.cjkFont", "appearance.chatFont", "appearance.chatCjkFont", "appearance.chatFontSize", "appearance.monoFont", "appearance.monoFontSize", "appearance.monoCjkFont"],
     },
     { anchor: "layout", titleKey: "appearance.layout", keywords: ["appearance.zoom", "appearance.density", "appearance.nameGrouping", "appearance.nameReading"] },
-    { anchor: "avatars", titleKey: "settings.ia.avatars" as MessageKey, keywords: ["appearance.agentAvatar", "appearance.avatarTint"] },
     // 窗口与卡片 (design 006 v1: what stays here is the whole window's; the panels' rows are on their 面板 pages).
-    { anchor: "work-surface", titleKey: "workSurface.title", keywords: ["workSurface.material", "workSurface.width", "workSurface.edge", "foretell.setting", "workSurface.dropPreview", "orientation.setting", "orientation.position", "orientation.split"] },
+    { anchor: "work-surface", titleKey: "workSurface.title", keywords: ["workSurface.material", "workSurface.width", "workSurface.edge", /* 贴边显示's old name (窗格铺满时占满整个窗口) still finds it */ "workSurface.fill", "foretell.setting", "workSurface.dropPreview", "orientation.setting", "orientation.position", "orientation.split"] },
     { anchor: "portraits", titleKey: "avatarStyle.title", keywords: ["appearance.portraits", "appearance.portraits.selectAll", "appearance.portraits.replaceAll", "appearance.portraits.reassign", "info.avatar.packs", "avatarStyle.kind.portrait", "avatarStyle.kind.emoji", "avatarStyle.kind.letter", "avatarStyle.bulk.replaceAll", "avatarStyle.bulk.reassign"] },
+    // On the 头像 sub-page (lib/portraitSettingsNav, like avatars / portraits / headwear): a result opens it at the card.
+    { anchor: "avatar", titleKey: "avatarPage.title", keywords: ["avatarPage.row", "settings.ia.avatars", "appearance.agentAvatar", "appearance.avatarTint", "appearance.headwear.operators", "appearance.headwear.seasonal", "avatarStyle.title", "portraitLib.title", "appearance.headwear"] },
+    { anchor: "portrait-library", titleKey: "portraitLib.title", keywords: ["portraitLib.download", "portraitLib.check"] },
+    { anchor: "portraits-bulk", titleKey: "avatarStyle.bulk.title", keywords: ["avatarStyle.bulk.replaceAll", "avatarStyle.bulk.reassign", "avatarStyle.bulk.repair"] },
     { anchor: "fontPack", titleKey: "appearance.fontPack", keywords: ["appearance.fontPack.import", "appearance.fonts"] },
     { anchor: "launchArt", titleKey: "appearance.launchArt", keywords: ["appearance.launchArt.import", "appearance.launchArt.clear", "appearance.launchArt.source.imported", "appearance.launchArt.source.bundled"] },
-    { anchor: "headwear", titleKey: "appearance.headwear", keywords: ["appearance.headwear.maid", "appearance.headwear.crown", "appearance.headwear.mianguan", "appearance.headwear.detective", "appearance.headwear.graduation", "appearance.headwear.chef", "appearance.headwear.wizard", "appearance.headwear.halo", "appearance.headwear.cat-ears", "appearance.headwear.headphones", "appearance.headwear.none", "appearance.headwear.operators", "appearance.headwear.seasonal"] },
+    { anchor: "headwear", titleKey: "appearance.headwear", keywords: ["appearance.headwear.maid", "appearance.headwear.crown", "appearance.headwear.mianguan", "appearance.headwear.detective", "appearance.headwear.graduation", "appearance.headwear.chef", "appearance.headwear.wizard", "appearance.headwear.halo", "appearance.headwear.cat-ears", "appearance.headwear.headphones", "appearance.headwear.none"] },
   ],
 };
 
@@ -85,16 +89,13 @@ export const SIDES_SEARCH: Search = {
 export const COMPOSER_SEARCH: Search = {
   sections: [
     { anchor: "send", titleKey: "shell.composer.send", keywords: ["settings.sendKeys", "settings.multilineEnter", "conversation.delegationSteerKeys"] },
-    { anchor: "promptEnhance", titleKey: "promptEnhance.title", keywords: ["promptEnhance.settings.route", "promptEnhance.settings.fallback", "promptEnhance.settings.profiles"] },
+    { anchor: "atMention", titleKey: "settings.atMention", keywords: ["settings.atMentionOrder", "settings.atMentionOrder.agents", "settings.atMentionOrder.profiles"] },
     { anchor: "queuePanel", titleKey: "queue.panelFold", keywords: ["queue.panelFold.open", "queue.panelFold.auto", "queue.sectionStrip"] },
-    { anchor: "aboveInput", titleKey: "shell.status.aboveInput", keywords: ["appearance.needsYouStrip", "shell.composer.barItems"] },
+    { anchor: "aboveInput", titleKey: "shell.status.aboveInput", keywords: ["appearance.needsYouStrip", "shell.statusRow.items", "settings.panel.status"] },
     { anchor: "inputBar", titleKey: "shell.composer.inputBar", keywords: ["composer.profileAvatar"] },
   ],
 };
 
-export const STATUS_SEARCH: Search = {
-  sections: [{ anchor: "places", titleKey: "shell.capsule.places", keywords: ["shell.statusPlace.bar", "shell.statusPlace.capsule"] }],
-};
 
 /** One card per shortcut group (ShortcutsPage renders them with these anchors). */
 function shortcutAnchor(group: string): string {

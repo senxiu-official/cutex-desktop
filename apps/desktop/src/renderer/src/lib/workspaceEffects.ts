@@ -25,6 +25,7 @@ import { canSolo, canStrip, collapseToStrip, expandStrip, expandStripOf, soloWor
 import type { Foretell, ForetellMark } from "./foretell";
 import { startColumnPick } from "./columnPick";
 import { maxConversationColumns } from "./paneLayout";
+import { roomForColumn } from "./paneRoom";
 import { setOf, useWorkspaceSets } from "./workspaceSets";
 import { addOpen, openEntry, popBack, pushBack, replayingBack, type OpenAgent } from "./trayOpen";
 import { trayNextAfterClose } from "./trayPins";
@@ -69,7 +70,8 @@ const besideKey = (): string => newInstanceKey();
 export type AgentPlan =
   | { kind: "focus"; paneId: string; strip: boolean }
   | { kind: "open"; paneId: string | null }
-  | { kind: "replace"; paneId: string; from: { hostId: string; sessionId: string } }
+  /** `narrow`: asked for 并排, but the work area has no room for a second column (lib/paneRoom), so it replaces. */
+  | { kind: "replace"; paneId: string; from: { hostId: string; sessionId: string }; narrow?: boolean }
   /** A plain click: that agent's own workspace (all its members) takes the screen; the one on screen stays in the tray. */
   | { kind: "switch"; members: { hostId: string; sessionId: string }[]; from: { hostId: string; sessionId: string }[] }
   /** Ctrl/⌘ with every column taken: pick the one the agent replaces (lib/columnPick). */
@@ -84,7 +86,7 @@ export type AgentPlan =
  * workspace on the right (two on screen: the other one shows it); 替换 = the focused workspace shows it — except
  * a minimised one beside a single workspace, which comes back on its side (002).
  */
-export function agentPlan(ref: { hostId: string; key: string }, mode: WorkspaceOpenMode, screen: WsScreen, ctx: { strips: readonly string[]; open: Pick<OpenAgent, "side"> | null; /** The agent's remembered workspace (null: none). */ set?: readonly { hostId: string; sessionId: string }[] | null; /** Most columns side by side (default 2). */ max?: number }): AgentPlan {
+export function agentPlan(ref: { hostId: string; key: string }, mode: WorkspaceOpenMode, screen: WsScreen, ctx: { strips: readonly string[]; open: Pick<OpenAgent, "side"> | null; /** The agent's remembered workspace (null: none). */ set?: readonly { hostId: string; sessionId: string }[] | null; /** Most columns side by side (default 2). */ max?: number; /** false: the work area cannot fit another conversation column. */ room?: boolean }): AgentPlan {
   const shows = (p: WsScreen["panes"][number]) => p.hostId === ref.hostId && p.sessionId === ref.key;
   const at = screen.panes.find(shows);
   if (at) return { kind: "focus", paneId: at.paneId, strip: ctx.strips.includes(at.paneId) };
@@ -93,6 +95,8 @@ export function agentPlan(ref: { hostId: string; key: string }, mode: WorkspaceO
   const focused = real.find((p) => p.paneId === screen.focused) ?? real[0]!;
   if (mode === "project") return { kind: "project", paneId: focused.paneId };
   if (mode === "beside") {
+    // Too narrow for a second column (owner 2026-11-27, 「不生效」): it replaces — said so, not foretold as 并排.
+    if (ctx.room === false && real.length < (ctx.max ?? 2)) return { kind: "replace", paneId: focused.paneId, from: { hostId: focused.hostId, sessionId: focused.sessionId! }, narrow: true };
     if (real.length < (ctx.max ?? 2)) return { kind: "beside", side: ctx.open?.side ?? "right", restore: false };
     // Every column is taken: the owner picks which one it replaces (design 039).
     return { kind: "pick", panes: real.map((p) => p.paneId) };
@@ -113,6 +117,7 @@ export function agentForetell(plan: AgentPlan, name: string, opts: { hint?: bool
     case "open":
       return { tone: "open", text: t("foretell.open", { name }), marks: [{ selector: plan.paneId ? `${DESK}, ${paneArea(plan.paneId)}` : DESK }] };
     case "replace": {
+      if (plan.narrow) return { tone: "replace", text: t("foretell.besideNoRoom", { name: nameOf(plan.from.hostId, plan.from.sessionId) }), marks: [{ selector: paneArea(plan.paneId) }] };
       const text = t("foretell.replace", { name: nameOf(plan.from.hostId, plan.from.sessionId) }) + (opts.hint ? t("foretell.besideHint", { key: besideKey() }) : "");
       return { tone: "replace", text, marks: [{ selector: paneArea(plan.paneId) }] };
     }
@@ -162,6 +167,7 @@ export function runAgentPlan(plan: AgentPlan, ref: { hostId: string; key: string
       void app.select(ref.key, ref.hostId);
       return;
     case "replace":
+      if (plan.narrow) app.notify(t("ws.besideNoRoom"), "info");
       if (plan.paneId === focusedConversation(usePanes.getState().layout)) void app.select(ref.key, ref.hostId);
       else replaceWith(ref.hostId, ref.key, plan.paneId);
       return;
@@ -212,7 +218,7 @@ export function agentEffect(ref: { hostId: string; key: string; title?: string }
   const screen = screenOf(layout);
   const strips = [...stripPanes(layout, useStrips.getState().strips), ...shelfOnlyPanes(layout, useShelfOnly.getState().records)];
   const set = setOf(useWorkspaceSets.getState().sets, { hostId: ref.hostId, sessionId: ref.key });
-  const plan = agentPlan(ref, mode, screen, { strips, open: openEntry({ hostId: ref.hostId, sessionId: ref.key }), set: opts.members ?? set?.members ?? null, max: maxConversationColumns() });
+  const plan = agentPlan(ref, mode, screen, { strips, open: openEntry({ hostId: ref.hostId, sessionId: ref.key }), set: opts.members ?? set?.members ?? null, max: maxConversationColumns(), room: mode === "beside" ? roomForColumn("conversation") : true });
   const name = ref.title ?? nameOf(ref.hostId, ref.key);
   return { foretell: agentForetell(plan, name, { hint: mode === "replace", focused: screen.focused }), run: () => runAgentPlan(plan, ref) };
 }

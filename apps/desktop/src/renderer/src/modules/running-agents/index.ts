@@ -8,6 +8,8 @@ export const RUNNING_AGENTS = "running-agents.list";
 
 export default defineModule({
   id: "running-agents",
+  // Hard dependency (module-dependencies-20261126): without it the module's main use fails.
+  requires: { modules: ["home"] },
   titleKey: "running-agents.title",
   descriptionKey: "running-agents.description",
   contributes: {

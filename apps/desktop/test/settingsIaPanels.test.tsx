@@ -13,7 +13,7 @@ vi.mock("../src/renderer/src/lib/globalSettings", async (original) => ({ ...(awa
 vi.mock("../src/renderer/src/lib/targetHost", async (original) => ({ ...(await original<object>()), useTargetHostId: () => fx.host, useTargetFeatures: () => new Set(fx.supported ? ["session-delete-empty-on-archive"] : []) }));
 
 import { ArchiveBehaviour } from "../src/renderer/src/components/settings/AppSettings";
-import { AvatarSettings } from "../src/renderer/src/components/settings/AvatarSettings";
+import { AvatarEntrySection } from "../src/renderer/src/components/settings/AvatarSettings";
 import { getUiPrefs } from "../src/renderer/src/lib/prefs";
 import { translate } from "../src/renderer/src/i18n";
 
@@ -64,8 +64,8 @@ describe("empty archive retention policy", () => {
 });
 
 it("avatar settings keep their existing stored preference keys after the move", () => {
-  act(() => root.render(h(AvatarSettings)));
-  expect(host.querySelector("#settings-avatars")).not.toBeNull();
+  act(() => root.render(h(AvatarEntrySection)));
+  expect(host.querySelector("#settings-avatar")).not.toBeNull();
   const row = [...host.querySelectorAll('[data-setting-row]')].find((e) => e.textContent?.includes(translate("appearance.avatarTint")));
   const scope = row ?? host;
   const target = [...scope.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === translate("appearance.avatarTint.provider"))!;

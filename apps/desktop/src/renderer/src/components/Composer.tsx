@@ -19,7 +19,7 @@ import { useAgentPause } from "../lib/agentPause";
 import { mentionText, parseDraggedPaths, WORKSPACE_PATHS_MIME } from "../lib/workspaceDrag";
 import { DROP_TINT, dropTint } from "../lib/dropTint";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useId, type ClipboardEvent, type DragEvent, type KeyboardEvent, type ReactNode } from "react";
-import { ArrowUp, CircleAlert, Clock, Eye, EyeOff, Info, Square, WandSparkles, X } from "lucide-react";
+import { ArrowUp, CircleAlert, Clock, Eye, EyeOff, Info, Square, SquarePen, X } from "lucide-react";
 import type { AdmissionNextStep, QueueItem } from "@cutex-desktop/protocol";
 import type { SkillMetadata, SkillsListResponse } from "@cutex-desktop/protocol/codex/v2";
 import type { ExtraInput, ModelOption, ProfileItem } from "../../../shared/ipc";
@@ -37,7 +37,7 @@ import { candidateIndex, composerCandidateKey, mentionPathsFor, startMentionSear
 import { agentMentionCandidates, agentMentionInsert, mentionRecentKey } from "../lib/composerAgentMentions";
 import { recentAgentPicks, rememberAgentPick } from "../lib/agentPickerOptions";
 import { composerMentionTokens } from "../lib/composerMentionTokens";
-import { atAgentRows, useProfileMentions } from "../lib/useProfileMentions";
+import { atAgentRows, atGroupOffsets, atOrdered, useProfileMentions } from "../lib/useProfileMentions";
 import { useNameOrderKey } from "../lib/rosterOrder";
 import { Avatar } from "./Avatar";
 import { AgentMentionInput, type AgentMentionInputHandle } from "./AgentMentionInput";
@@ -70,12 +70,9 @@ import { sideLayersActive } from "../lib/sideLayoutStore";
 import { openChanges, openSide } from "../lib/sideOpen";
 import { SIDE_CHAT_COMPONENT } from "../lib/sideKinds";
 import { useConversationEsc } from "../lib/useConversationEsc";
-import { PromptEnhancePanel } from "./PromptEnhancePanel";
-import { usePromptEnhance } from "../lib/usePromptEnhance";
-import { FEATURE_PROFILES_FEATURE } from "../../../shared/featureProfiles";
-import { hostRoute, insertUndoable, promptEnhanceKey, rewriteRoute, usePromptEnhancePrefs } from "../lib/promptEnhance";
-import { TEXT_REWRITE_FEATURE } from "../../../shared/textRewrite";
-import { useBindingLabel, withKey } from "../lib/useKeybindings";
+import { insertUndoable } from "../lib/undoableInsert";
+import { useComposerActions } from "../lib/composerActions";
+import { ComposerActions } from "../modules/ComposerActions";
 import { pausedSection } from "../lib/queuePause";
 import { composerKeyAction, isMultilineDraft, multilineHint, strategyFor } from "../lib/sendKeys";
 import { displayKey } from "../lib/shortcuts";
@@ -113,6 +110,9 @@ import { useHostPlatform } from "../lib/codeBlockActions";
 import { WINDOWS_SANDBOX_FEATURE, windowsSandboxWarns } from "../../../shared/windowsSandbox";
 import { QueuePanel } from "./QueuePanel";
 import { ImageThumb } from "./ImageThumbs";
+import { ImageEditor } from "./ImageEditor";
+import { ComposerActionLayer } from "./ComposerActionLayer";
+import { applyEdit, editableSrc, restoreOriginal } from "../lib/imageEdit";
 import { PendingMessagesSection } from "./PendingMessagesSection";
 import { usePendingMessages } from "../lib/agentMessageStore";
 import { lastFinishedTurnStart } from "../lib/legacyDelivery/agentMessages";
@@ -571,7 +571,7 @@ export function Composer({
     typing.current = { composing };
     try { apply(); } finally { typing.current = null; }
   };
-  const { sendKeys, delegationSteerKeys, queueSectionStrip, queuePanelFold, multilineEnterNewline } = useUiPrefs();
+  const { sendKeys, delegationSteerKeys, queueSectionStrip, queuePanelFold, multilineEnterNewline, atMentionOrder: atOrder } = useUiPrefs();
   // The running turn handles a delegation (agent-asks): hint, guarded shortcuts, send menu.
   const runningDelegation = useDelegationTurn(timeline);
   // Idle on purpose: the handler ended its turn with delegation_await (say so, never a plain idle or working look).
@@ -941,11 +941,13 @@ export function Composer({
   const mentionProfiles = mentionOpen ? profileMention.atRows : [];
   const agentGroup = atAgentRows(mentionAgents, mentionProfiles.length);
   const shownAgents = agentGroup.shown;
+  // 「@ 列表顺序」 (owner 2026-11-28): agents or profiles first; rows, the keyboard index and the pick all follow it.
+  const atAt = atGroupOffsets(atOrder, shownAgents.length, mentionProfiles.length);
   const mentionPopupOpen = mentionOpen || profileMention.open;
   const popupCount = paletteOpen ? paletteItems.length : profileMention.open ? profileMention.rows.length : mentionOpen ? shownAgents.length + mentionProfiles.length + mentionPaths.length : 0;
   const selectedCandidate = candidateIndex(selected, popupCount) ?? 0;
   // Reset on a changed list, not on an unrelated sidebar refresh returning equivalent entries.
-  const candidateListKey = JSON.stringify(paletteOpen ? paletteItems.map((item) => item.key) : profileMention.open ? profileMention.rows.map(row => row.key) : [...shownAgents.map(agent => agent.id), ...mentionProfiles.map(row => row.key), ...mentionPaths]);
+  const candidateListKey = JSON.stringify(paletteOpen ? paletteItems.map((item) => item.key) : profileMention.open ? profileMention.rows.map(row => row.key) : atOrdered<string>(atOrder, shownAgents.map(agent => agent.id), mentionProfiles.map(row => row.key), mentionPaths));
   useEffect(() => setSelected(0), [query, mention?.query, profileMention.query, candidateListKey]);
 
   // ---------- slash dispatch ----------
@@ -1039,48 +1041,42 @@ export function Composer({
       setCaret(el.value.length);
     });
 
-  // ---------- 提示词增强 (lib/usePromptEnhance.ts; host feature text-rewrite-v1, Settings → 输入区) ----------
-  const enhancePrefs = usePromptEnhancePrefs();
-  const enhanceFeatureProfiles = features.has(FEATURE_PROFILES_FEATURE);
-  const enhanceOn = enhancePrefs.enabled && features.has(TEXT_REWRITE_FEATURE);
-  const enhanceKey = useBindingLabel("promptEnhance");
-  const enhanceApi = useCallback(() => hostApi(hostId), [hostId]);
-  const enhanceRoute = useCallback(() => rewriteRoute(hostRoute(hostId), sessionId, enhanceFeatureProfiles), [hostId, sessionId, enhanceFeatureProfiles]);
-  const enhance = usePromptEnhance(enhanceApi, enhanceRoute, `${hostId}|${sessionId}`);
-  const enhanceLabel = t("promptEnhance.title");
-  /** The button keeps the input's selection: it is what gets rewritten. */
-  const keepSelection = (e: React.MouseEvent) => e.preventDefault();
-  /** The selection when it holds text, else the whole draft. */
-  const startEnhance = () => {
-    const el = textarea.current;
-    enhance.start(text, el?.selectionStart, el?.selectionEnd);
-  };
-  /** Again: the same part when the draft still has it there, else the whole draft. */
-  const retryEnhance = () => {
-    const target = enhance.state.phase === "idle" ? null : enhance.state.target;
-    if (target && text.slice(target.start, target.end) === target.text) enhance.start(text, target.start, target.end);
-    else enhance.start(text, null, null);
-  };
-  /** Into the draft as one undo step: the textarea's own editing (Ctrl+Z restores), the rich input's history. */
-  const adoptEnhance = () => {
-    const shown = enhance.state;
-    if (shown.phase !== "done") return;
-    const next = enhance.adopt(text);
-    if (!next) return;
-    const el = textarea.current;
-    // The adopted rewrite is one undo step (it arrives through the textarea as input).
-    markDraftStep();
-    if (!useRichInput && el && "tagName" in el && insertUndoable(el, shown.target.start, shown.target.end, shown.rewrittenText, next.text)) {
-      setCaret(next.caret);
-      return;
-    }
-    setText(next.text);
-    setCaret(next.caret);
-    win.requestAnimationFrame(() => {
-      textarea.current?.focus();
-      textarea.current?.setSelectionRange(next.caret, next.caret);
-    });
-  };
+  // ---------- composer.action (docs/desktop-modules.md §31; lib/composerActions.ts): module actions in this box ----------
+  // They read the draft and its selection and replace a part as one undo step.
+  const draftNow = useRef(text);
+  draftNow.current = text;
+  const actions = useComposerActions(sessionId, hostId, {
+    read: () => {
+      const el = textarea.current;
+      const value = draftNow.current;
+      return { text: value, selectionStart: el?.selectionStart ?? value.length, selectionEnd: el?.selectionEnd ?? value.length };
+    },
+    replace: (start, end, insert, expected) => {
+      const cur = draftNow.current;
+      if (start < 0 || end > cur.length || start > end || cur.slice(start, end) !== expected) return false;
+      const next = cur.slice(0, start) + insert + cur.slice(end);
+      const caret = start + insert.length;
+      // One undo step (it arrives through the textarea as input; the rich input's history otherwise).
+      markDraftStep();
+      const el = textarea.current;
+      if (!useRichInput && el && "tagName" in el && insertUndoable(el, start, end, insert, next)) {
+        draftNow.current = next;
+        setCaret(caret);
+        return true;
+      }
+      draftNow.current = next;
+      setText(next);
+      setCaret(caret);
+      win.requestAnimationFrame(() => {
+        textarea.current?.focus();
+        textarea.current?.setSelectionRange(caret, caret);
+      });
+      return true;
+    },
+    focus: () => textarea.current?.focus(),
+  });
+  const [actionButtons, setActionButtons] = useState<HTMLElement | null>(null);
+  const [actionPanel, setActionPanel] = useState<HTMLElement | null>(null);
 
   /** Put `$name` in the draft and bind it as a skill input (palette: replaces the `/query`; "+": appends). */
   const pickSkill = (skill: SkillMetadata, mode: "replace" | "append") => {
@@ -1109,13 +1105,13 @@ export function Composer({
 
   const pickMention = (index: number) => {
     if (!mention) return;
-    const agent = shownAgents[index];
-    if (!agent && index < shownAgents.length + mentionProfiles.length) {
+    const agent = index >= atAt.agents && index < atAt.agents + shownAgents.length ? shownAgents[index - atAt.agents] : undefined;
+    if (index >= atAt.profiles && index < atAt.profiles + mentionProfiles.length) {
       // A profile row: the same model / effort cascade as `p@` (lib/useProfileMentions).
-      profileMention.pickAt(index - shownAgents.length);
+      profileMention.pickAt(index - atAt.profiles);
       return;
     }
-    const path = mentionPaths[index - shownAgents.length - mentionProfiles.length];
+    const path = index >= atAt.paths ? mentionPaths[index - atAt.paths] : undefined;
     if (!agent && !path) return;
     const next = agent ? (() => {
       const inserted = agentMentionInsert(agent, hostId);
@@ -1155,6 +1151,20 @@ export function Composer({
     }
     return true;
   };
+  // 图片编辑: the attachment being edited, in the draft it belongs to (saved into that draft even if the view moved on).
+  const [editingImage, setEditingImage] = useState<{ id: string; target: ReturnType<typeof captureDraft> } | null>(null);
+  const editImage = (id: string) => {
+    const img = images.find((x) => x.id === id);
+    if (!img) return;
+    if (!editableSrc(img)) { notifyHere(t("imageEdit.unavailable"), "error"); return; }
+    setEditingImage({ id, target: captureDraft() });
+  };
+  const restoreImage = (id: string, target = captureDraft()) => {
+    target.setImages((prev) => prev.map((x) => (x.id === id ? restoreOriginal(x) : x)));
+    notifyHere(t("imageEdit.restored"));
+  };
+  const editing = editingImage ? images.find((x) => x.id === editingImage.id) : undefined;
+  const editingSrc = editing ? editableSrc(editing) : null;
   const pickImages = async () => {
     const target = captureDraft();
     try {
@@ -1223,7 +1233,7 @@ export function Composer({
       turnId: busy ? (timeline?.activeTurnId ?? null) : null,
       pendingSteers: steersWaiting,
       delegation: !!delegation,
-      blocked: !!panel || popupCount > 0 || (timeline?.pending.size ?? 0) > 0 || (enhanceOn && enhance.active),
+      blocked: !!panel || popupCount > 0 || (timeline?.pending.size ?? 0) > 0 || actions.open,
       focused,
     },
     {
@@ -1348,8 +1358,8 @@ export function Composer({
       travelDraft(undoKey === "redo");
       return;
     }
-    const enhanceKeyAction = promptEnhanceKey(e, enhanceOn, enhance.state.phase);
-    if (enhanceKeyAction === "start") { e.preventDefault(); startEnhance(); return; }
+    // A composer.action's own command (lib/composerActions.ts), before the popups.
+    if (actions.commandKey(e)) return;
     if (profileMention.open && (e.key === "Escape" || (profileMention.cascade && e.key === " "))) {
       e.preventDefault();
       profileMention.exit(e.key === " ");
@@ -1381,12 +1391,9 @@ export function Composer({
         return;
       }
     }
-    // 提示词增强 shown: Esc cancels it (the request too); Enter adopts the answer, and does not send while one is coming.
-    if (enhanceKeyAction) {
-      e.preventDefault();
+    // An open composer.action takes the keys first (its Esc / Enter); send, steer and queue keys are held meanwhile.
+    if (actions.openKey(e)) {
       if (e.key === "Enter") report("unhandled");
-      if (enhanceKeyAction === "cancel") enhance.cancel();
-      else if (enhanceKeyAction === "adopt") adoptEnhance();
       return;
     }
     // A right-side layer in front (maximised / full screen / narrow drawer) takes this Esc first (App).
@@ -1415,19 +1422,19 @@ export function Composer({
   }));
   const agentGroupLabel = agentGroup.cut ? t("mention.groupMore", { group: t("mention.agents"), shown: shownAgents.length, total: agentGroup.total }) : t("mention.agents");
   const profileGroup = profileMention.atTotal > mentionProfiles.length ? t("mention.groupMore", { group: t("mention.profileGroup"), shown: mentionProfiles.length, total: profileMention.atTotal }) : t("mention.profileGroup");
-  const mentionRows: PaletteRow[] = [...shownAgents.map(agent => ({
+  const mentionRows: PaletteRow[] = atOrdered<PaletteRow>(atOrder, shownAgents.map(agent => ({
     key: `agent:${agent.id}`, label: agent.label, group: agentGroupLabel,
     description: `${agent.sameProject ? t("mention.sameProject") + " · " : ""}${t(`mention.${agent.presence}`)}`,
     ariaLabel: t("mention.agentMention", { name: agent.label }) + ` · ${t(`mention.${agent.presence}`)}`,
     icon: <Avatar name={agent.name} seed={agent.id} avatar={agent.session.avatar} size={20} status={{presence:agent.presence}} />,
-  })), ...mentionProfiles.map(row => ({
+  })), mentionProfiles.map(row => ({
     key: row.key, label: row.label, description: row.description, group: profileGroup,
     ariaLabel: t("mention.profileMention", { name: row.label }),
     icon: <ProfileAvatar profile={row.profile} size={20} host={hostId} />,
-  })), ...mentionPaths.map((p) => {
+  })), mentionPaths.map((p) => {
     const slash = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\"));
     return { key: `file:${p}`, group: t("mention.title"), label: slash >= 0 ? p.slice(slash + 1) : p, description: slash >= 0 ? p.slice(0, slash) : undefined };
-  })];
+  }));
 
   const statusRows = (): StatusRow[] => {
     const usage = timeline?.contextUsage;
@@ -1591,9 +1598,14 @@ export function Composer({
         >
           {images.length > 0 && (
             <div className="flex flex-wrap gap-2 pt-1 pb-1.5">
-              {images.map((img) => (
-                <div key={img.id} className="group relative h-14 w-14 overflow-hidden rounded-lg border border-border bg-surface-2" data-tip={img.name}
-                  onContextMenuCapture={img.source.kind === "path" ? contextMenu(() => fileActions({ hostId: img.pickedLocally ? LOCAL_HOST_ID : hostId, path: img.source.kind === "path" ? img.source.path : "", knownLocal: img.pickedLocally }, t)) : undefined}>
+              {images.map((img) => {
+                const editEntries = () => [
+                  { label: t("imageEdit.edit"), onSelect: () => editImage(img.id) },
+                  ...(img.original ? [{ label: t("imageEdit.restore"), onSelect: () => restoreImage(img.id) }] : []),
+                ];
+                return (
+                <div key={img.id} className="group relative h-14 w-14 overflow-hidden rounded-lg border border-border bg-surface-2" data-tip={img.name} data-composer-image={img.id} data-edited={img.original ? "" : undefined}
+                  onContextMenuCapture={img.source.kind === "path" ? contextMenu(() => [...editEntries(), "separator" as const, ...fileActions({ hostId: img.pickedLocally ? LOCAL_HOST_ID : hostId, path: img.source.kind === "path" ? img.source.path : "", knownLocal: img.pickedLocally }, t)]) : undefined}>
                   {/* Click → full size, as for a sent image; a restored host path is read through cutex. */}
                   <ImageThumb
                     image={draftMessageImage(img)}
@@ -1602,7 +1614,19 @@ export function Composer({
                     className="block h-full w-full"
                     imgClassName="h-full w-full object-cover"
                     fallback={<span className="flex h-full items-center justify-center text-caption/[inherit] text-subtle">{img.name}</span>}
+                    editAttach={false}
+                    menuExtra={editEntries}
                   />
+                  <button
+                    type="button"
+                    onClick={() => editImage(img.id)}
+                    data-composer-image-edit=""
+                    data-tip={t("imageEdit.editShort")} aria-label={t("imageEdit.editShort")}
+                    className="press-solid reveal-focus absolute top-0.5 left-0.5 rounded-full bg-black/60 p-0.5 text-white opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
+                  >
+                    <SquarePen size={10} />
+                  </button>
+                  {img.original && <span data-tip={t("imageEdit.edited")} aria-label={t("imageEdit.edited")} className="pointer-events-none absolute bottom-0.5 left-0.5 rounded-full bg-black/60 p-0.5 text-white group-hover:opacity-0"><SquarePen size={8} aria-hidden /></span>}
                   <button
                     onClick={() => setImages((prev) => prev.filter((x) => x.id !== img.id))}
                     data-tip={t("composer.image.remove")} aria-label={t("composer.image.remove")}
@@ -1611,9 +1635,21 @@ export function Composer({
                     <X size={10} />
                   </button>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
+          {editingImage && editing && editingSrc && <ImageEditor
+            key={editingImage.id}
+            src={editingSrc}
+            maxBytes={maxImageBytes(agent)}
+            onCancel={() => setEditingImage(null)}
+            onSave={(r) => {
+              editingImage.target.setImages((prev) => prev.map((x) => (x.id === editingImage.id ? applyEdit(x, r) : x)));
+              setEditingImage(null);
+            }}
+            onRestore={editing.original ? () => { restoreImage(editingImage.id, editingImage.target); setEditingImage(null); } : undefined}
+          />}
           {delegation && <DelegationTurnHint turn={delegation} draft={hasContent} />}
           {awaiting && hasContent && <DelegationAwaitLine d={awaiting} draft />}
           {overloadRetry?.phase === "pending" && <div role="status" className="pb-1.5 text-caption text-muted group-has-[[data-auto-retry-explained]]/inputcard:hidden" data-testid="composer-auto-retry-owner-order">
@@ -1621,7 +1657,8 @@ export function Composer({
           </div>}
           {agentPause && hasContent && <AgentPausedSendHint hostId={hostId} sessionId={sessionId} send={() => send("send")} />}
           {noSteerHintShown({ busy: busyLook, noSteer, hasContent, delegation: !!delegation, paused: !!agentPause }) && <NoSteerSendHint />}
-          {enhanceOn && <PromptEnhancePanel state={enhance.state} hostId={hostId} adoptKey="Enter" onAdopt={adoptEnhance} onCancel={enhance.cancel} onRetry={retryEnhance} />}
+          <ComposerActionLayer layerRef={setActionPanel} />
+          <ComposerActions host={actions} sessionId={sessionId} hostId={hostId} button={actionButtons} panel={actionPanel} />
           <div className="relative flex items-end gap-2">
             {delegation && !hasContent && <DelegationTurnOverlay turn={delegation} />}
             {awaiting && !hasContent && <DelegationAwaitLine d={awaiting} draft={false} />}
@@ -1749,17 +1786,7 @@ export function Composer({
           }}
           onManage={(tab) => useApp.getState().openSettings(tab)}
         />
-        {enhanceOn && (
-          <button type="button" data-testid="prompt-enhance-button"
-            onMouseDown={keepSelection}
-            onClick={startEnhance}
-            disabled={enhance.state.phase === "running"}
-            aria-label={enhanceLabel}
-            data-tip={withKey(t(hasContent ? "promptEnhance.buttonHint" : "promptEnhance.buttonEmpty"), enhanceKey)}
-            className="press flex items-center rounded-md px-1.5 py-0.5 text-xs text-muted hover:bg-surface-2 hover:text-foreground disabled:opacity-40">
-            <WandSparkles size={14} strokeWidth={1.75} className="block" />
-          </button>
-        )}
+        <span ref={setActionButtons} className="contents" data-composer-action-buttons="" />
         {isAcpAgent(agent) ? null : claudeModes ? (
           <Menu<ClaudeMode>
             title={t("composer.permissionTitle")}

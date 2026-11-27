@@ -17,7 +17,6 @@ vi.mock("../src/renderer/src/lib/useHostScope", async original => ({ ...await or
 vi.mock("../src/renderer/src/lib/useClaudeAccountList", () => ({ useClaudeAccountList: (enabled: boolean) => {
   env.accountRead(enabled); return { list: [{ id: "default", status: env.status }], loadError: null, load: env.load };
 } }));
-import { ProfileStep } from "../src/renderer/src/components/OnboardingSteps";
 import { OnboardingClaudeRuntime } from "../src/renderer/src/components/OnboardingClaudeRuntime";
 let container: HTMLDivElement, root: Root;
 beforeEach(() => {
@@ -31,16 +30,6 @@ afterEach(() => { act(() => root.unmount()); container.remove(); });
 async function show() { await act(async () => root.render(h(OnboardingClaudeRuntime))); }
 function button(key: string) { return [...container.querySelectorAll("button")].find(b => b.textContent === key)!; }
 
-it("does not show or read Claude setup for either Codex choice, and releases it when switching back", async () => {
-  await act(async () => root.render(h(ProfileStep)));
-  expect(container.querySelector("[data-onboarding-claude]")).toBeNull(); expect(env.accountRead).not.toHaveBeenCalled();
-  await act(async () => (container.querySelector('[data-onboarding-profile-kind="chatgpt"]') as HTMLButtonElement).click());
-  expect(env.accountRead).not.toHaveBeenCalled();
-  await act(async () => (container.querySelector('[data-onboarding-profile-kind="claude"]') as HTMLButtonElement).click());
-  expect(container.querySelector('[data-component-card="missing"]')).not.toBeNull();
-  await act(async () => (container.querySelector('[data-onboarding-profile-kind="apiKey"]') as HTMLButtonElement).click());
-  expect(container.querySelector("[data-onboarding-claude]")).toBeNull();
-});
 it("uses the shared install action for the selected host and keeps unknown CLI/sign-in honest", async () => {
   await show(); await act(async () => button("modules.component.install").click());
   expect(env.install).toHaveBeenCalledExactlyOnceWith("remote", "claude-runtime", "install");

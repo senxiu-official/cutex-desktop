@@ -3,6 +3,7 @@
 import type { zhCN } from "./i18n";
 
 const zhHantCN: Partial<Record<keyof typeof zhCN, string>> = {
+  "conversation.agent.openSideInfo": "在側欄裏按住 Ctrl（Mac 上是 ⌘）左鍵點擊，或用中鍵點擊一個{{agent}}，也是並排打開。窗口放不下第二欄時，會在當前這一欄打開，替換正在看的{{agent}}。",
   "conversation.tools.memberRuntime": "調整成員運行狀態",
   "conversation.tools.memberRuntime.online": "請求成員上線",
   "conversation.tools.memberRuntime.offline": "請求成員下線",

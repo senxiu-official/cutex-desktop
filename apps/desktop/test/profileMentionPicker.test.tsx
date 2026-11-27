@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
+import { readFileSync } from "node:fs";
 import { act, createElement as h, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProfileItem, ProfileModelsView } from "../src/shared/ipc";
-import { AT_GROUP_ROWS, atAgentRows, useProfileMentions } from "../src/renderer/src/lib/useProfileMentions";
+import { AT_GROUP_ROWS, atAgentRows, atGroupOffsets, atOrdered, useProfileMentions } from "../src/renderer/src/lib/useProfileMentions";
 import { agentMentionCandidates, type MentionHost } from "../src/renderer/src/lib/composerAgentMentions";
-import { setUiPref } from "../src/renderer/src/lib/prefs";
+import { getUiPrefs, setUiPref } from "../src/renderer/src/lib/prefs";
 import type { SessionResource } from "@cutex-desktop/protocol";
 import type { SidebarSnapshot } from "../src/shared/ipc";
 import { profileMentionText } from "../src/renderer/src/lib/profileMentions";
@@ -159,6 +160,25 @@ describe("plain @: the profile group beside the agents", () => {
   expect(grouped).toMatchObject({ total: 8, cut: true });
   expect(atAgentRows(agents, 0)).toMatchObject({ shown: agents, total: 8, cut: false });
   expect(atAgentRows(agents.slice(0, 3), 2)).toMatchObject({ total: 3, cut: false });
+ });
+ it("「@ 列表顺序」: agents first by default; profiles first moves that group up, paths stay last, and the flat index follows", () => {
+  expect(getUiPrefs().atMentionOrder).toBe("agents");
+  expect(atOrdered("agents", ["a1", "a2"], ["p1"], ["f1"])).toEqual(["a1", "a2", "p1", "f1"]);
+  expect(atOrdered("profiles", ["a1", "a2"], ["p1"], ["f1"])).toEqual(["p1", "a1", "a2", "f1"]);
+  expect(atGroupOffsets("agents", 2, 1)).toEqual({ agents: 0, profiles: 2, paths: 3 });
+  expect(atGroupOffsets("profiles", 2, 1)).toEqual({ profiles: 0, agents: 1, paths: 3 });
+  // No profile group (host without profiles): the agents start at 0 either way.
+  expect(atGroupOffsets("profiles", 3, 0)).toEqual({ profiles: 0, agents: 0, paths: 3 });
+  setUiPref("atMentionOrder", "profiles");
+  try { expect(getUiPrefs().atMentionOrder).toBe("profiles"); } finally { setUiPref("atMentionOrder", "agents"); }
+ });
+ it("Composer: rows, the keyboard index and the pick all use the one order (no group read by a fixed offset)", () => {
+  const src = readFileSync("src/renderer/src/components/Composer.tsx", "utf8");
+  expect(src).toContain("const atAt = atGroupOffsets(atOrder, shownAgents.length, mentionProfiles.length);");
+  expect(src).toContain("atOrdered<string>(atOrder, shownAgents.map(agent => agent.id), mentionProfiles.map(row => row.key), mentionPaths)");
+  expect(src).toContain("const mentionRows: PaletteRow[] = atOrdered<PaletteRow>(atOrder,");
+  expect(src).toContain("profileMention.pickAt(index - atAt.profiles)");
+  expect(src).not.toMatch(/index - shownAgents.length/);
  });
  it("picking a profile row replaces the @ text and continues the model cascade", async () => {
   await act(async () => { root.render(h(AtHarness, { initial: "ask @Ada" })); });

@@ -20,7 +20,8 @@ export default defineModule({
   titleKey: "claude-science.title",
   descriptionKey: "claude-science.description",
   defaultEnabled: false,
-  requires: { capabilities: ["services", SERVICES_LOGIN_LINK_FEATURE] },
+  // Hard dependency (module-dependencies-20261126): without it the module's main use fails.
+  requires: { capabilities: ["services", SERVICES_LOGIN_LINK_FEATURE], modules: ["browser"] },
   contributes: {
     "nav.primary": [{ id: "claude-science.nav", order: 420, icon: FlaskConical, titleKey: "claude-science.nav", unavailable: "hide", target: { page: "claude-science.page" } }],
     "main.page": [{ id: "claude-science.page", Page: ClaudeSciencePage, useTitle: pageTitle("claude-science.nav") }],

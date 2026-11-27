@@ -1,11 +1,6 @@
-// @vitest-environment jsdom
-import {it,expect,vi} from 'vitest';
-vi.mock('../src/renderer/src/bridge',()=>({
-  api:{}, apiFor:()=>({}), onEvent:()=>()=>{}, cleanIpcMessage:(x:string)=>x,
-  bridge:{on:()=>()=>{}}
-}));
-import {inputSegments,hasReferenceToken} from '../src/shared/inputPreview';
-import {queueItemText} from '../src/renderer/src/store';
+import { expect, it } from "vitest";
+import { hasReferenceToken, inputSegments } from "../src/shared/inputPreview";
+import { queueItemText } from "../src/shared/queueMerge";
 it.each([['','a',''],['a\r\n','','b\r\n'],['','',''],['a','b','c']])('text parts preserve exact empty/CRLF bytes: %j',(a:string,b:string,c:string)=>{
   const texts=[a,b,c],parts=texts.map(text=>({type:'text',text}));
   expect(queueItemText({input:parts} as never)).toBe(texts.join('\n'));

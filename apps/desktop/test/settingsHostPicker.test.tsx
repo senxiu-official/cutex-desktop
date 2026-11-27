@@ -28,7 +28,7 @@ vi.mock("../src/renderer/src/store", () => {
   return { useApp: Object.assign((select: (value: typeof state) => unknown) => select(state), { getState: () => state }) };
 });
 vi.mock("../src/renderer/src/components/HostPicker", () => ({ HostPicker: () => h("button", { "data-host-picker": "" }, "remote") }));
-vi.mock("../src/renderer/src/components/SettingsHostFrame", () => ({ SettingsHostFrame: ({ children }: { children: ReactNode }) => children }));
+vi.mock("../src/renderer/src/components/SettingsHostFrame", () => ({ SettingsHostFrame: ({ children }: { children: ReactNode }) => children, SettingsHostSwitcher: () => h("button", { "data-host-picker": "" }, "remote") }));
 vi.mock("../src/renderer/src/modules/Outlet", () => ({ ItemBoundary: ({ children }: { children: ReactNode }) => children }));
 vi.mock("../src/renderer/src/components/Page", () => ({
   PageBody: ({ children }: { children: ReactNode }) => h("main", null, children),
@@ -78,5 +78,21 @@ it("a host page keeps its page-level host picker", () => {
 
 it("a mixed page with a host part keeps its page-level host picker", () => {
   render("browser", null, true);
+  expect(container.querySelector("[data-host-picker]")).not.toBeNull();
+});
+
+it("a sub-page of a host-part page whose cards are all on this computer shows no host picker (浏览器身份)", () => {
+  const subPage = (hostPicker?: false) => ({ titleKey: "shell.general", Page: () => h("div", null, "sub"), ...(hostPicker === false ? { hostPicker } : {}) });
+  fx.entry = {
+    item: {
+      id: "test.browser", page: "browser", source: null, hostPart: true, group: "app", order: 100, icon: () => null,
+      titleKey: "shell.general", hintKey: "shell.general.pageHint", Page: () => h("div", null, "content"),
+      subPages: { identity: subPage(false), other: subPage() },
+    },
+  } as typeof fx.entry;
+  act(() => root.render(h(Settings, { params: { tab: "browser", sub: "identity" } })));
+  expect(container.textContent).toContain("sub");
+  expect(container.querySelector("[data-host-picker]")).toBeNull();
+  act(() => root.render(h(Settings, { params: { tab: "browser", sub: "other" } })));
   expect(container.querySelector("[data-host-picker]")).not.toBeNull();
 });

@@ -5,16 +5,15 @@
 // Once loaded the component renders synchronously (no empty frame on later opens). No Suspense: React holds a
 // boundary's content back for 300 ms after its fallback showed (FALLBACK_THROTTLE_MS), which made a first open
 // ~290 ms slower than the chunk load itself; the page is set from an effect instead (empty until then).
-// preloadLazyPages loads them all ahead, one per idle period; preloadOnIntent does it once, the first time the
-// owner heads for such a page (Settings opens, the Shelf ＋ launcher or ⌘K), so later first opens are instant.
+// preloadPage warms one likely destination. The explicit smooth performance mode can warm all pages in idle time.
 // A chunk that fails to load (the app was updated under the open window, a dev server restarted: "Failed to fetch
 // dynamically imported module") is tried again once, then the page says so with 重试 / 重新加载窗口 instead of
 // failing as a module error.
 import { useEffect, useState, type ComponentType, type ReactNode } from "react";
-import { loadEnglish, useI18n } from "../i18n";
+import { useI18n } from "../i18n";
 
 type Loader = () => Promise<unknown>;
-const loaders: Loader[] = [];
+const loaders = new Map<unknown, Loader>();
 
 /** The automatic second try after a failed chunk load. */
 export const LAZY_RETRY_MS = 400;
@@ -31,7 +30,6 @@ export function lazyPage<P extends object>(load: () => Promise<ComponentType<P>>
         throw err;
       },
     ));
-  loaders.push(once);
   function LazyPage(props: P) {
     const [state, setState] = useState<{ C: ComponentType<P> | null; failed?: boolean; attempt: number }>(() => ({ C: loaded, attempt: 0 }));
     useEffect(() => {
@@ -55,6 +53,7 @@ export function lazyPage<P extends object>(load: () => Promise<ComponentType<P>>
     if (state.failed) return <LazyLoadFailed onRetry={() => setState({ C: null, attempt: 1 })} />;
     return state.C ? <state.C {...props} /> : null;
   }
+  loaders.set(LazyPage, once);
   return LazyPage;
 }
 
@@ -77,7 +76,7 @@ function LazyLoadFailed({ onRetry }: { onRetry(): void }) {
 
 /** How many lazy pages are registered (tests, the perf report). */
 export function lazyPageCount(): number {
-  return loaders.length;
+  return loaders.size;
 }
 
 /**
@@ -85,25 +84,15 @@ export function lazyPageCount(): number {
  * are loaded (failures are skipped: the page tries again when opened). `idle` is swappable for tests.
  */
 export async function preloadLazyPages(idle: () => Promise<void> = nextIdle): Promise<void> {
-  for (const load of loaders.slice()) {
+  for (const load of [...loaders.values()]) {
     await idle();
     await load().catch(() => undefined);
   }
 }
 
-let intent: Promise<void> | null = null;
-/**
- * The owner heads for a lazily loaded page (Settings opened, the Shelf ＋ launcher hovered, ⌘K opened): preload them
- * all once, in idle periods (as 流畅优先 does after start), after the en search aliases. Later calls do nothing.
- */
-export function preloadOnIntent(): Promise<void> {
-  // The en catalog too (i18n: on demand): Settings search and ⌘K match English names from their first keystroke.
-  return (intent ??= loadEnglish().then(() => preloadLazyPages()));
-}
-
-/** Tests: forget that preloadOnIntent ran. */
-export function resetPreloadIntent(): void {
-  intent = null;
+/** Warm a single contributed component, reusing the same promise as its first mount. */
+export async function preloadPage(page: unknown): Promise<void> {
+  await loaders.get(page)?.().catch(() => undefined);
 }
 
 function nextIdle(): Promise<void> {

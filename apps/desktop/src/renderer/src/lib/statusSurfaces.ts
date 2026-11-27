@@ -93,13 +93,25 @@ export interface ResolvedPlacement {
 }
 
 /**
- * requested ∩ supported ∩ available providers. With the capsule off: bar → bar, both → bar,
- * capsule → none, off → none; the saved choice stays as it is.
+ * The capsule is off: its module is turned off (the default for new installs) or gone. Not while it
+ * failed or is still starting — those are passing states, where a saved place keeps its meaning.
+ */
+export const capsuleOff = (providers: SurfaceProviders): boolean => {
+  const capsule = providers.capsule;
+  return !capsule.available && (capsule.reason === "disabled" || capsule.reason === "absent");
+};
+
+/**
+ * requested ∩ supported ∩ available providers; the saved choice stays as it is. With the capsule off
+ * (capsuleOff; owner 2026-11-28, the capsule an optional module): capsule → bar, both → bar for an
+ * item the status row can show, so nothing placed in the capsule silently disappears.
  */
 export function resolvePlacement(requested: StatusPlace, supported: readonly StatusSurfaceId[], providers: SurfaceProviders): ResolvedPlacement {
   const effective: StatusSurfaceId[] = [];
   const unavailable: SurfaceUnavailable[] = [];
-  for (const surface of placeSurfaces(requested)) {
+  const asked = placeSurfaces(requested);
+  const surfaces: StatusSurfaceId[] = asked.includes("capsule") && capsuleOff(providers) && supported.includes("bar") ? ["bar"] : asked;
+  for (const surface of surfaces) {
     const provider = providers[surface];
     if (!supported.includes(surface)) unavailable.push({ surface, reason: "unsupported" });
     else if (!provider.available) unavailable.push({ surface, reason: provider.reason });
@@ -110,14 +122,6 @@ export function resolvePlacement(requested: StatusPlace, supported: readonly Sta
 
 /** Some surface shows the item now (null = its module is off). No → e.g. the full checklist in the timeline. */
 export const shownSomewhere = (resolved: ResolvedPlacement | null): boolean => !!resolved && resolved.effective.length > 0;
-
-/**
- * Can the owner pick `place` for the item now (Settings)? Its surfaces must be supported and their
- * providers registered and on — whether a conversation is mounted does not matter. "off" always.
- */
-export function placeSelectable(place: StatusPlace, supported: readonly StatusSurfaceId[], providers: SurfaceProviders): boolean {
-  return placeSurfaces(place).every((s) => supported.includes(s) && providers[s].available);
-}
 
 /**
  * Where a reveal goes, in order: the effective surfaces that serve the intent (the bar first, as

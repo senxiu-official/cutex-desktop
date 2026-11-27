@@ -11,7 +11,7 @@ import { createPortal } from "react-dom";
 import { bridge } from "../../bridge";
 import { CARD_FLAGS } from "../../lib/narrowCard";
 import { dataFlags, useSizeFlags } from "../../lib/sizeFlags";
-import { ArrowRight, Check, ChevronDown, ChevronLeft, ChevronRight, Info, Layers, Monitor, Plus, RotateCcw, RotateCw, Server, Wrench, X } from "lucide-react";
+import { ArrowRight, Check, ChevronDown, Cloud, ChevronLeft, ChevronRight, Info, Layers, Monitor, Plus, RotateCcw, RotateCw, Server, Wrench, X } from "lucide-react";
 import { useI18n } from "../../i18n";
 import { isImeComposing } from "../../lib/ime";
 import { graphemeCount } from "../../lib/graphemes";
@@ -20,6 +20,7 @@ import { usePending } from "../../lib/usePending";
 import { FIELD_W } from "../../lib/fieldWidths";
 import { parseClamped, radioKeyTarget, RowA11yContext, useRowA11y } from "../../lib/formA11y";
 import { useLayoutView } from "../../lib/userLayoutView";
+import { pageSynced, useSettingsSync } from "../../lib/settingsSync/view";
 import type { SettingsAgents, SettingsSource } from "../../lib/settingsNav";
 import { SETTINGS_EFFECT_EXEMPTIONS } from "../../lib/settingsEffectPolicy";
 import { useTargetHostId } from "../../lib/targetHost";
@@ -54,6 +55,19 @@ export function SourceTag({ source }: { source: SettingsSource }) {
   );
 }
 
+/** 「已同步」 (design 056 §12): some settings of this page follow the person on this computer; opens Settings → 你. */
+function SyncedChip({ page }: { page: string }) {
+  const { t } = useI18n();
+  const synced = useSettingsSync((s) => pageSynced(s, page));
+  const host = useSettingsSync((s) => s.memoryHost?.label ?? "");
+  if (!synced) return null;
+  return (
+    <button type="button" data-settings-synced="" title={t("settingsSync.chip.hint", { host })} onClick={() => useApp.getState().openSettings("me")} className={`inline-flex h-5 shrink-0 items-center gap-1 rounded bg-accent/12 px-1.5 text-caption/[inherit] whitespace-nowrap text-accent hover:bg-accent/20 ${FOCUS}`}>
+      <Cloud size={11} aria-hidden />{t("settingsSync.chip")}
+    </button>
+  );
+}
+
 /** Every field states its effect. Read-only values keep scope only; navigation contributes neither axis. */
 export type SettingEffect = { agents: SettingsAgents; source: SettingsSource | readonly SettingsSource[]; allHosts?: boolean; readOnly?: boolean; navigation?: boolean };
 type Timing = SettingsAgents | "mixed";
@@ -70,13 +84,26 @@ function scopeOf(row: RowMetadata): Scope | undefined {
 type MetadataReport = (id: string, value: RowMetadata | null) => void;
 const PageMetadataReportContext = createContext<MetadataReport | null>(null);
 const CardMetadataReportContext = createContext<readonly MetadataReport[]>([]);
-const EffectPlacementContext = createContext<{ timingStated: boolean; scopeStated: boolean; scopeBaseline?: Scope }>({ timingStated: false, scopeStated: false });
+/**
+ * What an enclosing header already says (docs/design/settings-rules.md 「标签只说一次」): the timing, the place (or the
+ * page's most common place, `scopeBaseline`), and `statedHost` — the host the page header's switcher names, so a place
+ * on it leaves the host's name out.
+ */
+const EffectPlacementContext = createContext<{ timingStated: boolean; scopeStated: boolean; scopeBaseline?: Scope; statedHost?: string }>({ timingStated: false, scopeStated: false });
 const FormFieldsContext = createContext(false);
 
 /** One-shot drafts are form fields, not settings: no scope/effect badges or metadata summaries.
  * Labels sit above their controls so creation forms and dialogs fit narrow panes too. */
 export function FormFields({ children }: { children: ReactNode }) {
   return <FormFieldsContext value={true}>{children}</FormFieldsContext>;
+}
+
+/**
+ * A popup over a settings page whose controls confirm one action (e.g. 技能 → 复制到…'s dialog), not settings of the
+ * page: its declarations stay off the page's and cards' summaries, so opening it never moves the place tags.
+ */
+export function DetachedSettings({ children }: { children: ReactNode }) {
+  return <PageMetadataReportContext value={null}><CardMetadataReportContext value={[]}>{children}</CardMetadataReportContext></PageMetadataReportContext>;
 }
 
 function summarize(rows: ReadonlyMap<string, RowMetadata>) {
@@ -123,18 +150,12 @@ function useRowMetadata(value: RowMetadata | null) {
   return hostId;
 }
 /** Host selection is navigation, never an effect declaration. */
-const PartPickerContext = createContext<ReactNode>(null);
-export function PartSource({ picker, children }: { picker?: ReactNode; children: ReactNode }) {
-  return <PartPickerContext value={picker ?? null}>{children}</PartPickerContext>;
-}
-
 const CHIP = "inline-flex h-[18px] shrink-0 items-center gap-1 rounded-chip px-1.5 text-caption leading-none whitespace-nowrap";
 // warn / danger: Settings → 模块 tags (modules/moduleTags.ts): a risk or a failure, explained in the same popover.
 const CHIP_TONE = { plain: "bg-surface-2 text-muted", quiet: "bg-surface-2 text-subtle", host: "bg-accent-soft text-accent", agents: "bg-attention-soft text-warn-text", warn: "bg-warn/15 text-warn-text", danger: "bg-danger/12 text-danger" } as const;
 
 /** A scope chip: a click floats a short explanation under it; an outside click or Esc closes it. */
-/** `joined`: the left half of a tag whose right half is a host picker (HostPicker `chip`), e.g. 「cutex 后端 · ● HOST-A ▾」. */
-export function ScopeChip({ tone, icon, label, title, body, joined, timing }: { tone: keyof typeof CHIP_TONE; icon: ReactNode; label: string; title: string; body: string; joined?: boolean; timing?: { kind: Timing; presentation: "header" | "row"; short: string } }) {
+export function ScopeChip({ tone, icon, label, title, body, timing }: { tone: keyof typeof CHIP_TONE; icon: ReactNode; label: string; title: string; body: string; timing?: { kind: Timing; presentation: "header" | "row"; short: string } }) {
   const win = useOwnerWindow();
   const [open, setOpen] = useState(false);
   const [hovered, setHovered] = useState(false);
@@ -187,8 +208,10 @@ export function ScopeChip({ tone, icon, label, title, body, joined, timing }: { 
     };
   }, [visible, layer, win]);
   return (
-    <span ref={ref} className="relative inline-flex align-middle" onMouseEnter={timing ? () => setHovered(true) : undefined} onMouseLeave={timing ? () => setHovered(false) : undefined}>
-      <button type="button" aria-label={timing ? label : undefined} aria-expanded={visible} aria-controls={id} data-settings-agents={timing?.kind} data-timing-presentation={timing?.presentation} onClick={() => setOpen((v) => !v)} className={timing ? `inline-flex shrink-0 cursor-pointer items-center gap-1 rounded p-0.5 text-xs font-normal ${timing.kind === "none" || timing.kind === "mixed" || timing.kind === "access" ? "text-subtle" : "text-warn-text"} press hover:bg-hover ${FOCUS}` : `${CHIP} ${CHIP_TONE[tone]} press-solid cursor-pointer hover:brightness-125 ${joined ? "rounded-r-none pr-1" : ""} ${FOCUS}`}>
+    // Not `relative`: the popover is a fixed portal, and a positioned chip inside a scroller that is not a stacking
+    // context got a compositor layer of its own and trailed the text while scrolling (owner 2026-11-26, 设置 → 模块).
+    <span ref={ref} className="inline-flex align-middle" onMouseEnter={timing ? () => setHovered(true) : undefined} onMouseLeave={timing ? () => setHovered(false) : undefined}>
+      <button type="button" aria-label={timing ? label : undefined} aria-expanded={visible} aria-controls={id} data-settings-agents={timing?.kind} data-timing-presentation={timing?.presentation} onClick={() => setOpen((v) => !v)} className={timing ? `inline-flex shrink-0 cursor-pointer items-center gap-1 rounded p-0.5 text-xs font-normal ${timing.kind === "none" || timing.kind === "mixed" || timing.kind === "access" ? "text-subtle" : "text-warn-text"} press hover:bg-hover ${FOCUS}` : `${CHIP} ${CHIP_TONE[tone]} press-solid cursor-pointer hover:brightness-125 ${FOCUS}`}>
         {icon}
         {timing ? timing.presentation === "header" && <span className="text-muted">{timing.short}</span> : label}
       </button>
@@ -208,13 +231,16 @@ export function ScopeChip({ tone, icon, label, title, body, joined, timing }: { 
  * Where the settings live (owner 2026-10-19, dev topic 标签设计): 本地桌面应用 / cutex 后端 · X /
  * Codex 运行时 · X — the place, never 「…设置」. On a page header, `except` (a card tagged elsewhere)
  * makes it 「混合：<place>」, and a page with no single place (each card tagged) says 混合设置.
- * `short`: the left half of a tag with a host picker (the picker names the host).
+ * A place on the host the page header's switcher names (EffectPlacementContext `statedHost`) leaves the host out
+ * (「主机」, 「Codex 配置」): the header states the host once (owner 2026-11-28; docs/design/settings-rules.md).
  */
-function WhereChip({ source, short, except, shown, hostId: scopedHostId }: { source: SettingsSource | undefined; hostId?: string; short?: boolean; except?: boolean; /** On a 混合设置 header: the host the page's host cards show. */ shown?: boolean }) {
+function WhereChip({ source, except, hostId: scopedHostId }: { source: SettingsSource | undefined; hostId?: string; except?: boolean }) {
   const { t } = useI18n();
   const memoryHost = useLayoutView(s => s.memoryHost?.label);
   const targetHostId = useTargetHostId();
+  const { statedHost } = useContext(EffectPlacementContext);
   const hostId = scopedHostId ?? targetHostId;
+  const short = !!statedHost && hostId === statedHost;
   const host = useApp((s) => s.hosts?.hosts.find((h) => h.id === hostId)?.label) ?? "—";
   if (except) source = undefined;
   if (source === "person") return <ScopeChip tone="plain" icon={<Monitor size={11} aria-hidden />} label={memoryHost ? t("layoutMemory.scope", { host: memoryHost }) : t("layoutMemory.local")} title={t("layoutMemory.title")} body={t("layoutMemory.hint")} />;
@@ -224,8 +250,8 @@ function WhereChip({ source, short, except, shown, hostId: scopedHostId }: { sou
     return <ScopeChip tone="plain" icon={<Monitor size={11} aria-hidden />} label={t("settings.scope.local.label")} title={t("settings.scope.local.title")} body={t("settings.scope.local.body")} />;
   }
   if (source === "host" || source === "codex") {
-    const label = short ? `${t(`settings.scope.${source}.short`)} ·` : t(`settings.scope.${source}.label`, { host });
-    return <ScopeChip tone="host" joined={short} icon={<Server size={11} aria-hidden />} label={label} title={shown ? t("settings.scope.host.shownTitle", { host }) : t(`settings.scope.${source}.label`, { host })} body={t(`settings.scope.${source}.body`, { host })} />;
+    const label = short ? t(`settings.scope.${source}.short`) : t(`settings.scope.${source}.label`, { host });
+    return <ScopeChip tone="host" icon={<Server size={11} aria-hidden />} label={label} title={t(`settings.scope.${source}.label`, { host })} body={t(`settings.scope.${source}.body`, { host })} />;
   }
   // A page whose cards each say where they live (通知).
   return <ScopeChip tone="plain" icon={<Layers size={11} aria-hidden />} label={t("settings.scope.mixedTag")} title={t("settings.scope.mixedTag")} body={t("settings.scope.mixed")} />;
@@ -261,26 +287,25 @@ function ToolsChip({ tools }: { tools: readonly CardTool[] }) {
 }
 
 /** A marker is placed only by the shared renderer, using summarized row data. */
-function EffectScope({ scope, picker }: { scope: Scope; picker?: ReactNode }) {
+function EffectScope({ scope }: { scope: Scope }) {
   const { t } = useI18n();
-  // A multi-place scope lists each place. A host page's picker (navigation, not a place) still follows them: the
-  // host places go last and the last one becomes its left half (「这台桌面应用  主机 · ● HOST-A ▾」).
+  // A multi-place scope lists each place.
   if (scope.includes("|")) {
-    const parts = scope.split("|");
-    const hosted = picker ? parts.filter(part => part.startsWith("host:") || part.startsWith("codex:")) : [];
-    const joined = hosted.at(-1);
     return <span data-effect-scope-marker={scope} className="inline-flex flex-wrap items-center gap-1">
-      {[...parts.filter(part => !hosted.includes(part)), ...hosted].map(part => <EffectScope key={part} scope={part} picker={part === joined ? picker : undefined} />)}
-      {!joined && picker}
+      {scope.split("|").map(part => <EffectScope key={part} scope={part} />)}
     </span>;
   }
   const [place, ...hostParts] = scope.split(":");
   const hostId = hostParts.join(":");
   const source = place === "host" || place === "codex" ? place : scope === "local" ? "local" : scope === "person" ? "person" : undefined;
   return <span data-effect-scope-marker={scope} className="inline-flex items-center">
-    {scope === "allHosts" ? <ScopeChip tone="host" icon={<Server size={11} aria-hidden />} label={t("hostPicker.allHosts")} title={t("hostPicker.allHosts")} body={t("hostPicker.allHosts")} /> : <WhereChip hostId={hostId || undefined} source={source} short={!!picker && !!source && source !== "local"} />}
-    {picker}
+    {scope === "allHosts" ? <ScopeChip tone="host" icon={<Server size={11} aria-hidden />} label={t("hostPicker.allHosts")} title={t("hostPicker.allHosts")} body={t("hostPicker.allHosts")} /> : <WhereChip hostId={hostId || undefined} source={source} />}
   </span>;
+}
+
+/** Whether `scope` is a place on `host` alone (cutex there or its Codex config). */
+function onHost(scope: Scope | undefined, host: string | undefined): boolean {
+  return !!scope && !!host && (scope === `host:${host}` || scope === `codex:${host}`);
 }
 function EffectMarkers({ agents, source, allHosts, readOnly, row = false }: RowMetadata & { row?: boolean }) {
   const form = useContext(FormFieldsContext);
@@ -297,21 +322,26 @@ function EffectMarkers({ agents, source, allHosts, readOnly, row = false }: RowM
 }
 
 /**
- * Shared page header: title, purpose and scope chips. `host`: the host picker of a host page (multi-host). `link`: a related page at the
+ * Shared page header: title, purpose and scope chips. `host`: the Settings host switcher (SettingsHostFrame
+ * SettingsHostSwitcher) of a page with host settings: first in the scope row, and it states the host for the whole
+ * page — the header's place chip and every card / row on that host leave the host's name out, and on a page whose
+ * places differ the header names the most common place on that host (cards only tag what differs). `link`: a related page at the
  * header's end (the page item's `headerLink`, e.g. 运行时 → 后端更新). `back`: a way back above it all
  * (the page item's `backLink`, e.g. 主机 → ‹ 所有设备).
  */
-export function SettingsPage({ page, title, hint, host, link, back, children }: { page?: string; title?: ReactNode; back?: ReactNode; hint?: ReactNode; host?: ReactNode; link?: ReactNode; children: ReactNode }) {
+export function SettingsPage({ page, title, hint, host, hostId, link, back, children }: { page?: string; title?: ReactNode; back?: ReactNode; hint?: ReactNode; host?: ReactNode; /** The one host `host` shows (none while it shows 「全部主机」). */ hostId?: string; link?: ReactNode; children: ReactNode }) {
   const [rows, reportRows] = useMetadataRows();
   const summary = summarize(rows);
   const exemption = page ? SETTINGS_EFFECT_EXEMPTIONS[page] : undefined;
+  const statedHost = host ? hostId : undefined;
   const scopes = new Map<Scope, number>();
-  if (exemption?.scope === "baseline" && summary.scope === "mixed") for (const row of rows.values()) {
-    const scope = scopeOf(row); if (scope) scopes.set(scope, (scopes.get(scope) ?? 0) + 1);
+  if ((exemption?.scope === "baseline" || statedHost) && summary.scope === "mixed") for (const row of rows.values()) {
+    const scope = scopeOf(row);
+    if (scope && (!statedHost || onHost(scope, statedHost))) scopes.set(scope, (scopes.get(scope) ?? 0) + 1);
   }
   const scopeBaseline = [...scopes].sort((a, b) => b[1] - a[1])[0]?.[0];
   const headerScope = scopeBaseline ?? summary.scope;
-  const placement = { timingStated: !!summary.timing && summary.timing !== "mixed", scopeStated: !!summary.scope && summary.scope !== "mixed", scopeBaseline };
+  const placement = { timingStated: !!summary.timing && summary.timing !== "mixed", scopeStated: !!summary.scope && summary.scope !== "mixed", scopeBaseline, statedHost };
   return <>
     <div data-settings-header data-settings-page={page} data-effect-exemption={exemption ? page : undefined} className="mb-5 space-y-1.5 border-b border-border/60 pb-3">
       {back && <div className="-mt-1 flex h-5 items-center">{back}</div>}
@@ -319,9 +349,10 @@ export function SettingsPage({ page, title, hint, host, link, back, children }: 
       {hint && <p className="text-ui/[inherit] text-muted">{hint}</p>}
       <div className="flex min-h-6 flex-wrap items-center gap-x-3 gap-y-1.5">
         <div data-settings-scope={summary.scope} className="flex max-w-full flex-none flex-wrap items-center gap-1.5">
-          {headerScope && <EffectScope scope={headerScope} picker={host} />}
-          {!headerScope && host}
+          {host && <span data-settings-header-host="" className="-ml-2 inline-flex min-w-0">{host}</span>}
+          <EffectPlacementContext value={{ timingStated: false, scopeStated: false, statedHost }}>{headerScope && <EffectScope scope={headerScope} />}</EffectPlacementContext>
           {summary.timing && <AgentsChip agents={summary.timing} />}
+          {page && <SyncedChip page={page} />}
         </div>
         {link && <div data-settings-header-actions className="ml-auto flex min-w-0 max-w-full flex-[1_1_10rem] items-center justify-end">{link}</div>}
       </div>
@@ -391,7 +422,7 @@ export function SettingsEffectCard({ children }: { children: ReactElement<{ chil
  * storage scope only repeats when it differs from the page. Timing defaults describe the rows;
  * the page summarizes their metadata, with row icons only when the page is mixed.
  */
-export function Section({ title, tabs, hint, children, actions, id, tag, picker, tools, sub, collapsed }: { title?: ReactNode; /** A card whose views switch (e.g. 插件's 已安装 / 浏览 / 市场): the tab bar in the title's place. */ tabs?: ReactNode; collapsed?: boolean; hint?: ReactNode; /** None: a titled note (title + hint) with no card under it — a card holds settings, never just a sentence. */ children?: ReactNode; actions?: ReactNode; id?: string; /** A muted label after the title, e.g. 旧版 for a card that will be redone (title = tooltip). */ tag?: { label: string; title?: string }; /** A host card's host picker before its (then short) source chip (components/SettingsHostFrame SettingsHostSection). */ picker?: ReactNode; /** The agents' MCP tools this card is about: an [MCP工具] tag naming them. */ tools?: readonly CardTool[]; /** A child card under a heading of its own (a smaller title). */ sub?: boolean }) {
+export function Section({ title, tabs, hint, children, actions, id, tag, tools, sub, collapsed }: { title?: ReactNode; /** A card whose views switch (e.g. 插件's 已安装 / 浏览 / 市场): the tab bar in the title's place. */ tabs?: ReactNode; collapsed?: boolean; hint?: ReactNode; /** None: a titled note (title + hint) with no card under it — a card holds settings, never just a sentence. */ children?: ReactNode; actions?: ReactNode; id?: string; /** A muted label after the title, e.g. 旧版 for a card that will be redone (title = tooltip). */ tag?: { label: string; title?: string }; /** The agents' MCP tools this card is about: an [MCP工具] tag naming them. */ tools?: readonly CardTool[]; /** A child card under a heading of its own (a smaller title). */ sub?: boolean }) {
   const { t } = useI18n();
   // 「只看你修改过的设置」 (owner 2026-10-18): per card, offered only while a row in it is modified.
   const [modified, setModified] = useState<ReadonlySet<string>>(() => new Set());
@@ -414,14 +445,12 @@ export function Section({ title, tabs, hint, children, actions, id, tag, picker,
     ) : null;
   const { scope, timing, placement, reports } = useCardEffects(!!(title || tabs));
   const inheritedDecoration = useSettingsRowDecoration(!!(title || tabs));
-  const partPicker = useContext(PartPickerContext);
-  picker = scope?.startsWith("host:") || scope?.startsWith("codex:") ? picker ?? partPicker : undefined;
   const compact = useContext(CompactContext);
   return (
     // Compact (a 在主界面调整 panel): the settings page may be mounted too, so the anchor is not an id there.
     <EffectPlacementContext value={placement}><CardMetadataReportContext value={reports}>
     <section className={compact ? "mb-3" : "mb-6"} id={compact ? undefined : id} data-settings-anchor={compact ? id : undefined}>
-      {(title || tabs || actions || filter || picker || tools?.length) && (
+      {(title || tabs || actions || filter || tools?.length) && (
         <div className={compact ? "mb-1" : "mb-2"}>
           {/* The title never truncates (owner 2026-10-25: 事件分级 showed as 「事...」 once the revamp's markers, the
               「只看你修改过的设置」 switch and a preset switch shared its row). Two groups that wrap: the title with its
@@ -434,7 +463,7 @@ export function Section({ title, tabs, hint, children, actions, id, tag, picker,
               {tabs && <div className="min-w-0" data-settings-card-tabs="">{tabs}</div>}
               {inheritedDecoration?.marker}
               {(title || tabs) && (scope || timing || tools?.length) && <span className="inline-flex flex-wrap items-center gap-1.5" data-effect-card-summary="">
-                {scope && <EffectScope scope={scope} picker={picker} />}
+                {scope && <EffectScope scope={scope} />}
                 {timing && <AgentsChip agents={timing} />}
                 {tools?.length ? <ToolsChip tools={tools} /> : null}
               </span>}
@@ -665,15 +694,17 @@ export function SettingRow({ label, hint, info, children, reset, sample, agents,
     >
       <div className="relative min-w-0">
         {modified && <ModifiedMark compact={compact} />}
-        <div id={labelId} className={form ? "text-sm break-words" : "text-sm"}>
-          {/* The restore button floats after the label: showing / hiding it never reflows the row. */}
-          <span className="relative">
-            {label}
-            {modified && <RestoreDefault onClick={reset$!.onClick} title={reset$!.title} />}
-          </span>
+        {/* The label line (docs/design/settings-rules.md): label · ⓘ · effect markers · 恢复默认, one wrapping run in
+            the label column. Whatever the label holds (a block, a flex span), the markers follow it on its line and
+            wrap only when the column is full; never onto a line of their own under a short label (owner 2026-11-28). */}
+        <div id={labelId} data-setting-label-line="" className="flex flex-wrap items-center gap-y-0.5 text-sm">
+          <span data-setting-label="" className="min-w-0 break-words">{label}</span>
           {/* R7: a one-line hint and the rest in the ⓘ can both be present; the hint keeps the row's description id. */}
           {info && <InfoTip id={hint ? `${hintId}-info` : hintId}>{info}</InfoTip>}
           <EffectMarkers agents={agents} source={source} allHosts={allHosts} readOnly={readOnly || navigation} row />
+          {/* In the label column's flow, its space kept while hidden: showing it on hover never reflows the row, and
+              it can never sit over the row's control (owner 2026-11-28: it covered 只读 / 工作区可写 / 完全访问). */}
+          {modified && <RestoreDefault onClick={reset$!.onClick} title={reset$!.title} />}
         </div>
         {hint && (
           <div id={hintId} className="text-xs text-subtle">
@@ -711,7 +742,8 @@ function RestoreDefault({ onClick, title }: { onClick(): void; title?: string })
       title={label}
       aria-label={label}
       onClick={onClick}
-      className={`absolute top-1/2 left-full z-10 ml-1.5 inline-flex h-5 -translate-y-1/2 items-center gap-1 rounded bg-surface px-1 text-caption/[inherit] whitespace-nowrap text-subtle press opacity-0 group-hover/row:opacity-100 group-focus-within/row:opacity-100 hover:bg-surface-2 hover:text-foreground focus-visible:opacity-100 ${FOCUS}`}
+      data-setting-restore=""
+      className={`ml-1.5 inline-flex h-5 shrink-0 items-center gap-1 rounded px-1 text-caption/[inherit] whitespace-nowrap text-subtle press opacity-0 group-hover/row:opacity-100 group-focus-within/row:opacity-100 hover:bg-surface-2 hover:text-foreground focus-visible:opacity-100 ${FOCUS}`}
     >
       <RotateCcw size={12} aria-hidden />
       {t("appearance.reset")}
@@ -737,12 +769,13 @@ export function RowGroup({ title, hint, children }: { title: ReactNode; hint?: R
  * One choice among a few where each needs a line of explanation (a device's rights at pairing): radios with a hint each,
  * stacked. Short choices without explanations are a Segmented.
  */
-export function RadioList<T extends string>({ name, value, options, onChange, label }: { name: string; value: T; options: readonly { value: T; label: ReactNode; hint?: ReactNode; extra?: ReactNode }[]; onChange(v: T): void; label: string }) {
+/** `disabled` on an option: shown greyed, not choosable (still shown checked when it is the value). */
+export function RadioList<T extends string>({ name, value, options, onChange, label }: { name: string; value: T; options: readonly { value: T; label: ReactNode; hint?: ReactNode; extra?: ReactNode; disabled?: boolean }[]; onChange(v: T): void; label: string }) {
   return (
     <div role="radiogroup" aria-label={label} data-settings-radio-list="" className="py-1.5">
       {options.map((o) => (
-        <label key={o.value} className="flex cursor-pointer items-start gap-2 py-1 text-sm">
-          <input type="radio" name={name} checked={value === o.value} data-settings-control="" onChange={(e) => settingsControlChanged(e.currentTarget, onChange(o.value))} className="mt-1 accent-[var(--color-accent)]" />
+        <label key={o.value} className={`flex items-start gap-2 py-1 text-sm ${o.disabled ? "cursor-default opacity-60" : "cursor-pointer"}`}>
+          <input type="radio" name={name} checked={value === o.value} disabled={o.disabled} data-settings-control="" onChange={(e) => settingsControlChanged(e.currentTarget, onChange(o.value))} className="mt-1 accent-[var(--color-accent)]" />
           <span className="min-w-0">
             {o.label}
             {o.extra}

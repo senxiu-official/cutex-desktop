@@ -1,6 +1,7 @@
 import { resolve } from "node:path";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
+import { bundledPortraitStarter } from "./scripts/portraitCollectionsBuild";
 import { defineConfig, externalizeDepsPlugin } from "electron-vite";
 
 // Workspace packages are TS sources; bundle them instead of externalizing.
@@ -32,7 +33,7 @@ export default defineConfig({
   },
   renderer: {
     root: resolve(__dirname, "src/renderer"),
-    plugins: [react(), tailwindcss()],
+    plugins: [bundledPortraitStarter(resolve(__dirname, "src/renderer")), react(), tailwindcss()],
     resolve: {
       alias: { "@": resolve(__dirname, "src/renderer/src") },
     },

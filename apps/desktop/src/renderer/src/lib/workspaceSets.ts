@@ -169,6 +169,16 @@ function setSets(sets: WsSet[]): void {
   write(sets);
 }
 
+/** Settings sync (lib/settingsSync, opt-in): the main window's sets as synced from another device. */
+export function replaceMainWorkspaceSets(sets: WsSet[]): void {
+  inWindow(MAIN_WINDOW, () => setSets(readSets({ v: 1, sets })));
+}
+
+/** The main window's sets (settings sync reads them from any window). */
+export function mainWorkspaceSets(): WsSet[] {
+  return inWindow(MAIN_WINDOW, () => useWorkspaceSets.getState().sets);
+}
+
 /** These agents are on screen in window `here`: they leave the other windows' sets (one copy per agent). */
 function leaveOtherWindows(here: WindowKey, agents: readonly AgentId[]): void {
   if (!agents.length) return;

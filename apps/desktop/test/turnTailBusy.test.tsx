@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, it, vi } from "vitest";

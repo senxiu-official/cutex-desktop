@@ -173,7 +173,7 @@ function LaunchModelPanel({ profile, catalog, form, touched, onChange, onReset, 
   );
 }
 
-/** `agent-config.newAgent` (params.project presets the project, params.host its host). */
+/** `agent-config.newAgent` (params.project presets the project, params.host its host, params.profile the Profile). */
 export function NewAgentPage({ params }: { params: PageParams }) {
   const focus = useFocusHostId();
   // A draft kept while the owner added / managed profiles (lib/newAgentReturn) comes back with its host.
@@ -289,7 +289,11 @@ function NewAgentForm({ params, target, presetHost, restored }: { params: PagePa
   const messageId = useRef(crypto.randomUUID());
   const [project, setProject] = useState<string>(restored?.project ?? projectId ?? INDEPENDENT);
   const [cwd, setCwd] = useState(restored?.cwd ?? "");
-  const [profile, setProfile] = useState(restored?.profile ?? "");
+  // params.profile (a Profile id): the first-run card's 「用 <Profile> 新建智能体」 picks it.
+  const [profile, setProfile] = useState(restored?.profile ?? params.profile ?? "");
+  useEffect(() => {
+    if (params.profile) setProfile(params.profile);
+  }, [params.profile]);
   const [portraitSelected, setPortraitSelected] = useState(restored?.portraitSelected ?? false);
   const [start, setStart] = useState(restored?.start ?? true);
   const [memoryOn, setMemoryOn] = useState(restored?.memoryInjection ?? true);
@@ -909,7 +913,10 @@ function NewAgentForm({ params, target, presetHost, restored }: { params: PagePa
   );
 
   return (
-    <LaunchPage intro={<LaunchIntro portraits={{ profileId: chosen?.id, profiles: available ? available.filter((p) => !isClaudeProfile(p) || claudeOk) : null, selected: portraitSelected, disabled: locked, onSelect: (id) => { if (locked) return; setPortraitSelected(true); setProfile(id); setLaunch((f) => ({ ...f, model: "", reasoningEffort: "" })); setPanel(null); } }} provider={chosen ? profileProvider(chosen) : undefined} icon={<Sparkles size={24} />} title={t("agent-config.newAgent.welcome")} hint={t("agent-config.newAgent.welcomeHint")} />}>
+    <LaunchPage intro={<LaunchIntro columns={{ hostId, profileId: chosen?.id, profiles: available ?? null, selected: portraitSelected,
+      auto: auto.state.kind === "ready" || auto.state.kind === "loading", disabled: locked,
+      unavailable: (p) => (isClaudeProfile(p) && !claudeOk ? t("agent-config.newAgent.claudeUnsupported") : null),
+      onSelect: (id) => { if (locked) return; setPortraitSelected(true); setProfile(id); setLaunch((f) => ({ ...f, model: "", reasoningEffort: "" })); setPanel(null); } }} provider={chosen ? profileProvider(chosen) : undefined} icon={<Sparkles size={24} />} title={t("agent-config.newAgent.welcome")} hint={t(missingWorkspace ? "agent-config.newAgent.welcomeHintWorkspace" : "agent-config.newAgent.welcomeHint")} />}>
       <LaunchDock>
         {/* A host with personal assistants offers one here too (its own create form, on that host). */}
         {features.has(PERSONAL_ASSISTANTS_FEATURE) && !locked && <AssistantChoice hostId={hostId} disabled={!online} />}

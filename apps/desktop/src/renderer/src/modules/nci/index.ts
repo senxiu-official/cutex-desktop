@@ -17,6 +17,8 @@ const NciSettings = lazyPage(() => import("./NciSettings").then((m) => m.NciSett
 
 export default defineModule({
   id: "nci",
+  // Hard dependency (module-dependencies-20261126): without it the module's main use fails.
+  requires: { modules: ["jobs"] },
   titleKey: "nci.title",
   descriptionKey: "nci.description",
   defaultEnabled: false,
@@ -27,6 +29,8 @@ export default defineModule({
         page: "nci",
         group: "tools",
         order: 500,
+        // A detail page under 模块 (§5.1, owner 2026-11-27): no nav row; 「设置」 on its module row and search open it.
+        navParent: "modules",
         icon: Mailbox,
         titleKey: "nci.page",
         source: "host",

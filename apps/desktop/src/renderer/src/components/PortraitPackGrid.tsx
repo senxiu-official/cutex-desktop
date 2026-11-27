@@ -5,10 +5,11 @@ import { useMemo, useState } from "react";
 import type { SessionAvatar } from "@cutex-desktop/protocol";
 import { useI18n } from "../i18n";
 import { useUiPrefs } from "../lib/prefs";
-import { FAMILY_LABEL, packName, portraitAvatarOf, portraitRefOf, usePortraitImage, usePortraitPacks, type PortraitFamily, type PortraitPicture } from "../lib/portraitPacks";
+import { FAMILY_LABEL, missingOfficialPortrait, packName, portraitAvatarOf, portraitRefOf, usePortraitImage, usePortraitPacks, type PortraitFamily, type PortraitPicture } from "../lib/portraitPacks";
 import { PORTRAIT_FAMILIES } from "../../../shared/portraitPacks";
 import { useOwnerDocument } from "../lib/ownerContext";
 import { portraitThemesOf } from "../lib/portraitThemes";
+import { PortraitDownloadHint } from "./PortraitDownloadHint";
 
 function Cell({ picture, size, selected, onPick }: { picture: PortraitPicture; size: number; selected: boolean; onPick(p: PortraitPicture): void }) {
   const url = usePortraitImage(picture, size);
@@ -25,16 +26,18 @@ export function PortraitPackGrid({ value, onPick, family, columns = 8, size = 36
   const doc = useOwnerDocument();
   const { t, locale } = useI18n();
   const { portraitPacks } = useUiPrefs();
-  const { packs } = usePortraitPacks();
+  const { packs, index } = usePortraitPacks();
   const selected = portraitRefOf(value);
   const themes = useMemo(() => {
     const names = new Map(portraitThemesOf(packs, locale).map(th => [th.key, th.name]));
-    return packs.flatMap(p => p.themes.map(th => ({ key: `${p.id}/${th.id}`, label: `${packs.length > 1 ? `${packName(p, locale)} · ` : ""}${names.get(`${p.id}/${th.id}`) ?? th.name}`, theme: th })));
+    return packs.flatMap(p => p.themes.map(th => ({ key: `${p.id}/${th.id}`, pack: p.id, label: `${packs.length > 1 ? `${packName(p, locale)} · ` : ""}${names.get(`${p.id}/${th.id}`) ?? th.name}`, theme: th })));
   }, [packs, locale]);
   const fallbackKey = (selected && `${selected.pack}/${selected.theme}`) || portraitPacks.find((k) => themes.some((x) => x.key === k)) || null;
   const [shownKey, setShownKey] = useState<string | null>(null);
   const current = themes.find((x) => x.key === (shownKey ?? fallbackKey)) ?? themes[0];
   if (!current) return <p className="text-caption/[inherit] text-subtle">{t("info.avatar.packsEmpty")}</p>;
+  // The chosen picture of this theme is not here yet (a stand-in shows): its full theme can be fetched.
+  const missing = !!selected && `${selected.pack}/${selected.theme}` === current.key && missingOfficialPortrait(index, selected) !== null;
   const order = family && family !== "other" ? [family, ...PORTRAIT_FAMILIES.filter((f) => f !== family)] : PORTRAIT_FAMILIES;
   const groups = [...order, "other" as const].map((f) => ({ family: f, pictures: current.theme.pictures.filter((p) => p.family === f) })).filter((g) => g.pictures.length);
   const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -54,6 +57,7 @@ export function PortraitPackGrid({ value, onPick, family, columns = 8, size = 36
         className="w-full rounded-md border border-border bg-background px-1.5 py-1 text-xs outline-none focus:border-accent">
         {themes.map((x) => <option key={x.key} value={x.key}>{x.label}</option>)}
       </select>
+      <PortraitDownloadHint pack={current.pack} theme={current.theme.id} missing={missing} />
       <div role="group" aria-label={current.label} onKeyDown={onKeyDown} className="space-y-1">
         {groups.map((g) => (
           <div key={g.family} className="flex items-center gap-1.5" data-portrait-family={g.family}>

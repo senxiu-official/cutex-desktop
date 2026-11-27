@@ -37,7 +37,7 @@ import { moveToSectionEntry } from "./sectionMenus";
 import { sidebarMenuTail } from "./customizeMenu";
 import { folderIdleScope, hostIdleScope, projectIdleScope, stopIdleAvailable, stopIdleMenuEntries, type StopIdleMenuScope } from "./stopIdle";
 import { sectionOf } from "./sidebarSections";
-import { markSeenOn, turnMarksOn } from "./turnUnread";
+import { markReadManyOn, turnMarksOn } from "./turnUnread";
 import { runLimited, START_CONCURRENCY } from "./agentList";
 import { captureHostAction } from "./hostSwitch";
 import { OWNER_ROTATION_FEATURE } from "../../../shared/directorRotation";
@@ -179,7 +179,7 @@ export function projectMenu(group: SidebarGroup, workspaceRoot: string | null, c
     ...(project ? projectMenuExtras({ hostId: host, projectId: group.id, name }) : []),
     "separator",
     // ── bulk ──
-    marked.length > 0 && { label: t("menu.markProjectRead", { count: marked.length }), icon: <MailCheck size={ICON} />, onSelect: () => marked.forEach((r) => markSeenOn(host, r.id)) },
+    marked.length > 0 && { label: t("menu.markProjectRead", { count: marked.length }), icon: <MailCheck size={ICON} />, onSelect: () => markReadManyOn(host, marked.map((r) => r.id)) },
     // Design 031: cutex decides who is idle (stop-idle-agents); older cutex keeps the desktop's own list.
     ...(stopIdleAvailable(host)
       ? stopIdleMenuEntries(idleScopesFor(group.id, project, name, host), t, <Power size={ICON} />)

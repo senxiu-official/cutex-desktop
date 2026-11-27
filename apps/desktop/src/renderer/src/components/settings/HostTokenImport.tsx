@@ -56,7 +56,7 @@ export function TokenProblemText({ error }: { error: SshErrorView }) {
   );
 }
 
-function TokenImportForm({ onDone }: { onDone(): void }) {
+export function TokenImportForm({ onDone }: { onDone(): void }) {
   const { t } = useI18n();
   const notify = useApp((s) => s.notify);
   const [aliases, setAliases] = useState<string[]>([]);

@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 import { afterEach, expect, it } from "vitest";
 import { useDebug, captureDebugError, receiveDebugError } from "../src/renderer/src/lib/debugState";
 import { queueActionNotice } from "../src/renderer/src/lib/queueSteer";

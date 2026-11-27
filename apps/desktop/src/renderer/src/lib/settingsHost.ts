@@ -3,18 +3,19 @@
 // Settings stays until Settings closes (SettingsNav resets it) or the host is removed. A picked host
 // that goes offline stays the target (UI-01, review 2026-10-15): the page shows it as unavailable and
 // takes no edits (components/SettingsHostFrame) — it never moves to another host by itself.
-import { createContext, useContext, useMemo, useSyncExternalStore } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import { create } from "zustand";
 import type { SettingsTab } from "../store"; // type only (erased)
 import { canTargetHost, keepTargetHost, type AllHostsChoice } from "./hostPick";
 import type { HostScope } from "./hostScope";
+import { INPUT_REFINEMENT_PAGE } from "./inputRefinementNav";
 import { useHostScope } from "./useHostScope";
 
 /**
  * Host pages that follow the picker (lib/targetHost: they read / write the picked host). Device pages
  * keep their own rules and show no picker.
  */
-export const SETTINGS_HOST_PAGES: ReadonlySet<SettingsTab> = new Set<SettingsTab>(["profiles", "defaults", "instructions", "collab", "runtime", "mcp", "skills", "hooks", "plugins", "access", "remote", "peers", "users", "usage", "archive", "storage", "backend", "nci", "feature-profiles"]);
+export const SETTINGS_HOST_PAGES: ReadonlySet<SettingsTab> = new Set<SettingsTab>(["profiles", "defaults", "instructions", "collab", "runtime", "runtime-config", "mcp", "skills", "hooks", "plugins", "access", "remote", "peers", "users", "usage", "archive", "storage", "backend", "nci", INPUT_REFINEMENT_PAGE]);
 /**
  * Host pages that also render for a connection that is not the host's owner (the page decides what
  * such a connection sees): 访问管理 — a member sees 你在这台主机上 and their own devices; the management
@@ -27,6 +28,22 @@ const useChosen = create<{ hostId: string | null }>(() => ({ hostId: null }));
 /** Pick the host Settings edits (null = back to the focus host). An explicit user choice. */
 export function setSettingsHost(hostId: string | null): void {
   useChosen.setState({ hostId });
+}
+
+/**
+ * Settings follows the title bar, never drives it (owner 2026-11-28, docs/design/settings-rules.md): while Settings
+ * is open, a new focus host there (title bar switcher, Ctrl+Shift+H) becomes the Settings host too — the latest choice
+ * wins —, and leaving Settings drops a pick made in it. Called by the Settings nav / shelf.
+ */
+export function useSettingsHostFollowsFocus(): void {
+  const focus = useHostScope().focus;
+  const seen = useRef(focus);
+  useEffect(() => {
+    if (focus === seen.current) return;
+    seen.current = focus;
+    setSettingsHost(null);
+  }, [focus]);
+  useEffect(() => () => setSettingsHost(null), []);
 }
 
 /** The picked host (null: none picked, the focus host is edited). Non-React, for tests / handlers. */

@@ -107,6 +107,7 @@ export const trayZhHant: Record<keyof typeof trayZhCN, string> = {
   "tray.close": "關閉",
   "workspace.threeColumns": "允許 3 個工作區",
   "workspace.threeColumnsHint": "最多並排 3 個工作區（缺省 2 個）；每個至少 400 px，窗口放不下就不會加",
+  "workspace.sideBySide": "並排工作區",
   "tray.closeTitle": "關閉 {name}（離開托盤）",
   "tray.needsYou": "需要你 {n}",
   "tray.needsYouTitle": "打開需要你的：{name}",

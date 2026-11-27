@@ -16,13 +16,12 @@ import { isElement } from "./ownerWindow";
 import { queryAppWindows } from "./appWindowSet";
 
 /** The panel pages (lib/settingsNav PANEL_PAGES), by their page id. */
-export type PanelPage = "sidebar" | "conversation" | "status" | "sides" | "tray" | "desktop";
+export type PanelPage = "sidebar" | "conversation" | "sides" | "tray" | "desktop";
 
 /** A page's name (its nav title). */
 export const PANEL_PAGE_NAME: Record<PanelPage, MessageKey> = {
   sidebar: "settings.panel.sidebar",
   conversation: "settings.panel.conversation",
-  status: "settings.panel.status",
   sides: "settings.panel.shelf",
   tray: "settings.panel.tray",
   desktop: "settings.panel.desktop",
@@ -32,7 +31,6 @@ export const PANEL_PAGE_NAME: Record<PanelPage, MessageKey> = {
 const MENU_LABEL: Record<PanelPage, MessageKey> = {
   sidebar: "settings.panel.menu.sidebar",
   conversation: "settings.panel.menu.conversation",
-  status: "settings.panel.menu.status",
   sides: "settings.panel.menu.sides",
   tray: "settings.panel.menu.tray",
   desktop: "settings.panel.menu.desktop",
@@ -70,7 +68,7 @@ const TARGET_NAME: Record<PanelTarget, MessageKey> = {
 };
 
 /** The panel a panel page is about (the 「这些设置管它」 outline of the menu row's foretell). */
-const PAGE_TARGET: Record<PanelPage, PanelTarget> = { sidebar: "sidebar", conversation: "conversation", status: "composer", sides: "shelf", tray: "tray", desktop: "desktop" };
+const PAGE_TARGET: Record<PanelPage, PanelTarget> = { sidebar: "sidebar", conversation: "conversation", sides: "shelf", tray: "tray", desktop: "desktop" };
 
 /**
  * The Settings Shelf's place while it is closed (where it will open): beside the work row on its side, at the
@@ -141,9 +139,7 @@ const ANCHOR_AFFECTS: Readonly<Record<string, readonly PanelTarget[]>> = {
   "bookmarks.settings": ["margin", "conversation"],
   "shell.shelfOnly": ["conversation", "shelf"],
   "shelf-only": ["conversation", "shelf"],
-  // 状态显示
-  places: ["composer", "capsule"],
-  "status-capsule.settings": ["capsule"],
+  workspaces: ["window"],
   // {{shelf}}
   "shelf-place": ["rail", "shelf"],
 };
@@ -152,7 +148,8 @@ const PAGE_AFFECTS: Readonly<Partial<Record<string, readonly PanelTarget[]>>> = 
   appearance: ["window"],
   sidebar: ["sidebar"],
   conversation: ["conversation"],
-  status: ["composer", "capsule"],
+  // The status capsule module's own page (owner 2026-11-28; was a card of 状态显示).
+  "status-capsule": ["capsule"],
   sides: ["shelf"],
   tray: ["tray"],
   desktop: ["desktop"],

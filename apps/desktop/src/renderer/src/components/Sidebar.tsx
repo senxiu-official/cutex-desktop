@@ -60,14 +60,14 @@ import { NowSection, NowSplitter } from "./SidebarNowAll";
 import { AllRowsCompact } from "../lib/allRowsCompact";
 import { runNav, useNavActive } from "../lib/navEntries";
 import { PaneResizer } from "./PaneResizer";
-import { newInstanceKey, openModifiers } from "../lib/openModifiers";
+import { openModifiers } from "../lib/openModifiers";
 import { ScriptText } from "./ScriptText";
 import { useHostAccess } from "../lib/hostAccess";
 import { realAgentName } from "../lib/agentAlias";
 import { dataFlags, useSizeFlags, widthBelow } from "../lib/sizeFlags";
-import { InfoMark } from "./InfoMark";
 import { share } from "../lib/structuralShare";
-import { DirFilterButton, DirFilterRow, OldTaskSearch } from "./SidebarSessionSearch";
+import { OldTaskSearch } from "./SidebarSessionSearch";
+import { FilterToggle, NamesHeading, SearchFilterChips, SearchFilterPanel } from "./SidebarSearchFilters";
 import { IdLookupResults } from "./SidebarIdLookup";
 import { useIdLookup } from "../lib/useIdLookup";
 import { dropStaleTaskSearch, refreshDirFilter, setSearchHosts, useSessionSearch } from "../lib/sessionSearchStore";
@@ -953,7 +953,8 @@ export function Sidebar() {
   const dir = useSessionSearch((s) => s.dir);
   const dirResult = useSessionSearch((s) => s.dirResult);
   const archived = useSessionSearch((s) => s.archived);
-  const [dirOpen, setDirOpen] = useState(false);
+  // 筛选 (design A, owner 2026-11-27; components/SidebarSearchFilters): the panel under the field.
+  const [filtersOpen, setFiltersOpen] = useState(false);
   // Only these hosts are asked (in scope, online, capable); a queued request for another is dropped before it is sent.
   useEffect(() => setSearchHosts(searchHosts.capable.map((h) => h.id)), [searchHosts]);
   // Old-task results belong to the scope, each connection, the directory filter, the text and 已归档: a change drops
@@ -1181,9 +1182,9 @@ export function Sidebar() {
   const searchField = (placeholder: string, className: string) => (
     <input ref={searchRef} data-sidebar-search="" value={query} onChange={(e) => setQuery(e.target.value)} placeholder={placeholder} aria-label={placeholder} className={className} />
   );
-  // 工作目录 (session-search-v1 hosts only): the toggle beside the field, the row under it while open or set.
+  // 筛选 (session-search-v1 hosts only): the button beside the field; the panel while open, else the set conditions as chips.
   const searchable = searchHosts.capable.length > 0;
-  const showDirRow = searchable && (dirOpen || !!dir);
+  const showDirRow = searchable && filtersOpen;
   // The directories offered in the row (each host's agents'), worked out only while the row shows and the roster changes.
   const cwdsByHost = useMemo(() => {
     const byHost = new Map<string, string[]>();
@@ -1200,37 +1201,37 @@ export function Sidebar() {
     return byHost;
   }, [showDirRow, model, scope.focus]);
   const cwdsOf = useCallback((hostId: string) => cwdsByHost.get(hostId) ?? NO_CWDS, [cwdsByHost]);
-  const dirButton = searchable ? <DirFilterButton open={dirOpen || !!dir} onToggle={() => setDirOpen((v) => !v)} /> : null;
-  const dirRow = showDirRow ? <DirFilterRow hosts={searchHosts} cwdsOf={cwdsOf} focus={scope.focus} onClose={() => setDirOpen(false)} /> : null;
-  // Ctrl / middle click on a row opens it beside the current one (design 040 §2.1: the how-to is this ⓘ, not each row's tip).
-  const besideInfo = <InfoMark text={t("pane.openBesideHint", { key: newInstanceKey() })} className="order-last" />;
+  const filterButton = searchable ? <FilterToggle open={filtersOpen} onToggle={() => setFiltersOpen((v) => !v)} /> : null;
+  const filterRow = !searchable ? null : filtersOpen ? <SearchFilterPanel hosts={searchHosts} cwdsOf={cwdsOf} focus={scope.focus} onClose={() => setFiltersOpen(false)} /> : <SearchFilterChips />;
+  // Ctrl / middle click on a row opens it beside: no ⓘ by the field any more (owner 2026-11-27, it read as a search
+  // shortcut); the agent menu's 并排打开 carries the ⓘ, and the rows' hover foretell says it.
+  // 「上次异常关机…」 (dismissable; the entries are in the window bar, sidebar v5, design 040 §4.1) folds while the search
+  // has text (owner 2026-11-27). One place to move when it becomes a notification.
+  const restoreNotice = query.trim() ? null : <RestoreBanner compact />;
   // The full sidebar's body: docked when expanded, the popped overlay while hidden (components/SidebarPeek).
   const full = (
     <>
         {nowAll ? (
           <>
             {/* 「现在」 (the abnormal-shutdown notice under its header), the divider, then 「全部」's header with the filter. */}
-            <NowSection attention={attention} focus={scope.focus} height={nowHeight} notice={<RestoreBanner compact />} />
+            <NowSection attention={attention} focus={scope.focus} height={nowHeight} notice={restoreNotice} />
             <NowSplitter height={nowHeight} onLive={setLiveNow} />
             <div data-sidebar-all="" className="flex shrink-0 items-center gap-1.5 px-2.5 pt-1 pb-1">
               <span className="text-meta font-semibold text-muted">{t("sidebar.all")}</span>
               <span className="text-caption text-subtle tabular-nums">{attention.rows.length}</span>
-              {besideInfo}
               {searchField(t("sidebar.all.filter"), "ml-1 h-6 min-w-0 flex-1 rounded-ctl border border-border bg-background px-2 text-meta outline-none placeholder:text-subtle focus:border-accent")}
-              {dirButton}
+              {filterButton}
             </div>
-            {dirRow}
+            {filterRow}
           </>
         ) : (
           <>
             <div className="flex items-center gap-1 p-2">
               {searchField(t("sidebar.search"), "min-w-0 flex-1 rounded-md border border-border bg-background px-2.5 py-1 text-ui/[inherit] outline-none placeholder:text-subtle focus:border-accent")}
-              {dirButton}
-              {besideInfo}
+              {filterButton}
             </div>
-            {dirRow}
-            {/* The abnormal-shutdown notice (dismissable); the entries are in the window bar (sidebar v5, design 040 §4.1). */}
-            <RestoreBanner compact />
+            {filterRow}
+            {restoreNotice}
           </>
         )}
         <AllRowsCompact.Provider value={nowAll}>
@@ -1247,6 +1248,7 @@ export function Sidebar() {
           {idLookup && <IdLookupResults lookOf={(id) => scope.host(id) ?? undefined} multi={scope.multi} />}
           {/* An id written as one (#…, ask-…) is not text to look for in old turns. */}
           {searchable && !idLookup?.explicit && <OldTaskSearch query={query} hosts={searchHosts} lookOf={(id) => scope.host(id) ?? undefined} scopeKey={searchScopeKey} />}
+          {searchable && query.trim() !== "" && <NamesHeading />}
           {groups.length === 0 && chats.length === 0 && hostOnly.length === 0 ? (
             <p className="px-2 py-6 text-center text-sm text-subtle" data-roster-empty={unreachableOnly ? "unreachable" : searching ? "noMatch" : ""}>{focusAccess.pending ? t("users.access.pendingEmpty") : unreachableOnly ? t("sidebar.unreachableOnly") : searching ? t("sidebar.noMatch") : t("sidebar.empty")}</p>
           ) : (

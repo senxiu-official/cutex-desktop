@@ -107,6 +107,64 @@ describe("现在读取", () => {
   });
 });
 
+describe("an idle agent's unread note (owner 2026-11-28)", () => {
+  const hint = () => el.querySelector('[data-testid="next-up-idle-hint"]');
+  it("says it waits for the agent's next work while 现在读取 is offered", () => {
+    const r = note("n1"); seed([r]); show(r);
+    expect(button("readNow").disabled).toBe(false);
+    expect(hint()!.textContent).toBe("· noteDelivery.readNow.idleHint");
+  });
+  it("no hint while the agent works, or when the host refuses 现在读取", () => {
+    const r = note("n1"); seed([r], delivery("turn", 1)); show(r);
+    expect(hint()).toBeNull();
+    const b = note("n2", { details: { deliveryDiagnostics: { stage: "inbox", waitingFor: "nextTurn", readNowDisabledReason: "orderedBatchPending" } } as never });
+    seed([b]); show(b);
+    expect(button("readNow").disabled).toBe(true);
+    expect(hint()).toBeNull();
+  });
+});
+
+describe("现在读取 on a note an automatic delivery batch holds (owner 2026-11-28)", () => {
+  const blocked = (reason: string) => note("n1", { details: { deliveryDiagnostics: { stage: "inbox", waitingFor: "nextTurn", readNowDisabledReason: reason } } as never });
+  it.each([["orderedBatchPending", "inAutoDelivery"], ["orderedBindingReplaced", "inAutoDelivery"], ["somethingNew", "notOffered"]])("%s: 现在读取 is grey with its reason, never sent", async (reason, grey) => {
+    const r = blocked(reason); seed([r]); show(r);
+    expect(button("readNow").disabled).toBe(true);
+    expect(button("readNow").dataset.disabledReason).toBe(grey);
+    expect(button("dismiss").disabled).toBe(false);
+    await press("readNow");
+    expect(calls.wake).not.toHaveBeenCalled();
+  });
+  it("the host's ordered_batch_pending refusal (row not re-read yet): its own words, re-read, no resend", async () => {
+    const r = note("n1"); seed([r]); show(r);
+    calls.wake.mockRejectedValue(new Error("Error invoking remote method 'cutex:session-action': Error: ordered_batch_pending: The selected note has an unconfirmed ordered batch receipt. Dismiss is still available."));
+    await press("readNow");
+    expect(calls.wake).toHaveBeenCalledTimes(1);
+    expect(calls.notify).toHaveBeenCalledWith("noteDelivery.readNow.ordered", "info", { hostId: "h", sessionId: "cutex.s1" });
+    expect(calls.refresh).toHaveBeenCalledTimes(1);
+  });
+  it("any other failure on a row without 查看详情 / 查看原因 says the reason, never points at a missing button", async () => {
+    const r = note("n1"); seed([r]); show(r);
+    expect(el.querySelector('button[data-effect="viewDetails"], button[data-effect="viewReason"]')).toBeNull();
+    calls.wake.mockRejectedValue(new Error("Error invoking remote method 'cutex:session-action': Error: future_code: the runtime is restarting"));
+    await press("readNow");
+    expect(calls.notify).toHaveBeenCalledTimes(1);
+    const [text, tone] = calls.notify.mock.calls[0]!;
+    expect(tone).toBe("error");
+    expect(text).toBe("Could not complete; the row stays: the runtime is restarting");
+    expect(String(text)).not.toMatch(/View details|View reason|查看/);
+  });
+});
+
+describe("failureReason", () => {
+  it("drops the IPC wrapper, Error prefixes and the code; clips; empty is null", async () => {
+    const { failureReason } = await import("../src/renderer/src/lib/inputLedger/actionResult");
+    expect(failureReason(new Error("Error invoking remote method 'x': CutexApiError: ordered_batch_pending: Dismiss is still available."))).toBe("Dismiss is still available.");
+    expect(failureReason("plain words")).toBe("plain words");
+    expect(failureReason(new Error("a".repeat(300)))!.length).toBe(200);
+    expect(failureReason(new Error(""))).toBeNull();
+  });
+});
+
 describe("where a note is (hover and details)", () => {
   const diag = (extra: Record<string, unknown>) => ({ deliveryDiagnostics: { stage: "inbox", since: iso(T0), sinceEvidence: "firstRecordedNativeEvidence", lastAttemptAt: null, lastAttemptKind: null, lastError: null, waitingFor: "nextTurn", blockedByInputId: null, ...extra } });
   it("an idle agent's next-turn wait reads calmly in the label tip, with the stage; no stall line", () => {

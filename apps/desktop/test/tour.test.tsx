@@ -28,20 +28,13 @@ globalThis.ResizeObserver ??= class {
 
 const { OnboardingHost } = await import("../src/renderer/src/components/OnboardingDialog");
 const { closeOnboarding, getOnboarding, openOnboarding } = await import("../src/renderer/src/lib/onboarding");
-const { decidePortraitThemes, hasTour, initialPortraitAnswer, portraitAnswered, portraitThemesFor } = await import("../src/renderer/src/lib/tour");
+const { decidePortraitThemes, initialPortraitAnswer, portraitAnswered, portraitThemesFor } = await import("../src/renderer/src/lib/tour");
 const { availableChoices, decideAllChoices, FIRST_CHOICES } = await import("../src/renderer/src/lib/firstChoices");
 const { getUiPrefs, setUiPref } = await import("../src/renderer/src/lib/prefs");
 const { getAppearance, setAppearance } = await import("../src/renderer/src/lib/appearance");
 const { setTrayPrefs, useTrayPrefs } = await import("../src/renderer/src/lib/trayPrefs");
 
 describe("lib/tour", () => {
-  it("0.2.0 (and its pre-releases) has the tour; later versions keep the text list", () => {
-    expect(hasTour("0.2.0")).toBe(true);
-    expect(hasTour("0.2.0-rc.1")).toBe(true);
-    expect(hasTour("0.2.1")).toBe(false);
-    expect(hasTour(null)).toBe(false);
-  });
-
   it("the 拟人头像 answer: 用 with every theme to start; 用 needs a theme; its 「帮我决定」 = every theme", () => {
     const fresh = initialPortraitAnswer([], ["p/a", "p/b"]);
     expect(fresh).toEqual({ use: true, themes: ["p/a", "p/b"] });

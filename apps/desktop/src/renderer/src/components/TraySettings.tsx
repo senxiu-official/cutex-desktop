@@ -1,6 +1,6 @@
 // Settings → 外观 → 窗口与卡片: the tray's rows (owner 2026-10-21; lib/trayPrefs, components/ChipTray): 托盘常驻
 // (default on), 托盘位置 (bottom / top / left / right; also by dragging its grip or 停靠在… in its menu) and
-// 允许 3 列 (design 039: three conversation columns side by side; default two) and 托盘两排 (owner 2026-10-24, default
+// 托盘两排 (owner 2026-10-24, default
 // off: the card at the bottom lays out in two rows when one does not hold its items; display only).
 // Per machine. WorkSurfaceSection places them. With no pin list (the desktop layer's module off) the 托盘常驻
 // row says the tray then only holds collapsed tool panes.
@@ -35,12 +35,23 @@ export function TraySettingRows() {
       <SettingRow agents="none" source="local" label={t("pane.tray.edge")} hint={t("pane.tray.edgeHint")} reset={<ResetButton disabled={p.edge === DEFAULT_TRAY_PREFS.edge} onClick={() => setTrayPrefs({ edge: DEFAULT_TRAY_PREFS.edge })} />}>
         <Segmented<TrayEdge> label={t("pane.tray.edge")} value={p.edge} options={TRAY_EDGES.map((e) => ({ value: e, label: t(`pane.tray.edge.${e}` as MessageKey) }))} onChange={(v) => setTrayPrefs({ edge: v })} />
       </SettingRow>
-      <SettingRow agents="none" source="local" label={t("workspace.threeColumns")} hint={t("workspace.threeColumnsHint")} reset={<ResetButton disabled={p.allowThreeColumns === DEFAULT_TRAY_PREFS.allowThreeColumns} onClick={() => setTrayPrefs({ allowThreeColumns: DEFAULT_TRAY_PREFS.allowThreeColumns })} />}>
-        <Toggle label={t("workspace.threeColumns")} checked={p.allowThreeColumns} onChange={(v) => setTrayPrefs({ allowThreeColumns: v })} />
-      </SettingRow>
       <SettingRow agents="none" source="local" label={t("tray.twoRows")} hint={t("tray.twoRowsHint")} reset={<ResetButton disabled={p.twoRows === DEFAULT_TRAY_PREFS.twoRows} onClick={() => setTrayPrefs({ twoRows: DEFAULT_TRAY_PREFS.twoRows })} />}>
         <Toggle label={t("tray.twoRows")} checked={p.twoRows} onChange={(v) => setTrayPrefs({ twoRows: v })} />
       </SettingRow>
     </>
+  );
+}
+
+/**
+ * 允许 3 个工作区 (design 039: three workspaces side by side; default two). Not a tray setting (owner 2026-11-28): on
+ * 会话 → 布局 (「并排工作区」). Still a tray pref (`allowThreeColumns`), so the saved value stays.
+ */
+export function ThreeWorkspacesRow() {
+  const { t } = useI18n();
+  const p = useTrayPrefs();
+  return (
+    <SettingRow agents="none" source="local" label={t("workspace.threeColumns")} hint={t("workspace.threeColumnsHint")} reset={<ResetButton disabled={p.allowThreeColumns === DEFAULT_TRAY_PREFS.allowThreeColumns} onClick={() => setTrayPrefs({ allowThreeColumns: DEFAULT_TRAY_PREFS.allowThreeColumns })} />}>
+      <Toggle label={t("workspace.threeColumns")} checked={p.allowThreeColumns} onChange={(v) => setTrayPrefs({ allowThreeColumns: v })} />
+    </SettingRow>
   );
 }

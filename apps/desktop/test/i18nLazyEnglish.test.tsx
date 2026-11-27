@@ -104,9 +104,9 @@ describe("en on demand (i18n)", () => {
 
 describe("the entry chunk has no en / other-locale tables (source)", () => {
   const SRC = join(__dirname, "../src/renderer/src");
-  // Files the lazy catalogs reach (modules/*/locales.<loc>.ts only through their i18n.locales.ts); everything else is
+  // Files the lazy catalogs reach, including per-language module overrides; everything else is
   // (or may be) in the entry chunk.
-  const LAZY = /(^|\/)(i18n\/(?!index\.tsx|zh-CN\.ts|trayCatalog\.ts|gestureCatalog\.ts)[^/]+|modules\/i18nCatalog(En|Locales)\.ts|modules\/.+\.(en|locales)\.ts|modules\/[^/]+\/locales\.[^/]+\.ts)$/;
+  const LAZY = /(^|\/)(i18n\/(?!index\.tsx|zh-CN\.ts|trayCatalog\.ts|gestureCatalog\.ts)[^/]+|modules\/i18nCatalog(En|Locales)\.ts|modules\/.+\.(en|locales)\.ts|modules\/(?:[^/]+\/)?locales\.[^/]+\.ts)$/;
   const files: string[] = [];
   const walk = (d: string) => {
     for (const n of readdirSync(d)) {
@@ -120,7 +120,7 @@ describe("the entry chunk has no en / other-locale tables (source)", () => {
     const text = readFileSync(file!, "utf8");
     for (const m of text.matchAll(/^\s*import\s+(?!type\b)[^;]*?from\s+"([^"]+)"/gm)) {
       const spec = m[1]!;
-      expect(spec, spec).not.toMatch(/(^|\/)(en|en-AU|de-DE|es-ES|fr-FR|it-IT|ja-JP|ko-KR|pt-BR|ru-RU|zh-Hant-CN)$|\.(en|locales)$|i18nCatalog(En|Locales)$/);
+      expect(spec, spec).not.toMatch(/(^|\/)(en|en-AU|de-DE|es-ES|fr-FR|it-IT|ja-JP|ko-KR|pt-BR|ru-RU|zh-Hant-CN)$|\.(en|locales)$|(^|\/)locales\.[\w-]+$|i18nCatalog(En|Locales)$/);
     }
   });
 });

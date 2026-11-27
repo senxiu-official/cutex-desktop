@@ -29,7 +29,7 @@ vi.mock("../src/renderer/src/modules/app", () => ({
 }));
 vi.mock("../src/renderer/src/lib/sideServices", () => ({ sideShowsHost: (hostId: string) => hostId === m.shown }));
 
-import { openOnItsHost, openService, openServiceExternal, SHELF_SWITCH_MS, shelfAgentFor } from "../src/renderer/src/lib/services";
+import { openOnItsHost, openService, openServiceExternal, openServiceTab, SHELF_SWITCH_MS, shelfAgentFor } from "../src/renderer/src/lib/services";
 import { recordTurnEndOn, turnMarksOn, unreadCount } from "../src/renderer/src/lib/turnUnread";
 import { useShelfToast } from "../src/renderer/src/lib/shelves";
 import { ShelfToast } from "../src/renderer/src/components/side/ShelfToast";
@@ -115,10 +115,10 @@ describe("every entry point switches to the service's host and opens it in the a
 
   it("⌘K (a service row of another host)", async () => {
     const plan = planOpen({ kind: "service", hostId: REMOTE, slug: "board" }, false, (id) => id === m.shown);
-    expect(plan).toEqual({ via: "serviceExternal", hostId: REMOTE, slug: "board" });
+    expect(plan).toEqual({ via: "serviceTab", hostId: REMOTE, slug: "board" });
     let outcome: unknown;
     await flush(async () => {
-      outcome = await runOpen(plan, { panesOpen: () => ({ status: "opened" }) as never, refsOpen: async () => ({ status: "stale" }), openServiceExternal: async (slug, hostId) => void (await openServiceExternal({ slug }, hostId)), openShelfPage: () => false, openRef: async () => false });
+      outcome = await runOpen(plan, { panesOpen: () => ({ status: "opened" }) as never, refsOpen: async () => ({ status: "stale" }), openServiceTab: async (slug, hostId) => void (await openServiceTab({ slug }, hostId)), openShelfPage: () => false, openRef: async () => false });
     });
     expect(outcome).toEqual({ ok: true });
     switchedAndOpened();

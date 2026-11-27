@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { CopyState } from "../src/shared/remoteCopies";
 const f = vi.hoisted(() => ({ call: vi.fn(), open: vi.fn() }));

@@ -1,41 +1,73 @@
-// A module whose default flips from off to on must not turn itself on for an existing install. The
-// module host stores only choices that differ from the default (host.ts persist), so "turned it off"
-// and "never touched it" both look like "no entry" while the default was off. Before the host starts,
-// an install that already saved module choices (the `cutex-desktop.modules` record exists) gets an
-// explicit `false` for each flipped module it has no entry for; a fresh install (no record) gets the
-// new default. Runs once per flip (marker key), so a later explicit choice is never overwritten.
+// Defaults that change must keep the previous behavior on devices that already used the app.
+// The host stores only choices that differ from the default, so an absent entry used the old default.
+// Run before the host starts and record each migration once, even for a fresh install.
 import { MODULES_PREFS_KEY, type KeyValueStorage } from "./types";
+import { ON_DEMAND_UPGRADE_PACKS } from "../../../shared/modulePacks";
 
 export interface DefaultFlip {
-  /** Module id whose default went from off to on. */
   id: string;
-  /** Storage key set once the flip was applied (or found nothing to pin). */
   marker: string;
+  previousDefault: boolean;
+  /** Existing startup marker written by older builds, even without a saved module preference. */
+  previousStartupMarker?: string;
+  /** Also count an install with saved module choices as existing (one older than the startup marker). */
+  orSavedChoices?: boolean;
 }
 
-/** browser: on by default since 2026-10-15 (fresh-install defaults; lead decision). */
-export const DEFAULT_FLIPS: readonly DefaultFlip[] = [{ id: "browser", marker: "cutex-desktop.modules.flip.browser-on" }];
+const BROWSER_STARTUP_MARKER = "cutex-desktop.modules.flip.browser-on";
 
-/** Returns the module ids pinned off (for tests / logging). */
+export const DEFAULT_FLIPS: readonly DefaultFlip[] = [
+  // This startup marker predates the introduction of Baidu Netdisk in November 2026.
+  { id: "baidu-pan", marker: "cutex-desktop.modules.flip.baidu-pan-off", previousDefault: true, previousStartupMarker: BROWSER_STARTUP_MARKER },
+  { id: "browser", marker: BROWSER_STARTUP_MARKER, previousDefault: false },
+  // 状态胶囊（旧版）off for new installs (owner 2026-11-27, slim audit #8). "Existing install" = the browser flip's
+  // startup marker, written on every start since 2026-10-15, or saved module choices (an install older than that marker).
+  // There an absent choice was the old default on, so it becomes an explicit on; an explicit on / off stays. Position
+  // and size are separate keys (capsuleState) and untouched.
+  { id: "status-capsule", marker: "cutex-desktop.modules.flip.status-capsule-off", previousDefault: true, previousStartupMarker: BROWSER_STARTUP_MARKER, orSavedChoices: true },
+];
+
+function record(raw: unknown): Record<string, unknown> | null {
+  return raw && typeof raw === "object" && !Array.isArray(raw) ? raw as Record<string, unknown> : null;
+}
+
+/** Returns the module ids whose previous defaults were pinned. */
 export function pinFlippedDefaults(storage: KeyValueStorage, flips: readonly DefaultFlip[] = DEFAULT_FLIPS): string[] {
-  const pinned: string[] = [];
   const pending = flips.filter((flip) => storage.getItem(flip.marker) === null);
-  if (!pending.length) return pinned;
-  const raw = storage.getItem(MODULES_PREFS_KEY);
-  if (raw !== null) {
-    let record: unknown = null;
-    try { record = JSON.parse(raw); } catch { record = null; }
-    const value = record && typeof record === "object" && !Array.isArray(record) ? (record as Record<string, unknown>) : null;
-    if (value && value.v === 1) {
-      const enabled = value.enabled && typeof value.enabled === "object" && !Array.isArray(value.enabled) ? { ...(value.enabled as Record<string, unknown>) } : {};
-      for (const flip of pending) {
-        if (Object.hasOwn(enabled, flip.id)) continue;
-        enabled[flip.id] = false;
-        pinned.push(flip.id);
-      }
-      if (pinned.length) storage.setItem(MODULES_PREFS_KEY, JSON.stringify({ ...value, enabled }));
-    }
+  if (!pending.length) return [];
+
+  let value: Record<string, unknown> | null = null;
+  try { value = record(JSON.parse(storage.getItem(MODULES_PREFS_KEY) ?? "null")); } catch { /* unreadable preferences */ }
+  const prefs = value?.v === 1 ? value : null;
+  const enabled = { ...record(prefs?.enabled) };
+  const pinned: string[] = [];
+  for (const flip of pending) {
+    const existing = flip.previousStartupMarker
+      ? storage.getItem(flip.previousStartupMarker) !== null || (!!flip.orSavedChoices && prefs !== null)
+      : prefs !== null;
+    if (!existing || typeof enabled[flip.id] === "boolean") continue;
+    enabled[flip.id] = flip.previousDefault;
+    pinned.push(flip.id);
   }
+  if (pinned.length) storage.setItem(MODULES_PREFS_KEY, JSON.stringify({ v: 1, place: {}, ...prefs, enabled }));
   for (const flip of pending) storage.setItem(flip.marker, "1");
   return pinned;
+}
+
+/** Snapshot eligibility once, after the old defaults have been pinned and before any new pack can be enabled. */
+export function pinnedBundledFallbacks(storage: KeyValueStorage): ReadonlySet<string> {
+  let enabled: Record<string, unknown> | null = null;
+  try {
+    const prefs = record(JSON.parse(storage.getItem(MODULES_PREFS_KEY) ?? "null"));
+    if (prefs?.v === 1) enabled = record(prefs.enabled);
+  } catch { /* Unreadable preferences behave like a fresh install. */ }
+  const legacy = new Set<string>();
+  for (const id of ON_DEMAND_UPGRADE_PACKS) {
+    const key = `cutex-desktop.modules.bundled-fallback.${id}`;
+    const pinned = storage.getItem(key);
+    const keep = pinned === null ? enabled?.[id] === true : pinned === "1";
+    if (pinned === null) storage.setItem(key, keep ? "1" : "0");
+    if (keep) legacy.add(id);
+  }
+  return legacy;
 }

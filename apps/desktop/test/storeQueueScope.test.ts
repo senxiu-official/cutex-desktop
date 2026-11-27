@@ -6,6 +6,9 @@ import type { DaemonState, HostsState } from "../src/shared/ipc";
 import type { NotifyOccurrence } from "../src/renderer/src/lib/notifyEvents";
 import { viewKey } from "../src/renderer/src/lib/viewKey";
 
+// Reuse the real static catalog across module resets. The locale state and store still reload per case.
+vi.mock("../src/renderer/src/i18n/zh-CN", (importOriginal) => importOriginal());
+
 const mock = vi.hoisted(() => {
   const listeners = new Map<string, Set<(value: unknown) => void>>();
   const calls: { host: string; method: string; args: unknown[] }[] = [];

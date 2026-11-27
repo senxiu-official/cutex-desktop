@@ -42,7 +42,7 @@ const request: PaRequest = {
   director: { sessionId: "eva-old", epoch: 1 }, assistantRevision: 4, state: "awaitingOwner", revision: 2, updatedAt: "2026-11-25T10:00:00Z", detail: null,
 };
 const host: PaHost = {
-  hostId: "local", look: null, label: "This PC", online: true, instanceId: "inst-a", supported: true, features: { recurring: false, qualifiedRefs: false, ownerViews: false, crossHost: false },
+  hostId: "local", look: null, label: "This PC", online: true, instanceId: "inst-a", supported: true, features: { recurring: false, qualifiedRefs: false, ownerViews: false, crossHost: false, readiness: false },
   projects: [{ project_id: "desktop", authority_epoch: 2, presentation: { display_name: "cutex-desktop", badge_label: "CD", color: "cyan" }, active_member_count: 3, lifecycle: "active" }],
   names: new Map([["eva", "Eva"], ["eva-old", "Old Eva"]]),
 };
@@ -80,6 +80,9 @@ describe("assistant request confirmation card", () => {
     expect($("[data-pa-seat-changed]")?.textContent).toContain("Old Eva · 第 1 任");
     expect($("[data-pa-needs-review]")).not.toBeNull();
     expect($("[data-pa-card-field=source]")?.textContent).toContain("对话 · 10:42");
+    // No internal revisions on the card (phase 0).
+    expect($("[data-pa-card-field=version]")).toBeNull();
+    expect(container.textContent).not.toMatch(/\br\d+\b/);
     const send = buttonByText("发给")!;
     expect(send.disabled).toBe(false);
     await act(async () => send.click());

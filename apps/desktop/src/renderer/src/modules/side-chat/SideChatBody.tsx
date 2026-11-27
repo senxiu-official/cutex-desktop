@@ -16,8 +16,9 @@ import { SIDE_MESSAGE_LIMIT } from "../../../../shared/sideChat";
 import { sideErrorText } from "./errors";
 import { quoteLines, sideError, sideTimeline, splitQuoted, SUMMARY_PROMPT } from "./model";
 import { interruptSide, loadSide, respondSide, sendSide, setSideDraft, setSideQuote, sideKey, summarizeSide, useSides } from "./state";
-import { useTurnLabel } from "./hooks";
-import { turnRef } from "../../lib/refs";
+import { useSourceTurn, useTurnLabel } from "./hooks";
+import { reasoningText } from "../../lib/reasoning";
+import { shortTime, turnRef } from "../../lib/refs";
 import { btn } from "../../components/Button";
 import { SelectionActions } from "../../components/SelectionActions";
 
@@ -33,7 +34,8 @@ export function SideEntry({ entry }: { entry: TimelineEntry }) {
   }
   if (entry.kind === "agent" || entry.kind === "plan" || entry.kind === "review") return <div className="min-w-0" data-side-markdown=""><Markdown text={entry.text} streaming={entry.kind !== "review" && entry.streaming} /></div>;
   if (entry.kind === "tool" || entry.kind === "other") return <details className="min-w-0 rounded-lg border border-border px-3 py-2 text-xs text-muted"><summary className="cursor-pointer truncate">{toolDetail(entry.item) || entry.item.type}</summary><SelectionActions as="pre" className="selectable mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words">{toolOutput(entry.item) ?? JSON.stringify(entry.item, null, 2)}</SelectionActions></details>;
-  if (entry.kind === "reasoning") return <details className="text-xs text-subtle"><summary className="cursor-pointer">{t("side-chat.reasoning")}</summary><div className="mt-2"><Markdown text={[...entry.summary, ...entry.content].join("\n\n")} streaming={entry.streaming} compact /></div></details>;
+  // What the main conversation shows (lib/reasoning): the full reasoning, else its summaries — never both one after the other.
+  if (entry.kind === "reasoning") return <details className="text-xs text-subtle"><summary className="cursor-pointer">{t("side-chat.reasoning")}</summary><div className="mt-2"><Markdown text={reasoningText(entry)?.text ?? ""} streaming={entry.streaming} compact /></div></details>;
   return null;
 }
 
@@ -69,7 +71,7 @@ export function SideChatBody({ hostId: host, sessionId, chatId, revealed, visibl
     </div>
     <div ref={scroller} onScroll={e => { const el = e.currentTarget; following.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; }} className="min-h-0 flex-1 overflow-y-auto">
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-4 py-5">
-        {chat.anchorTurnId && <SourceTurn hostId={host} sessionId={sessionId} turnId={chat.anchorTurnId} />}
+        {chat.anchorTurnId && <SourceTurn hostId={host} sessionId={sessionId} turnId={chat.anchorTurnId} openedAt={chat.createdAt} />}
         {chat.truncated && <p className="text-xs text-muted">{t("side-chat.truncated")}</p>}
         {entries.length === 0 && <p className="py-8 text-center text-sm text-subtle">{t("side-chat.empty")}</p>}
         <AgentMarkdownScope paneId={`side-chat:${chatId}`} hostId={host} sessionId={sessionId} visible={visible}>{entries.map(entry => <SideEntry key={entry.id} entry={entry} />)}</AgentMarkdownScope>
@@ -112,14 +114,32 @@ function useJumpToTurn(hostId: string, sessionId: string) {
   };
 }
 
-/** The side chat's start turn (from the host: chat.anchorTurnId), with a link back to it. */
-function SourceTurn({ hostId, sessionId, turnId }: { hostId: string; sessionId: string; turnId: string }) {
+/** "14:20" today, else "11-27 14:20" (local time) of a unix time in seconds. */
+function whenText(seconds: number): string {
+  const at = new Date(seconds * 1000), now = new Date();
+  return at.toDateString() === now.toDateString() ? shortTime(seconds).slice(6) : shortTime(seconds);
+}
+
+/**
+ * The side chat's start turn (from the host: chat.anchorTurnId) as the owner knows it (owner 2026-11-28): its ordinal
+ * and time, their message and the start of its last reply, with a link back. The turn id only in the tooltip; while
+ * that turn isn't in the loaded main timeline, just 「来源回合 · 侧边对话开于 <time>」.
+ */
+function SourceTurn({ hostId, sessionId, turnId, openedAt }: { hostId: string; sessionId: string; turnId: string; openedAt: string }) {
   const { t } = useI18n();
-  const label = useTurnLabel(hostId, sessionId, turnId);
+  const turn = useSourceTurn(hostId, sessionId, turnId);
   const jump = useJumpToTurn(hostId, sessionId);
-  return <div className="flex min-w-0 items-center gap-2 text-xs text-subtle" data-side-source="">
-    <span className="truncate" title={turnId}>{t("side-chat.source", { turn: label })}</span>
-    <button type="button" className="inline-flex shrink-0 items-center gap-1 text-accent hover:underline" onClick={() => void jump(turnId)}><CornerUpLeft size={12} aria-hidden />{t("side-chat.quoteJump")}</button>
+  const opened = Date.parse(openedAt);
+  const meta = turn
+    ? [turn.ordinal ? `#${turn.ordinal}` : null, turn.startedAt ? whenText(turn.startedAt) : null]
+    : [Number.isFinite(opened) ? t("side-chat.sourceOpened", { time: whenText(opened / 1000) }) : null];
+  return <div className="min-w-0 rounded-lg border-l-2 border-border bg-surface-2/60 px-3 py-2 text-xs" data-side-source="">
+    <div className="flex min-w-0 items-center gap-2 text-subtle">
+      <span className="truncate" title={t("side-chat.turnId", { id: turnId })} data-side-source-meta="">{[t("side-chat.sourceTitle"), ...meta].filter(Boolean).join(" · ")}</span>
+      <button type="button" className="ml-auto inline-flex shrink-0 items-center gap-1 text-accent hover:underline" onClick={() => void jump(turnId)}><CornerUpLeft size={12} aria-hidden />{t("side-chat.quoteJump")}</button>
+    </div>
+    {turn?.ask && <p className="mt-1 truncate text-foreground" data-side-source-ask="">{t("side-chat.sourceAsk", { text: turn.ask })}</p>}
+    {turn?.reply && <p className="mt-0.5 line-clamp-2 break-words text-muted" data-side-source-reply="">{turn.reply}</p>}
   </div>;
 }
 
@@ -133,7 +153,7 @@ function QuoteChip({ hostId, sessionId, chatId, locked }: { hostId: string; sess
   return <div data-side-quote="" className="mb-2 rounded-lg border-l-2 border-accent bg-surface-2 px-2.5 py-1.5 text-xs">
     <div className="flex min-w-0 items-center gap-2 text-subtle">
       <MessageSquareQuote size={12} className="shrink-0" aria-hidden />
-      <span className="truncate">{quote.turnId ? t("side-chat.quoteFrom", { turn: label }) : t("side-chat.quoteLabel")}</span>
+      <span className="truncate" title={quote.turnId ? t("side-chat.turnId", { id: quote.turnId }) : undefined}>{label ? t("side-chat.quoteFrom", { turn: label }) : t("side-chat.quoteLabel")}</span>
       {quote.turnId && <button type="button" data-side-quote-jump="" className="inline-flex shrink-0 items-center gap-1 text-accent hover:underline" onClick={() => void jump(quote.turnId!)}><CornerUpLeft size={12} aria-hidden />{t("side-chat.quoteJump")}</button>}
       <button type="button" disabled={locked} aria-label={t("side-chat.quoteRemove")} title={t("side-chat.quoteRemove")} className="ml-auto shrink-0 rounded p-0.5 hover:bg-hover disabled:opacity-40" onClick={() => setSideQuote(hostId, chatId, null)}><X size={12} /></button>
     </div>

@@ -1,11 +1,13 @@
 import { directorZh } from "./directorI18n";
 // 项目视图 strings. zh-CN and en are the maintained sources; the module also ships the other ten
-// app locales here (`locales`, spread by each i18n/<locale>.ts through modules/i18nCatalog modulesLocale).
+// app locales in the per-language module overrides.
 export const zhCN = {
   ...directorZh,
   "project-view.title": "项目视图",
   "project-view.description": "查看项目内{{agent}}的工作、委托、作业和最近动态，可从{{shelf}}、快速切换或项目菜单打开",
   "project-view.tabTitle": "项目 · {name}",
+  "project-view.todayTitle": "今日",
+  "project-view.todayTooltip": "今日：个人助理的待你确认、在办、简报和提醒（助理的协调项目不是你的项目，这里不显示项目视图）",
   "project-view.pick": "选择项目",
   "project-view.follow": "跟随当前对话",
   "project-view.followHint": "显示当前对话所在的项目",

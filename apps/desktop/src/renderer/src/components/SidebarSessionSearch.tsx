@@ -1,16 +1,16 @@
 // The sidebar's session search controls (harness C3, cutex r295 session-search-v1; state and paging in
-// lib/sessionSearchStore): the 工作目录 filter button and row, the 查找旧任务 row at the top of a search, and its results.
+// lib/sessionSearchStore): the 工作目录 field of the 筛选 panel (components/SidebarSearchFilters), the
+// 「在消息记录里搜「…」」 row at the top of a search, and its results (design A, owner 2026-11-27).
 // Only hosts with the capability get any of it; without one the sidebar search stays name / preview only.
-import { useEffect, useId, useMemo, useState } from "react";
-import { Archive, FolderSearch, History, Loader2, PanelRightOpen, X } from "lucide-react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { History, Loader2, X } from "lucide-react";
 import { useI18n } from "../i18n";
 import { useApp } from "../store";
+import { openModifiers } from "../lib/openModifiers";
 import type { HostLook } from "../lib/hostScope";
 import {
   continueTaskSearch,
   clearTaskSearch,
-  setArchivedSearch,
-  setSearchChoice,
   openTaskHit,
   setDirFilter,
   startTaskSearch,
@@ -21,27 +21,18 @@ import {
 } from "../lib/sessionSearchStore";
 import { hostEpoch } from "../../../shared/hosts";
 import { filtersOf, hitTurnMs, newestFirst, snippetAdds, type SearchFilterChoice } from "../lib/sessionSearchView";
-import { HitBadges, HitTime, Marked, SearchFilterSelects, SenderFilterSelect } from "./SessionSearchParts";
+import { HitBadges, HitTime, Marked } from "./SessionSearchParts";
 import { SESSION_SEARCH_PAGE } from "../lib/sessionSearchPage";
 import type { SessionSearchHosts } from "../lib/useSessionSearchHosts";
 
 
 const targetOf = (hostId: string, v2: ReadonlySet<string>): SearchTarget => ({ hostId, epoch: hostEpoch(useApp.getState().hosts, hostId), v2: v2.has(hostId) });
 
-/** The 工作目录 toggle beside the search field. */
-export function DirFilterButton({ open, onToggle }: { open: boolean; onToggle: () => void }) {
-  const { t } = useI18n();
-  const active = useSessionSearch((s) => s.dir !== null);
-  const label = t("sidebar.sessionSearch.dirButton");
-  return (
-    <button type="button" data-sidebar-dir-toggle="" aria-pressed={open || active} aria-label={label} data-tip={label} onClick={onToggle} className={`inline-flex size-6 shrink-0 items-center justify-center rounded-ctl hover:bg-hover ${open || active ? "text-accent" : "text-muted"}`}>
-      <FolderSearch size={14} aria-hidden />
-    </button>
-  );
-}
-
-/** The directory filter: which host (several in scope), the path (typed, or one of that host's agents' directories). */
-export function DirFilterRow({ hosts, cwdsOf, focus, onClose }: { hosts: SessionSearchHosts; cwdsOf: (hostId: string) => string[]; focus: string; onClose: () => void }) {
+/**
+ * The directory filter in the 筛选 panel (its group names it): which host (several in scope), the path (typed, or one of
+ * that host's agents' directories); × clears it while one is set.
+ */
+export function DirFilterRow({ hosts, cwdsOf, focus }: { hosts: SessionSearchHosts; cwdsOf: (hostId: string) => string[]; focus: string }) {
   const { t } = useI18n();
   const dir = useSessionSearch((s) => s.dir);
   const result = useSessionSearch((s) => s.dirResult);
@@ -71,14 +62,12 @@ export function DirFilterRow({ hosts, cwdsOf, focus, onClose }: { hosts: Session
   const clear = () => {
     setPath("");
     void setDirFilter(null);
-    onClose();
   };
   const hostLabel = (id: string) => hosts.capable.find((h) => h.id === id)?.label ?? id;
   const status = !dir ? null : !available ? t("sidebar.sessionSearch.dirUnavailable") : result?.error ? t("sidebar.sessionSearch.dirFailed", { error: result.error }) : result && !result.ids ? t("sidebar.sessionSearch.dirLoading") : result?.incomplete ? t("sidebar.sessionSearch.dirIncomplete") : null;
   return (
-    <div data-sidebar-dir-filter="" className="mx-2 mb-1.5 flex flex-col gap-1 rounded-ctl border border-border bg-surface px-2 py-1.5">
-      <div className="flex items-center gap-1.5">
-        <span className="text-caption font-medium text-muted">{t("sidebar.sessionSearch.dirLabel")}</span>
+    <div data-sidebar-dir-filter="" className="flex flex-col gap-1">
+      <div className={`flex items-center gap-1.5 ${!hosts.multi && !dir ? "hidden" : ""}`}>
         {hosts.multi && (
           hosts.capable.length > 1 ? (
             <select
@@ -97,9 +86,9 @@ export function DirFilterRow({ hosts, cwdsOf, focus, onClose }: { hosts: Session
             <span data-sidebar-dir-host="" className="ml-auto truncate text-caption text-subtle">{hostLabel(hostId)}</span>
           )
         )}
-        <button type="button" aria-label={t("sidebar.sessionSearch.dirClear")} data-tip={t("sidebar.sessionSearch.dirClear")} onClick={clear} className={`${hosts.multi ? "" : "ml-auto "}inline-flex size-5 shrink-0 items-center justify-center rounded-ctl text-subtle hover:bg-hover hover:text-foreground`}>
+        {dir && <button type="button" aria-label={t("sidebar.sessionSearch.dirClear")} data-tip={t("sidebar.sessionSearch.dirClear")} onClick={clear} className={`${hosts.multi ? "" : "ml-auto "}inline-flex size-5 shrink-0 items-center justify-center rounded-ctl text-subtle hover:bg-hover hover:text-foreground`}>
           <X size={12} aria-hidden />
-        </button>
+        </button>}
       </div>
       <input
         data-sidebar-dir-path=""
@@ -129,9 +118,14 @@ export function DirFilterRow({ hosts, cwdsOf, focus, onClose }: { hosts: Session
   );
 }
 
+/** At most this many message-history results in the sidebar; the rest are on the search page (owner 2026-11-27, design A). */
+export const SIDEBAR_HISTORY_LIMIT = 5;
+
 /**
- * 查找旧任务 for the current text (the top of a search), and its results. `targets`: the hosts to search — the directory
- * filter's host when one is set, else every capable host of the scope. `scopeKey`: the sidebar drops the results when it changes.
+ * 「在消息记录里搜「…」」 for the current text (the top of a search; design A, owner 2026-11-27) and its results: at most
+ * SIDEBAR_HISTORY_LIMIT, then 「在页面中看全部 N 条」. `targets`: the hosts to search — the directory filter's host when one is
+ * set, else every capable host of the scope. Its conditions (含已归档 / 发送方 / 类型 / 时间) are set in the 筛选 panel
+ * (components/SidebarSearchFilters); a change searches again. `scopeKey`: the sidebar drops the results when it changes.
  */
 export function OldTaskSearch({ query, hosts, lookOf, scopeKey }: { query: string; hosts: SessionSearchHosts; lookOf: (hostId: string) => HostLook | undefined; scopeKey: string }) {
   const { t } = useI18n();
@@ -145,95 +139,81 @@ export function OldTaskSearch({ query, hosts, lookOf, scopeKey }: { query: strin
   const dirHost = dir && hosts.capable.some((h) => h.id === dir.hostId) ? dir.hostId : null;
   // A filter whose host left the scope / went offline is suspended: the search goes to the capable hosts in view.
   const pool = dirHost ? [dirHost] : hosts.capable.map((h) => h.id);
-  // 已归档: owner connections only (cutex answers owner_required otherwise).
+  // 含已归档: owner connections only (cutex answers owner_required otherwise).
   const ownerPool = pool.filter((id) => hosts.owner.has(id));
-  const canArchived = ownerPool.length > 0;
-  const retired = archived && canArchived;
+  const retired = archived && ownerPool.length > 0;
   const targets = retired ? ownerPool : pool;
   const status = taskSearchStatus(runHosts);
   // Newest first (owner 2026-11-26), over what has been found so far.
   const sorted = useMemo(() => newestFirst(hits), [hits]);
   const showAction = q !== "" && targets.length > 0 && (!run || run.q !== q || run.retired !== retired);
-  if (!showAction && !run) return null;
-  // 在页面中查找: the search page with this text (and 已归档 / the directory filter's host), its own search.
-  const popOut = () => useApp.getState().openPage(SESSION_SEARCH_PAGE, { q: run && !showAction ? run.q : q, ...(retired ? { archived: "1" } : {}), ...(dirHost ? { host: dirHost } : {}) });
-  const popOutButton = (
-    <button type="button" data-old-tasks-popout="" aria-label={t("sidebar.sessionSearch.popOut")} data-tip={t("sidebar.sessionSearch.popOut")} onClick={popOut} className="inline-flex size-5 shrink-0 items-center justify-center rounded-ctl text-subtle hover:bg-hover hover:text-foreground">
-      <PanelRightOpen size={12} aria-hidden />
-    </button>
-  );
-  // 发送方 / 类型 / 时间 (owner 2026-11-26; cutex r297 session-search-v2): working on v2 hosts (a set filter leaves the
-  // others out, named in the footer); without any v2 host 发送方 stays greyed with why. A change searches again.
+  // 发送方 / 类型 / 时间 work on session-search-v2 hosts (r297; a set filter leaves the others out, named in the footer).
   const anyV2 = targets.some((id) => hosts.v2.has(id));
   const startWith = (text: string, next: SearchFilterChoice) =>
     startTaskSearch({ q: text, targets: targets.map((id) => targetOf(id, hosts.v2)), cwd: dirHost ? dir!.path : null, retired, filters: anyV2 ? filtersOf(next) : null, key: scopeKey });
-  const filterRow = anyV2 ? (
-    <div data-old-tasks-filters="" className="flex min-w-0 items-center gap-1 px-2">
-      <SearchFilterSelects
-        choice={choice}
-        selectClass="h-5 flex-1"
-        onChange={(next) => {
-          setSearchChoice(next);
-          if (run) startWith(run.q, next);
-        }}
-      />
-    </div>
-  ) : (
-    <div data-old-tasks-sender="" className="flex items-center gap-1.5 px-2">
-      <span className="text-caption text-subtle">{t("sidebar.sessionSearch.sender")}</span>
-      <SenderFilterSelect className="min-w-0 [&>select]:h-5" />
-    </div>
+  // A condition changed in the 筛选 panel: the shown results are searched again with it.
+  const seenChoice = useRef(choice);
+  useEffect(() => {
+    if (seenChoice.current === choice) return;
+    seenChoice.current = choice;
+    if (run) startWith(run.q, choice);
+  }); // eslint-disable-line react-hooks/exhaustive-deps
+  if (!showAction && !run) return null;
+  // 在页面中打开: the search page with this text (and 含已归档 / the directory filter's host), its own search.
+  const popOut = () => useApp.getState().openPage(SESSION_SEARCH_PAGE, { q: run && !showAction ? run.q : q, ...(retired ? { archived: "1" } : {}), ...(dirHost ? { host: dirHost } : {}) });
+  const popOutLink = (
+    <button type="button" data-old-tasks-popout="" data-tip={t("searchX.openPageHint")} onClick={popOut} className="shrink-0 rounded-ctl px-1 py-0.5 text-caption text-accent hover:underline">{t("searchX.openPage")}</button>
   );
-  const start = () => startWith(q, choice);
-  // 已归档 (owner connections): beside the action, or in the results' header once searched (switching drops the results).
-  const archivedToggle = canArchived && (
-    <button type="button" data-old-tasks-archived="" aria-pressed={archived} data-tip={t("sidebar.sessionSearch.archivedHint")} onClick={() => setArchivedSearch(!archived)} className={`inline-flex h-6 shrink-0 items-center gap-1 rounded-ctl px-1.5 text-caption ${archived ? "bg-accent/10 text-accent" : "text-subtle hover:bg-hover"}`}>
-      <Archive size={12} aria-hidden />
-      {t("sidebar.sessionSearch.archived")}
-    </button>
-  );
+  const shown = sorted.slice(0, SIDEBAR_HISTORY_LIMIT);
+  const capped = sorted.length > SIDEBAR_HISTORY_LIMIT;
   return (
     <section data-old-tasks="" className="mb-1.5 flex flex-col gap-0.5 border-b border-border pb-1.5">
       {showAction && (
-        <div className="flex items-center gap-1">
-          <button type="button" data-old-tasks-start="" onClick={start} className="flex min-w-0 flex-1 items-center gap-1.5 rounded-ctl px-2 py-1 text-left text-ui text-accent hover:bg-hover">
-            <History size={14} aria-hidden className="shrink-0" />
-            <span className="truncate">{t("sidebar.sessionSearch.findOld", { q })}</span>
-          </button>
-          {archivedToggle}
-          {popOutButton}
-        </div>
+        <>
+          <div className="flex items-center gap-1">
+            <button type="button" data-old-tasks-start="" onClick={() => startWith(q, choice)} className="flex min-w-0 flex-1 items-center gap-1.5 rounded-ctl px-2 py-1 text-left text-ui text-accent hover:bg-hover">
+              <History size={14} aria-hidden className="shrink-0" />
+              <span className="truncate">{t("searchX.findIn", { q })}</span>
+            </button>
+            {popOutLink}
+          </div>
+          <p className="-mt-0.5 px-2 pl-[29px] text-caption text-subtle" data-old-tasks-hint="">{t(retired ? "searchX.findHintArchived" : "searchX.findHint")}</p>
+        </>
       )}
-      {filterRow}
       {run && (
         <div data-old-tasks-results="" className="flex flex-col">
           <div className="flex items-center gap-1 px-2 pt-1">
-            <span className="min-w-0 flex-1 truncate text-caption font-semibold text-muted">{t(run.retired ? "sidebar.sessionSearch.resultsArchived" : "sidebar.sessionSearch.results", { q: run.q })}</span>
-            {hits.length > 0 && <span className="text-caption text-subtle tabular-nums">{hits.length}</span>}
-            {!showAction && archivedToggle}
-            {!showAction && popOutButton}
+            <span className="min-w-0 flex-1 truncate text-caption font-semibold text-muted">{t(run.retired ? "searchX.historyArchived" : "searchX.history", { q: run.q })}</span>
+            {hits.length > 0 && <span className="text-caption text-subtle tabular-nums">{hits.length}{status.more ? "+" : ""}</span>}
+            {!showAction && popOutLink}
             <button type="button" data-old-tasks-close="" aria-label={t("sidebar.sessionSearch.close")} data-tip={t("sidebar.sessionSearch.close")} onClick={clearTaskSearch} className="inline-flex size-5 items-center justify-center rounded-ctl text-subtle hover:bg-hover hover:text-foreground">
               <X size={12} aria-hidden />
             </button>
           </div>
           <ul role="list" className="flex flex-col">
-            {sorted.map((hit) => <OldTaskRow key={hit.key} hit={hit} q={run.q} host={hosts.multi ? lookOf(hit.connectionId) : undefined} />)}
+            {shown.map((hit) => <OldTaskRow key={hit.key} hit={hit} q={run.q} host={hosts.multi ? lookOf(hit.connectionId) : undefined} />)}
           </ul>
-          <OldTaskFooter status={status} empty={hits.length === 0} failedLabel={status.failed.map((id) => lookOf(id)?.label ?? id).join("、")} skippedLabel={run.skipped.map((id) => lookOf(id)?.label ?? id).join("、")} />
+          {capped && (
+            <button type="button" data-old-tasks-all="" onClick={popOut} className="self-start rounded-ctl px-2 py-0.5 text-caption text-accent hover:underline">
+              {t(status.more ? "searchX.seeAllMore" : "searchX.seeAll", { n: sorted.length })}
+            </button>
+          )}
+          <OldTaskFooter status={status} capped={capped} empty={hits.length === 0} failedLabel={status.failed.map((id) => lookOf(id)?.label ?? id).join("、")} skippedLabel={run.skipped.map((id) => lookOf(id)?.label ?? id).join("、")} />
         </div>
       )}
     </section>
   );
 }
 
-function OldTaskFooter({ status, empty, failedLabel, skippedLabel }: { status: ReturnType<typeof taskSearchStatus>; empty: boolean; failedLabel: string; skippedLabel: string }) {
+/** `capped`: more than the sidebar shows were found — 继续查找 belongs to the page then (the link above). */
+function OldTaskFooter({ status, capped, empty, failedLabel, skippedLabel }: { status: ReturnType<typeof taskSearchStatus>; capped: boolean; empty: boolean; failedLabel: string; skippedLabel: string }) {
   const { t } = useI18n();
   return (
     <div data-old-tasks-status="" className="flex flex-col gap-0.5 px-2 pb-1 text-caption text-subtle" aria-live="polite">
       {status.pending && (
         <span className="inline-flex items-center gap-1"><Loader2 size={12} className="animate-spin" aria-hidden />{t("sidebar.sessionSearch.searching")}</span>
       )}
-      {!status.pending && status.more && (
+      {!status.pending && status.more && !capped && (
         <button type="button" data-old-tasks-more="" onClick={continueTaskSearch} className="self-start rounded-ctl py-0.5 text-accent hover:underline">{t("sidebar.sessionSearch.more")}</button>
       )}
       {/* Empty only once every host has no cursor left. */}
@@ -247,15 +227,16 @@ function OldTaskFooter({ status, empty, failedLabel, skippedLabel }: { status: R
 
 function OldTaskRow({ hit, q, host }: { hit: TaskHit; q: string; host: HostLook | undefined }) {
   const { t } = useI18n();
-  const open = async () => {
-    const result = await openTaskHit(hit);
+  // Ctrl/⌘ + click, middle click: beside the focused agent, as on the agent rows.
+  const open = async (e?: { ctrlKey: boolean; metaKey: boolean; shiftKey: boolean; button?: number }) => {
+    const result = await openTaskHit(hit, { beside: !!e && openModifiers(e).newInstance });
     if (result.status === "host-offline") useApp.getState().notify(t("sidebar.sessionSearch.hostOffline"), "error");
   };
   const title = hit.title.trim() || t("sidebar.sessionSearch.untitled");
   const at = hitTurnMs(hit);
   return (
     <li>
-      <button type="button" data-old-task={hit.key} onClick={() => void open()} className="flex w-full min-w-0 flex-col gap-0.5 rounded-ctl px-2 py-1 text-left hover:bg-hover">
+      <button type="button" data-old-task={hit.key} onClick={(e) => void open(e)} onAuxClick={(e) => e.button === 1 && void open(e)} onMouseDown={(e) => e.button === 1 && e.preventDefault()} className="flex w-full min-w-0 flex-col gap-0.5 rounded-ctl px-2 py-1 text-left hover:bg-hover">
         <span className="line-clamp-2 break-words text-ui font-medium" data-old-task-title=""><Marked text={title} q={q} /></span>
         {snippetAdds(hit.title, hit.snippet) && <span className="line-clamp-2 break-words text-caption text-muted" data-old-task-snippet=""><Marked text={hit.snippet} q={q} /></span>}
         <span className="flex min-w-0 items-center gap-1 text-caption text-subtle">

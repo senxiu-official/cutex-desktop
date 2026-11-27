@@ -1,11 +1,16 @@
-// Browser-preview data for Settings → 功能 Profile (`/v2/feature-profiles`, shapes in shared/featureProfiles.ts) and the
+// Browser-preview data for Settings → Profile → 功能 Profile (`/v2/feature-profiles`, shapes in shared/featureProfiles.ts) and the
 // 提示词增强 picker. This machine: two rows (one OpenAI Responses, one Anthropic Messages); another host: its own list.
 // `?fp=many` nine rows (the 全部 N sub-page), `?fp=empty` none, `?fp=off` an older cutex without the capability
-// (rollback: the page hides, 提示词增强 follows the agent only), `?fp=fail` every save refused like cutex, `?fp=damaged` one unreadable record (list `errors`).
+// (rollback: the card hides, 提示词增强 follows the agent only), `?fp=fail` every save refused like cutex, `?fp=damaged` one unreadable record (list `errors`),
+// `?fp=nokey` the second row without a key (未设置 API key), `?fp=notest` a host without 测试连接 (feature-profile-test-v1).
+// 测试连接: the first row connects; the second fails with auth; `?fp=many` rows cycle the other error classes. A draft
+// connects unless its key contains "bad" (auth), its model contains "missing" (modelNotFound) or its base URL
+// contains "nowhere" (network) / "slow" (timeout).
 // Keys are never stored here beyond "present"; nothing is ever echoed.
 import {
-  FEATURE_PROFILE_LIMIT, FEATURE_PROFILE_PROTOCOLS, FEATURE_PROFILE_QUOTA_TYPES, FEATURE_PROFILES_FEATURE,
-  parseFeatureProfileList, type FeatureProfile, type FeatureProfileCreate, type FeatureProfilePatch,
+  FEATURE_PROFILE_LIMIT, FEATURE_PROFILE_PROTOCOLS, FEATURE_PROFILE_QUOTA_TYPES, FEATURE_PROFILE_TEST_FEATURE, FEATURE_PROFILES_FEATURE,
+  featureProfileTestBody, parseFeatureProfileList, parseFeatureProfileTestResult, type FeatureProfile, type FeatureProfileCreate, type FeatureProfilePatch,
+  type FeatureProfileTestErrorClass, type FeatureProfileTestRequest,
 } from "../../../../shared/featureProfiles";
 import type { ModuleMock } from "../../dev/mockTypes";
 
@@ -22,7 +27,7 @@ function seed(hostId: string): FeatureProfile[] {
   if (hostId !== "local") return [row("fp-7f3e0a91-0b2c-4d5e-8f60-112233445566", "工作站小模型", "openaiResponses", "https://relay.example.net/v1", "gpt-6.2-mini", "periodicAllowance")];
   const base = [
     row("fp-1a2b3c4d-5e6f-4a1b-9c2d-0e1f2a3b4c5d", "便宜的小模型", "openaiResponses", "https://api.openai.com/v1", "gpt-6.2-mini", "payAsYouGo"),
-    row("fp-9e8d7c6b-5a49-4382-a716-5f4e3d2c1b0a", "Haiku 改写", "anthropicMessages", "https://api.anthropic.com", "claude-haiku-5-5", "balance"),
+    { ...row("fp-9e8d7c6b-5a49-4382-a716-5f4e3d2c1b0a", "Haiku 改写", "anthropicMessages", "https://api.anthropic.com", "claude-haiku-5-5", "balance"), keyPresent: SCENE !== "nokey" },
   ];
   if (SCENE !== "many") return base;
   const extra = ["DeepSeek 兼容", "本机 Ollama", "OpenRouter", "公司网关", "Kimi 兼容", "备用 OpenAI", "测试用"].map((name, i) =>
@@ -51,6 +56,20 @@ function check(p: Omit<FeatureProfile, "id" | "keyPresent">, key: string | undef
   if (!p.name.trim() || p.name.length > 64 || !p.model.trim() || /\s/.test(p.model) || !okUrl
     || !(FEATURE_PROFILE_PROTOCOLS as readonly string[]).includes(p.protocol) || !(FEATURE_PROFILE_QUOTA_TYPES as readonly string[]).includes(p.quotaType)
     || (key !== undefined && !key.trim())) refuse("invalid_feature_profile", "invalid feature profile");
+}
+
+const TEST_MESSAGE: Record<FeatureProfileTestErrorClass, string> = {
+  auth: "provider rejected the credential (401)", modelNotFound: "model not available (404)", quotaOrRateLimit: "rate limited (429)",
+  network: "connection refused", tls: "certificate verification failed", timeout: "no response within 15 s",
+  badEndpoint: "unexpected response shape (404 on /responses)", other: "unexpected provider status 500",
+};
+const MANY_CLASSES: FeatureProfileTestErrorClass[] = ["network", "timeout", "quotaOrRateLimit", "tls", "badEndpoint", "modelNotFound", "other"];
+
+/** cutex's reply for one completed test (always HTTP 200). */
+function testReply(error: FeatureProfileTestErrorClass | null, model: string, latencyMs: number) {
+  return parseFeatureProfileTestResult(error
+    ? { contractVersion: 2, ok: false, latencyMs, model: null, error: { class: error, message: TEST_MESSAGE[error] } }
+    : { contractVersion: 2, ok: true, latencyMs, model, error: null });
 }
 
 function api(hostId: string) {
@@ -84,6 +103,24 @@ function api(hostId: string) {
       console.info("[mock] PATCH /v2/feature-profiles", id, { ...meta, ...(apiKey !== undefined ? { apiKey: "(replaced)" } : {}) });
       return structuredClone(s[i]!);
     },
+    async testFeatureProfile(request: FeatureProfileTestRequest) {
+      const body = featureProfileTestBody(request);
+      if ("profileId" in body) {
+        const s = storeOf(hostId);
+        const i = s.findIndex((p) => p.id === body.profileId);
+        if (i < 0) refuse("feature_profile_not_found", "feature profile not found");
+        const p = s[i]!;
+        const error: FeatureProfileTestErrorClass | null = !p.keyPresent ? "auth" : i === 0 ? null : i === 1 ? "auth" : MANY_CLASSES[(i - 2) % MANY_CLASSES.length]!;
+        await wait(error === "timeout" ? 2500 : 900);
+        return testReply(error, `${p.model}-2026-10-01`, error === "timeout" ? 15000 : 640 + i * 37);
+      }
+      const d = body.draft;
+      const error: FeatureProfileTestErrorClass | null = d.apiKey.includes("bad") ? "auth" : d.model.includes("missing") ? "modelNotFound"
+        : d.baseUrl.includes("nowhere") ? "network" : d.baseUrl.includes("slow") ? "timeout" : null;
+      await wait(error === "timeout" ? 2500 : 900);
+      console.info("[mock] POST /v2/feature-profiles/test", { ...d, apiKey: "(sent)" });
+      return testReply(error, d.model, error === "timeout" ? 15000 : 712);
+    },
     async deleteFeatureProfile(id: string) {
       await wait(300);
       const s = storeOf(hostId);
@@ -96,7 +133,7 @@ function api(hostId: string) {
 }
 
 export const mock: ModuleMock = {
-  features: { new: SCENE === "off" ? [] : [FEATURE_PROFILES_FEATURE] },
+  features: { new: SCENE === "off" ? [] : SCENE === "notest" ? [FEATURE_PROFILES_FEATURE] : [FEATURE_PROFILES_FEATURE, FEATURE_PROFILE_TEST_FEATURE] },
   api: () => api("local"),
   remote: (hostId) => api(hostId),
 };

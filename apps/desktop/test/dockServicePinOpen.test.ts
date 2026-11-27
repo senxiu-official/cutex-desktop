@@ -1,6 +1,7 @@
 // A tray / desktop pin that does not open (owner 2026-10-25: the 看板 service pin showed 「打不开（unavailable）」
 // as a red chip inside the composer): the reason in words, as the toast above the tray; a service pin of a host
-// the Shelf does not show now (another host's agent is open) opens in the system browser instead of failing.
+// the Shelf does not show now (another host's agent is open) opens like the 服务 page (lib/services openServiceTab:
+// that host's agent first, then the in-app tab; owner 2026-11-28) instead of failing.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -17,7 +18,7 @@ vi.mock("../src/renderer/src/i18n", () => ({
 vi.mock("../src/renderer/src/lib/shelves", () => ({ showShelfToast: (text: string) => void mocks.toasts.push(text) }));
 vi.mock("../src/renderer/src/lib/sideServices", () => ({ sideShowsHost: (hostId: string) => hostId === mocks.shown }));
 vi.mock("../src/renderer/src/lib/services", () => ({
-  openServiceExternal: async (s: { slug: string }, hostId: string, path: string) => void mocks.external.push({ slug: s.slug, hostId, path }),
+  openServiceTab: async (s: { slug: string }, hostId: string, path: string) => void mocks.external.push({ slug: s.slug, hostId, path }),
 }));
 vi.mock("../src/renderer/src/lib/workspaces", () => ({
   openRefWhy: async (ref: unknown) => (mocks.refs.push(ref), mocks.why),
@@ -71,7 +72,7 @@ describe("a tray click", () => {
     expect(mocks.external).toEqual([]);
   });
 
-  it("another host's agent is open: the service opens in the system browser (no Shelf open, no failure)", async () => {
+  it("another host's agent is open: the service goes to openServiceTab (its host's agent, then the in-app tab), no failure", async () => {
     mocks.shown = "ssh-remote";
     expect(serviceOutOfView(board)).toBe(true);
     await openPinAs(board, "replace", openFailedText);

@@ -1,5 +1,7 @@
 import { UserLayoutMigration } from "./components/UserLayoutMemory";
+import { SettingsSyncAsk } from "./components/settings/SettingsSync";
 import { startUserLayout } from "./lib/userLayoutSync";
+import { startSettingsSync } from "./lib/settingsSync/run";
 import { useEffect, useMemo } from "react";
 import { PaneHost } from "./components/PaneHost";
 import { DesktopBackground, TrayFrame } from "./components/ChipTray";
@@ -35,7 +37,7 @@ import { FullscreenHint, WindowBarFrame } from "./components/PanelFullscreen";
 import { LOCAL_HOST_ID } from "../../shared/hosts";
 import { api, bridge } from "./bridge";
 import { activeHost, hasLocalHost, hasNoHost, hostIndicator, isRemote, routesExhausted } from "./lib/hosts";
-import { useTurnMarkUpkeep } from "./lib/attentionView";
+import { useHostAttentionUpkeep, useTurnMarkUpkeep } from "./lib/attentionView";
 import { useDesktopShell } from "./lib/shell";
 import { useTermsSync } from "./lib/termsSync";
 import { startSideStore } from "./lib/sideLayoutStore";
@@ -70,10 +72,10 @@ function DaemonBanner() {
   const indicator = hostIndicator(hosts, daemon);
   // A conversation on screen: it doesn't show the first-run card (below), so this line is the only notice there.
   const conversationShown = usePanes((s) => conversationPanes(s.layout).some((id) => !!paneBinding(s.layout, id)?.sessionId));
-  // No host at all: the main area guides to adding one (components/FirstRun); nothing to reconnect.
+  // No host at all: the main area guides to adding one (the 开始使用 card, modules/start); nothing to reconnect.
   if (indicator.status === "online" || hasNoHost(hosts)) return null;
   if (!isRemote(hosts)) {
-    // cutex not installed / not running and no conversation on screen: the main area's card (components/FirstRun) says it
+    // cutex not installed / not running and no conversation on screen: the main area's card (the 开始使用 card, modules/start) says it
     // with the steps; no second line here.
     if (firstRunCardShown(daemon, conversationShown)) return null;
     const text =
@@ -128,6 +130,7 @@ export function App() {
   useDesktopShell(locale);
   useTermsSync();
   useTurnMarkUpkeep();
+  useHostAttentionUpkeep();
   // One workspace watch for the selected agent, shared by its conversation header's git chip and the right side.
   const scope = useSelectedScope();
   const workspaceHost = useSelectedHost();
@@ -136,6 +139,8 @@ export function App() {
   const selected = useMemo(() => ({ hostId: workspaceHost, api: hostApi(workspaceHost), scope, ...workspace }), [workspaceHost, focusHost, scope, workspace]); // eslint-disable-line react-hooks/exhaustive-deps -- hostApi follows the focus
   useEffect(() => init(), [init]);
   useEffect(() => startUserLayout(), []);
+  // Settings that follow the person (design 056 §12): after the layout store, whose memory host it shares.
+  useEffect(() => startSettingsSync(), []);
   // The right side (components/side): its layout store follows the host / agent / modules.
   useEffect(() => startSideStore((listener) => appModules().subscribe(listener)), []);
   // The conversation panes (lib/paneStore): the layout follows the selection, persisted per device.
@@ -183,6 +188,7 @@ export function App() {
           <JobOutputDialog />
           <Overlays />
           <UserLayoutMigration />
+          <SettingsSyncAsk />
           <SshPromptDialog />
           <RemoteCloseDialog />
           <DeskWindows />

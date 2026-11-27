@@ -2,6 +2,7 @@
 import type { SidebarSection } from "./sidebarSections";
 import { readFolderLookChoice, type FolderLookChoice } from "./folderLook";
 import { hostKey, parseHostKey } from "./hostKeys";
+import type { TurnBar, TurnBarPins } from "./turnBarPins";
 
 export interface LayoutHost { id: string; instanceId?: string; label: string; online: boolean; supported: boolean; eligible: boolean; known?: boolean }
 /** Main's host connection is authoritative. During a focus switch the renderer's top-level
@@ -18,14 +19,31 @@ export interface LayoutRef { host?: string; id: string; hostLabel?: string; loca
 export interface PortableSection { id: string; name: string; collapsed: boolean; members: LayoutRef[]; look?: FolderLookChoice; [key: string]: unknown }
 export const LAYOUT_LISTS = ["starredProjects", "projectOrder", "foldedProjects", "pinned"] as const;
 export type LayoutList = typeof LAYOUT_LISTS[number];
-export interface SidebarLocal { sidebarSections: SidebarSection[]; starredProjects: string[]; projectOrder: string[]; foldedProjects: string[]; pinned: string[]; navPins: string[] | null }
+/** `turnBarPins` (owner 2026-11-28): the 操作栏 pins per bar (lib/turnBarPins); absent = this device has none of its own. */
+export interface SidebarLocal { sidebarSections: SidebarSection[]; starredProjects: string[]; projectOrder: string[]; foldedProjects: string[]; pinned: string[]; navPins: string[] | null; turnBarPins?: TurnBarPins }
+export const TURN_BARS: readonly TurnBar[] = ["reply", "user"];
+/** The 操作栏 pins in the document: per bar, null = the bar's defaults (like `navPins`). */
+export type TurnBarDoc = Record<TurnBar, string[] | null>;
 export interface SidebarDoc extends Record<string, unknown> {
   sections: PortableSection[];
   starredProjects: LayoutRef[]; projectOrder: LayoutRef[]; foldedProjects: LayoutRef[]; pinned: LayoutRef[];
   navPins: string[] | null;
+  /** Desktops before it keep it untouched: unknown keys survive their reads, edits and merges (readSidebar spreads the raw document). */
+  turnBarPins: TurnBarDoc;
   tombstones: { id: string; del: true; t: number }[];
 }
-export const emptySidebar = (): SidebarDoc => ({ sections: [], starredProjects: [], projectOrder: [], foldedProjects: [], pinned: [], navPins: null, tombstones: [] });
+export const emptySidebar = (): SidebarDoc => ({ sections: [], starredProjects: [], projectOrder: [], foldedProjects: [], pinned: [], navPins: null, turnBarPins: { reply: null, user: null }, tombstones: [] });
+const pinList = (v: unknown): string[] | null => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : null);
+function readTurnBars(v: unknown): TurnBarDoc {
+  const raw = v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
+  return { ...raw, reply: pinList(raw.reply), user: pinList(raw.user) } as TurnBarDoc;
+}
+const encodeTurnBars = (local: TurnBarPins | undefined): TurnBarDoc => ({ reply: local?.reply ?? null, user: local?.user ?? null });
+function decodeTurnBars(doc: TurnBarDoc): TurnBarPins {
+  const out: TurnBarPins = {};
+  for (const bar of TURN_BARS) if (doc[bar]) out[bar] = [...doc[bar]!];
+  return out;
+}
 export const refId = (r: LayoutRef): string => JSON.stringify([r.host ?? `unknown:${r.localId ?? ""}`, r.id]);
 export function portableRef(key: string, hosts: readonly LayoutHost[], focus: string): LayoutRef {
   const [localId, id] = parseHostKey(key) ?? [focus, key];
@@ -40,12 +58,12 @@ export function localRef(r: LayoutRef, hosts: readonly LayoutHost[]): string | n
 export function encodeSidebar(local: SidebarLocal, hosts: readonly LayoutHost[], focus: string): SidebarDoc {
   const ref = (k: string) => portableRef(k, hosts, focus);
   return { ...emptySidebar(), sections: local.sidebarSections.map(s => ({ ...s, members: s.members.map(ref) })),
-    ...Object.fromEntries(LAYOUT_LISTS.map(k => [k, local[k].map(ref)])), navPins: local.navPins };
+    ...Object.fromEntries(LAYOUT_LISTS.map(k => [k, local[k].map(ref)])), navPins: local.navPins, turnBarPins: encodeTurnBars(local.turnBarPins) };
 }
 export function decodeSidebar(doc: SidebarDoc, hosts: readonly LayoutHost[]): SidebarLocal {
   const refs = (rs: LayoutRef[]) => rs.map(r => localRef(r, hosts)).filter((r): r is string => r !== null);
   return { sidebarSections: doc.sections.map(s => { const look = readFolderLookChoice(s.look); return { id: s.id, name: s.name, collapsed: s.collapsed, members: refs(s.members), ...(look && { look }) }; }),
-    starredProjects: refs(doc.starredProjects), projectOrder: refs(doc.projectOrder), foldedProjects: refs(doc.foldedProjects), pinned: refs(doc.pinned), navPins: doc.navPins };
+    starredProjects: refs(doc.starredProjects), projectOrder: refs(doc.projectOrder), foldedProjects: refs(doc.foldedProjects), pinned: refs(doc.pinned), navPins: doc.navPins, turnBarPins: decodeTurnBars(doc.turnBarPins) };
 }
 export function readSidebar(raw: Record<string, unknown> | null | undefined): SidebarDoc {
   const d = { ...emptySidebar(), ...raw };
@@ -53,6 +71,7 @@ export function readSidebar(raw: Record<string, unknown> | null | undefined): Si
   for (const k of LAYOUT_LISTS) d[k] = refs(d[k]);
   d.sections = Array.isArray(d.sections) ? d.sections.filter(s => s && typeof s.id === "string" && typeof s.name === "string").map(s => ({ ...s, collapsed: s.collapsed === true, members: refs(s.members) })) : [];
   d.navPins = Array.isArray(d.navPins) ? d.navPins.filter((v): v is string => typeof v === "string") : null;
+  d.turnBarPins = readTurnBars(d.turnBarPins);
   d.tombstones = Array.isArray(d.tombstones) ? d.tombstones.filter(t => t && typeof t.id === "string" && typeof t.t === "number" && t.del === true) : [];
   return d;
 }
@@ -65,7 +84,10 @@ export type LayoutOp =
   | { kind: "list"; list: LayoutList; ref: LayoutRef; present: boolean; before: string | null; t: number; visible?: string[] }
   | { kind: "sectionOrder"; id: string; before: string | null; t: number }
   | { kind: "nav"; id: string; present: boolean; before: string | null; t: number }
-  | { kind: "navDefault"; t: number };
+  | { kind: "navDefault"; t: number }
+  /** 操作栏 pins (owner 2026-11-28): the same ordered insert / remove and back-to-default as `nav`, per bar. */
+  | { kind: "turnBar"; bar: TurnBar; id: string; present: boolean; before: string | null; t: number }
+  | { kind: "turnBarDefault"; bar: TurnBar; t: number };
 
 function insert<T>(items: T[], value: T, id: (v: T) => string, before: string | null): T[] {
   const rest = items.filter(x => id(x) !== id(value));
@@ -85,7 +107,7 @@ export function applyLayoutOp(base: SidebarDoc, op: LayoutOp): SidebarDoc {
   const recent = (d: SidebarDoc) => ({ ...d, tombstones: d.tombstones.filter(t => t.t >= op.t - 30 * 24 * 60 * 60 * 1000) });
   if (op.kind === "import") return recent(mergeSidebar(base, op.data));
   const d = readSidebar(base);
-  const tombId = op.kind === "section" ? `section:${op.id}` : op.kind === "list" ? `${op.list}:${refId(op.ref)}` : op.kind === "member" ? `member:${refId(op.ref)}` : op.kind === "nav" ? `nav:${op.id}` : "";
+  const tombId = op.kind === "section" ? `section:${op.id}` : op.kind === "list" ? `${op.list}:${refId(op.ref)}` : op.kind === "member" ? `member:${refId(op.ref)}` : op.kind === "nav" ? `nav:${op.id}` : op.kind === "turnBar" ? `turnBar:${op.bar}:${op.id}` : "";
   if (tombId && d.tombstones.some(t => t.id === tombId && t.t >= op.t)) return base;
   const remove = () => { d.tombstones = [...d.tombstones.filter(t => t.id !== tombId), { id: tombId, del: true, t: op.t }]; };
   switch (op.kind) {
@@ -119,6 +141,13 @@ export function applyLayoutOp(base: SidebarDoc, op: LayoutOp): SidebarDoc {
     case "list": d[op.list] = op.present ? anchored(d[op.list], op.ref, refId, op.before, op.visible) : d[op.list].filter(r => refId(r) !== refId(op.ref)); if (!op.present) remove(); break;
     case "nav": d.navPins = op.present ? insert(d.navPins ?? [], op.id, s => s, op.before) : (d.navPins ?? []).filter(id => id !== op.id); if (!op.present) remove(); break;
     case "navDefault": d.navPins = null; break;
+    case "turnBar": {
+      const pins = d.turnBarPins[op.bar] ?? [];
+      d.turnBarPins = { ...d.turnBarPins, [op.bar]: op.present ? insert(pins, op.id, s => s, op.before) : pins.filter(id => id !== op.id) };
+      if (!op.present) remove();
+      break;
+    }
+    case "turnBarDefault": d.turnBarPins = { ...d.turnBarPins, [op.bar]: null }; break;
   }
   return recent(d);
 }
@@ -168,6 +197,19 @@ export function sidebarEdits(before: SidebarDoc, after: SidebarDoc, t = Date.now
       for (let i = after.navPins.length - 1; i >= 0; i--) out.push({ kind: "nav", id: after.navPins[i]!, present: true, before: after.navPins[i + 1] ?? null, t });
     }
   }
+  out.push(...turnBarEdits(before.turnBarPins, after.turnBarPins, t));
+  return out;
+}
+/** The 操作栏 pins' edits, like `navPins`': back to default, or the removals then every pin right to left with its next neighbour. */
+export function turnBarEdits(before: TurnBarDoc | undefined, after: TurnBarDoc | undefined, t: number, bars: readonly TurnBar[] = TURN_BARS): LayoutOp[] {
+  const out: LayoutOp[] = [];
+  for (const bar of bars) {
+    const was = before?.[bar] ?? null, now = after?.[bar] ?? null;
+    if (JSON.stringify(was) === JSON.stringify(now)) continue;
+    if (now === null) { out.push({ kind: "turnBarDefault", bar, t }); continue; }
+    for (const id of was ?? []) if (!now.includes(id)) out.push({ kind: "turnBar", bar, id, present: false, before: null, t });
+    for (let i = now.length - 1; i >= 0; i--) out.push({ kind: "turnBar", bar, id: now[i]!, present: true, before: now[i + 1] ?? null, t });
+  }
   return out;
 }
 export function mergeSidebar(remote: SidebarDoc, local: SidebarDoc): SidebarDoc {
@@ -182,5 +224,8 @@ export function mergeSidebar(remote: SidebarDoc, local: SidebarDoc): SidebarDoc 
   }
   for (const k of LAYOUT_LISTS) d[k] = [...d[k], ...local[k].filter(r => !d[k].some(n => refId(n) === refId(r)))];
   if (local.navPins) d.navPins = [...new Set([...(d.navPins ?? []), ...local.navPins])];
+  // 操作栏 pins: an order the owner set elsewhere wins; this device's own list only fills a bar still at its defaults.
+  const remoteBars = readTurnBars(remote.turnBarPins), localBars = readTurnBars(local.turnBarPins);
+  d.turnBarPins = { ...remoteBars, ...Object.fromEntries(TURN_BARS.map(bar => [bar, remoteBars[bar] ?? localBars[bar]])) } as TurnBarDoc;
   return d;
 }

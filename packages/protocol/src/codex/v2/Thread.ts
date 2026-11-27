@@ -37,6 +37,10 @@ sessionId: string,
  */
 forkedFromId: string | null,
 /**
+ * Parent that owns this persisted attached thread, independent of fork or spawn lineage.
+ */
+attachedToThreadId: string | null,
+/**
  * The ID of the parent thread. This will only be set if this thread is a subagent.
  */
 parentThreadId: string | null,
@@ -144,6 +148,11 @@ name: string | null,
  * Saved Daybreak choice, independent of turn execution. Null if unset.
  */
 daybreakEnabled: boolean | null,
+/**
+ * Whether the live thread joined the Daybreak propagation experiment at startup.
+ * Null when only stored metadata is available. Older servers can omit this field.
+ */
+daybreakProgramPropagationEnrolled: boolean | null,
 /**
  * Only populated on `thread/resume`, `thread/fork`, and `thread/read`
  * (when `includeTurns` is true) responses.

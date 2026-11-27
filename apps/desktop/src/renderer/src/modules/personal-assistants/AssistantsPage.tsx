@@ -3,11 +3,13 @@
 // nature), its state and what waits for the owner. One assistant opens directly; with several the one with something
 // to confirm is shown first. No assistant at all: only 「创建个人助理」. Right: the chosen assistant, the create form,
 // or every request. Read on open, on focus and reconnection; r296 hosts by their change events, r295 hosts every 30 s
-// while open (lib/personalAssistantStore).
+// while open (lib/personalAssistantStore). A narrow page (the Shelf, a portrait or small window) puts the list above
+// the chosen item instead of beside it (lib/sizeFlags).
 import { useEffect, useMemo, useState } from "react";
 import { Inbox, Plus } from "lucide-react";
 import { useI18n, type MessageKey } from "../../i18n";
-import { PageBody, SubNav, SUBNAV_ITEM, SUBNAV_OFF, SUBNAV_ON } from "../../components/Page";
+import { PageBody, SUBNAV_ITEM, SUBNAV_OFF, SUBNAV_ON } from "../../components/Page";
+import { dataFlags, useSizeFlags, widthBelow } from "../../lib/sizeFlags";
 import { Button } from "../../components/settings/Form";
 import { KNOWN_AVAILABILITY, requestGroup } from "../../lib/personalAssistants";
 import { refreshHost, usePa } from "../../lib/personalAssistantStore";
@@ -19,10 +21,14 @@ import { CreateAssistant } from "./AssistantForm";
 import { RequestList } from "./RequestList";
 import { paRows, rowKey, usePaHosts, usePaRefresh, type PaHost, type PaRow } from "./paHooks";
 
+// Below ~540 px (a narrow Shelf / window) the list goes above; the default Shelf keeps it beside.
+const PAGE_SIZES = { narrow: widthBelow(34) };
+
 type Selection = { kind: "assistant"; key: string } | { kind: "new" } | { kind: "requests" } | null;
 
 export function AssistantsPage({ params }: { params: PageParams }) {
   const { t, locale } = useI18n();
+  const [pageRef, size] = useSizeFlags(PAGE_SIZES);
   const hosts = usePaHosts();
   const supported = hosts.filter((h) => h.supported && h.online);
   usePaRefresh(supported);
@@ -66,8 +72,8 @@ export function AssistantsPage({ params }: { params: PageParams }) {
   const decideAll = rows.reduce((n, r) => n + r.requests.filter((q) => requestGroup(q.state) === "decide").length, 0);
   const readAt = Math.min(...supported.map((h) => byHost[h.hostId]?.loadedAt ?? Infinity));
   return (
-    <main className="flex min-w-0 flex-1" data-pa-page="">
-      <SubNav>
+    <main ref={pageRef} {...dataFlags(size)} className={`flex min-w-0 flex-1 ${size.narrow ? "flex-col" : ""}`} data-pa-page="">
+      <nav className={`shrink-0 overflow-y-auto border-border p-2 ${size.narrow ? "max-h-52 w-full border-b" : "w-52 border-r"}`} data-pa-list="">
         <button type="button" onClick={() => setSelected({ kind: "requests" })} className={`press ${SUBNAV_ITEM} ${shown?.kind === "requests" ? SUBNAV_ON : SUBNAV_OFF}`} data-pa-rail="requests">
           <Inbox size={15} className="shrink-0 text-subtle" />
           <span className="min-w-0 flex-1">
@@ -87,7 +93,7 @@ export function AssistantsPage({ params }: { params: PageParams }) {
             {t("personal-assistants.refreshed", { at: formatAbsolute(Math.floor(readAt / 1000)) })}
           </button>
         )}
-      </SubNav>
+      </nav>
       {shown?.kind === "new" ? (
         <CreateAssistant
           key={`new:${params.view === "new" ? (params.host ?? "") : ""}`}

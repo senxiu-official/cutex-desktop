@@ -385,12 +385,12 @@ export const ARTIFACT_VIEW = "artifacts.view";
  * artifact / page goes through the workspaces API (lib/workspaces openRef "beside": the other workspace's
  * Shelf, or a new page of this one's Shelf — `besideAction` says which, and whether there is a beside at
  * all). A service or artifact of a host the Shelf does not show (`showsHost`: lib/sideServices
- * sideShowsHost) opens in place the way its own list does then: lib/services openServiceExternal (this machine's: the
- * system browser; another host's: its agent first, then the in-app tab there) / the artifact ref.
+ * sideShowsHost) opens the way its own list does then: lib/services openServiceTab (its host's agent first, then the
+ * in-app tab there; the system browser only with the browser module off) / the artifact ref.
  */
 export type OpenPlan =
   | { via: "panes"; kind: string; params: Record<string, string>; beside: boolean; fallback?: OpenPlan }
-  | { via: "serviceExternal"; hostId: string; slug: string }
+  | { via: "serviceTab"; hostId: string; slug: string }
   | { via: "ref"; ref: { hostId: string; kind: string; key: string; title: string; params: Record<string, string> } }
   | { via: "run"; run: () => void | Promise<void> }
   | { via: "shelfPage"; shelfId: string; pageId: string }
@@ -413,7 +413,7 @@ export function planOpen(target: QsTarget, beside: boolean, showsHost: (hostId: 
     case "agent":
       return { via: "panes", kind: CONVERSATION_KIND, params: { sessionId: target.sessionId, hostId: target.hostId }, beside };
     case "service": {
-      const external: OpenPlan = { via: "serviceExternal", hostId: target.hostId, slug: target.slug };
+      const external: OpenPlan = { via: "serviceTab", hostId: target.hostId, slug: target.slug };
       if (!showsHost(target.hostId)) return external;
       // The owner browser tab (`cutex:service/<slug>/`, the services page's 打开); browser module off → the system browser.
       return { via: "panes", kind: SERVICE_COMPONENT, params: { url: `cutex:service/${target.slug}/` }, beside: false, fallback: external };

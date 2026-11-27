@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 // A delegation whose handler ended its turn with delegation_await (Remote #37, 2026-11-06, cutex 4eddce22): execution
 // running, hold waitingForEvent, no lease, no turn. It waits; it does not run, online or offline, requester or handler
 // side. Shapes as GET /v2/asks returned them (src/asks/view.rs summary: `hold` as serialized, `await`, `jobs`).

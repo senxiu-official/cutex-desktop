@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 // Onboarding (owner 2026-10-19): wording presets (lib/termPresets) and when the introduction / a version's
-// 新功能 open by themselves (lib/onboarding automaticView); the merged flow's step order (components/OnboardingFlow) and
-// the hidden Maid chip.
-import { act, createElement as h } from "react";
+// 新功能 open by themselves (lib/onboarding automaticView); the introduction is only the question (onboarding v3) and
+// the hidden Maid chip (now on 自定义桌面).
+import { act, createElement as h, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -10,7 +10,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const mountedRoots = new Set<ReturnType<typeof createRoot>>();
 afterEach(() => { act(() => { mountedRoots.forEach((root) => root.unmount()); mountedRoots.clear(); }); document.body.replaceChildren(); });
 
-const fx = vi.hoisted(() => ({ profiles: [] as unknown[] }));
+const fx = vi.hoisted(() => ({ profiles: [] as unknown[], openPage: vi.fn() }));
 
 vi.mock("../src/renderer/src/bridge", () => ({ api: {}, bridge: { on: () => () => {} }, onEvent: () => () => {}, cleanIpcMessage: (m: string) => m }));
 vi.mock("../src/renderer/src/i18n", async (importOriginal) => ({
@@ -18,7 +18,7 @@ vi.mock("../src/renderer/src/i18n", async (importOriginal) => ({
   useI18n: () => ({ t: (key: string) => key, locale: "zh-CN", setLocale: () => {} }),
 }));
 vi.mock("../src/renderer/src/store", async (importOriginal) => {
-  const state = { daemon: { kind: "connecting" }, openSettings: () => {}, notify: () => {}, hosts: { active: "local" }, features: new Set<string>(), byHost: {} };
+  const state = { daemon: { kind: "connecting" }, openSettings: () => {}, openPage: fx.openPage, notify: () => {}, hosts: { active: "local" }, features: new Set<string>(), byHost: {} };
   return {
     ...(await importOriginal<object>()),
     useApp: Object.assign((select: (s: unknown) => unknown) => select(state), { getState: () => state, setState: () => {}, subscribe: () => () => {} }),
@@ -40,6 +40,7 @@ const { applyTermPreset, currentTermPreset, termPresets } = await import("../src
 const { getTermOverrides, resolveTerms } = await import("../src/renderer/src/lib/terms");
 const { automaticView, closeOnboarding, getOnboarding, ONBOARDING_REVISION, openOnboarding, setTestEveryBuild, resetOnboardingForTest, setWhatsNewEnabled, testView, useOnboardingView } = await import("../src/renderer/src/lib/onboarding");
 const { OnboardingHost } = await import("../src/renderer/src/components/OnboardingDialog");
+const { TermsStep } = await import("../src/renderer/src/components/OnboardingSteps");
 
 describe("wording presets", () => {
   it("Chinese offers 智能体 / 代理 / agent and the Maid easter egg last; other languages default + Maid", () => {
@@ -136,59 +137,38 @@ describe("the testing switch (development builds)", () => {
   });
 });
 
-describe("the introduction dialog", () => {
-  function openIntro() {
+describe("the introduction (onboarding v3, owner 2026-11-26)", () => {
+  it("is the question only: a replay closes at once, counts as done and opens 开始使用", () => {
     localStorage.removeItem("cutex-desktop.onboarding");
     resetOnboardingForTest();
+    fx.openPage.mockClear();
     const div = document.createElement("div");
     document.body.append(div);
     const root = createRoot(div); mountedRoots.add(root);
     act(() => root.render(h(OnboardingHost)));
     act(() => openOnboarding({ kind: "intro" }));
-    const step = () => div.querySelector("[data-onboarding-step]")?.getAttribute("data-onboarding-step");
-    const button = (label: string) => [...div.querySelectorAll("button")].find((b) => b.textContent === label);
-    const toTerms = () => {
-      for (let i = 0; i < 16 && step() !== "terms"; i++) act(() => button("onboarding.next")!.click());
-      expect(step()).toBe("terms");
-    };
-    // Every step to the end; 「几个选择」 waits for the 拟人头像 answer (先不用 here).
-    const walk = () => {
-      const seen = [step()];
-      while (button("onboarding.next")) {
-        const next = button("onboarding.next")!;
-        if (next.disabled) act(() => div.querySelector<HTMLElement>("[data-portrait-use=no]")!.click());
-        act(() => button("onboarding.next")!.click());
-        seen.push(step());
-      }
-      return seen;
-    };
-    return { div, step, button, toTerms, walk, unmount: () => { act(() => root.unmount()); mountedRoots.delete(root); } };
+    expect(div.querySelector("[data-onboarding]")).toBeNull();
+    expect(getOnboarding().doneRevision).toBe(ONBOARDING_REVISION);
+    expect(fx.openPage).toHaveBeenCalledWith("start.page");
+  });
+});
+
+describe("the wording choice (自定义桌面)", () => {
+  function mountTerms() {
+    const div = document.createElement("div");
+    document.body.append(div);
+    const root = createRoot(div); mountedRoots.add(root);
+    function Terms() {
+      const [revealed, setRevealed] = useState(false);
+      return h(TermsStep, { egg: { revealed, reveal: () => setRevealed(true) } });
+    }
+    act(() => root.render(h(Terms)));
+    const maid = () => [...div.querySelectorAll("[role=radio]")].find((b) => b.textContent?.includes("onboarding.preset.maid"));
+    return { div, maid };
   }
 
-  // One merged flow (owner 2026-10-24): setup cards (one decision group each; 拟人头像 starts on 用, so its theme card
-  // follows), 认识 Cutex (the basics and 0.2 as one part), then Profile.
-  const FULL = ["language", "intro", "theme", "zoom", "perf", "terms", "project", "window", "sidebar", "groups", "layout", "pages", "look", "portraitThemes"];
-
-  it("concepts precede their settings, with the missing Profile step last", () => {
-    const { walk, button, unmount } = openIntro();
-    expect(walk()).toEqual([...FULL, "profile"]);
-    expect(button("onboarding.finish")).toBeTruthy();
-    unmount();
-  });
-
-  it("without a missing Profile the Profile step is left out", () => {
-    fx.profiles = [{ name: "work" }];
-    const { walk, button, unmount } = openIntro();
-    expect(walk()).toEqual(FULL);
-    expect(button("onboarding.finish")).toBeTruthy();
-    fx.profiles = [];
-    unmount();
-  });
-
-  it("the plain choices are 智能体 / 代理 / agent; the small ribbon reveals Maid, which then stays across steps", async () => {
-    const { div, toTerms, button, unmount } = openIntro();
-    toTerms();
-    const maid = () => [...div.querySelectorAll("[role=radio]")].find((b) => b.textContent?.includes("onboarding.preset.maid"));
+  it("the plain choices are 智能体 / 代理 / agent; the small ribbon reveals Maid", async () => {
+    const { div, maid } = mountTerms();
     expect([...div.querySelectorAll("[role=radio]")].map((b) => b.textContent)).toEqual(["onboarding.preset.default", "onboarding.preset.daili", "onboarding.preset.english"]);
     const ribbon = div.querySelector<HTMLElement>("[data-onboarding-ribbon]")!;
     expect(ribbon.getAttribute("title")).toBeNull(); // no hint
@@ -197,23 +177,14 @@ describe("the introduction dialog", () => {
     expect(div.querySelector("[data-onboarding-ribbon]")).toBeNull();
     await act(async () => new Promise<void>((r) => requestAnimationFrame(() => r())));
     expect(maid()!.className).toContain("opacity-100");
-    act(() => button("onboarding.back")!.click());
-    act(() => button("onboarding.next")!.click());
-    expect(maid()).toBeTruthy();
-    unmount();
-    closeOnboarding(null);
   });
 
   it("a wording that already is Maid shows it selected, and picking another keeps the way back", () => {
     applyTermPreset("zh-CN", "maid");
-    const dialog = openIntro();
-    dialog.toTerms();
-    const maid = () => [...dialog.div.querySelectorAll("[role=radio]")].find((b) => b.textContent?.includes("onboarding.preset.maid"));
+    const { maid } = mountTerms();
     expect(maid()?.getAttribute("aria-checked")).toBe("true");
     act(() => (maid()!.parentElement!.querySelector("[role=radio]") as HTMLElement).click());
     expect(currentTermPreset("zh-CN")).toBe("default");
     expect(maid()).toBeTruthy();
-    dialog.unmount();
-    closeOnboarding(null);
   });
 });

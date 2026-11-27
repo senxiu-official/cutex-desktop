@@ -15,7 +15,7 @@ vi.mock("../src/renderer/src/lib/serviceLinkView", () => ({ useHostServices: () 
 vi.mock("../src/renderer/src/modules/browser/BrowserBody", () => ({ BrowserBody: fx.body }));
 import browser from "../src/renderer/src/modules/browser";
 import { BROWSER_TAB, SERVICE_TAB, initBrowser } from "../src/renderer/src/modules/browser/browserState";
-import { ServiceBody } from "../src/renderer/src/modules/browser/ServiceBody";
+import { preloadPage } from "../src/renderer/src/lib/lazyPage";
 import { AppWindow } from "lucide-react";
 import { useSide } from "../src/renderer/src/lib/sideLayoutStore";
 import { browserTabInstance, openPopupTab, revealBrowserTab } from "../src/renderer/src/modules/browser/popupOpen";
@@ -32,12 +32,18 @@ function open(layout: SideLayout, kind: typeof service, url: string) {
 }
 
 describe("the separate service Shelf kind", () => {
-  it("uses the single application icon and has a source-picker launcher", () => {
+  it("uses the single application icon and keeps the lazy website body", async () => {
     expect(service.icon).toBe(AppWindow);
     expect(service.titleKey).toBe("browser.service.title");
     expect(service.launcher!.params()).toEqual({ url: "about:blank" });
     expect(service.tabRow).toBe("always");
-    expect(web.Body).toBe(fx.body);
+    await preloadPage(web.Body);
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    fx.body.mockClear();
+    act(() => root.render(h(web.Body, {} as never)));
+    expect(fx.body).toHaveBeenCalledOnce();
+    act(() => root.unmount());
   });
 
   it("keeps normal websites on their browser page and reuses one separate page for services", () => {
@@ -51,14 +57,15 @@ describe("the separate service Shelf kind", () => {
     expect(second.layout.instances[website.instanceId]!.kind).toBe(BROWSER_TAB);
   });
 
-  it("opens a chosen service in the blank service tab without mounting a blank browser guest", () => {
+  it("opens a chosen service in the blank service tab without mounting a blank browser guest", async () => {
     const container = document.createElement("div");
     document.body.append(container);
     const root = createRoot(container);
     const setState = vi.fn();
     const state = initBrowser({ url: "about:blank" }, null);
+    await preloadPage(service.Body);
     fx.body.mockClear();
-    act(() => root.render(h(ServiceBody, { hostId: "local", instance: { id: "service-picker", state }, setState } as never)));
+    act(() => root.render(h(service.Body, { hostId: "local", instance: { id: "service-picker", state }, setState } as never)));
     expect(fx.body).not.toHaveBeenCalled();
     expect([...container.querySelectorAll("button")].map(b => b.textContent)).toEqual(["Books"]);
     act(() => container.querySelector<HTMLButtonElement>("button")!.click());

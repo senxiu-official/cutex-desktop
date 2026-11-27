@@ -7,15 +7,17 @@
 // localStorage "cutex-mock-packs" = "none" (no index published yet) | "offline" (check fails) | "broken"
 // (an installed pack failed its start-up verification) | "mixed" (Settings → 模块 tags: the desk pet installed from a
 // file, v1.2.0, reading app internals, with v1.2.2 in the index: 本地安装 + version + 未验证 + 内部接口 + an update).
+// localStorage "cutex-mock-science" = "migrated" (start-up moved the enabled bundled Claude Science to its signed pack
+// v1.1.0) | "bundled" (no usable payload: the bundled copy keeps serving) | "busy" (main was busy, next start).
 import type { ModuleDevBridge, ModuleDevView } from "../../../shared/moduleDev";
-import type { InstalledPackView, ModulePacksBridge, ModulePacksView, PackStep } from "../../../shared/modulePacks";
+import type { PackMigration, InstalledPackView, ModulePacksBridge, ModulePacksView, PackStep } from "../../../shared/modulePacks";
 
 const STEP_MS = 700;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-function scenario(): string {
+function scenario(key = "cutex-mock-packs"): string {
   try {
-    return localStorage.getItem("cutex-mock-packs") ?? "";
+    return localStorage.getItem(key) ?? "";
   } catch {
     return "";
   }
@@ -62,6 +64,8 @@ export function mockModuleDev(): ModuleDevBridge {
 export function mockModulePacks(): ModulePacksBridge {
   const listeners = new Set<(v: ModulePacksView) => void>();
   const mode = scenario();
+  const science = scenario("cutex-mock-science");
+  const migration: PackMigration | undefined = science === "migrated" ? "installed" : science === "bundled" ? "seed_missing" : science === "busy" ? "busy" : undefined;
   let view: ModulePacksView = {
     appModuleApi: "1.16",
     testKey: true,
@@ -90,6 +94,10 @@ export function mockModulePacks(): ModulePacksBridge {
     ...(INDEX_PACKS.find((p) => p.id === id)?.title ? { title: INDEX_PACKS.find((p) => p.id === id)!.title } : {}),
   });
   let busy = false;
+  if (migration) {
+    view = { ...view, migrations: { "claude-science": migration } };
+    if (migration === "installed") view = { ...view, installed: [...view.installed, entry("claude-science", "1.1.0")] };
+  }
 
   return {
     state: async () => view,

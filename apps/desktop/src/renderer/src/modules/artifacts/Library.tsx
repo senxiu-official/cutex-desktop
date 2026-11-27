@@ -7,18 +7,18 @@ import { isImeComposing } from "../../lib/ime";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ReadIssueLine } from "../../components/ReadIssueLine";
 import { readIssue, retryDelay, type ReadIssue } from "../../lib/transientError";
-import { ArrowLeft, ArrowLeftRight, LayoutGrid, List, Loader2, Search, Star, Upload } from "lucide-react";
-import { ARTIFACT_KINDS, artifactRef, type ArtifactKind, type ArtifactList, type ArtifactScope, type ArtifactSummary } from "../../../../shared/artifactStore";
+import { ArrowLeft, ArrowLeftRight, ArrowUpRight, LayoutGrid, List, Loader2, Search, Star, Upload } from "lucide-react";
+import { ARTIFACT_AUDIENCE_FEATURE, ARTIFACT_FILE_KINDS, ARTIFACT_KINDS, ARTIFACT_PURPOSE_FILTERS, ARTIFACT_PURPOSES, artifactRef, type ArtifactKind, type ArtifactPurpose, type ArtifactPurposeFilter, type ArtifactView, type ArtifactList, type ArtifactScope, type ArtifactSummary } from "../../../../shared/artifactStore";
 import { useI18n } from "../../i18n";
 import { contextMenu } from "../../lib/contextMenu";
 import { imageMimeFor, isGenericMime } from "../../lib/fileKinds";
 import { useThumbnail } from "../../lib/fileThumbnails";
 import { formatAbsolute, formatWhen, useClock } from "../../lib/time";
 import { services } from "../app";
-import { agentHost, useApp } from "../../store";
+import { agentHost, featuresOf, useApp } from "../../store";
 import type { SideBodyProps, SideOpen } from "../slots";
-import { artifactMenu, openDelegation, openVersion, refusalText } from "./actions";
-import { arrangeLibrary, DEFAULT_LIBRARY, initView, parseViewParams, previewKind, typePath, VIEW, type ViewState, LIBRARY_SORTS, libraryQuery, libraryScopeKey, producerLabel, producerOptions, type ArchivedFilter, type LibraryScope, type LibrarySort, type LibraryState } from "./model";
+import { artifactMenu, openDelegation, openVersion, refusalText, toggleStar } from "./actions";
+import { arrangeLibrary, DEFAULT_LIBRARY, initView, parseViewParams, previewKind, typePath, VIEW, type ViewState, LIBRARY_SORTS, libraryFiltered, libraryFilterKey, libraryQuery, libraryScopeKey, producerLabel, producerOptions, type ArchivedFilter, type LibraryScope, type LibrarySort, type LibraryState } from "./model";
 import { KIND_ICON } from "./refTarget";
 import { invalidateArtifact, loadContent, useEpoch } from "./store";
 import { ViewBody } from "./View";
@@ -59,7 +59,7 @@ function Thumb({ hostId, a }: { hostId: string; a: ArtifactSummary }) {
   );
 }
 
-function Meta({ hostId, a, now }: { hostId: string; a: ArtifactSummary; now: number }) {
+function Meta({ hostId, a, now, internal }: { hostId: string; a: ArtifactSummary; now: number; internal: boolean }) {
   const { t, locale } = useI18n();
   const p = a.latest.producer;
   return (
@@ -84,16 +84,44 @@ function Meta({ hostId, a, now }: { hostId: string; a: ArtifactSummary; now: num
           {t("artifacts.delegation")}
         </button>
       )}
+      {internal && <Tag title={t("artifacts.internalHint")}>{t("artifacts.internalTag")}</Tag>}
       {a.archivedAt && <Tag>{t("artifacts.archivedTag")}</Tag>}
     </span>
   );
 }
 
-function Row({ hostId, a, open, layout, now }: { hostId: string; a: ArtifactSummary; open: SideOpen; layout: "list" | "grid"; now: number }) {
+/** 加星 / 取消加星 in place: always shown when starred, on hover / focus otherwise. */
+function StarButton({ hostId, a }: { hostId: string; a: ArtifactSummary }) {
+  const { t } = useI18n();
+  const [busy, setBusy] = useState(false);
+  const label = t(a.starred ? "artifacts.unstar" : "artifacts.star");
+  return (
+    <button
+      type="button"
+      aria-pressed={a.starred}
+      aria-label={label}
+      title={label}
+      disabled={busy}
+      onClick={(e) => {
+        e.stopPropagation();
+        setBusy(true);
+        void toggleStar(hostId, a).finally(() => setBusy(false));
+      }}
+      onKeyDown={(e) => e.stopPropagation()}
+      className={`press -m-0.5 shrink-0 rounded-sm p-0.5 ${a.starred ? "text-warn" : "text-subtle opacity-0 group-hover:opacity-100 hover:text-foreground focus-visible:opacity-100"}`}
+    >
+      <Star size={11} fill={a.starred ? "currentColor" : "none"} />
+    </button>
+  );
+}
+
+/** `internal`: show 「内部」 on a team artifact (the 全部 view of an `artifact-audience` host). */
+function Row({ hostId, a, open, layout, now, internal }: { hostId: string; a: ArtifactSummary; open: SideOpen; layout: "list" | "grid"; now: number; internal: boolean }) {
   const { t } = useI18n();
   const Icon = KIND_ICON[a.kind];
   const activate = () => openVersion(open, artifactRef(a.artifactId, "latest"), a.name);
   const menu = contextMenu(() => artifactMenu(hostId, a, open));
+  const isInternal = internal && a.audience === "team";
   const title = (
     <span className="flex min-w-0 items-center gap-1.5">
       {layout === "list" && <Icon size={13} className="shrink-0 text-subtle" />}
@@ -101,24 +129,79 @@ function Row({ hostId, a, open, layout, now }: { hostId: string; a: ArtifactSumm
         {a.name}
       </span>
       <span className="shrink-0 font-mono text-caption/[inherit] text-subtle">{t("artifacts.version", { n: a.latestVersion })}</span>
-      {a.starred && <Star size={11} fill="currentColor" className="shrink-0 text-warn" aria-label={t("artifacts.starredTag")} />}
+      <StarButton hostId={hostId} a={a} />
     </span>
   );
   if (layout === "grid")
     return (
-      <div role="button" tabIndex={0} onClick={activate} onKeyDown={(e) => e.key === "Enter" && activate()} onContextMenu={menu} className="press flex min-w-0 cursor-pointer flex-col gap-1 rounded-lg border border-border bg-surface p-1.5 hover:bg-hover">
+      <div role="button" tabIndex={0} onClick={activate} onKeyDown={(e) => e.key === "Enter" && activate()} onContextMenu={menu} className="press group flex min-w-0 cursor-pointer flex-col gap-1 rounded-lg border border-border bg-surface p-1.5 hover:bg-hover">
         <Thumb hostId={hostId} a={a} />
         {title}
-        <Meta hostId={hostId} a={a} now={now} />
+        <Meta hostId={hostId} a={a} now={now} internal={isInternal} />
       </div>
     );
   return (
-    <div role="button" tabIndex={0} onClick={activate} onKeyDown={(e) => e.key === "Enter" && activate()} onContextMenu={menu} className="press flex min-w-0 cursor-pointer flex-col gap-0.5 rounded-md px-2 py-1 hover:bg-hover">
+    <div role="button" tabIndex={0} onClick={activate} onKeyDown={(e) => e.key === "Enter" && activate()} onContextMenu={menu} className="press group flex min-w-0 cursor-pointer flex-col gap-0.5 rounded-md px-2 py-1 hover:bg-hover">
       {title}
       <span className="pl-[19px]">
-        <Meta hostId={hostId} a={a} now={now} />
+        <Meta hostId={hostId} a={a} now={now} internal={isInternal} />
       </span>
     </div>
+  );
+}
+
+const CHIP = "press inline-flex h-[22px] shrink-0 items-center rounded-full px-2 text-caption/[inherit] whitespace-nowrap";
+const chipClass = (on: boolean) => `${CHIP} ${on ? "bg-accent-soft text-accent" : "bg-surface-2/70 text-muted hover:text-foreground"}`;
+
+/**
+ * 呈阅 / 全部 and the file-kind / purpose chips (`artifact-audience` hosts). A chip toggles (one of each
+ * group at most); the row wraps in a narrow side window.
+ */
+function AudienceFilters({ state, set, onServices }: { state: LibraryState; set(patch: Partial<LibraryState>): void; onServices: (() => void) | null }) {
+  const { t } = useI18n();
+  return (
+    <>
+      <div className="flex min-w-0 items-center gap-1.5">
+        <div role="tablist" aria-label={t("artifacts.view.label")} className="flex shrink-0 rounded-full bg-surface-2 p-0.5" data-artifacts-view="">
+          {(["forOwner", "all"] as const satisfies readonly ArtifactView[]).map((v) => (
+            <button
+              key={v}
+              type="button"
+              role="tab"
+              aria-selected={state.view === v}
+              title={v === "forOwner" ? t("artifacts.view.forOwnerHint") : undefined}
+              onClick={() => set({ view: v })}
+              className={`rounded-full px-2.5 py-0.5 text-xs ${state.view === v ? "bg-background text-foreground shadow-e1" : "text-muted hover:text-foreground"}`}
+            >
+              {t(`artifacts.view.${v}`)}
+            </button>
+          ))}
+        </div>
+        {onServices && (
+          <button type="button" onClick={onServices} title={t("artifacts.projectServicesHint")} className="press ml-auto flex min-w-0 items-center gap-0.5 rounded-sm text-caption/[inherit] text-accent hover:underline" data-artifacts-services="">
+            <span className="truncate">{t("artifacts.projectServices")}</span>
+            <ArrowUpRight size={11} className="shrink-0" />
+          </button>
+        )}
+      </div>
+      <div className="flex min-w-0 flex-wrap items-center gap-1" data-artifacts-chips="">
+        <span role="group" aria-label={t("artifacts.fileKind.label")} className="contents">
+          {ARTIFACT_FILE_KINDS.map((k) => (
+            <button key={k} type="button" aria-pressed={state.fileKind === k} onClick={() => set({ fileKind: state.fileKind === k ? "" : k })} className={chipClass(state.fileKind === k)}>
+              {t(`artifacts.fileKind.${k}`)}
+            </button>
+          ))}
+        </span>
+        <span aria-hidden className="mx-0.5 h-3 w-px shrink-0 bg-border" />
+        <span role="group" aria-label={t("artifacts.purpose.label")} className="contents">
+          {ARTIFACT_PURPOSE_FILTERS.map((p: ArtifactPurposeFilter) => (
+            <button key={p} type="button" aria-pressed={state.purpose === p} onClick={() => set({ purpose: state.purpose === p ? "" : p })} className={chipClass(state.purpose === p)}>
+              {t(p === "unset" ? "artifacts.purposeUnset" : `artifacts.purpose.${p}`)}
+            </button>
+          ))}
+        </span>
+      </div>
+    </>
   );
 }
 
@@ -130,12 +213,13 @@ function newRequestId(): string {
   }
 }
 
-function PublishForm({ hostId, scope, open, onDone }: { hostId: string; scope: ArtifactScope; open: SideOpen; onDone(): void }) {
+function PublishForm({ hostId, scope, open, onDone, audience }: { hostId: string; scope: ArtifactScope; open: SideOpen; onDone(): void; audience: boolean }) {
   const { t } = useI18n();
   const [path, setPath] = useState("");
   const [name, setName] = useState("");
   const [kind, setKind] = useState<ArtifactKind | "">("");
   const [note, setNote] = useState("");
+  const [purpose, setPurpose] = useState<ArtifactPurpose | "">("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // One request id per form: a retry after a lost answer returns the first result (idempotent).
@@ -151,6 +235,7 @@ function PublishForm({ hostId, scope, open, onDone }: { hostId: string; scope: A
         path: path.trim(),
         ...(name.trim() ? { name: name.trim() } : {}),
         ...(kind ? { kind } : {}),
+        ...(audience && purpose ? { purpose } : {}),
         ...(note.trim() ? { note: note.trim() } : {}),
       });
       if (!r.ok) {
@@ -197,6 +282,19 @@ function PublishForm({ hostId, scope, open, onDone }: { hostId: string; scope: A
             ))}
           </select>
         </label>
+        {audience && (
+          <label className="flex shrink-0 flex-col gap-0.5">
+            <span className="text-caption/[inherit] text-subtle">{t("artifacts.purpose.label")}</span>
+            <select value={purpose} onChange={(e) => setPurpose(e.target.value as ArtifactPurpose | "")} className={`${FIELD} w-auto`}>
+              <option value="">{t("artifacts.purposeNone")}</option>
+              {ARTIFACT_PURPOSES.map((p) => (
+                <option key={p} value={p}>
+                  {t(`artifacts.purpose.${p}`)}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
       </div>
       <label className="flex flex-col gap-0.5">
         <span className="text-caption/[inherit] text-subtle">{t("artifacts.publishNote")}</span>
@@ -322,8 +420,12 @@ function LibraryPanel({ hostId, scope, state, setState, visible, open, emptyKey 
   const failures = useRef(0);
   const [more, setMore] = useState(false);
   const [publishing, setPublishing] = useState(false);
-  const queryKey = `${hostId}|${libraryScopeKey(scope)}|${q}|${state.kind}|${state.archived}`;
-  const filter = { q, kind: state.kind, archived: state.archived };
+  // cutex artifact-audience: 呈阅 / 全部 and the file-kind / purpose chips; an older host lists as before.
+  const audience = useApp((s) => featuresOf(s, hostId).has(ARTIFACT_AUDIENCE_FEATURE));
+  const servicesOn = useApp((s) => featuresOf(s, hostId).has("services"));
+  const focusHost = useApp((s) => s.hosts?.active ?? "local");
+  const filter = { q, kind: state.kind, archived: state.archived, view: state.view, fileKind: state.fileKind, purpose: state.purpose };
+  const queryKey = `${hostId}|${libraryScopeKey(scope)}|${libraryFilterKey(filter, audience)}`;
 
   useEffect(() => {
     failures.current = 0;
@@ -334,7 +436,7 @@ function LibraryPanel({ hostId, scope, state, setState, visible, open, emptyKey 
     let retry: ReturnType<typeof setTimeout> | undefined;
     services
       .daemonFor(hostId)
-      .artifactStoreList(libraryQuery(scope, filter, PAGE))
+      .artifactStoreList(libraryQuery(scope, filter, PAGE, undefined, audience))
       .then(
         (list) => {
           if (!live) return;
@@ -353,7 +455,7 @@ function LibraryPanel({ hostId, scope, state, setState, visible, open, emptyKey 
       live = false;
       clearTimeout(retry);
     };
-    // queryKey covers hostId / scope / q / kind / archived.
+    // queryKey covers hostId / scope / the filters (and whether the host has artifact-audience).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [queryKey, epoch, visible, attempt]);
 
@@ -365,7 +467,7 @@ function LibraryPanel({ hostId, scope, state, setState, visible, open, emptyKey 
     if (!list?.nextCursor || more) return;
     setMore(true);
     try {
-      const next = await services.daemonFor(hostId).artifactStoreList(libraryQuery(scope, filter, PAGE, list.nextCursor));
+      const next = await services.daemonFor(hostId).artifactStoreList(libraryQuery(scope, filter, PAGE, list.nextCursor, audience));
       if (next) setLoaded({ key: queryKey, list: { ...next, items: [...list.items, ...next.items.filter((n) => !list.items.some((o) => o.artifactId === n.artifactId))] } });
     } finally {
       setMore(false);
@@ -373,6 +475,10 @@ function LibraryPanel({ hostId, scope, state, setState, visible, open, emptyKey 
   };
 
   const stale = loaded && loaded.key !== queryKey;
+  // 本项目网页服务: the project page's 服务 tab (running sites stay on the Services side; a session scope has none).
+  const projectId = list?.scope.kind === "project" ? list.scope.id : "project" in scope ? scope.project : null;
+  const onServices = audience && servicesOn && projectId ? () => services.ui.openPage("projects.page", { project: projectId, tab: "services", ...(hostId !== focusHost ? { host: hostId } : {}) }) : null;
+  const filtered = libraryFiltered(state, audience);
   return (
     <div className="flex h-full min-h-0 flex-col text-xs">
       <div className="flex shrink-0 flex-col gap-1.5 p-2">
@@ -399,15 +505,16 @@ function LibraryPanel({ hostId, scope, state, setState, visible, open, emptyKey 
             {t("artifacts.publish")}
           </button>
         </div>
+        {audience && <AudienceFilters state={state} set={set} onServices={onServices} />}
         <div className="flex flex-wrap items-center gap-1.5">
-          <select value={state.kind} onChange={(e) => set({ kind: e.target.value as ArtifactKind | "" })} aria-label={t("artifacts.publishKind")} className={SELECT}>
+          {!audience && <select value={state.kind} onChange={(e) => set({ kind: e.target.value as ArtifactKind | "" })} aria-label={t("artifacts.publishKind")} className={SELECT}>
             <option value="">{t("artifacts.kindAll")}</option>
             {ARTIFACT_KINDS.map((k) => (
               <option key={k} value={k}>
                 {t(`artifacts.kind.${k}`)}
               </option>
             ))}
-          </select>
+          </select>}
           <EntitySelect value={state.producer} onChange={(v) => set({ producer: v })} label={t("artifacts.src.producer")} className={`flex w-36 max-w-36 items-center justify-between gap-1 ${SELECT}`}
             options={[{ value: "", label: t("artifacts.producerAll") },
               ...producers.map((p) => ({ value: p.key, label: p.kind === "auto" ? t("artifacts.producerAuto") : p.kind === "owner" ? t("artifacts.producer.owner") : p.name, entity: p.kind === "agent" ? { kind: "agent" as const, id: p.key.replace(/^agent:/, ""), name: p.name } : null })),
@@ -441,7 +548,7 @@ function LibraryPanel({ hostId, scope, state, setState, visible, open, emptyKey 
           </span>
         </div>
       </div>
-      {publishing && list && <PublishForm hostId={hostId} scope={list.scope} open={open} onDone={() => setPublishing(false)} />}
+      {publishing && list && <PublishForm hostId={hostId} scope={list.scope} open={open} onDone={() => setPublishing(false)} audience={audience} />}
       <div className={`min-h-0 flex-1 overflow-y-auto px-1 pb-2 ${stale ? "opacity-60" : ""}`}>
         {loaded?.list && loaded.issue && <ReadIssueLine className="px-2 py-1.5" issue={loaded.issue} retryingText={t("artifacts.listRetrying")} failedText={t("artifacts.listFailed")} onReload={() => { failures.current = 0; setAttempt((n) => n + 1); }} />}
         {!loaded ? (
@@ -451,15 +558,26 @@ function LibraryPanel({ hostId, scope, state, setState, visible, open, emptyKey 
             ? <ReadIssueLine className="p-3" issue={loaded.issue} retryingText={t("artifacts.listRetrying")} failedText={t("artifacts.listFailed")} onReload={() => { failures.current = 0; setAttempt((n) => n + 1); }} />
             : <p className="p-3 text-danger">{t("artifacts.loadFailed", { error: loaded.error })}</p>
         ) : !items.length ? (
-          <p className="p-3 leading-relaxed text-subtle">{state.q || state.kind || state.producer || state.archived !== "false" ? t("artifacts.noMatch") : t(emptyKey)}</p>
+          filtered ? (
+            <p className="p-3 leading-relaxed text-subtle">{t("artifacts.noMatch")}</p>
+          ) : audience && state.view === "forOwner" ? (
+            <div className="flex flex-col items-start gap-1.5 p-3 leading-relaxed text-subtle" data-artifacts-for-owner-empty="">
+              <p>{t("artifacts.forOwnerEmpty")}</p>
+              <button type="button" onClick={() => set({ view: "all" })} className="press rounded-sm text-accent hover:underline">
+                {t("artifacts.showAll")}
+              </button>
+            </div>
+          ) : (
+            <p className="p-3 leading-relaxed text-subtle">{t(emptyKey)}</p>
+          )
         ) : state.layout === "grid" ? (
           <div className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-1.5 px-1">
             {items.map((a) => (
-              <Row key={a.artifactId} hostId={hostId} a={a} open={open} layout="grid" now={now} />
+              <Row key={a.artifactId} hostId={hostId} a={a} open={open} layout="grid" now={now} internal={audience && state.view === "all"} />
             ))}
           </div>
         ) : (
-          items.map((a) => <Row key={a.artifactId} hostId={hostId} a={a} open={open} layout="list" now={now} />)
+          items.map((a) => <Row key={a.artifactId} hostId={hostId} a={a} open={open} layout="list" now={now} internal={audience && state.view === "all"} />)
         )}
         {list?.nextCursor && (
           <button onClick={() => void loadMore()} disabled={more} aria-busy={more || undefined} className="press mx-2 mt-1 rounded-sm text-accent enabled:hover:underline disabled:cursor-default disabled:opacity-50">

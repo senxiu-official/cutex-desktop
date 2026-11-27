@@ -209,6 +209,7 @@ export interface UserPortraitPack extends PortraitPackData {
 
 export interface PortraitPacksState {
   packs: UserPortraitPack[];
+  official?: UserPortraitPack[];
   /** Absolute path of the owner's folder. */
   dir: string;
   /** Folders / entries skipped (bad id, unreadable manifest, missing or oversized pictures). */

@@ -25,7 +25,7 @@ vi.mock("../src/renderer/src/lib/identityView", () => ({ useIdentity: () => ({ n
 vi.mock("../src/renderer/src/lib/update", async (importOriginal) => ({ ...(await importOriginal<object>()), useUpdateStatus: () => null }));
 vi.mock("../src/renderer/src/components/settings/TermsSettings", () => ({ TermsSection: () => null }));
 vi.mock("../src/renderer/src/modules/Outlet", () => ({ SettingsSections: () => null }));
-import { LanguageStep } from "../src/renderer/src/components/OnboardingSteps";
+import { LanguageStep } from "../src/renderer/src/components/LanguageChoice";
 import { GeneralPage } from "../src/renderer/src/components/settings/AppSettings";
 import { IdentityButton } from "../src/renderer/src/components/IdentityMenu";
 

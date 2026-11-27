@@ -69,9 +69,10 @@ describe("mainline package adapter: actual settings modules", () => {
     // One page joins: 后端更新 (backend-upgrade, 系统 group right before 更新与诊断 since 2026-10-15). 互联 (module peers, hidden
     // without peers-v2) is a section of 访问管理 since 2026-10-19; NCI 远程作业 (module nci) is off by default.
     const joined = host.snapshot("settings.page");
-    // 功能 Profile (feature-profiles, 工具 group) joins with its capability since 2026-11-25.
-    expect(joined.filter(row => !["backend-upgrade.page", "storage.page", "feature-profiles.page"].includes(row.item.id))).toEqual(allPages);
-    expect(joined.find(row => row.item.id === "feature-profiles.page")).toMatchObject({ mode: "show", item: { page: "feature-profiles", group: "tools" } });
+    // 功能 Profile (feature-profiles) is a card of Profile since 2026-11-26, not a page.
+    expect(joined.filter(row => !["backend-upgrade.page", "storage.page"].includes(row.item.id))).toEqual(allPages);
+    expect(joined.some(row => row.item.id === "feature-profiles.page")).toBe(false);
+    expect(host.snapshot("settings.section").find(row => row.item.id === "feature-profiles.list")).toMatchObject({ mode: "show", item: { page: "profiles" } });
     expect(joined.find(row => row.item.id === "backend-upgrade.page")).toMatchObject({ mode: "show", item: { page: "backend", group: "system" } });
     expect(host.snapshot("settings.section").find(row => row.item.id === "peers.access")).toMatchObject({ mode: "show", item: { page: "access" } });
     expect(host.snapshot("settings.section").find(row => row.item.id === "claude-accounts.accounts")).toMatchObject({ mode: "show", item: { page: "profiles" } });
@@ -81,20 +82,20 @@ describe("mainline package adapter: actual settings modules", () => {
     }
   });
 
-  it("persists toggles for real codex-config and archive modules, restores defaults, and keeps core settings locked", async () => {
+  it("persists toggles for real codex-config and updater modules (archive is required since module-dependencies-20261126), restores defaults, and keeps core settings locked", async () => {
     const saved = storage(); const host = await fixture(saved);
     const original = host.snapshot("settings.page");
-    await host.setEnabled("codex-config", false); await host.setEnabled("archive", false);
-    expect(host.snapshot("settings.page").some(row => ["codex-config", "archive"].includes(row.moduleId))).toBe(false);
+    await host.setEnabled("codex-config", false); await host.setEnabled("updater", false);
+    expect(host.snapshot("settings.page").some(row => ["codex-config", "updater"].includes(row.moduleId))).toBe(false);
     for (const id of ["shell", "conversation", "connection", "agent-config", "notifications"]) {
       await host.setEnabled(id, false);
       expect(host.isEnabled(id)).toBe(true); expect(host.statuses().get(id)?.state.kind).toBe("active");
     }
-    expect(JSON.parse(saved.data.get("cutex-desktop.modules")!).enabled).toEqual({ "codex-config": false, archive: false });
+    expect(JSON.parse(saved.data.get("cutex-desktop.modules")!).enabled).toEqual({ "codex-config": false, updater: false });
     const restarted = await fixture(saved);
     expect(restarted.statuses().get("codex-config")?.state.kind).toBe("disabled");
-    expect(restarted.statuses().get("archive")?.state.kind).toBe("disabled");
-    await restarted.setEnabled("codex-config", true); await restarted.setEnabled("archive", true);
+    expect(restarted.statuses().get("updater")?.state.kind).toBe("disabled");
+    await restarted.setEnabled("codex-config", true); await restarted.setEnabled("updater", true);
     expect(JSON.parse(saved.data.get("cutex-desktop.modules")!).enabled).toEqual({});
     expect(restarted.snapshot("settings.page").map(row => row.item.id)).toEqual(original.map(row => row.item.id));
     for (const row of restarted.snapshot("settings.page")) expect(row.item).toBe(original.find(item => item.item.id === row.item.id)!.item);
@@ -196,10 +197,11 @@ describe("current page/navigation contract", () => {
     await host.setHost({ id: "page-ssh", kind: "ssh", features: new Set(ALL_FEATURES) });
     expect(host.snapshot("main.page")).toBe(pages);
     expect(host.snapshot("nav.primary")).toBe(nav);
-    await host.setEnabled("projects", false);
-    expect(host.snapshot("main.page")).toEqual(pages.filter(entry => entry.moduleId !== "projects"));
-    expect(host.snapshot("nav.primary")).toEqual(nav.filter(entry => entry.moduleId !== "projects"));
-    await host.setEnabled("projects", true);
+    // Projects is required since module-dependencies-20261126: Delegations stands in as a page module to turn off.
+    await host.setEnabled("delegations", false);
+    expect(host.snapshot("main.page")).toEqual(pages.filter(entry => entry.moduleId !== "delegations"));
+    expect(host.snapshot("nav.primary")).toEqual(nav.filter(entry => entry.moduleId !== "delegations"));
+    await host.setEnabled("delegations", true);
     expect(host.snapshot("main.page").map(entry => entry.item)).toEqual(pages.map(entry => entry.item));
   });
 });

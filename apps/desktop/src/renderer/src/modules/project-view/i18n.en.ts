@@ -8,6 +8,8 @@ export const en: Record<keyof typeof zhCN, string> = {
   "project-view.title": "Project view",
   "project-view.description": "View a project’s {{agent}} work, delegations, jobs and recent activity; open it from the {{shelf}}, quick switcher or project menu",
   "project-view.tabTitle": "Project · {name}",
+  "project-view.todayTitle": "Today",
+  "project-view.todayTooltip": "Today: the personal assistant's confirmations, work in progress, brief and reminders (its coordination project is not one of yours, so no project view here)",
   "project-view.pick": "Choose a project",
   "project-view.follow": "Follow the current conversation",
   "project-view.followHint": "Shows the project of the conversation in focus",

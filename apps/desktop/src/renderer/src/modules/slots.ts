@@ -11,7 +11,7 @@
 // window.search, §26; contract 1.20: pane.desktop Dock / useDockCount, PaneDesktopProps covered / tray —
 // the tray of shortcuts, canvas principles §7; contract 1.21: a `main.page` opens as its own pane in the focused
 // conversation's Shelf — services.ui.openPage / panes.open("page:<id>") — or, 页面打开位置 = 占用会话, over the
-// conversation column with its own page header, §24.4).
+// conversation column with its own page header, §24.4); contract 1.32: composer.action, §31.
 // Item component types live here; types.ts / host.ts stay React-free.
 import type { ComponentType, ReactNode } from "react";
 import type { MessageKey } from "../i18n";
@@ -60,7 +60,12 @@ export interface SettingsPageItem extends SlotItemBase {
    * Parts on a page of their own (`openSettings(page, { sub })`): title, a way back, their own scroll position.
    * The page shows an entry to each. `anchors`: the cards that live there, so old deep links and search land on it.
    */
-  subPages?: Readonly<Record<string, { titleKey: MessageKey; hintKey?: MessageKey; Page: ComponentType; anchors?: readonly string[] }>>;
+  /**
+   * Sub-pages of the page. `hostPicker: false`: a sub-page of a `hostPart` page whose cards are all on this computer (no
+   * host card): the header shows no host picker there, so it never looks as if it chose the host of what the sub-page
+   * shows or deletes (owner 2026-11-28, 浏览器身份).
+   */
+  subPages?: Readonly<Record<string, { titleKey: MessageKey; hintKey?: MessageKey; Page: ComponentType; anchors?: readonly string[]; hostPicker?: false }>>;
   /**
    * A host page that can show every host at once (用量): the header picker adds 「全部主机」 while two or
    * more online hosts report `capability`; the page reads the hosts with lib/settingsHost
@@ -345,9 +350,16 @@ export interface ToolRenderer extends SessionItemBase {
   // default unavailable "hide" (= the core PlainToolRow)
   /** Pure and cheap (runs for every tool entry): usually item.type plus the tool / server name. */
   match(item: RawItem): boolean;
-  Row: ComponentType<{ item: RawItem; sessionId: string }>;
+  /** `items`: with `gather`, every item of the turn gathered into this row (this one first); absent otherwise. */
+  Row: ComponentType<{ item: RawItem; sessionId: string; items?: readonly RawItem[] }>;
   /** A standalone card: ends the work group instead of folding into it (delegation cards). */
   standalone?(item: RawItem): boolean;
+  /**
+   * One row for several calls of a turn (project memory edits): items with the same key in one turn render as one
+   * standalone row where the first of them is, given all of them as `items`; the later ones leave no row of their
+   * own and do not split work groups. null = this item alone (and `standalone` decides).
+   */
+  gather?(item: RawItem): string | null;
   /** The turn's live line while the item runs (lib/turnActivity.ts TOOL_ACTIVITY); null = the default. */
   activity?(item: RawItem): MessageKey | null;
 }
@@ -897,6 +909,56 @@ export interface CodeBlockActionProps extends CodeBlockMatch {
 }
 
 /**
+ * v1.32 `composer.action` (§31; outlet components/ComposerActions.tsx): a module action in the conversation's input
+ * box — a button in its footer, keys of its own (rebindable commands of lib/keybindings), and a panel in the input
+ * card above the text. It reads the draft and the selection and replaces a part of it as one undo step; the core
+ * never names the module (输入优化 (input-refinement) is the first contributor; translation-like actions later). One `Action` is
+ * mounted per input box while the item is shown; it renders into `button` / `panel` with portals.
+ */
+export interface ComposerActionItem extends SessionItemBase {
+  // default unavailable "hide"
+  /** Registry commands (lib/keybindings COMMANDS ids) this action answers while its input box has the focus. */
+  commands?: readonly string[];
+  Action: ComponentType<ComposerActionProps>;
+}
+export interface ComposerDraft {
+  text: string;
+  selectionStart: number;
+  selectionEnd: number;
+}
+/** What a key means to an open action, or to one whose command it is: "handled" / "hold" (both swallow it), null (not its key). */
+export type ComposerKeyResult = "handled" | "hold" | null;
+export interface ComposerKey {
+  key: string;
+  ctrl: boolean;
+  meta: boolean;
+  alt: boolean;
+  shift: boolean;
+  /** The action's own command this key is bound to, or null. */
+  command: string | null;
+}
+export interface ComposerAccess {
+  /** The draft and its selection now. */
+  read(): ComposerDraft;
+  /** Replace [start, end) with `text` as one undo step, caret after it; false when the draft no longer has `expected` there. */
+  replace(start: number, end: number, text: string, expected: string): boolean;
+  focus(): void;
+  /** While open the action gets the box's keys first (onKey) and send / steer / Esc-interrupt keys are held. */
+  setOpen(open: boolean): void;
+  /** The key handler (one per action; null removes it). Called for its own commands, and for every key while it is open. */
+  onKey(handler: ((key: ComposerKey) => ComposerKeyResult) | null): void;
+}
+export interface ComposerActionProps {
+  hostId: string;
+  /** The agent the box writes to. */
+  sessionId: string;
+  composer: ComposerAccess;
+  /** Portal targets: the footer's tool row (null until mounted) and the panel place: a float above the input box, out of its flow (§31). */
+  button: HTMLElement | null;
+  panel: HTMLElement | null;
+}
+
+/**
  * v1.4 `ref.action` (§19.8; lib/refActions.tsx): an action on anything referable. The shell renders the same
  * list as icon buttons or menu items. Data, not a component, so it fits both.
  */
@@ -906,6 +968,11 @@ export interface RefActionItem extends SlotItemBase {
   excludeKinds?: readonly string[]; // ref kinds this never applies to (with `kinds` omitted: all but these)
   icon: Icon;
   titleKey: MessageKey;
+  /**
+   * v1.33: what the item does, in a sentence — a menu row's small ⓘ (hover / keyboard highlight; MenuAction.info), e.g.
+   * 并排打开's Ctrl/⌘ + click and the narrow-window rule (owner 2026-11-27). Menus only; icon buttons keep the title.
+   */
+  infoKey?: MessageKey;
   /** Live state for the current ref, e.g. "already bookmarked" (filled icon, other title). */
   useState?(ref: CutexRef): { active?: boolean; titleKey?: MessageKey; tooltip?: string; disabledReason?: string } | null;
   /**
@@ -1035,6 +1102,8 @@ export interface SlotMap {
   "timeline.intro": TimelineIntroItem;
   // Contract 1.14: actions in a reply's code-block toolbar (§22).
   "timeline.codeBlockAction": CodeBlockActionItem;
+  // Contract 1.32: actions in the conversation's input box (§31).
+  "composer.action": ComposerActionItem;
   "ref.action": RefActionItem;
   "ref.target": RefTargetItem;
   // Contract 1.6: module actions beside module-owned profile fields (§20).
@@ -1073,6 +1142,7 @@ export const SLOT_SPECS: { readonly [S in SlotId]: SlotSpec } = {
   "timeline.turnAttachment": { unavailable: "hide" },
   "timeline.intro": { unavailable: "hide" },
   "timeline.codeBlockAction": { unavailable: "hide" },
+  "composer.action": { unavailable: "hide" },
   "ref.action": { unavailable: "hide" },
   "ref.target": { unavailable: "hide" },
   "profile.fieldAction": { unavailable: "hide" },

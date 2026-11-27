@@ -9,7 +9,7 @@ import type { ExternalInputStatus } from "./ExternalInputStatus";
  */
 export type ExternalInputResponse = { version: number, ownerId: string, threadId: string, runtimeGeneration: bigint, statuses: Array<ExternalInputStatus>,
 /**
- * `exclusive_turn` submit only: the turn that carries this item. The
+ * Dedicated admission (`exclusive_turn` or `stop_answer`): the turn that carries this item. The
  * receipt, once context is persisted, carries the same turn id; if the
  * turn ends first, the item is dropped and its status becomes `unknown`.
  */

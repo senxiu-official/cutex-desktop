@@ -122,7 +122,6 @@ const CORE_NEW_FEATURES: readonly string[] = [
   "session-created-by",
   "session-path-reapproval",
   "guides.preferences",
-  "text-rewrite-v1",
 ];
 
 export const MOCK_BASE_FEATURES: readonly string[] = [...CORE_BASE_FEATURES, ...MODULE_MOCKS.flatMap(({ mock }) => mock.features?.base ?? [])];
@@ -140,5 +139,6 @@ export function mockScenarioFeatures(search: string): string[] {
   // ?turnerror: cutex turn-error-surface (dev/mockTurnError.ts). ?variants: cutex profile-runtime-variants (r265; dev/mockProfileVariants.ts).
   // ?rename: cutex formal-agent-name-rename-v1 (dev/mockAgentRename.ts); without it the host lacks it, as today.
   // ?promote: cutex quick-chat-promote-v1 (dev/mockQuickChatPromote.ts).
-  return [...(q.has("rename") ? ["formal-agent-name-rename-v1"] : []), ...(q.has("promote") ? ["quick-chat-promote-v1"] : []), ...(q.has("turnerror") && !q.has("no-turn-error-surface") ? ["turn-error-surface"] : []), ...ledgerFeatures, ...(q.has("live-deltas") ? ["live-text-deltas"] : []), ...(q.has("variants") ? ["profile-runtime-variants"] : []), ...(q.has("relay") ? ["profile-relay-runtimes"] : [])];
+  // ?readstate: cutex attention-state-v1, cross-device read state (dev/mockAttention).
+  return [...(q.has("readstate") ? ["attention-state-v1"] : []), ...(q.has("rename") ? ["formal-agent-name-rename-v1"] : []), ...(q.has("promote") ? ["quick-chat-promote-v1"] : []), ...(q.has("turnerror") && !q.has("no-turn-error-surface") ? ["turn-error-surface"] : []), ...ledgerFeatures, ...(q.has("live-deltas") ? ["live-text-deltas"] : []), ...(q.has("variants") ? ["profile-runtime-variants"] : []), ...(q.has("relay") ? ["profile-relay-runtimes"] : [])];
 }

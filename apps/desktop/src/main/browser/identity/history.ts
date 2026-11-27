@@ -259,8 +259,9 @@ export class BrowserHistory implements BrowserHistoryService {
     rmSync(directory, { recursive: true });
   }
 
-  async dropHost(hostId: string): Promise<void> {
-    for (const identityId of this.identities()) {
+  /** A host's history: of every identity, or of one. */
+  async dropHost(hostId: string, only?: string): Promise<void> {
+    for (const identityId of only === undefined ? this.identities() : [only]) {
       const path = this.path(identityId, hostId);
       this.close(path);
       if (!this.diskPath(path, false)) continue;

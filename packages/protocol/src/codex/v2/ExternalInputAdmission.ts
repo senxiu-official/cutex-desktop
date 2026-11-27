@@ -5,4 +5,4 @@
 /**
  * How a submitted item may start or join a turn.
  */
-export type ExternalInputAdmission = "queue" | "exclusive_turn";
+export type ExternalInputAdmission = "queue" | "exclusive_turn" | "stop_answer";

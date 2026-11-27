@@ -2,6 +2,7 @@
 // kept free of Electron imports so it is unit-testable.
 import { readMemoryHost } from "@cutex-desktop/cutex-client";
 import { parseUpdateProxyPref } from "./proxy";
+import { DEFAULT_APP_ICON, isAppIconId } from "./appIcons";
 import type { CloseBehavior, DesktopPrefs, ShellLocale } from "./ipc";
 import type { ShellTermForms, ShellTerms, ShellTermsPref } from "./ipc";
 import { DEVICE_OFF_NONE, parseDeviceOff } from "./notificationLevels";
@@ -37,6 +38,7 @@ export function parsePrefs(raw: unknown): DesktopPrefs {
   const value = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
   return {
     ...(readMemoryHost(value.memoryHost) ? { memoryHost: readMemoryHost(value.memoryHost)! } : {}),
+    ...(isAppIconId(value.appIcon) && value.appIcon !== DEFAULT_APP_ICON ? { appIcon: value.appIcon } : {}),
     closeBehavior: isCloseBehavior(value.closeBehavior) ? value.closeBehavior : DEFAULT_PREFS.closeBehavior,
     locale: isShellLocale(value.locale) ? value.locale : null,
     terms: parseTerms(value.terms),

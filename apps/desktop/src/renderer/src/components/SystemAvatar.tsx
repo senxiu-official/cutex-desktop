@@ -1,24 +1,19 @@
 // The avatar of a system sender (lib/systemSenders): a square logo instead of an agent's round
 // letter. The ONE place that picks the icon — swap the import (or map a kind to its own asset).
 import type { SessionAvatar } from "@cutex-desktop/protocol";
-import cutexLogo from "../assets/cutex-logo-64.png";
+import { useAppLogo } from "../lib/appIcon";
 import { systemSender, type SystemSender } from "../lib/systemSenders";
 import { useApp } from "../store";
 import { convSidebarOf, useConvScope } from "../lib/conversationScope";
 import { rowsOf } from "../lib/viewHost";
 import { Avatar } from "./Avatar";
 
-const ICON: Record<SystemSender, string> = {
-  delegation: cutexLogo,
-  alarm: cutexLogo,
-  job: cutexLogo,
-  cutex: cutexLogo,
-};
-
+// Every system sender shows the app logo, in the 外观 → 应用图标 style (lib/appIcon); map a kind here to give it its own.
 export function SystemAvatar({ kind, size = 28 }: { kind: SystemSender; size?: number }) {
+  const logo = useAppLogo(size);
   return (
     <img
-      src={ICON[kind]}
+      {...logo}
       alt=""
       aria-hidden
       draggable={false}

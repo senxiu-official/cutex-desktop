@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 // Design 032 (modules/home/DeskSurface): the instances the desktop shows (owner ones from the desk, module ones from
 // their kind — a pinned service's with its service as source; a kind turned off shows none) and the boxes of a
 // width band: its own, else derived from the nearest stored band, else the default layout.

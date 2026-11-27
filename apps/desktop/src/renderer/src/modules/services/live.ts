@@ -1,11 +1,11 @@
 // Module activation: an agent's service reveal request → a card in that agent's conversation
 // 「Reader 想给你看：Doodle · 打开」. 打开 = an owner browser tab (owner login pool, bound to the host)
 // on `cutex:service/<slug><path>`; with the browser module off, the service's usual opener (the
-// system browser, lib/services.ts). Nothing opens by itself: a service can be any dev server.
+// system browser with a toast, lib/services.ts openServiceTab). Nothing opens by itself: a service can be any dev server.
 import { bridge } from "../../bridge";
 import { clearAgentToasts, pushAgentToast } from "../../lib/agentToasts";
 import { hostData } from "../../lib/hostScope";
-import { openServiceExternal } from "../../lib/services";
+import { openServiceTab } from "../../lib/services";
 import { sideShowsHost } from "../../lib/sideServices";
 import { SERVICE_COMPONENT } from "../../lib/sideKinds";
 import { useApp } from "../../store";
@@ -22,12 +22,12 @@ const REVEAL_CARD_MS = 30 * 60_000;
 export function openRevealed(ctx: ModuleContext, r: Pick<ServiceReveal, "hostId" | "slug" | "path">): void {
   let opened = false;
   try {
-    // Another host than the open agent's would open out of view on the right side: the system browser instead.
+    // Another host than the open agent's would open out of view: openServiceTab switches there first (owner 2026-11-28).
     opened = sideShowsHost(r.hostId) && ctx.services.side.open(BROWSER_TAB, { url: serviceLink(r) }, { binding: { kind: "host", hostId: r.hostId }, reveal: true, focus: true }).status === "opened";
   } catch {
     opened = false;
   }
-  if (!opened) void openServiceExternal({ slug: r.slug }, r.hostId, r.path).catch((e: unknown) => ctx.services.ui.notice(ctx.t("services.reveal.failed", { error: e instanceof Error ? e.message : String(e) }), "error"));
+  if (!opened) void openServiceTab({ slug: r.slug }, r.hostId, r.path).catch((e: unknown) => ctx.services.ui.notice(ctx.t("services.reveal.failed", { error: e instanceof Error ? e.message : String(e) }), "error"));
 }
 
 export function startServiceReveals(ctx: ModuleContext): void {

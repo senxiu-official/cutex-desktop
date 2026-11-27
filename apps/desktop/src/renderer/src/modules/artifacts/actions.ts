@@ -65,6 +65,11 @@ async function patch(hostId: string, a: ArtifactSummary, change: Omit<ArtifactPa
   return false;
 }
 
+/** 加星 / 取消加星 (with `artifact-audience` a star also puts the artifact into 呈阅). */
+export function toggleStar(hostId: string, a: ArtifactSummary): Promise<boolean> {
+  return patch(hostId, a, { starred: !a.starred });
+}
+
 /** 保存到这台电脑: this version's bytes into the download folder, from this computer's store or a remote one. */
 export function saveArtifactEntry(hostId: string, version: ArtifactVersion | null | undefined, scope?: ArtifactSummary["scope"]): MenuEntry {
   if (!version) return false;
@@ -83,7 +88,7 @@ export function artifactMenu(hostId: string, a: ArtifactSummary, open: SideOpen 
     saveArtifactEntry(hostId, version, a.scope),
     ...artifactSourceFileEntries(hostId, version),
     "separator",
-    { label: translate(a.starred ? "artifacts.unstar" : "artifacts.star"), onSelect: () => void patch(hostId, a, { starred: !a.starred }) },
+    { label: translate(a.starred ? "artifacts.unstar" : "artifacts.star"), onSelect: () => void toggleStar(hostId, a) },
     {
       label: translate("artifacts.rename"),
       onSelect: async () => {

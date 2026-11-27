@@ -55,6 +55,13 @@ describe("agentPlan", () => {
     expect(agentPlan(ref, "beside", one, { strips: [], open: {} })).toEqual({ kind: "beside", side: "right", restore: false });
   });
 
+  it("并排 without room for a second column (owner 2026-11-27 「不生效」): a replace that says so, not a 并排 foretell", () => {
+    expect(agentPlan(ref, "beside", one, { ...none, room: false })).toEqual({ kind: "replace", paneId: "main", from: { hostId: "local", sessionId: "A" }, narrow: true });
+    // Room or not, every column taken still asks which one; a plain click is unchanged.
+    expect(agentPlan(ref, "beside", two, { ...none, room: false }).kind).toBe("pick");
+    expect(agentPlan(ref, "replace", one, { ...none, room: false })).toEqual({ kind: "replace", paneId: "main", from: { hostId: "local", sessionId: "A" } });
+  });
+
   it("并排 with every column taken (design 039): the owner picks which one it replaces; a setting of 3 columns still adds one", () => {
     expect(agentPlan(ref, "beside", two, none)).toEqual({ kind: "pick", panes: ["main", "p2"] });
     expect(agentPlan(ref, "beside", { ...two, focused: "main" }, none)).toEqual({ kind: "pick", panes: ["main", "p2"] });

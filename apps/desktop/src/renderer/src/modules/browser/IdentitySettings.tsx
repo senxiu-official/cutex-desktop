@@ -72,28 +72,39 @@ export function BrowserSearchHistorySection() {
   );
 }
 
-/** 研究中 (design §12): extensions and sync between hosts are being studied; shown greyed, not clickable. */
+/** 研究中 (design §12): extensions are being studied; shown greyed, not clickable (sync: IdentitySyncSettings). */
 export function BrowserResearchSection() {
   const { t } = useI18n();
   return (
     <Section title={t("browser.research.title")} tag={{ label: t("browser.research.tag") }}>
       <SettingsGroup agents="none" source="local"><div data-browser-research aria-disabled="true" className="opacity-60">
         <ListRow title={t("browser.research.extensions")} detail={t("browser.research.extensionsHint")} />
-        <ListRow title={t("browser.research.sync")} detail={t("browser.research.syncHint")} />
       </div></SettingsGroup>
     </Section>
   );
 }
 
-function StorageLines({ storage }: { storage: BrowserIdentityStorage[] | null }) {
+/** One row per host holding data: a configured host offers 退出登录 there; a removed host's leftover offers 清除. */
+function StorageLines({ storage, onHost }: { storage: BrowserIdentityStorage[] | null; onHost(s: BrowserIdentityStorage): void }) {
   const { t } = useI18n();
   if (!storage) return <Loading rows={1} />;
   if (!storage.length) return <EmptyState>{t("browser.identity.page.noData")}</EmptyState>;
   const size = (n: number | null) => (n === null ? t("browser.identity.page.storageUnknown") : formatBytes(n, t));
-  return <>{storage.map((s) => (
-    <ListRow key={s.hostId} title={hostLabel(s.hostId)} detail={t("browser.identity.page.storageLine", { site: size(s.siteDataBytes), cache: size(s.cacheBytes) })} />
+  return <>{storage.map((s) => s.removedHost ? (
+    <div key={s.hostId} data-identity-storage={s.hostId} data-removed-host="">
+      <ListRow title={<span title={t("browser.identity.page.removedHostTip", { id: s.hostId })}>{t("browser.identity.page.removedHost")}</span>}
+        detail={t("browser.identity.page.removedHostLine", { size: size(s.siteDataBytes) })}
+        actions={<Button onClick={() => onHost(s)}>{t("browser.identity.page.leftoverClear")}</Button>} />
+    </div>
+  ) : (
+    <div key={s.hostId} data-identity-storage={s.hostId}>
+      <ListRow title={hostLabel(s.hostId)} detail={t("browser.identity.page.storageLine", { site: size(s.siteDataBytes), cache: size(s.cacheBytes) })}
+        actions={<Button onClick={() => onHost(s)}>{t("browser.identity.page.hostSignOut")}</Button>} />
+    </div>
   ))}</>;
 }
+
+type IdentityDialog = null | "edit" | "clear" | "signOut" | "remove" | { kind: "signOutHost" | "clearLeftover"; hostId: string };
 
 /** One identity's page (sub "identity"; which one: useIdentityPage, set by the list row / the switcher's 管理). */
 export function BrowserIdentitySubPage() {
@@ -104,7 +115,7 @@ export function BrowserIdentitySubPage() {
   const [storage, setStorage] = useState<BrowserIdentityStorage[] | null>(null);
   const [sites, setSites] = useState<Record<string, string[]>>({});
   const [passwords, setPasswords] = useState<number | null>(null);
-  const [dialog, setDialog] = useState<null | "edit" | "clear" | "signOut" | "remove">(null);
+  const [dialog, setDialog] = useState<IdentityDialog>(null);
   const [done, setDone] = useState(false);
   const [reload, setReload] = useState(0);
   const id = identity?.id;
@@ -132,9 +143,10 @@ export function BrowserIdentitySubPage() {
           hint={identity.isDefault ? `${t("browser.identity.settings.original")} · ${t("browser.identity.page.storage")}` : t("browser.identity.page.storage")}
           actions={<button type="button" data-identity-rename onClick={() => setDialog("edit")} className="rounded text-xs text-accent hover:underline">{t("browser.identity.edit.renameTitle")}</button>}>
           <SettingsGroup agents="none" source="local">
-            <StorageLines storage={storage} />
+            <StorageLines storage={storage} onHost={(s) => { setDone(false); setDialog({ kind: s.removedHost ? "clearLeftover" : "signOutHost", hostId: s.hostId }); }} />
             <ListRow title={<span className="text-muted">{t("browser.identity.page.clearHint")}</span>} actions={<Button onClick={() => { setDone(false); setDialog("clear"); }}>{t("browser.identity.page.clear")}</Button>} />
             {done && <p role="status" className="py-1 text-xs text-subtle">{t("browser.identity.page.done")}</p>}
+            <p data-identity-sync-note className="pt-1 pb-2 text-xs text-subtle">{t("browser.identity.page.syncNote")}</p>
           </SettingsGroup>
         </Section>
         <Section title={t("browser.identity.page.signedIn")} hint={t("browser.identity.page.signedInHint")}>
@@ -159,8 +171,11 @@ export function BrowserIdentitySubPage() {
         </Section>
       </div>
       {dialog === "edit" && <IdentityEditDialog editing={identity} onClose={() => setDialog(null)} />}
-      {dialog === "clear" && <ClearDataDialog identity={identity} sites={allSites} onClose={() => setDialog(null)} onDone={refresh} />}
+      {dialog === "clear" && <ClearDataDialog identity={identity} hosts={(storage ?? []).filter((s) => !s.removedHost).map((s) => ({ id: s.hostId, name: hostLabel(s.hostId) }))}
+        sites={sites} onClose={() => setDialog(null)} onDone={refresh} />}
       {(dialog === "signOut" || dialog === "remove") && <IdentityConfirmDialog identity={identity} kind={dialog} passwords={passwords ?? 0} onClose={() => setDialog(null)} onDone={refresh} />}
+      {typeof dialog === "object" && dialog && <IdentityConfirmDialog identity={identity} kind={dialog.kind} passwords={passwords ?? 0}
+        host={{ id: dialog.hostId, name: dialog.kind === "signOutHost" ? hostLabel(dialog.hostId) : dialog.hostId }} onClose={() => setDialog(null)} onDone={refresh} />}
     </SettingsDevicePart>
   );
 }

@@ -53,7 +53,7 @@ export default defineModule({
         services.side.open("side-chat.chat", { turnId: ref.params.turnId }, { focus: true, binding: { kind: "agent", hostId: ref.hostId, sessionId: ref.params.sessionId } });
       },
     },
-    // 解释这段 (docs/design/teaching-mode.md P1; general since owner 2026-11-25): selected agent text (lib/selectionMenu)
+    // 解释这段 (a general selection command since owner 2026-11-25): selected agent text (lib/selectionMenu)
     // asked about in a side chat; a new side chat sends it at once, an open one gets it as its draft (state.ts openSideChat).
     { id: "side-chat.explain", titleKey: "side-chat.explain", icon: Lightbulb, kinds: ["selection"], useState: useFromTurnState,
       run: ref => {

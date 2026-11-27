@@ -7,7 +7,7 @@ import { shelfLauncherSections } from "../src/renderer/src/lib/emptyShelfLaunche
 const state = vi.hoisted(() => ({ items: [] as any[], launch: vi.fn() }));
 vi.mock("../src/renderer/src/i18n", () => ({ useI18n: () => ({ t: (key: string) => key }) }));
 vi.mock("../src/renderer/src/lib/sideComponents", () => ({ useSideRegistry: () => new Map() }));
-vi.mock("../src/renderer/src/lib/lazyPage", () => ({ preloadOnIntent: vi.fn() }));
+vi.mock("../src/renderer/src/lib/lazyPage", () => ({ preloadPage: vi.fn() }));
 vi.mock("../src/renderer/src/lib/sideMenus", () => ({ launchable: () => state.items, launch: state.launch }));
 import { EmptyShelfLaunchers } from "../src/renderer/src/components/side/EmptyShelfLaunchers";
 

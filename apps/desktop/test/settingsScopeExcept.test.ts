@@ -17,7 +17,7 @@ vi.mock("../src/renderer/src/store", async (importOriginal) => ({
   useApp: Object.assign((select: (s: unknown) => unknown) => select(fx.state), { getState: () => fx.state, setState: () => {}, subscribe: () => () => {} }),
 }));
 
-const { Section, SettingsPage, SettingRow, PartSource, SettingsGroup } = await import("../src/renderer/src/components/settings/Form");
+const { Section, SettingsPage, SettingRow, SettingsGroup } = await import("../src/renderer/src/components/settings/Form");
 
 const card = (title: string, source: "local" | "host" = "local") => h(Section, { key: title, title, children: h(SettingRow, { label: title, agents: "none", source }) });
 const page = (...cards: React.ReactNode[]) => h(SettingsPage, { children: cards });
@@ -59,19 +59,18 @@ describe("source declarations use the highest uniform page/card/row", () => {
 });
 
 it("states a uniform host scope only on the outer card containing a headless host part", () => {
-  render(page(card("Local"), h(Section, { title: "Host outer", children: h(PartSource, { children:
-    h(Section, { title: "Host inner", children: h(SettingRow, { label: "Remote value", agents: "none", source: "host" }) }) }) })));
+  render(page(card("Local"), h(Section, { title: "Host outer", children:
+    h(Section, { title: "Host inner", children: h(SettingRow, { label: "Remote value", agents: "none", source: "host" }) }) })));
   expect(scopes(container)).toEqual(["mixed", "local", "host:local"]);
   const inner = [...container.querySelectorAll("section")].find(section => section.querySelector("h3")?.textContent === "Host inner")!;
   expect(scopes(inner)).toEqual([]);
 });
 
-it("distinguishes an all-hosts logical row and omits a target-host picker", () => {
-  render(page(card("Local"), h(Section, { title: "Bulk", picker: h("button", {}, "Target picker"), children:
+it("distinguishes an all-hosts logical row", () => {
+  render(page(card("Local"), h(Section, { title: "Bulk", children:
     h(SettingsGroup, { agents: "none", source: "host", allHosts: true, children: "Apply on all connected hosts" }) })));
   expect(pageScope()).toBe("mixed");
   expect(scopes(container)).toEqual(["mixed", "local", "allHosts"]);
-  expect(container.textContent).not.toContain("Target picker");
   expect(row("Apply on all connected hosts").getAttribute("data-effect-all-hosts")).toBe("true");
 });
 

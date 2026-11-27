@@ -13,6 +13,7 @@ import { useUpdateStatus } from "../../lib/update";
 import { GUIDE_ACTIONS, runGuideAction } from "../../lib/guideActions";
 import { useApp } from "../../store";
 import { panelGuideDone } from "../../lib/panelGuides";
+import { SettingsSections } from "../Outlet";
 
 const REPO = "https://github.com/senxiu-official/cutex-desktop";
 export const HELP_LINKS: readonly { id: string; label: MessageKey; url: string }[] = [
@@ -33,7 +34,6 @@ export function HelpPage() {
   const version = status?.current?.version ?? null;
   const state = useGuideState();
   const guides = liveGuides(version);
-  const onboarding = guides.filter((g) => g.kind === "onboarding");
   const tips = guides.filter((g) => g.kind !== "onboarding" && g.kind !== "panel");
   const panels = guides.filter((g) => g.kind === "panel");
   const [inlineReplay, setInlineReplay] = useState<string | null>(null);
@@ -56,7 +56,8 @@ export function HelpPage() {
   return (
     <div className="space-y-4" data-help-page="">
       <p data-help-guide-scope className="whitespace-pre-line text-meta text-muted">{t("onboarding.guide.help.scope" as MessageKey)}</p>
-      <Section title={t("onboarding.guide.help.onboarding")}>{onboarding.map(row)}</Section>
+      {/* 开始使用 and the sample project (module start, onboarding v3): what the 新手引导 row replayed. */}
+      <SettingsSections page="help" />
       <Section
         title={t("onboarding.guide.help.tips")}
         hint={t("onboarding.guide.help.tipsHint")}

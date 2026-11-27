@@ -241,6 +241,8 @@ describe("agent menu additions", () => {
     const { default: conversation } = await import("../src/renderer/src/modules/conversation/index");
     const action = (conversation.contributes?.["ref.action"] ?? []).find((a) => a.id === "conversation.openAgentSide")!;
     expect(action.titleKey).toBe("conversation.agent.openSide");
+    // Its ⓘ (module contract 1.33 infoKey): Ctrl / middle click and the narrow-window rule.
+    expect(action.infoKey).toBe("conversation.agent.openSideInfo");
     const run = vi.fn();
     const effect = vi.spyOn(effects, "agentEffect").mockReturnValue({ run } as never);
     try {

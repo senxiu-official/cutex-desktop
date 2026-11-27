@@ -4,7 +4,7 @@
 // capture, an archived draft. demo-writer's thread publishes and cites them (`cutex:artifact/…@2`
 // links and an image) and an HTML page (figures/dose-response.html, rendered in the offline frame);
 // ~12 s after start demo-writer republishes the page (auto-open), ~20 s regression.md v4 (live update).
-import { ARTIFACT_PUBLISHED_EVENT, ARTIFACT_SHOW_FEATURE, ARTIFACT_SHOW_REQUESTED_EVENT, ARTIFACT_UPDATED_EVENT, ARTIFACTS_FEATURE, artifactLink, artifactRef, parseArtifactRef, type ArtifactCandidate, type ArtifactContent, type ArtifactDetail, type ArtifactKind, type ArtifactProducer, type ArtifactResolveItem, type ArtifactScope, type ArtifactSummary, type ArtifactVersion } from "../../../../shared/artifactStore";
+import { ARTIFACT_AUDIENCE_FEATURE, ARTIFACT_PUBLISHED_EVENT, ARTIFACT_SHOW_FEATURE, ARTIFACT_SHOW_REQUESTED_EVENT, ARTIFACT_UPDATED_EVENT, ARTIFACTS_FEATURE, artifactLink, artifactRef, parseArtifactRef, type ArtifactCandidate, type ArtifactContent, type ArtifactDetail, type ArtifactFileKind, type ArtifactKind, type ArtifactProducer, type ArtifactResolveItem, type ArtifactScope, type ArtifactSummary, type ArtifactVersion } from "../../../../shared/artifactStore";
 import type { DesktopApi } from "../../../../shared/ipc";
 import type { MockCore, ModuleMock } from "../../dev/mockTypes";
 // The decision form using the page API (window.cutexPage: autosave + 发给智能体), docs/design/004.
@@ -249,12 +249,12 @@ function seed(): Map<string, Stored> {
         version(REPORT, 2, report(2), "text/markdown", "reports/regression.md", writer("demo-t7", "ask-demo-reg"), ago(42), { note: "rerun with the new exclusion rule", git: { commit: "9e8d7c6b5a4f3e2d1c0b9a8f7e6d5c4b3a2f1e0d", dirty: true } }),
         version(REPORT, 3, report(3), "text/markdown", "reports/regression.md", OWNER, ago(12), { note: "wording checked" }),
       ],
-      { starred: true },
+      { starred: true, purpose: "report" },
     ),
     make(FIGURE, "figures/power-curve.svg", "figure", [
       version(FIGURE, 1, figure(1), "image/svg+xml", "figures/power-curve.svg", stats("demo-t3"), ago(200)),
       version(FIGURE, 2, figure(2), "image/svg+xml", "figures/power-curve.svg", writer("demo-t7", "ask-demo-reg"), ago(41), { note: "after the exclusion" }),
-    ]),
+    ], { purpose: "evidence" }),
     make(TABLE, "results/table2.csv", "table", [version(TABLE, 1, TABLE2, "text/csv", "results/table2.csv", auto("exclusive", [{ sessionId: "demo-run", displayName: "demo-sampler", turnId: "demo-t2" }]), ago(35))]),
     make(SUMMARY, "output/sim-summary.txt", "data", [
       version(SUMMARY, 1, SIM, "text/plain", "output/sim-summary.txt", auto("ambiguous", [
@@ -263,13 +263,13 @@ function seed(): Map<string, Stored> {
       ]), ago(25), { git: null }),
     ]),
     make(HANDOFF, "handoff/notes.md", "handoff", [version(HANDOFF, 1, HANDOFF_TEXT, "text/markdown", "handoff/notes.md", auto("unknown", []), ago(8))]),
-    make(DOODLE, "figures/dose-response.html", "figure", [version(DOODLE, 1, doodle(1), "text/html", "figures/dose-response.html", writer("demo-t10"), ago(3), { note: "interactive sketch" })]),
-    make(DECIDE, "reviews/decide-0.2.html", "plan", [version(DECIDE, 1, DECIDE_PAGE, "text/html", "reviews/decide-0.2.html", writer("demo-t9"), ago(6), { note: "0.2 checklist — answers autosave, 发给智能体 sends them back" })]),
+    make(DOODLE, "figures/dose-response.html", "figure", [version(DOODLE, 1, doodle(1), "text/html", "figures/dose-response.html", writer("demo-t10"), ago(3), { note: "interactive sketch" })], { audience: "owner", purpose: "preview" }),
+    make(DECIDE, "reviews/decide-0.2.html", "plan", [version(DECIDE, 1, DECIDE_PAGE, "text/html", "reviews/decide-0.2.html", writer("demo-t9"), ago(6), { note: "0.2 checklist — answers autosave, 发给智能体 sends them back" })], { audience: "owner", purpose: "deliverable" }),
     make(SUMMARY_PDF, "reports/dose-response-summary.pdf", "report", [
       binaryVersion(version(SUMMARY_PDF, 1, tinyPdf(["Dose-response summary", "Generated in the browser preview (mock artifact).", "Pooled slope 0.42 per mg; see table2.csv."]), "application/pdf", "reports/dose-response-summary.pdf", writer("demo-t9"), ago(20), { note: "PDF export of the report" })),
-    ]),
-    make(ACCEPT, "reviews/a1-acceptance.txt", "report", [version(ACCEPT, 1, ACCEPT_TEXT, "text/plain", "reviews/a1-acceptance.txt", writer("demo-t9"), ago(23), { note: "A1 tail sensitivity Director acceptance" })]),
-    make(DRAFT, "reports/old-draft.md", "report", [version(DRAFT, 1, DRAFT_TEXT, "text/markdown", "reports/old-draft.md", writer("demo-t4"), ago(300))], { archivedAt: ago(100) }),
+    ], { audience: "owner", purpose: "report" }),
+    make(ACCEPT, "reviews/a1-acceptance.txt", "report", [version(ACCEPT, 1, ACCEPT_TEXT, "text/plain", "reviews/a1-acceptance.txt", writer("demo-t9"), ago(23), { note: "A1 tail sensitivity Director acceptance" })], { purpose: "evidence" }),
+    make(DRAFT, "reports/old-draft.md", "report", [version(DRAFT, 1, DRAFT_TEXT, "text/markdown", "reports/old-draft.md", writer("demo-t4"), ago(300))], { archivedAt: ago(100), audience: "owner" }),
     // `?projectview` (modules/project-view/mock.ts): two results of the cutex-dev project.
     ...(BIG_PNG ? [make(POSTER, "figures/poster-print.png", "figure", [{ ...version(POSTER, 1, "", "image/png", "figures/poster-print.png", writer("demo-t12"), ago(2), { note: "print size 180×271 mm" }), b64: true as const, bytes: 3_560_000 }])] : []),
     ...(typeof location !== "undefined" && new URLSearchParams(location.search).has("projectview")
@@ -282,7 +282,21 @@ function seed(): Map<string, Stored> {
 }
 
 const strip = ({ text: _text, b64: _b64, ...v }: MockVersion): ArtifactVersion => v;
-const summaryOf = (s: Stored): ArtifactSummary => ({ ...s.summary, latestVersion: s.versions.length, latest: strip(s.versions[s.versions.length - 1]!) });
+/** cutex derives the file kind from the latest version's media type, then its source suffix (src/artifacts/paths.rs). */
+function mockFileKind(mediaType: string, path: string): ArtifactFileKind {
+  const ext = /.([a-z0-9]+)$/i.exec(path)?.[1]?.toLowerCase() ?? "";
+  if (mediaType === "text/html" || ext === "html" || ext === "htm") return "page";
+  if (["ppt", "pptx", "odp", "key"].includes(ext)) return "slides";
+  if (mediaType.startsWith("image/")) return "image";
+  if (["zip", "tar", "gz", "tgz", "7z"].includes(ext)) return "archive";
+  if (["text/csv", "text/tab-separated-values", "application/json"].includes(mediaType) || ["csv", "tsv", "json", "parquet", "xlsx"].includes(ext)) return "data";
+  if (["application/pdf", "text/markdown", "text/plain"].includes(mediaType) || ["md", "pdf", "txt", "docx"].includes(ext)) return "document";
+  return "other";
+}
+const summaryOf = (s: Stored): ArtifactSummary => {
+  const latest = strip(s.versions[s.versions.length - 1]!);
+  return { audience: "team", purpose: null, ...s.summary, fileKind: mockFileKind(latest.mediaType, latest.sourcePath), latestVersion: s.versions.length, latest };
+};
 
 /** A small unified diff (LCS over lines; one hunk) for the mock's diff route. */
 function unifiedDiff(a: string, b: string, from: number, to: number): string {
@@ -420,7 +434,8 @@ function remoteStoreOf(hostId: string): Map<string, Stored> {
 
 export const mock: ModuleMock = {
   // `artifact-show`: the mock host opens only what an agent asked to show (scripted publish below).
-  features: { new: [ARTIFACTS_FEATURE, ARTIFACT_SHOW_FEATURE] },
+  // `artifact-audience`: 呈阅 / 全部 and the chips (`?nofeat=artifact-audience`: an older host, the full library only).
+  features: { new: [ARTIFACTS_FEATURE, ARTIFACT_SHOW_FEATURE, ARTIFACT_AUDIENCE_FEATURE] },
   thread: (sessionId) => (sessionId === "demo-done" ? writerThread() : null),
   api: (core) => storeApi(store, SCOPE, SCP_SESSIONS, core.emitHost),
   remote: (hostId, emitHost) => storeApi(remoteStoreOf(hostId), REMOTE_SCOPE, REMOTE_SESSIONS, emitHost),
@@ -454,6 +469,11 @@ function storeApi(store: Map<string, Stored>, home: ArtifactScope, homeSessions:
         .filter((s) => !query.kind || s.summary.kind === query.kind)
         .filter((s) => !query.producer || s.versions.some((v) => v.producer.sessionId === query.producer))
         .map(summaryOf)
+        // artifact-audience: 呈阅 = owner audience or starred; the chips narrow before paging.
+        .filter((a) => query.view !== "forOwner" || a.audience === "owner" || a.starred)
+        .filter((a) => !query.audience || a.audience === query.audience)
+        .filter((a) => !query.purpose || (query.purpose === "unset" ? !a.purpose : a.purpose === query.purpose))
+        .filter((a) => !query.fileKind || a.fileKind === query.fileKind)
         .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
       const start = Number(query.cursor ?? 0) || 0;
       const limit = query.limit ?? 50;
@@ -510,11 +530,11 @@ function storeApi(store: Map<string, Stored>, home: ArtifactScope, homeSessions:
       let s = existing;
       if (!s) {
         const id = `af-${Array.from({ length: 32 }, () => "0123456789abcdef"[Math.floor(Math.random() * 16)]).join("")}`;
-        s = { summary: { artifactId: id, scope: home, name, kind: req.kind ?? (/\.csv$/i.test(path) ? "table" : "report"), revision: 0, starred: false, archivedAt: null, createdAt: at, updatedAt: at }, versions: [] };
+        s = { summary: { artifactId: id, scope: home, name, kind: req.kind ?? (/\.csv$/i.test(path) ? "table" : "report"), audience: req.audience ?? "owner", purpose: req.purpose ?? null, revision: 0, starred: false, archivedAt: null, createdAt: at, updatedAt: at }, versions: [] };
         store.set(id, s);
       }
       s.versions.push(version(s.summary.artifactId, s.versions.length + 1, text, mediaType, path, OWNER, at, { note: req.note ?? null }));
-      s.summary = { ...s.summary, updatedAt: at, revision: s.summary.revision + 1, ...(req.kind ? { kind: req.kind } : {}) };
+      s.summary = { ...s.summary, updatedAt: at, revision: s.summary.revision + 1, ...(req.kind ? { kind: req.kind } : {}), ...(req.audience ? { audience: req.audience } : {}), ...(req.purpose ? { purpose: req.purpose } : {}) };
       emitPublished(s, true);
       const v = s.versions[s.versions.length - 1]!;
       return { ok: true as const, published: structuredClone({ artifact: summaryOf(s), version: strip(v), newVersion: true, markdown: `[${label(name)} v${v.version}](${v.link})` }) };

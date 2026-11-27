@@ -10,11 +10,11 @@ vi.mock("../src/renderer/src/modules/app", () => ({ services: { daemonFor: () =>
 vi.mock("../src/renderer/src/modules/artifacts/store", () => ({ useEpoch: () => env.epoch, invalidateArtifact: vi.fn(), loadContent: vi.fn() }));
 vi.mock("../src/renderer/src/modules/artifacts/View", () => ({ ViewBody: () => null }));
 vi.mock("../src/renderer/src/modules/artifacts/ViewActions", () => ({ ViewActions: () => null }));
-vi.mock("../src/renderer/src/modules/artifacts/actions", () => ({ artifactMenu: vi.fn(), openDelegation: vi.fn(), openVersion: vi.fn(), refusalText: vi.fn() }));
+vi.mock("../src/renderer/src/modules/artifacts/actions", () => ({ artifactMenu: vi.fn(), openDelegation: vi.fn(), openVersion: vi.fn(), refusalText: vi.fn(), toggleStar: vi.fn() }));
 vi.mock("../src/renderer/src/lib/time", () => ({ useClock: () => 1, formatAbsolute: () => "", formatWhen: () => "" }));
 vi.mock("../src/renderer/src/lib/fileThumbnails", () => ({ useThumbnail: () => null }));
 vi.mock("../src/renderer/src/lib/contextMenu", () => ({ contextMenu: vi.fn() }));
-vi.mock("../src/renderer/src/store", () => ({ agentHost: () => "local", useApp: () => "local" }));
+vi.mock("../src/renderer/src/store", () => ({ agentHost: () => "local", useApp: (sel: (s: unknown) => unknown) => sel({ hosts: { active: "local" } }), featuresOf: () => new Set() }));
 import { LibraryBody } from "../src/renderer/src/modules/artifacts/Library";
 import { DEFAULT_LIBRARY } from "../src/renderer/src/modules/artifacts/model";
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;

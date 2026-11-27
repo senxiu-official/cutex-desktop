@@ -14,6 +14,19 @@ interface Cascade extends ProfileMentionCascade { item: ProfileItem; stage: "mod
 export interface ProfileMentionRow { key: string; label: string; description?: string; tag?: string; profile?: ProfileItem; model?: ProfileMentionModel; effort?: { id: string | null } }
 /** In the combined `@` panel each group shows at most this many rows (agents, profiles); typing narrows them. */
 export const AT_GROUP_ROWS = 5;
+/** 「@ 列表顺序」 (prefs atMentionOrder): which group a plain `@` lists first. */
+export type AtMentionOrder = "agents" | "profiles";
+/**
+ * Where each group of the plain `@` panel starts in the one flat list (rows, keyboard index, pick): agents and profiles
+ * in the owner's order, paths always last.
+ */
+export function atGroupOffsets(order: AtMentionOrder, agents: number, profiles: number): { agents: number; profiles: number; paths: number } {
+  return order === "profiles" ? { profiles: 0, agents: profiles, paths: agents + profiles } : { agents: 0, profiles: agents, paths: agents + profiles };
+}
+/** Puts the two groups in the owner's order (then the paths). */
+export function atOrdered<T>(order: AtMentionOrder, agents: readonly T[], profiles: readonly T[], paths: readonly T[]): T[] {
+  return order === "profiles" ? [...profiles, ...agents, ...paths] : [...agents, ...profiles, ...paths];
+}
 /** The agent rows the `@` panel shows: all of them without a profile group, else at most AT_GROUP_ROWS (the header says how many of how many). */
 export function atAgentRows<T>(agents: readonly T[], profileRows: number): { shown: readonly T[]; total: number; cut: boolean } {
   const shown = profileRows ? agents.slice(0, AT_GROUP_ROWS) : agents;

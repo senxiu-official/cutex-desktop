@@ -21,6 +21,8 @@ export const WHATSAPP_PAGE = "whatsapp";
 
 export default defineModule({
   id: WHATSAPP_MODULE,
+  // Hard dependency (module-dependencies-20261126): without it the module's main use fails.
+  requires: { modules: ["browser"] },
   titleKey: "whatsapp.title",
   descriptionKey: "whatsapp.description",
   defaultEnabled: false,

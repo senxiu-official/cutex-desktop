@@ -12,6 +12,15 @@ export const MODULES_RELEASE_TAG = "modules-release";
 /** Where the index lives when the install records no release page (dev runs, source installs). */
 export const DEFAULT_MODULES_REPO = { owner: "senxiu-official", repo: "cutex-desktop" } as const;
 export const MODULES_INDEX_FILE = "modules.json";
+export const MODULE_UPGRADE_PAYLOAD = "module-upgrade";
+export const UPGRADE_PACK_BASELINES = { "claude-science": "1.0.0", nci: "1.0.0", "baidu-pan": "1.0.0" } as const;
+export type UpgradePackId = keyof typeof UPGRADE_PACK_BASELINES;
+export const ON_DEMAND_UPGRADE_PACKS = ["nci", "baidu-pan"] as const;
+export type PackMigration = "installed" | "kept" | "seed_missing" | "seed_invalid" | "complete" | "busy";
+
+export function isUpgradePackId(id: unknown): id is UpgradePackId {
+  return typeof id === "string" && Object.hasOwn(UPGRADE_PACK_BASELINES, id);
+}
 export const MODULES_INDEX_SIG = "modules.json.minisig";
 /** The directory inside an installed version that holds the signed index it was installed from. */
 export const SIGNED_DIR = ".signed";
@@ -34,11 +43,11 @@ export const LIMITS = {
 export const BUILT_IN_MODULE_IDS: readonly string[] = [
   "about", "agent-bus", "agent-config", "alarms", "approvals", "archive", "artifacts", "backend-upgrade",
   "background-terminals", "baidu-pan", "bookmarks", "browser", "claude-accounts", "claude-science", "codex-config",
-  "connection", "conversation", "delegations", "diff", "feature-profiles", "goal", "home", "intro", "jobs", "kimi-accounts",
+  "connection", "conversation", "delegations", "diff", "feature-profiles", "goal", "home", "input-refinement", "intro", "jobs", "kimi-accounts",
   "nci", "notes", "notifications", "onboarding", "owner-notify", "peers", "perf-log", "personal-assistants", "plan",
   "profile-import", "project-view", "projects", "proxy", "quick-chats", "quick-switch", "remote-access",
   "remote-copies", "running-agents", "runtime-packages", "runtimes", "safety-grants", "service-notify", "services", "session-search", "shell",
-  "side-chat", "status-capsule", "storage", "subagents", "task-service", "terminal", "thread-search",
+  "side-chat", "start", "status-capsule", "storage", "subagents", "task-service", "terminal", "thread-search",
   "updater", "usage", "users", "whatsapp", "workflows", "workspace", "world-clock",
 ];
 
@@ -270,6 +279,7 @@ export interface AvailablePackView {
 }
 
 export interface ModulePacksView {
+  migrations?: Partial<Record<UpgradePackId, PackMigration>>;
   appModuleApi: string;
   /** An unpackaged app that also trusts the module-pack test key. */
   testKey: boolean;
@@ -287,6 +297,7 @@ export interface ModulePacksView {
 export type ModulePacksRequest =
   | { op: "state" }
   | { op: "check" }
+  | { op: "seedBundled"; id: UpgradePackId }
   | { op: "install"; id: string; version?: string; allowOlder?: boolean }
   | { op: "remove"; id: string }
   // Requests only: main picks the file and asks the owner itself, so neither carries a path or an answer.
@@ -298,6 +309,7 @@ export type ModulePacksRequest =
 export interface ModulePacksBridge {
   state(): Promise<ModulePacksView>;
   check(): Promise<ModulePacksView>;
+  seedBundled?(id: UpgradePackId): Promise<ModulePacksView>;
   install(input: { id: string; version?: string; allowOlder?: boolean }): Promise<ModulePacksView>;
   remove(input: { id: string }): Promise<ModulePacksView>;
   installLocal(): Promise<ModulePacksView>;
@@ -315,6 +327,10 @@ export function parseModulePacksRequest(raw: unknown): ModulePacksRequest {
     case "installLocal":
       if (Object.keys(raw).length !== 1) throw new Error("invalid module pack request");
       return { op: raw.op };
+    case "seedBundled":
+      onlyKeys(raw, ["op", "id"], "module pack request");
+      if (!isUpgradePackId(raw.id)) throw new Error("invalid module pack request");
+      return { op: "seedBundled", id: raw.id };
     case "allowLocal":
       onlyKeys(raw, ["op", "allow"], "module pack request");
       if (typeof raw.allow !== "boolean") throw new Error("invalid module pack request");

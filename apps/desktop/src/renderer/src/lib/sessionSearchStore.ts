@@ -399,6 +399,15 @@ export function refreshDirFilter(epoch: string | null): void {
  * A task result: the turn through lib/jump, which opens another host's agent of the scope itself and notes the reading
  * position before that switch (so 「回到」 leads back across hosts; a missing turn shows its chip).
  */
-export function openTaskHit(hit: Pick<TaskHit, "connectionId" | "cutexSessionId" | "turnId">): Promise<FocusTurnResult> {
+/**
+ * Opens the hit's agent at that turn. `beside` (Ctrl/⌘ + click, middle click; owner 2026-11-27): the agent goes beside the
+ * focused one first, as a sidebar row's Ctrl/⌘ + click does (lib/workspaceEffects agentEffect), then the jump lands there.
+ */
+export async function openTaskHit(hit: Pick<TaskHit, "connectionId" | "cutexSessionId" | "turnId">, opts: { beside?: boolean } = {}): Promise<FocusTurnResult> {
+  if (opts.beside) {
+    // Loaded when used: workspaceEffects reaches the pane and window stores this module does not need otherwise.
+    const { agentEffect } = await import("./workspaceEffects");
+    agentEffect({ hostId: hit.connectionId, key: hit.cutexSessionId }, "beside").run();
+  }
   return jumpToTurn(hit.connectionId, hit.cutexSessionId, hit.turnId);
 }

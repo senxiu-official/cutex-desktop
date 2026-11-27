@@ -38,7 +38,7 @@ import { TurnSummary } from "./TurnSummary";
 import { fileChangesByTurn, type TurnChanges } from "../lib/turnSummary";
 import { useUiPrefs } from "../lib/prefs";
 import { formatAbsolute, formatAt, formatWhen, useClock, useNow } from "../lib/time";
-import { orderedEntries, type TimelineEntry, type TimelineState, type TurnView } from "../lib/timeline";
+import { orderedEntries, type RawItem, type TimelineEntry, type TimelineState, type TurnView } from "../lib/timeline";
 import { segmentEntries } from "../lib/workGroups";
 import { pairSentCalls } from "../lib/sentToolPairs";
 import { createTimelineWindow, recentEntries, visibleTurnPositions } from "../lib/timelineWindow";
@@ -367,7 +367,8 @@ function StrandedNote({ noteKey, sentAt }: { noteKey: "inputLedger.stranded.inte
 function TurnEntry(props: Parameters<typeof Entry>[0]) {
   return <MarkdownTurn.Provider value={props.entry.turnId ?? null}><Entry {...props} /></MarkdownTurn.Provider>;
 }
-const MemoEntry = memo(TurnEntry, (a, b) => a.entry === b.entry && a.pending === b.pending && a.nameOf === b.nameOf && a.sessionId === b.sessionId && a.readOnly === b.readOnly && a.actionable === b.actionable && a.dropped === b.dropped && a.foldRole === b.foldRole && sameFields(a.bar, b.bar) && a.changes?.signature === b.changes?.signature && a.reply === b.reply);
+const MemoEntry = memo(TurnEntry, (a, b) => a.entry === b.entry && a.pending === b.pending && a.nameOf === b.nameOf && a.sessionId === b.sessionId && a.readOnly === b.readOnly && a.actionable === b.actionable && a.dropped === b.dropped && a.foldRole === b.foldRole && sameFields(a.bar, b.bar) && a.changes?.signature === b.changes?.signature && a.reply === b.reply && sameItems(a.gathered, b.gathered));
+const sameItems = (a: readonly RawItem[] | undefined, b: readonly RawItem[] | undefined) => a === b || (!!a && !!b && a.length === b.length && a.every((x, i) => x === b[i]));
 
 /**
  * A live agent reply: its code blocks may carry `timeline.codeBlockAction` items (§22), on the agent's host.
@@ -396,7 +397,7 @@ function useSentImages(hostId: string, sessionId: string, id: string | null, led
   return useMemo(() => (extra?.length ? messageImages(extra as { type: string }[]) : undefined), [extra]);
 }
 
-function Entry({ entry: initial, ledgerRecord, ledgerRecords, ledgerPending, placeholder = false, pending, nameOf, sessionId, readOnly, actionable, bar, dropped, foldRole, changes, reply }: { /** 已回复 (handler side): shown in the reply's action row (design 040 step 10). */ reply?: DelegationAskRow; entry: TimelineEntry; ledgerRecord?: InputRecord; ledgerRecords?: readonly InputRecord[]; /** A ledger record drawn before its native item (LedgerPlaceholderRow): the body is only the preview, so the row keeps its timeline status and actions — nothing else offers them. */ placeholder?: boolean; ledgerPending?: LedgerOwnerOutbox; /** The user's send not in the thread yet (lib/outbox): the same row, dimmed, with its status line. */ pending?: OutboxEntry; nameOf: (id: string) => string; sessionId: string; readOnly: boolean; actionable: boolean; bar: ReplyBar | undefined; dropped: number; foldRole: FoldRole; /** The finished turn's file changes (turn summary; only with `bar`). */ changes?: TurnChanges }) {
+function Entry({ gathered, entry: initial, ledgerRecord, ledgerRecords, ledgerPending, placeholder = false, pending, nameOf, sessionId, readOnly, actionable, bar, dropped, foldRole, changes, reply }: { /** 已回复 (handler side): shown in the reply's action row (design 040 step 10). */ reply?: DelegationAskRow; /** A gathered tool row's items (lib/workGroups segmentEntries `gather`), this entry's first. */ gathered?: readonly RawItem[]; entry: TimelineEntry; ledgerRecord?: InputRecord; ledgerRecords?: readonly InputRecord[]; /** A ledger record drawn before its native item (LedgerPlaceholderRow): the body is only the preview, so the row keeps its timeline status and actions — nothing else offers them. */ placeholder?: boolean; ledgerPending?: LedgerOwnerOutbox; /** The user's send not in the thread yet (lib/outbox): the same row, dimmed, with its status line. */ pending?: OutboxEntry; nameOf: (id: string) => string; sessionId: string; readOnly: boolean; actionable: boolean; bar: ReplyBar | undefined; dropped: number; foldRole: FoldRole; /** The finished turn's file changes (turn summary; only with `bar`). */ changes?: TurnChanges }) {
   const entry = useStreamedEntry(sessionId, initial);
   const userDisplay = useMemo(() => {
     if (entry.kind !== "user") return null;
@@ -493,7 +494,7 @@ function Entry({ entry: initial, ledgerRecord, ledgerRecords, ledgerPending, pla
     case "sent":
       return <SentMessage entry={entry} name={nameOf(entry.to)} onContextMenu={menu("sent", entry.text)} />;
     case "tool":
-      return <ToolRow item={entry.item} sessionId={sessionId} />;
+      return <ToolRow item={entry.item} sessionId={sessionId} items={gathered} />;
     case "plan":
       return <PlanCard sessionId={sessionId} text={entry.text} streaming={entry.streaming} actionable={actionable && !readOnly} />;
     case "reasoning":
@@ -676,7 +677,7 @@ export function TimelineBody({ timeline, entries: suppliedEntries, version, sess
   }, [entries, activeTurn]);
   const reasoningShown = reasoningView !== "hidden";
   const segments = useMemo(
-    () => segmentEntries(entries, { reasoning: reasoningShown, interactions: timelineInteractions, standalone: (item) => !!toolRendererFor(item, tools)?.item.standalone?.(item) }),
+    () => segmentEntries(entries, { reasoning: reasoningShown, interactions: timelineInteractions, standalone: (item) => !!toolRendererFor(item, tools)?.item.standalone?.(item), gather: (item) => toolRendererFor(item, tools)?.item.gather?.(item) ?? null }),
     [entries, reasoningShown, timelineInteractions, tools],
   );
   const olderHistory = hiddenTurns > 0 || !!older?.cursor;
@@ -881,7 +882,7 @@ export function TimelineBody({ timeline, entries: suppliedEntries, version, sess
               {/* timeline.turnAttachment (§19.3): margin boxes beside the turn's first line, inline ones at the turn's end. */}
               {first && !readOnly && <TurnMargin sessionId={sessionId} turnId={first} />}
               {header && <TurnHeader turn={header} />}
-              <MemoEntry entry={entry} ledgerRecords={ledgerEnabled && entry.kind === "received" ? (carries.inputIds.size ? ledgerIndex.byItemId.get(entry.id)?.filter(record => !carries.inputIds.has(record.inputId)) : ledgerIndex.byItemId.get(entry.id)) : undefined} ledgerRecord={ledgerEnabled ? ownerRecordFor(ledger?.records, entry, ledgerIndex) : undefined} ledgerPending={ledgerEnabled && entry.kind === "user" ? o0.find(item => item.inputId === entry.clientId || item.inputId === entry.id) : undefined} nameOf={nameOf} sessionId={sessionId} readOnly={readOnly} actionable={entry.id === actionablePlan} bar={bars.get(entry.id)} dropped={entry.kind === "user" ? droppedFrom(entry.turnId) : 0} foldRole={foldRoleOf(entry)} changes={bars.has(entry.id) ? turnChanges.get(entry.turnId ?? "") : undefined} reply={inBar ? reply : undefined} />
+              <MemoEntry entry={entry} ledgerRecords={ledgerEnabled && entry.kind === "received" ? (carries.inputIds.size ? ledgerIndex.byItemId.get(entry.id)?.filter(record => !carries.inputIds.has(record.inputId)) : ledgerIndex.byItemId.get(entry.id)) : undefined} ledgerRecord={ledgerEnabled ? ownerRecordFor(ledger?.records, entry, ledgerIndex) : undefined} ledgerPending={ledgerEnabled && entry.kind === "user" ? o0.find(item => item.inputId === entry.clientId || item.inputId === entry.id) : undefined} nameOf={nameOf} sessionId={sessionId} readOnly={readOnly} actionable={entry.id === actionablePlan} bar={bars.get(entry.id)} dropped={entry.kind === "user" ? droppedFrom(entry.turnId) : 0} foldRole={foldRoleOf(entry)} changes={bars.has(entry.id) ? turnChanges.get(entry.turnId ?? "") : undefined} reply={inBar ? reply : undefined} gathered={seg.gathered?.map((g) => g.item)} />
               {entry.kind === "user" && carriedRows(ownerRecordFor(ledger?.records, entry, ledgerIndex)?.inputId)}
               {reply && !inBar && <RepliedBadge row={reply} />}
             </div>}

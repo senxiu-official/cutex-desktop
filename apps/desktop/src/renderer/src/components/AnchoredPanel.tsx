@@ -6,6 +6,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefO
 import { createPortal } from "react-dom";
 import { placePanel, type PanelSide } from "../lib/anchoredPanel";
 import { isImeComposing } from "../lib/ime";
+import { MenuLayersContext, menuLayerContains, useMenuLayers } from "../lib/menuLayers";
 import { useTrackOverlay } from "../lib/openOverlays";
 import { useOwnerWindow } from "../lib/ownerContext";
 import { resizeObserverFor } from "../lib/ownerWindow";
@@ -35,6 +36,8 @@ export function AnchoredPanel({
   const close = useRef(onClose);
   close.current = onClose;
   useTrackOverlay(true);
+  // Pick lists portalled out of the panel (Popover, EntitySelect) register here and count as inside it.
+  const layers = useMenuLayers();
 
   useLayoutEffect(() => {
     const fit = () => {
@@ -64,6 +67,7 @@ export function AnchoredPanel({
       if (panel.current?.contains(target) || anchor.current?.contains(target)) return;
       // Menus or dialogs opened from inside the panel do not close it.
       if ((target as Element).closest?.("[role=menu],dialog[open]")) return;
+      if (menuLayerContains(layers, target)) return;
       close.current(false);
     };
     const onKey = (e: KeyboardEvent) => {
@@ -89,7 +93,7 @@ export function AnchoredPanel({
       doc.removeEventListener("mousedown", onDown);
       doc.removeEventListener("keydown", onKey, true);
     };
-  }, [win, anchor]);
+  }, [win, anchor, layers]);
 
   return createPortal(
     <div
@@ -103,7 +107,7 @@ export function AnchoredPanel({
       style={{ left: pos?.left ?? -9999, top: pos?.top ?? -9999, maxHeight: "calc(100dvh - 32px)" }}
       className={`float fixed z-[160] flex max-w-[calc(100vw-32px)] flex-col overflow-hidden text-ui outline-none ${className}`}
     >
-      {children}
+      <MenuLayersContext.Provider value={layers}>{children}</MenuLayersContext.Provider>
     </div>,
     win.document.body,
   );

@@ -88,7 +88,6 @@ export function RequestCard({ hostId, assistant, request, host, readOnly }: { ho
         {field(t("personal-assistants.card.outcome"), r.outcome, "outcome")}
         {r.constraints && field(t("personal-assistants.card.constraints"), r.constraints, "constraints")}
         {r.detail && field(t("personal-assistants.card.detail"), r.detail, "detail")}
-        {field(t("personal-assistants.card.version"), t("personal-assistants.card.versionValue", { revision: r.revision, assistant: detail?.currentAssistantRevision ?? r.assistantRevision }), "version")}
       </dl>
       {detail?.needsReview && confirmable(r) && <div className="mt-1 text-caption/[inherit] text-warn" data-pa-needs-review="">{t("personal-assistants.card.needsReview")}</div>}
       {seatChanged && confirmable(r) && current?.sessionId && (

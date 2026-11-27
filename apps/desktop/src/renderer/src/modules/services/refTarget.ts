@@ -1,13 +1,11 @@
 // `ref.target` kind `service` (docs/desktop-modules.md §19.6): `cutex:service/<slug>[/path]` links in
-// agent replies open the service in the in-app browser tab on the right (lib/services.ts openInApp,
-// the same path as 服务 page → 打开), path kept. The side only shows the open agent's host, so a link of
-// another host switches the Shelf there; with the browser module off it falls back to the system browser like
-// the 服务 page does. A link of another host than the Shelf shows opens that host's agent first (lib/services
-// openOnItsHost; Director 2026-11-24, auto-switch); a host with no agent to open is unavailable.
+// agent replies open the service in the in-app browser tab on the right, path kept — the same open as 服务 page →
+// 打开 (lib/services.ts openServiceTab): a link of another host than the Shelf shows opens that host's agent first
+// (Director 2026-11-24, auto-switch; this machine's services too since owner 2026-11-28); the system browser only with
+// the browser module off. A host with no agent to open is unavailable (a toast says why).
 import { Server } from "lucide-react";
-import { openInApp, openOnItsHost, openServiceExternal, systemBrowserOpens } from "../../lib/services";
+import { openServiceTab } from "../../lib/services";
 import { isWorkerOn, showWorker } from "../../lib/serviceWorker";
-import { sideShowsHost } from "../../lib/sideServices";
 import type { CutexRef, RefLinkView, RefOpenResult } from "../slots";
 import { revealPath } from "./reveal";
 
@@ -32,13 +30,13 @@ export async function openServiceRef(ref: CutexRef, how: "auto" | "peek" | "page
   if (!target) return { status: "unavailable", reason: "bad-ref" };
   // A background service (no page): shown on the 服务 page, where it is controlled.
   if (isWorkerOn(ref.hostId, target.slug)) { showWorker(target.slug); return { status: "opened", where: "page" }; }
-  if (!sideShowsHost(ref.hostId)) return (await openOnItsHost(target.slug, ref.hostId, target.path)) === "opened" ? { status: "opened", where: "card" } : { status: "unavailable", reason: "host-offline" };
-  if (openInApp(target.slug, ref.hostId, target.path)) return { status: "opened", where: "card" };
-  // A remote host's service never goes to the system browser (lib/services systemBrowserOpens): the tab could not
-  // open, so the browser module is off (the caller says why).
-  if (!systemBrowserOpens(ref.hostId)) return { status: "unavailable", reason: "module-off" };
+  // The same open as 服务 page → 打开 (lib/services openServiceTab): its host's agent first when the Shelf shows another,
+  // the system browser only with the browser module off; what failed is said in a toast there.
   try {
-    return (await openServiceExternal({ slug: target.slug }, ref.hostId, target.path)) ? { status: "opened", where: "page" } : { status: "unavailable", reason: "module-off" };
+    const how = await openServiceTab({ slug: target.slug }, ref.hostId, target.path);
+    if (how === "opened") return { status: "opened", where: "card" };
+    if (how === "system") return { status: "opened", where: "page" };
+    return { status: "unavailable", reason: how === "browser-off" ? "module-off" : "host-offline" };
   } catch {
     return { status: "unavailable", reason: "gone" };
   }

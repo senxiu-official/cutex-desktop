@@ -445,8 +445,15 @@ describe("shared ledger statuses", () => {
   });
   it("counts down only the host deadline and never infers a new state at zero", () => {
     act(()=>root.render(h(DeliveryStatus,{delivery:delivery("held",1,{reason:"hostBusy",heldUntil:iso(Date.now()+3000)}),sessionId:"cutex.s1"})));
-    expect(el.textContent).toContain("queue.meta.countdown(3)"); act(()=>vi.advanceTimersByTime(5000));
-    expect(el.textContent).toContain("queue.meta.countdown(0)"); expect(el.querySelector('[data-state="held"]')).toBeTruthy();
+    expect(el.textContent).toContain("inputLedger.delivery.held.deadline(3)"); act(()=>vi.advanceTimersByTime(5000));
+    expect(el.textContent).toContain("inputLedger.delivery.held.deadline(0)"); expect(el.querySelector('[data-state="held"]')).toBeTruthy();
+  });
+  it("a hostBusy hold reads as one line with its deadline, never as an insert (owner 2026-11-28: 「稍后送达 49 秒后插话」)", () => {
+    act(()=>root.render(h(DeliveryStatus,{delivery:delivery("held",1,{reason:"hostBusy",heldUntil:iso(Date.now()+49000)}),sessionId:"cutex.s1"})));
+    const line = el.querySelector('[data-testid="delivery-status"]')!;
+    expect(line.textContent).toBe("inputLedger.delivery.held.hostBusy· inputLedger.delivery.held.deadline(49)");
+    expect(line.textContent).not.toContain("queue.meta.countdown");
+    expect(el.querySelector('[data-testid="delivery-countdown"]')!.getAttribute("data-tip")).toBe("inputLedger.delivery.held.deadlineHint");
   });
   it("shows lease elapsed minutes and requires a second click to release stale lease", async () => {
     act(()=>root.render(h(DeliveryStatus,{delivery:delivery("held",1,{reason:"eventLease",lease:{holder:"event",turnId:null,since:iso(Date.now()-180000),runtimeGeneration:1,inputIds:[],reconcile:{state:"stale"}}}),sessionId:"cutex.s1",hostId:"new-host"})));

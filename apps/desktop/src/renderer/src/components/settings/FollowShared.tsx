@@ -7,7 +7,8 @@ import type { GlobalSettings } from "../../../../shared/ipc";
 import { useI18n } from "../../i18n";
 import { settingsAnchorId } from "../../lib/settingsNav";
 import { useTargetApi } from "../../lib/targetHost";
-import { ErrorNote, Section, SettingRow, Toggle } from "./Form";
+import { useApp } from "../../store";
+import { ErrorNote, LinkRow, Section, SettingRow, Toggle } from "./Form";
 
 const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -39,6 +40,31 @@ export function FollowSharedSection() {
         <Toggle disabled={busy} checked={settings.codexConfigFollowShared} label={t("codex-config.plugins.follow")} onChange={(v) => void patch(v)} />
       </SettingRow>
       {error && <ErrorNote>{error}</ErrorNote>}
+    </Section>
+  );
+}
+
+/**
+ * 「Codex 跟随主机共享配置」 is set once, on 运行时配置 (FollowSharedSection; owner 2026-11-28, was on 插件); 插件 / MCP /
+ * 技能 / 钩子 show its state and a link there (settings audit 2026-10-15 #29). Hidden on a cutex whose settings lack the field.
+ */
+export function FollowSharedLink() {
+  const api = useTargetApi();
+  const { t } = useI18n();
+  const openSettings = useApp((s) => s.openSettings);
+  const [follow, setFollow] = useState<boolean | undefined>(undefined);
+  useEffect(() => {
+    api.getSettings().then((s) => setFollow(s.codexConfigFollowShared), () => setFollow(undefined));
+  }, []);
+  if (follow === undefined) return null;
+  return (
+    <Section>
+      <LinkRow agents="none" source="local"
+        label={t("codex-config.plugins.follow")}
+        hint={t(follow ? "codex-config.plugins.followOn" : "codex-config.plugins.followOff")}
+        link={t("codex-config.plugins.followLink")}
+        onClick={() => openSettings("runtime-config", { anchor: "sync" })}
+      />
     </Section>
   );
 }

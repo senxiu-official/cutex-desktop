@@ -12,7 +12,7 @@
 // `&browserNotice=certificate[,download,popup]`: main's one-click owner notices (ownerNotices.ts) on that page.
 import type { ModuleMock } from "../../dev/mockTypes";
 import { browserActivation, type BrowserTabView } from "../../../../shared/browser";
-import { DEFAULT_BROWSER_IDENTITY_ID, DEFAULT_BROWSER_IDENTITY_PREFS, type BrowserHistoryEntry, type BrowserIdentityBridge, type BrowserIdentityEvent, type BrowserIdentityPrefs, type BrowserIdentityView, type BrowserSavedLoginView } from "../../../../shared/browserIdentity";
+import { DEFAULT_BROWSER_IDENTITY_ID, DEFAULT_BROWSER_IDENTITY_PREFS, type BrowserHistoryEntry, type BrowserIdentityBridge, type BrowserIdentityEvent, type BrowserIdentityPrefs, type BrowserIdentityStorage, type BrowserIdentitySyncState, type BrowserIdentityView, type BrowserSavedLoginView } from "../../../../shared/browserIdentity";
 
 // `?browserIdentities` (浏览器身份, package 0 skeleton): an in-memory identities / history / prefs / passwords bridge for
 // the identity UI (switcher, settings, history page, password pages). The rest of the browser bridge is inert here.
@@ -53,6 +53,32 @@ export function mockBrowserIdentities(): BrowserIdentityBridge {
     });
   }
   const find = (id: string) => { const v = identities.find((i) => i.id === id); if (!v) throw new Error("unknown_identity"); return v; };
+  // 跨主机同步: two hosts (this one synced, the workstation at the limit), an identity another host deleted whose data
+  // is still here (清除 / 暂不), and a rename arriving from another host a moment later. `&browserSync=reasons` adds
+  // hosts without a switch (old cutex, not the owner's connection); `&browserSync=none` = a main without sync.
+  const syncMode = typeof location === "undefined" ? null : new URLSearchParams(location.search).get("browserSync");
+  const minutesAgo = (m: number) => new Date(now - m * 60_000).toISOString();
+  let sync: BrowserIdentitySyncState = {
+    hosts: [
+      { hostId: "local", state: "synced", lastSyncAt: minutesAgo(3) },
+      { hostId: "ssh-7a3f01c2", state: "limit", lastSyncAt: minutesAgo(42) },
+      ...(syncMode === "reasons" ? [{ hostId: "ssh-ae3e47b1", state: "unsupported" as const, lastSyncAt: null }, { hostId: "dev-preview", state: "notOwner" as const, lastSyncAt: null }] : []),
+    ],
+    cleanups: [{ identityId: "9c0d1e2f", name: "旧项目", color: "orange", deletionRevision: 7, hosts: ["local", "ssh-7a3f01c2"] }],
+  };
+  // Per identity: this computer, a configured SSH host, and a leftover of an SSH host removed before removals were tracked.
+  const MB = 1024 * 1024;
+  const stored: Record<string, BrowserIdentityStorage[]> = {};
+  const storageOf = (id: string) => (stored[id] ??= [
+    { hostId: "local", siteDataBytes: 13 * MB, cacheBytes: 173 * MB },
+    { hostId: "ssh-7a3f01c2", siteDataBytes: 4 * MB, cacheBytes: 38 * MB },
+    { hostId: "ssh-b79c33a8", siteDataBytes: 21 * MB, cacheBytes: null, removedHost: true },
+  ]);
+  const syncChanged = () => { emit({ kind: "sync", state: structuredClone(sync) }); return structuredClone(sync); };
+  if (syncMode !== "none" && typeof window !== "undefined") setTimeout(() => {
+    const school = identities.find((i) => i.id === "5e6f7a8b");
+    if (school) { Object.assign(school, { name: "学校 · 研究生", revision: school.revision + 1 }); changed(); }
+  }, 1500);
   return {
     state: async () => state(),
     create: async (name, color, initial) => { const v = view(Math.random().toString(16).slice(2, 10).padEnd(8, "0"), name, color, initial ?? [...name][0]!, 0); identities = [...identities, v]; changed(); return v; },
@@ -64,9 +90,11 @@ export function mockBrowserIdentities(): BrowserIdentityBridge {
     },
     setCurrent: async (id) => { find(id); current = id; return changed(); },
     signOut: async (id) => { find(id).openTabs = 0; changed(); },
+    signOutHost: async (id, hostId) => { find(id); storageOf(id).forEach((s) => { if (s.hostId === hostId) Object.assign(s, { siteDataBytes: 0, cacheBytes: 0 }); }); changed(); },
+    clearLeftover: async (id, hostId) => { find(id); stored[id] = storageOf(id).filter((s) => s.hostId !== hostId); changed(); },
     remove: async (id) => { if (id === DEFAULT_BROWSER_IDENTITY_ID) throw new Error("default_identity"); identities = identities.filter((i) => i.id !== id); if (current === id) current = DEFAULT_BROWSER_IDENTITY_ID; changed(); },
-    storage: async () => [{ hostId: "local", siteDataBytes: 13 * 1024 * 1024, cacheBytes: 173 * 1024 * 1024 }],
-    signedInSites: async () => ["outlook.office.com", "login.microsoftonline.com", "teams.microsoft.com"],
+    storage: async (id) => structuredClone(storageOf(id)),
+    signedInSites: async (id, hostId) => storageOf(id).some((s) => s.hostId === hostId && s.removedHost) ? [] : hostId === "local" ? ["outlook.office.com", "login.microsoftonline.com", "teams.microsoft.com"] : ["github.com", "outlook.office.com"],
     clearData: async (request) => {
       if (request.types.includes("history")) { history = history.filter((h) => h.identityId !== request.identityId); emit({ kind: "history", identityId: request.identityId, hostId: "local" }); }
     },
@@ -89,6 +117,15 @@ export function mockBrowserIdentities(): BrowserIdentityBridge {
     promptAnswer: async (promptId) => emit({ kind: "passwordPromptClosed", promptId }),
     fill: async (offerId) => emit({ kind: "fillOfferClosed", offerId }),
     dismissOffer: async (offerId) => emit({ kind: "fillOfferClosed", offerId }),
+    syncState: async () => { if (syncMode === "none") throw new Error("unsupported_operation"); return structuredClone(sync); },
+    setHostSync: async (hostId, enabled) => {
+      sync = { ...sync, hosts: sync.hosts.map((h) => h.hostId === hostId ? { ...h, state: enabled ? "syncing" : "off" } : h) };
+      return syncChanged();
+    },
+    confirmCleanup: async (identityId, deletionRevision) => {
+      sync = { ...sync, cleanups: sync.cleanups.filter((c) => !(c.identityId === identityId && c.deletionRevision === deletionRevision)) };
+      return syncChanged();
+    },
     subscribe: (listener) => { listeners.add(listener); return () => listeners.delete(listener); },
   };
 }

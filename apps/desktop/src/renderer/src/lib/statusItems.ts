@@ -12,6 +12,16 @@ import type { ResolvedPlacement } from "./statusSurfaces";
 export const inBar = (p: StatusPlace) => p === "bar" || p === "both";
 export const inCapsule = (p: StatusPlace) => p === "capsule" || p === "both";
 
+/**
+ * The status row's checkbox (会话 → 输入, owner 2026-11-28): puts the item into the row or takes it out. While the
+ * capsule is on the capsule side is kept (capsule ⇄ both, off ⇄ bar). With it off a capsule-only item already shows in
+ * the row (statusSurfaces capsuleOff), so ticking keeps the saved place and unticking hides it.
+ */
+export function rowPlace(p: StatusPlace, on: boolean, capsuleIsOff: boolean): StatusPlace {
+  if (on) return p === "off" ? "bar" : p === "capsule" && !capsuleIsOff ? "both" : p;
+  return !capsuleIsOff && inCapsule(p) ? "capsule" : "off";
+}
+
 /** The capsule … menu's check: puts the item into the capsule or takes it out, keeping the bar side. */
 export function capsuleToggle(p: StatusPlace): StatusPlace {
   switch (p) {

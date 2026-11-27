@@ -120,6 +120,55 @@ describe("main browser identity lifecycle", () => {
     expect(persisted).toMatchObject({ pendingPartitions: [], tombstones: [{ id, revision: 2 }] });
   });
 
+  it("signs out of one configured host only and refuses a host that is not configured", async () => {
+    const f = fixture(), { id } = await f.ids.create("Work", "teal");
+    retainedFile(f.userData, id); retainedFile(f.userData, id, "ssh-fixture");
+    const local = f.sessionFor(f.ids.partition(id, "local")), remote = f.sessionFor(f.ids.partition(id, "ssh-fixture"));
+    await f.ids.signOutHost(id, "ssh-fixture");
+    expect(f.options.close).toHaveBeenCalledWith(id, "ssh-fixture");
+    expect(f.options.revoke).toHaveBeenCalledWith(browserIdentityPartition(id, "ssh-fixture"));
+    expect(f.options.revoke).not.toHaveBeenCalledWith(browserIdentityPartition(id, "local"));
+    for (const call of [remote.clearData, remote.clearStorageData, remote.clearCache, remote.clearAuthCache]) expect(call).toHaveBeenCalledOnce();
+    for (const call of [local.clearData, local.clearStorageData, local.clearCache, local.clearAuthCache]) expect(call).not.toHaveBeenCalled();
+    expect(f.options.forgetAdmissions).toHaveBeenCalledWith(id, "ssh-fixture");
+    expect(f.ids.has(id)).toBe(true);
+    await expect(f.ids.signOutHost(id, "ssh-gone")).rejects.toThrow("stale_connection");
+  });
+
+  it("clears only the chosen host, and 所有主机 skips a removed host's leftover", async () => {
+    const f = fixture(), { id } = await f.ids.create("Work", "teal");
+    retainedFile(f.userData, id); retainedFile(f.userData, id, "ssh-fixture");
+    const leftover = retainedFile(f.userData, id, "ssh-gone");
+    const local = f.sessionFor(f.ids.partition(id, "local")), remote = f.sessionFor(f.ids.partition(id, "ssh-fixture"));
+    await f.ids.clearData({ identityId: id, hostId: "ssh-fixture", types: ["cache"] });
+    expect(remote.clearData).toHaveBeenCalledOnce();
+    expect(local.clearData).not.toHaveBeenCalled();
+    await f.ids.clearData({ identityId: id, hostId: "all", types: ["cache"] });
+    expect(local.clearData).toHaveBeenCalledOnce();
+    expect(remote.clearData).toHaveBeenCalledTimes(2);
+    expect(f.sessionFor(browserIdentityPartition(id, "ssh-gone")).clearData).not.toHaveBeenCalled();
+    expect(existsSync(leftover)).toBe(true);
+  });
+
+  it("measures a removed host's leftover on disk and clears it only through clearLeftover", async () => {
+    const f = fixture(), { id } = await f.ids.create("Work", "teal");
+    retainedFile(f.userData, id);
+    const leftover = retainedFile(f.userData, id, "ssh-gone");
+    const storage = await f.ids.storage(id);
+    expect(storage).toContainEqual({ hostId: "ssh-gone", siteDataBytes: 5, cacheBytes: null, removedHost: true });
+    expect(storage.find((s) => s.hostId === "local")).not.toHaveProperty("removedHost");
+    expect(f.sessionFor(browserIdentityPartition(id, "ssh-gone")).getCacheSize).not.toHaveBeenCalled();
+    await expect(f.ids.clearLeftover(id, "ssh-fixture")).rejects.toThrow("host_configured");
+    await f.ids.clearLeftover(id, "ssh-gone");
+    expect(existsSync(leftover)).toBe(false);
+    expect(f.options.forgetAdmissions).toHaveBeenCalledWith(id, "ssh-gone");
+    expect(f.options.dropHost).toHaveBeenCalledWith("ssh-gone", id);
+    expect((await f.ids.storage(id)).map((s) => s.hostId)).toEqual(["local"]);
+    const persisted = JSON.parse(readFileSync(join(f.userData, "browser-identities.json"), "utf8"));
+    expect(persisted.pendingPartitions).toEqual([]);
+    await expect(f.ids.clearLeftover(id, "ssh-gone")).rejects.toThrow("browser_identity_unavailable");
+  });
+
   it("removes all profiles of a removed host and keeps the same profile on other hosts", async () => {
     const f = fixture(), { id } = await f.ids.create("Work", "teal");
     const local = retainedFile(f.userData, id), remote = retainedFile(f.userData, id, "ssh-fixture");
@@ -197,6 +246,11 @@ describe("browser identity admission", () => {
     loopback.set("ssh-fixture", true, NAMED);
     new BrowserSitePermissionStore("fixture", permissionIO).forget({ pool: "owner", origin: site, browserIdentityId: NAMED });
     new BrowserCertificateExceptionStore("fixture", certificateIO).forget(NAMED);
+    const perHost = new BrowserDesktopLoopbackStore("fixture", loopbackIO);
+    perHost.set("local", true, NAMED);
+    perHost.forgetIdentity(NAMED, "local"); // one host's 退出登录: that host only
+    expect(perHost.enabled("local", NAMED)).toBe(false);
+    expect(perHost.enabled("ssh-fixture", NAMED)).toBe(true);
     new BrowserDesktopLoopbackStore("fixture", loopbackIO).forgetIdentity(NAMED);
     expect(new BrowserSitePermissionStore("fixture", permissionIO).get("owner", site, "notifications")).toBe(true);
     expect(new BrowserCertificateExceptionStore("fixture", certificateIO).matches("local", site, fp)).toBe(true);

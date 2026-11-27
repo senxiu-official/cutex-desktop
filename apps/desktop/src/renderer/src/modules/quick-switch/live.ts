@@ -11,7 +11,7 @@ import { shortcutKeyUsed } from "../../lib/browserCapture";
 import { isMac } from "../../lib/openModifiers";
 import { isFullWindowPage } from "../../lib/paneKinds";
 import { usePanes } from "../../lib/paneStore";
-import { openServiceExternal } from "../../lib/services";
+import { openServiceTab } from "../../lib/services";
 import { sideShowsHost } from "../../lib/sideServices";
 import { openRef, screenOf } from "../../lib/workspaces";
 import { agentEffect, refEffect } from "../../lib/workspaceEffects";
@@ -99,7 +99,7 @@ async function openItem(ctx: ModuleContext, item: QsItem, beside: boolean): Prom
   const outcome = await runOpen(itemEffect(item, beside, failed).plan, {
     panesOpen: (kind, params, opts) => ctx.services.panes.open(kind, params, opts),
     refsOpen: (ref) => ctx.services.refs.open(ref),
-    openServiceExternal: async (slug, hostId) => void (await openServiceExternal({ slug }, hostId)),
+    openServiceTab: async (slug, hostId) => void (await openServiceTab({ slug }, hostId)),
     openShelfPage: (pageId) => showShelfPage(pageId),
     openRef: (ref, mode, opts) => openRef(ref, mode, opts),
   });

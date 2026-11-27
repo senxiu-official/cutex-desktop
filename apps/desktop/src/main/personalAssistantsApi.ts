@@ -7,20 +7,32 @@ import type { DaemonApi } from "../shared/ipc";
 import {
   PA_PATH, paAgendaQuery, paCalendarBody, paCalendarClearBody, paCancelBody, paConfirmBody, paCreateBody, paId, paListQuery, paNotesQuery,
   paOwnerRequestsQuery, paRequestsQuery, paRunsQuery, paSeqQuery, paTemplateBody, paTemplateStopBody, paTemplatesQuery, paUpdateBody,
-  readPaAgenda, readPaAudit, readPaCalendar, readPaList, readPaNotes, readPaRequestDetail, readPaRequestPage, readPaRequestReply, readPaRuns,
+  readPaCreateOptions, readPaAgenda, readPaAudit, readPaCalendar, readPaList, readPaNotes, readPaRequestDetail, readPaRequestPage, readPaRequestReply, readPaRuns,
   readPaTemplateReply, readPaTemplates, readPaView,
 } from "../shared/personalAssistants";
+
+import { paScopeRulesBody, readPaScopeRules, paBriefScheduleBody, readPaBrief, paReminderCreateBody, readPaReminder, ownerPinCreateBody, readCreatedOwnerPin } from "../shared/personalAssistantsPhase1";
 
 const one = (id: string) => `${PA_PATH}/${encodeURIComponent(paId(id))}`;
 const request = (id: string, requestId: string) => `${one(id)}/requests/${encodeURIComponent(paId(requestId))}`;
 const template = (id: string, key: string) => `${one(id)}/templates/${encodeURIComponent(paId(key))}`;
 
 export type PersonalAssistantsMethods =
-  | "paList" | "paGet" | "paCreate" | "paUpdate" | "paAgenda" | "paAudit" | "paRequests" | "paRequest" | "paConfirm" | "paCancel"
+  | "paScopeRules" | "paScopeRulesSave" | "paBrief" | "paBriefSchedule" | "paReminderCreate" | "ownerPinCreate"
+  | "paCreateOptions" | "paList" | "paGet" | "paCreate" | "paUpdate" | "paAgenda" | "paAudit" | "paRequests" | "paRequest" | "paConfirm" | "paCancel"
   | "paOwnerRequests" | "paNotes" | "paTemplates" | "paTemplateConfirm" | "paTemplateStop" | "paTemplateRuns" | "paCalendar" | "paCalendarImport" | "paCalendarClear";
 
 export function personalAssistantsApi(client: CutexClient): Pick<DaemonApi, PersonalAssistantsMethods> {
   return {
+    async paScopeRules(id) { return readPaScopeRules(await client.request("GET", `${one(id)}/scope-rules`, { background: true })); },
+    async paScopeRulesSave(id, body) { return readPaScopeRules(await client.request("PUT", `${one(id)}/scope-rules`, { body: paScopeRulesBody(body) })); },
+    async paBrief(id) { return readPaBrief(await client.request("GET", `${one(id)}/brief`, { background: true })); },
+    async paBriefSchedule(id, body) { return readPaBrief(await client.request("PUT", `${one(id)}/brief`, { body: paBriefScheduleBody(body) })); },
+    async paReminderCreate(id, body) { return readPaReminder(await client.request("POST", `${one(id)}/reminders`, { body: paReminderCreateBody(body) })); },
+    async ownerPinCreate(body) { return readCreatedOwnerPin(await client.request("POST", "/v2/owner-pins", { body: ownerPinCreateBody(body) })); },
+    async paCreateOptions() {
+      return readPaCreateOptions(await client.request("GET", `${PA_PATH}/create-options`, { background: true }));
+    },
     async paList(q) {
       return readPaList(await client.request("GET", PA_PATH, { query: paListQuery(q), background: true }));
     },

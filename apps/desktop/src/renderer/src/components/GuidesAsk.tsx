@@ -7,6 +7,7 @@ import { useI18n } from "../i18n";
 import { answerGuides, skipAllGuides, useHostSkippedBefore } from "../lib/guides";
 import { useTrackOverlay } from "../lib/openOverlays";
 import { Button } from "./settings/Form";
+import { LanguageStep } from "./LanguageChoice";
 
 /** The question's two buttons (inline: inside a tip). */
 export function GuidesAskButtons({ version, onSkip }: { version: string | null; onSkip?: () => void }) {
@@ -35,7 +36,10 @@ export function GuidesAskButtons({ version, onSkip }: { version: string | null; 
   );
 }
 
-/** Before the first automatic onboarding: a small card, not the flow. */
+/**
+ * Before the first automatic onboarding: a small card, not the flow, with the UI language (onboarding v3, owner
+ * 2026-11-26: the first run keeps the question and the language; the rest is 开始使用 and 自定义桌面).
+ */
 export function GuidesAsk({ version }: { version: string | null }) {
   const { t } = useI18n();
   useTrackOverlay(true);
@@ -44,9 +48,13 @@ export function GuidesAsk({ version }: { version: string | null }) {
   useOnboardingInteraction(box, skip);
   return (
     <div className="fixed inset-0 z-[150] flex items-center justify-center bg-black/35 p-4">
-      <div ref={box} tabIndex={-1} role="dialog" aria-modal aria-label={t("onboarding.guide.ask.title")} data-guides-ask="" className="w-[30rem] max-w-full rounded-2xl border border-border bg-surface p-6 shadow-2xl">
+      <div ref={box} tabIndex={-1} role="dialog" aria-modal aria-label={t("onboarding.guide.ask.title")} data-guides-ask="" className="flex max-h-[90vh] w-[34rem] max-w-full flex-col overflow-y-auto rounded-2xl border border-border bg-surface p-6 shadow-2xl">
         <h2 className="text-display text-foreground">{t("onboarding.guide.ask.title")}</h2>
         <p className="mt-2 whitespace-pre-line text-ui text-muted">{t("onboarding.guide.ask.body")}</p>
+        <div className="mt-4 flex flex-col" data-guides-language="">
+          <h3 className="text-ui font-semibold text-foreground">{t("onboarding.language.title")}</h3>
+          <LanguageStep />
+        </div>
         <div className="mt-5 flex justify-end">
           <GuidesAskButtons version={version} />
         </div>

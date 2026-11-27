@@ -17,12 +17,15 @@ export async function route(r: BrowserIdentityRequest, s: BrowserIdentityService
   const ids = () => s.identities ?? unsupported();
   const history = () => s.history ?? unsupported();
   const passwords = () => s.passwords ?? unsupported();
+  const sync = () => s.sync ?? unsupported();
   switch (r.op) {
     case "state": return ids().state();
     case "create": return ids().create(r.name, r.color, r.initial);
     case "update": return ids().update(r.id, r.expectedRevision, { name: r.name, color: r.color, initial: r.initial });
     case "setCurrent": return ids().setCurrent(r.id);
     case "signOut": return ids().signOut(r.id);
+    case "signOutHost": return ids().signOutHost(r.id, r.hostId);
+    case "clearLeftover": return ids().clearLeftover(r.id, r.hostId);
     case "remove": return ids().remove(r.id);
     case "storage": return ids().storage(r.id);
     case "signedInSites": return ids().signedInSites(r.id, r.hostId);
@@ -53,5 +56,8 @@ export async function route(r: BrowserIdentityRequest, s: BrowserIdentityService
     case "promptAnswer": return passwords().answer(r.promptId, r.choice);
     case "fill": return passwords().fill(r.offerId, r.loginId);
     case "dismissOffer": return passwords().dismiss(r.offerId);
+    case "syncState": return sync().state();
+    case "setHostSync": return sync().setHostSync(r.hostId, r.enabled);
+    case "confirmCleanup": return sync().confirmCleanup(r.identityId, r.deletionRevision);
   }
 }

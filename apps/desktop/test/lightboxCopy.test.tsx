@@ -83,7 +83,7 @@ describe("the enlarged view", () => {
 
   it("has a toolbar with 复制图片 / 图片另存为… / 关闭; copy writes the image and says so", async () => {
     const bar = zoom()!.querySelector("[data-image-zoom-toolbar]")!;
-    expect([...bar.querySelectorAll("button")].map((b) => b.getAttribute("aria-label"))).toEqual(["image.copy", "image.save", "image.close"]);
+    expect([...bar.querySelectorAll("button")].map((b) => b.getAttribute("aria-label"))).toEqual(["image.copy", "imageEdit.editAttach", "image.save", "image.close"]);
     expect(bar.querySelector("[data-image-zoom-copy]")!.getAttribute("title")).toBe("image.copy (Ctrl+C)");
     act(() => bar.querySelector<HTMLElement>("[data-image-zoom-copy]")!.click());
     await flush();

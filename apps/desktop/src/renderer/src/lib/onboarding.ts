@@ -2,7 +2,7 @@
 // project are, the first Profile, the wording preset) and, once per desktop version, that version's
 // changelog summary. Per device (localStorage, like the changelog's seen version); Settings → 关于 turns the
 // 新功能 dialog off / on and replays either one. components/OnboardingDialog renders what `pending` says.
-import { useSyncExternalStore } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import { compareVersions, parseVersion } from "../../../shared/binaryUpdate";
 import type { ChangelogRelease } from "../../../shared/changelog";
 
@@ -29,8 +29,8 @@ export interface OnboardingState {
 
 /** `auto`: opened by itself at start (not a replay) — the first one on a device asks 「要看引导和提示吗？」 first (lib/guides). */
 export type OnboardingView =
-  | { kind: "intro"; /** Testing switch: record this build and show `whatsNew` (a version) afterwards. */ test?: { build: string; whatsNew: string | null }; auto?: boolean; /** The card to open at (回到引导). */ at?: string }
-  | { kind: "whatsNew"; version: string; auto?: boolean; at?: string };
+  | { kind: "intro"; /** Testing switch: record this build and show `whatsNew` (a version) afterwards. */ test?: { build: string; whatsNew: string | null }; auto?: boolean }
+  | { kind: "whatsNew"; version: string; auto?: boolean };
 
 const DEFAULTS: OnboardingState = { doneRevision: 0, whatsNew: true, lastWhatsNew: null, testEveryBuild: false, lastTestBuild: null };
 
@@ -66,20 +66,39 @@ function save(next: OnboardingState): void {
   emit();
 }
 
-// The bundled changelog's releases, provided by the about module (it owns the bundled copy;
-// modules/about/index.ts) so the shell dialog and the onboarding card need no module import.
-let releases: readonly ChangelogRelease[] = [];
+const EMPTY_RELEASES: readonly ChangelogRelease[] = [];
+let releases: readonly ChangelogRelease[] | undefined;
+let loadingReleases: Promise<readonly ChangelogRelease[]> | undefined;
 
 export function provideReleases(list: readonly ChangelogRelease[]): void {
   releases = list;
+  emit();
 }
 
-export function bundledReleases(): readonly ChangelogRelease[] {
-  return releases;
+export function loadBundledReleases(): Promise<readonly ChangelogRelease[]> {
+  if (releases) return Promise.resolve(releases);
+  return (loadingReleases ??= import("../modules/about/changelog").then(({ BUNDLED_CHANGELOG }) => {
+    if (!releases) provideReleases(BUNDLED_CHANGELOG.releases);
+    return releases ?? EMPTY_RELEASES;
+  }).finally(() => { loadingReleases = undefined; }));
+}
+
+export function useBundledReleases(): readonly ChangelogRelease[] {
+  useEffect(() => { void loadBundledReleases().catch(() => {}); }, []);
+  return useSyncExternalStore(subscribe, () => releases ?? EMPTY_RELEASES);
 }
 
 export function getOnboarding(): OnboardingState {
   return state;
+}
+
+/** Settings sync (lib/settingsSync): the introduction and 「新功能」 seen on another device count here too. */
+export function setOnboardingSeen(seen: { doneRevision?: number; lastWhatsNew?: string | null }): void {
+  save({ ...state, ...seen });
+}
+
+export function subscribeOnboarding(listener: () => void): () => void {
+  return subscribe(listener);
 }
 
 export function useOnboarding(): OnboardingState {
@@ -123,41 +142,6 @@ export function testView(s: OnboardingState, build: string | null, listed: reado
 /** Opens a view (关于 → 重新看一遍 / 这个版本的新功能, or the automatic start). */
 export function openOnboarding(view: OnboardingView): void {
   open = view;
-  aside = null;
-  emit();
-}
-
-/** The flow stepped aside for one of its actions (lib/guideActions): 「回到引导」 reopens it at that card. */
-let aside: OnboardingView | null = null;
-
-export function useOnboardingAside(): OnboardingView | null {
-  return useSyncExternalStore(subscribe, () => aside);
-}
-
-/**
- * A card's action (试一试 …) runs: the flow closes the way 关闭 does (counted as seen; the testing switch's
- * 新功能 waits for the way back), and 「回到引导」 can bring it back at `step`.
- */
-export function stepAsideOnboarding(version: string | null, step: string): void {
-  const view = open;
-  if (!view) return;
-  const back: OnboardingView = view.kind === "intro" ? { kind: "intro", at: step } : { kind: "whatsNew", version: view.version, at: step };
-  if (view.kind === "intro" && view.test) {
-    open = null;
-    save({ ...state, doneRevision: ONBOARDING_REVISION, lastTestBuild: view.test.build });
-  } else closeOnboarding(version);
-  aside = back;
-  emit();
-}
-
-/** 「回到引导」: the flow again at the card it left from. */
-export function resumeOnboarding(): void {
-  if (aside) openOnboarding(aside);
-}
-
-/** The pill's ✕: no way back (Settings → 帮助 still replays it). */
-export function dismissOnboardingAside(): void {
-  aside = null;
   emit();
 }
 

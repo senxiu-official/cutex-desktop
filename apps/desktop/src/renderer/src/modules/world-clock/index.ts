@@ -25,6 +25,8 @@ export function worldClockDefaults(_locale: string): WidgetSettings {
 
 export default defineModule({
   id: "world-clock",
+  // Hard dependency (module-dependencies-20261126): without it the module's main use fails.
+  requires: { modules: ["home"] },
   titleKey: "world-clock.title",
   descriptionKey: "world-clock.description",
   contributes: {

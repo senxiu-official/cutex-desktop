@@ -17,6 +17,7 @@ import { useApp } from "../store";
 import { hostData, scopedHostData, type HostData, type HostLook } from "./hostScope";
 import { onHostReset } from "./hostSwitch";
 import { useHostScope, useScopedHostData } from "./useHostScope";
+import { useHostAttentionVersion } from "./hostAttention";
 
 function useSource() {
   const hosts = useApp((s) => s.hosts);
@@ -129,7 +130,9 @@ export function useOutOfScopeAttention(): number {
   const hosts = useApp((s) => s.hosts);
   const notes = useOwnerNotify((s) => s.byId);
   const others = useOwnerNotify((s) => s.others);
-  return useMemo(() => outOfScopeCount(attentionByHost({ sessions: useApp.getState().sessions, approvals, features, byHost, hosts }, notes, others), scope.isInScope), [scope, meta, approvals, features, byHost, hosts, notes, others]); // eslint-disable-line react-hooks/exhaustive-deps -- `meta` stands for `sessions`
+  // Hosts with cross-device read state count from the person's state there (lib/shell attentionByHost).
+  const hostState = useHostAttentionVersion();
+  return useMemo(() => outOfScopeCount(attentionByHost({ sessions: useApp.getState().sessions, approvals, features, byHost, hosts }, notes, others), scope.isInScope), [scope, meta, approvals, features, byHost, hosts, notes, others, hostState]); // eslint-disable-line react-hooks/exhaustive-deps -- `meta` stands for `sessions`
 }
 
 /** Daemon calls for an entry of `hostId`: the focus host's `api`, another host's `apiFor` binding. */

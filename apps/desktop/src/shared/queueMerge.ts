@@ -9,7 +9,15 @@
 // shifted to their place in the merged text. Then every non-text item (images, local images, skills,
 // mentions) in queue order; a skill / mention named twice is kept once.
 
-import type { UserInputSubmitResult } from "@cutex-desktop/protocol";
+import type { QueueItem, UserInputSubmitResult } from "@cutex-desktop/protocol";
+
+/** A queued message's own text, byte for byte, including the separators around empty text parts. */
+export function queueItemText(item: Pick<QueueItem, "input">): string {
+  return (item.input as { type: string; text?: string }[])
+    .filter((part) => part.type === "text")
+    .map((part) => part.text ?? "")
+    .join("\n");
+}
 
 export const QUEUE_MERGE_SEPARATOR = "\n\n";
 /**

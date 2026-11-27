@@ -68,12 +68,12 @@ describe("prefs and choices", () => {
     expect(clampNowHeight(333.4)).toBe(333);
   });
 
-  it("侧栏布局 is a first-contact choice (its own onboarding card), recommended 花名册", () => {
+  it("侧栏布局 is a first-contact choice (in 自定义桌面, the guide), recommended 花名册", () => {
     const c = FIRST_CHOICES.find((x) => x.id === "sidebarLayout")!;
     expect(c.recommended).toBe("roster");
     expect(c.options.map((o) => o.value)).toEqual(["roster", "now-all"]);
     expect(availableChoices(["sidebarLayout"]).map((x) => x.id)).toEqual(["sidebarLayout"]);
-    expect(readFileSync("src/renderer/src/components/OnboardingFlow.tsx", "utf8")).toMatch(/sidebar: \{[^}]*choices: \["sidebarLayout"\]/);
+    expect(readFileSync("src/renderer/src/modules/start/CustomizePanel.tsx", "utf8")).toContain('ChoiceList ids={["sidebarLayout"');
   });
 });
 
@@ -87,7 +87,9 @@ describe("wiring (source)", () => {
   it("layout B: 现在, the divider, 全部 with its filter, then the same roster in compact rows; no icon row of its own", () => {
     const s = src("components/Sidebar.tsx");
     const b = s.slice(s.indexOf("{nowAll ? ("), s.indexOf(") : (", s.indexOf("{nowAll ? (")));
-    expect(b).toMatch(/<NowSection [^>]*notice=\{<RestoreBanner compact \/>\}/);
+    expect(b).toMatch(/<NowSection [^>]*notice=\{restoreNotice\}/);
+    // The abnormal-shutdown notice folds away while the sidebar search has text (owner 2026-11-27).
+    expect(s).toContain("const restoreNotice = query.trim() ? null : <RestoreBanner compact />;");
     expect(b.indexOf("<NowSection")).toBeLessThan(b.indexOf("<NowSplitter"));
     expect(b.indexOf("<NowSplitter")).toBeLessThan(b.indexOf('searchField(t("sidebar.all.filter")'));
     expect(b).not.toMatch(/TopNav|TitleBarEntries/);

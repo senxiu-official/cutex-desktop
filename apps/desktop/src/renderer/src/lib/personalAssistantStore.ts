@@ -10,7 +10,7 @@
 // (`onPaChanged`): only the named assistant and areas are read again, and `ticks` tells open cards (今日, notes, history,
 // 定期任务) to read theirs. No polling on those hosts.
 import { create } from "zustand";
-import type { PaAssistant, PaCancelInput, PaChange, PaConfig, PaConfirmInput, PaList, PaRequest, PaView } from "../../../shared/personalAssistants";
+import type { PaAssistant, PaCancelInput, PaChange, PaConfig, PaConfirmInput, PaList, PaPermissionMode, PaRequest, PaView } from "../../../shared/personalAssistants";
 import { hostApi, hostDataNow } from "./hostLists";
 import { capabilitiesOf, newActionId, paFeatures, type PaHostFeatures } from "./personalAssistants";
 
@@ -20,8 +20,8 @@ export const POLL_MS = 30_000;
 /** Newest requests read per assistant on an owner-views host (all the ones waiting for the owner come on their own). */
 export const RECENT_REQUESTS = 100;
 
-/** What a change event names (cutex: assistant / notes / calendar / requests, plus audit; later r296: templates). */
-export type PaArea = "assistant" | "notes" | "calendar" | "requests" | "audit" | "templates";
+/** What a change event names (cutex: assistant / notes / calendar / requests, plus audit; later r296: templates; phase 1: brief). */
+export type PaArea = "assistant" | "notes" | "calendar" | "requests" | "audit" | "templates" | "brief";
 
 export interface HostPa {
   /** The host's instance id as its list reports it (`homeInstanceId`). */
@@ -94,8 +94,10 @@ async function readRecentRequests(hostId: string, id: string): Promise<{ items: 
 /** The view of an r296 list row (kept detailed when the detail was read before). */
 function rowView(a: PaAssistant, list: PaList, prior: PaView | undefined, f: PaHostFeatures): PaView {
   const status = list.status?.[a.id] ?? { availability: "provisioning", activeProfile: null };
-  if (prior && !prior.fromList) return { ...prior, assistant: a, availability: status.availability, activeProfile: status.activeProfile };
-  return { assistant: a, overlaps: [], moreOverlaps: false, availability: status.availability, activeProfile: status.activeProfile, capabilities: capabilitiesOf(f), fromList: true };
+  // r299 rows carry the evaluated capability details too (absent on older hosts: unknown, kept as they were).
+  const details = status.capabilityDetails !== undefined ? { capabilityDetails: status.capabilityDetails } : {};
+  if (prior && !prior.fromList) return { ...prior, assistant: a, availability: status.availability, activeProfile: status.activeProfile, ...details };
+  return { assistant: a, overlaps: [], moreOverlaps: false, availability: status.availability, activeProfile: status.activeProfile, capabilities: capabilitiesOf(f), fromList: true, ...details };
 }
 
 const inFlight = new Map<string, Promise<void>>();
@@ -189,7 +191,7 @@ function takeView(hostId: string, view: PaView, requests?: { items: PaRequest[];
 
 // ---- change events (r296) ----
 
-const AREAS: ReadonlySet<string> = new Set<PaArea>(["assistant", "notes", "calendar", "requests", "audit", "templates"]);
+const AREAS: ReadonlySet<string> = new Set<PaArea>(["assistant", "notes", "calendar", "requests", "audit", "templates", "brief"]);
 /** The fields of a `cutex/personalAssistant/changed` event this app uses; null when malformed. */
 export function readChange(params: unknown): { assistantId: string; areas: PaArea[]; requestId: string | null } | null {
   const p = params as { assistantId?: unknown; areas?: unknown; requestId?: unknown } | null;
@@ -247,8 +249,9 @@ async function flush(hostId: string, id: string, areas: ReadonlySet<PaArea>): Pr
  * Creates an assistant. `actionId` is the caller's, kept until the outcome is known (a lost reply is retried with the
  * same id and the same config: cutex returns the same binding, never a second assistant).
  */
-export async function createAssistant(hostId: string, actionId: string, config: PaConfig): Promise<PaView> {
-  const view = await hostApi(hostId).paCreate({ actionId, config });
+export async function createAssistant(hostId: string, actionId: string, config: PaConfig, permissionMode?: PaPermissionMode): Promise<PaView> {
+  // r299 `personal-assistants-agent-v1`: the permission mode the agent starts in (omitted: the host's default).
+  const view = await hostApi(hostId).paCreate({ actionId, config, ...(permissionMode ? { permissionMode } : {}) });
   takeView(hostId, view, { items: [], more: false });
   return view;
 }

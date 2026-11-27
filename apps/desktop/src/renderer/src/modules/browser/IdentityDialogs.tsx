@@ -1,5 +1,5 @@
-// 浏览器身份 confirmations (design browser-profiles v3 §3): 清除浏览数据 (what, which sites, history range) and the
-// whole-identity 退出所有登录 / 删除 confirm. Portals into the owner window's document, like the module's other popovers.
+// 浏览器身份 confirmations (design browser-profiles v3 §3): 清除浏览数据 (which host, what, which sites, history range),
+// the whole-identity 退出所有登录 / 删除 confirm and the one-host 退出登录 / removed host's 清除 confirm. Portals into the owner window's document, like the module's other popovers.
 import { useEffect, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
@@ -47,20 +47,27 @@ function TypeRow({ checked, onChange, label, hint }: { checked: boolean; onChang
   );
 }
 
-export function ClearDataDialog({ identity, sites, onClose, onDone }: { identity: BrowserIdentityView; sites: readonly string[]; onClose(): void; onDone(): void }) {
+/** A configured host holding data of the identity (the storage rows minus removed hosts). */
+export interface ClearDataHost { id: string; name: string }
+
+/** `sites`: signed-in cookie domains per host; the list follows the chosen host (所有主机: every host's). */
+export function ClearDataDialog({ identity, hosts, sites: sitesByHost, onClose, onDone }: { identity: BrowserIdentityView; hosts: readonly ClearDataHost[]; sites: Readonly<Record<string, readonly string[]>>; onClose(): void; onDone(): void }) {
   const { t } = useI18n();
+  const [host, setHost] = useState<string>("all");
+  const chosen = hosts.find((h) => h.id === host);
+  const sites = [...new Set(chosen ? sitesByHost[chosen.id] ?? [] : Object.values(sitesByHost).flat())].sort();
   const [types, setTypes] = useState<ReadonlySet<BrowserClearDataType>>(() => new Set<BrowserClearDataType>(["siteData", "cache"]));
   const [range, setRange] = useState<BrowserHistoryRange>("all");
   const [only, setOnly] = useState(false);
   const [picked, setPicked] = useState<ReadonlySet<string>>(() => new Set());
   const [busy, setBusy] = useState(false), [error, setError] = useState<string | null>(null);
   const toggle = (type: BrowserClearDataType, on: boolean) => setTypes((s) => { const n = new Set(s); if (on) n.add(type); else n.delete(type); return n; });
-  const origins = only ? [...picked].map(siteOrigin) : [];
+  const origins = only ? [...picked].filter((site) => sites.includes(site)).map(siteOrigin) : [];
   async function run() {
     if (!types.size || busy || (only && !origins.length)) return;
     setBusy(true); setError(null);
     try {
-      await identityRequest((ids) => ids.clearData({ identityId: identity.id, hostId: "all", types: [...types], ...(origins.length ? { origins } : {}), ...(types.has("history") ? { historyRange: range } : {}) }));
+      await identityRequest((ids) => ids.clearData({ identityId: identity.id, hostId: chosen?.id ?? "all", types: [...types], ...(origins.length ? { origins } : {}), ...(types.has("history") ? { historyRange: range } : {}) }));
       onDone(); onClose();
     } catch (e) { setError(errorCode(e)); } finally { setBusy(false); }
   }
@@ -73,6 +80,17 @@ export function ClearDataDialog({ identity, sites, onClose, onDone }: { identity
         <button type="button" data-identity-clear-do className={btn({ size: "sm", danger: true })} disabled={busy || !types.size || (only && !origins.length)} onClick={() => void run()}>{t("browser.identity.clear.do")}</button>
       </>}>
       <SettingsGroup agents="none" source="local"><div data-identity-clear-dialog>
+        {hosts.length > 1 && (
+          <div className="mb-2 border-b border-border pb-2">
+            <p className="text-xs text-muted">{t("browser.identity.clear.host")}</p>
+            <div role="radiogroup" aria-label={t("browser.identity.clear.host")} data-identity-clear-hosts className="mt-1 flex flex-wrap gap-1">
+              {[{ id: "all", name: t("browser.identity.clear.allHosts") }, ...hosts].map((h) => (
+                <button key={h.id} type="button" role="radio" aria-checked={host === h.id} data-identity-clear-host={h.id} onClick={() => setHost(h.id)}
+                  className={`rounded-md border px-2 py-0.5 text-xs ${host === h.id ? "border-accent bg-accent/10 text-foreground" : "border-border text-muted hover:bg-surface-2"}`}>{h.name}</button>
+              ))}
+            </div>
+          </div>
+        )}
         {row("siteData", "browser.identity.clear.siteData", "browser.identity.clear.siteDataHint")}
         {row("cache", "browser.identity.clear.cache")}
         {row("history", "browser.identity.clear.history")}
@@ -101,31 +119,42 @@ export function ClearDataDialog({ identity, sites, onClose, onDone }: { identity
             </div>}
           </div>
         )}
-        <p className="mt-3 text-xs text-subtle">{t("browser.identity.clear.scope")}</p>
+        {chosen && <p data-identity-clear-scope-host className="mt-3 text-xs text-subtle">{t("browser.identity.clear.scopeHost", { host: chosen.name })}</p>}
+        <p className={`${chosen ? "mt-1" : "mt-3"} text-xs text-subtle`}>{t("browser.identity.clear.scope")}</p>
         {error && <p role="alert" className="mt-2 text-xs text-danger">{error}</p>}
       </div></SettingsGroup>
     </Modal>
   );
 }
 
-/** 退出所有登录 / 删除这个身份: the sentence says what goes; the red button repeats the action. */
-export function IdentityConfirmDialog({ identity, kind, passwords, onClose, onDone }: { identity: BrowserIdentityView; kind: "signOut" | "remove"; passwords: number; onClose(): void; onDone(): void }) {
+type ConfirmKind = "signOut" | "remove" | "signOutHost" | "clearLeftover";
+const CONFIRM: Record<ConfirmKind, { title: MessageKey; text: MessageKey }> = {
+  signOut: { title: "browser.identity.page.signOutDo", text: "browser.identity.page.signOutConfirm" },
+  remove: { title: "browser.identity.page.removeDo", text: "browser.identity.page.removeConfirm" },
+  signOutHost: { title: "browser.identity.page.hostSignOutDo", text: "browser.identity.page.hostSignOutConfirm" },
+  clearLeftover: { title: "browser.identity.page.leftoverDo", text: "browser.identity.page.leftoverConfirm" },
+};
+
+/** 退出所有登录 / 删除这个身份, and one host's 退出登录 / a removed host's 清除 (`host`: which; its name is in the title and
+ *  the sentence): the sentence says what goes; the red button repeats the action. */
+export function IdentityConfirmDialog({ identity, kind, passwords, host, onClose, onDone }: { identity: BrowserIdentityView; kind: ConfirmKind; passwords: number; host?: { id: string; name: string }; onClose(): void; onDone(): void }) {
   const { t } = useI18n();
   const [busy, setBusy] = useState(false), [error, setError] = useState<string | null>(null);
   useEffect(() => setError(null), [kind]);
   async function run() {
     setBusy(true); setError(null);
     try {
-      await identityRequest((ids) => (kind === "signOut" ? ids.signOut(identity.id) : ids.remove(identity.id)));
+      await identityRequest((ids) => kind === "signOut" ? ids.signOut(identity.id)
+        : kind === "remove" ? ids.remove(identity.id)
+        : kind === "signOutHost" ? ids.signOutHost(identity.id, host!.id)
+        : ids.clearLeftover(identity.id, host!.id));
       onDone(); onClose();
     } catch (e) { setError(errorCode(e)); } finally { setBusy(false); }
   }
-  const title = t(kind === "signOut" ? "browser.identity.page.signOutDo" : "browser.identity.page.removeDo");
-  const text = kind === "signOut"
-    ? t("browser.identity.page.signOutConfirm", { name: identity.name, n: identity.openTabs })
-    : t("browser.identity.page.removeConfirm", { name: identity.name, n: identity.openTabs, passwords });
+  const title = t(CONFIRM[kind].title);
+  const text = t(CONFIRM[kind].text, { name: identity.name, n: identity.openTabs, passwords, host: host?.name ?? "" });
   return (
-    <Modal title={`${title} · ${identity.name}`} label={title} busy={busy} onClose={onClose}
+    <Modal title={host ? `${title} · ${identity.name} · ${host.name}` : `${title} · ${identity.name}`} label={title} busy={busy} onClose={onClose}
       footer={<>
         <button type="button" className={btn({ variant: "ghost", size: "sm" })} disabled={busy} onClick={onClose}>{t("browser.identity.page.cancel")}</button>
         <button type="button" data-identity-confirm={kind} className={btn({ size: "sm", danger: true })} disabled={busy} onClick={() => void run()}>{title}</button>

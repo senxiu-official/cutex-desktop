@@ -1,6 +1,6 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`registry snapshot ↔ docs change log > the table matches its snapshot and REGISTRY_VERSION is the doc's newest change-log entry > registry 2.11 1`] = `
+exports[`registry snapshot ↔ docs change log > the table matches its snapshot and REGISTRY_VERSION is the doc's newest change-log entry > registry 2.12 1`] = `
 {
   "delegationEnding": {
     "approval": {
@@ -713,6 +713,6 @@ exports[`registry snapshot ↔ docs change log > the table matches its snapshot 
       "tone": "warn",
     },
   },
-  "version": "2.11",
+  "version": "2.12",
 }
 `;

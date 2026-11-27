@@ -25,6 +25,7 @@ import { activeSubAgents } from "../../lib/subagents";
 import { useSubAgentMeta } from "../../lib/subagentMetaStore";
 import type { TimelineState } from "../../lib/timeline";
 import { agentState, featuresOf, sidebarOf, useApp, viewOf } from "../../store";
+import { isAssistantSession, usePa } from "../../lib/personalAssistantStore";
 import { services } from "../app";
 import type { SideTabProps } from "../slots";
 import {
@@ -388,11 +389,16 @@ export function useViewTitle(props: SideTabProps<ViewState>): { title: string; t
   const focused = useFocusedProject();
   const s = useProjectViewState(props.instance.id, props.instance.state);
   const target = s.projectId && s.hostId ? { hostId: s.hostId, projectId: s.projectId } : focused;
+  // An assistant's conversation selected: the context-following view shows its 今日 (ProjectView), so the tab says so.
+  const selHost = useApp((st) => st.selectedHost ?? st.hosts?.active ?? "local");
+  const selId = useApp((st) => st.selectedId);
+  const assistant = usePa((st) => !(s.projectId && s.hostId) && isAssistantSession(st, selHost, selId));
   const name = useApp((st) => {
     if (!target) return null;
     const p = sidebarOf(st, target.hostId)?.projects?.projects.find((x) => x.project_id === target.projectId);
     const shown = (p?.presentation as { display_name?: unknown } | undefined)?.display_name;
     return typeof shown === "string" && shown ? shown : (target.projectId ?? null);
   });
+  if (assistant) return { title: t("project-view.todayTitle"), tooltip: t("project-view.todayTooltip") };
   return name ? { title: t("project-view.tabTitle", { name }), tooltip: t("project-view.title") } : { title: t("project-view.title") };
 }

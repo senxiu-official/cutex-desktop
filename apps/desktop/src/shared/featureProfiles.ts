@@ -128,3 +128,66 @@ export function featureProfilePatchBody(input: unknown): FeatureProfilePatch {
   if (!Object.keys(out).length) throw new Error("empty feature profile patch");
   return out as FeatureProfilePatch;
 }
+
+// 测试连接 (cutex feature-profile-test-v1, features.featureProfileTestV1): `POST /v2/feature-profiles/test` sends one
+// inference request (15 s) with a saved row (`{profileId}`, its stored key) or an unsaved draft (`{draft}`, the key
+// typed in the form; nothing is saved). HTTP 200 for every completed test; the result names an error class and a short
+// sanitized message, never provider text or the key. Hosts without the capability hide the button.
+export const FEATURE_PROFILE_TEST_FEATURE = "feature-profile-test-v1";
+
+export const FEATURE_PROFILE_TEST_ERROR_CLASSES = ["auth", "modelNotFound", "quotaOrRateLimit", "network", "tls", "timeout", "badEndpoint", "other"] as const;
+export type FeatureProfileTestErrorClass = (typeof FEATURE_PROFILE_TEST_ERROR_CLASSES)[number];
+
+export interface FeatureProfileTestDraft {
+  protocol: FeatureProfileProtocol;
+  baseUrl: string;
+  model: string;
+  apiKey: string;
+}
+
+export type FeatureProfileTestRequest = { profileId: string } | { draft: FeatureProfileTestDraft };
+
+export interface FeatureProfileTestResult {
+  ok: boolean;
+  latencyMs: number | null;
+  /** The model the provider reported, when the host could show it safely. */
+  model: string | null;
+  /** null on success. An unknown class from a newer host reads as `other`. */
+  error: { class: FeatureProfileTestErrorClass; message: string } | null;
+}
+
+/** The test body, rebuilt from known fields (a saved row by ID, or a draft with its key). */
+export function featureProfileTestBody(input: unknown): FeatureProfileTestRequest {
+  const v = input as Record<string, unknown> | null;
+  if (!v || typeof v !== "object") throw new Error("invalid feature profile test");
+  if ("profileId" in v) {
+    if (!isFeatureProfileId(v.profileId)) throw new Error("invalid feature profile id");
+    return { profileId: v.profileId };
+  }
+  const d = v.draft as Record<string, unknown> | null;
+  if (!d || typeof d !== "object") throw new Error("invalid feature profile test");
+  return {
+    draft: {
+      protocol: field(d, "protocol", true) as FeatureProfileProtocol,
+      baseUrl: field(d, "baseUrl", true)!,
+      model: field(d, "model", true)!,
+      apiKey: field(d, "apiKey", true)!,
+    },
+  };
+}
+
+/** The test reply; a malformed one throws. Only known fields go back to the renderer. */
+export function parseFeatureProfileTestResult(value: unknown): FeatureProfileTestResult {
+  const v = value as Record<string, unknown> | null;
+  if (!v || typeof v !== "object" || typeof v.ok !== "boolean") throw new Error("invalid feature profile test reply");
+  const latency = typeof v.latencyMs === "number" && Number.isFinite(v.latencyMs) && v.latencyMs >= 0 ? Math.round(v.latencyMs) : null;
+  const model = typeof v.model === "string" && v.model.trim() ? v.model.trim().slice(0, FEATURE_PROFILE_MODEL_MAX) : null;
+  const e = v.error as Record<string, unknown> | null | undefined;
+  let error: FeatureProfileTestResult["error"] = null;
+  if (!v.ok || (e && typeof e === "object")) {
+    const cls = typeof e?.class === "string" && (FEATURE_PROFILE_TEST_ERROR_CLASSES as readonly string[]).includes(e.class) ? (e.class as FeatureProfileTestErrorClass) : "other";
+    const message = typeof e?.message === "string" ? e.message.replace(/\s+/g, " ").trim().slice(0, 300) : "";
+    error = { class: cls, message };
+  }
+  return { ok: v.ok && !error, latencyMs: latency, model: v.ok && !error ? model : null, error };
+}

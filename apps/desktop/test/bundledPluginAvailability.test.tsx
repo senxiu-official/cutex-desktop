@@ -8,7 +8,7 @@ const fx = vi.hoisted(() => ({ locale: "zh-CN", request: vi.fn() }));
 vi.mock("../src/renderer/src/bridge", () => ({ api: {}, bridge: {}, onEvent: () => () => {}, cleanIpcMessage: (v: string) => v }));
 vi.mock("../src/renderer/src/i18n", () => ({ useI18n: () => ({ t: (key: string) => (fx.locale === "en" ? en : zhCN)[key as keyof typeof en] ?? key, locale: fx.locale }) }));
 vi.mock("../src/renderer/src/lib/targetHost", () => ({ useTargetApi: () => ({ codexRequest: fx.request }), useTargetFeatures: () => new Set(["codex-plugins"]) }));
-vi.mock("../src/renderer/src/components/settings/FollowShared", () => ({ FollowSharedSection: () => null }));
+vi.mock("../src/renderer/src/components/settings/FollowShared", () => ({ FollowSharedSection: () => null, FollowSharedLink: () => null }));
 vi.mock("../src/renderer/src/components/settings/Form", async original => {
   const actual = await original<Record<string, unknown>>();
   return { ...actual,

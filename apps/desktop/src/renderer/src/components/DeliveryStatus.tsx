@@ -42,7 +42,10 @@ export function DeliveryStatus({ delivery, sessionId, hostId, askTitle, leaseRec
   return <span className="inline-flex min-h-5 min-w-0 items-center gap-1 text-caption text-subtle" data-testid="delivery-status" data-state={delivery.state} data-turn-from={fromDelivery ? "delivery" : undefined} data-tip={tip}>
     <span className="truncate">{label.kind === "unknown" ? label.code : t(`inputLedger.delivery.${fromDelivery ? "turn.owner" : label.id}` as MessageKey)}</span>
     {delivery.state === "turn" && delivery.turn?.kind === "ask" && askTitle && <span className="truncate" data-testid="delivery-ask">{askTitle}</span>}
-    {Number.isFinite(heldUntil) && <span className="shrink-0 tabular-nums" data-testid="delivery-countdown">{t("queue.meta.countdown", { n: Math.max(0, Math.ceil((heldUntil - now) / 1000)) })}</span>}
+    {/* heldUntil is cutex's give-up deadline for a hostBusy hold (owner_held HELD_BUDGET): the message goes out in the mode
+        the owner chose as soon as the host is free, or fails visibly (admission_timeout) at the deadline. Never 「插话」
+        (queue.meta.countdown is the ride-along wait-insert countdown; owner 2026-11-28 read it as a mode change). */}
+    {Number.isFinite(heldUntil) && <span className="shrink-0 tabular-nums" data-testid="delivery-countdown" data-tip={t("inputLedger.delivery.held.deadlineHint")}>· {t("inputLedger.delivery.held.deadline", { n: Math.max(0, Math.ceil((heldUntil - now) / 1000)) })}</span>}
     {leaseMinutes !== null && !fromDelivery && <span className="shrink-0 tabular-nums" data-testid="delivery-lease-elapsed">{t("inputLedger.leaseElapsed", { n: leaseMinutes })}</span>}
     {paused && <button type="button" className="h-5 shrink-0 rounded px-1 hover:bg-surface-2" disabled={pending} onClick={() => void resume()}>{t("paused.resume")}</button>}
     {label.leaseStale && leaseRecovery && <><span className="text-warn-text">{t("inputLedger.leaseStale")}</span><button type="button" disabled={pending} className={`h-5 shrink-0 rounded px-1 ${armed ? "bg-danger/10 text-danger-text" : "hover:bg-surface-2"}`} onBlur={() => setArmed(false)} onClick={() => void release()} data-tip={t("inputLedger.releaseHint")}>{t(armed ? "inputLedger.releaseAgain" : "inputLedger.release")}</button></>}

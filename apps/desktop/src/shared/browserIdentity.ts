@@ -49,9 +49,40 @@ export interface BrowserIdentityState {
 
 export interface BrowserIdentityStorage {
   hostId: string;
-  /** Partition directory minus cache; null: not measurable. */
+  /** Partition directory minus cache; null: not measurable. A removed host: the whole directory (cache included). */
   siteDataBytes: number | null;
+  /** null: not measurable (always for a removed host: its session is never opened again). */
   cacheBytes: number | null;
+  /** The host is no longer configured (removed before this computer tracked removals): a leftover partition that only
+   *  `clearLeftover` removes. Absent = a configured host. */
+  removedHost?: boolean;
+}
+
+// ---- 跨主机同步 (cutex r297 `browser-identity-sync-v1`; owner 2026-11-26) ----
+// Only an identity's existence, name and colour travel between hosts; passwords, cookies, site data and history never do.
+
+/** One host's sync, as Settings shows it. `unsupported` (its cutex lacks the feature) and `notOwner` (this connection
+ *  is not the host owner's full Management access) have no switch; `waiting`: this desktop's 身份密钥 is not yet
+ *  confirmed on that host; `alone`: no other host takes part. */
+export type BrowserIdentitySyncHostState = "synced" | "syncing" | "limit" | "off" | "error" | "waiting" | "alone" | "unsupported" | "notOwner";
+export interface BrowserIdentitySyncHost {
+  hostId: string;
+  state: BrowserIdentitySyncHostState;
+  /** The latest time another host confirmed this host's directory (ISO); null: never. */
+  lastSyncAt: string | null;
+}
+/** Another host deleted an identity this computer still holds logins / site data / saved passwords / history for. Its tabs
+ *  cannot open; the data stays until the owner chooses 清除 (main checks the owner's gesture and the item together). */
+export interface BrowserIdentityCleanup {
+  identityId: string;
+  name: string;
+  color: BrowserIdentityColor | null;
+  deletionRevision: number;
+  hosts: string[];
+}
+export interface BrowserIdentitySyncState {
+  hosts: BrowserIdentitySyncHost[];
+  cleanups: BrowserIdentityCleanup[];
 }
 
 export type BrowserClearDataType = "siteData" | "cache" | "history";
@@ -187,7 +218,8 @@ export type BrowserIdentityEvent =
   | { kind: "passwordPrompt"; prompt: BrowserPasswordPromptView }
   | { kind: "passwordPromptClosed"; promptId: string }
   | { kind: "fillOffer"; offer: BrowserFillOfferView }
-  | { kind: "fillOfferClosed"; offerId: string };
+  | { kind: "fillOfferClosed"; offerId: string }
+  | { kind: "sync"; state: BrowserIdentitySyncState };
 
 export type BrowserIdentityRequest =
   | { op: "state" }
@@ -195,6 +227,10 @@ export type BrowserIdentityRequest =
   | { op: "update"; id: string; expectedRevision: number; name?: string; color?: BrowserIdentityColor; initial?: string }
   | { op: "setCurrent"; id: string }
   | { op: "signOut"; id: string }
+  /** 退出登录 on one configured host only (its tabs of this identity close; the other hosts keep their logins). */
+  | { op: "signOutHost"; id: string; hostId: string }
+  /** 清除 a leftover partition of a host that is no longer configured. */
+  | { op: "clearLeftover"; id: string; hostId: string }
   | { op: "remove"; id: string }
   | { op: "storage"; id: string }
   | { op: "signedInSites"; id: string; hostId: string }
@@ -215,7 +251,10 @@ export type BrowserIdentityRequest =
   | { op: "promptAnswer"; promptId: string; choice: BrowserPasswordPromptChoice }
   /** The owner's click on one login of an offer (main re-checks owner input, origin, grant). */
   | { op: "fill"; offerId: string; loginId: string }
-  | { op: "dismissOffer"; offerId: string };
+  | { op: "dismissOffer"; offerId: string }
+  | { op: "syncState" }
+  | { op: "setHostSync"; hostId: string; enabled: boolean }
+  | { op: "confirmCleanup"; identityId: string; deletionRevision: number };
 
 /** window.cutex.browser.identities (optional: older preloads / test mocks lack it). */
 export interface BrowserIdentityBridge {
@@ -225,6 +264,10 @@ export interface BrowserIdentityBridge {
   setCurrent(id: string): Promise<BrowserIdentityState>;
   /** Closes its tabs and clears every host partition of it; the identity stays. */
   signOut(id: string): Promise<void>;
+  /** The same on one configured host (main: `stale_connection` for a host that is not configured). */
+  signOutHost(id: string, hostId: string): Promise<void>;
+  /** Removes the partition of a host that is no longer configured (`storage` marks it `removedHost`). */
+  clearLeftover(id: string, hostId: string): Promise<void>;
   /** signOut + its history and passwords + the entry (not the default identity). */
   remove(id: string): Promise<void>;
   storage(id: string): Promise<BrowserIdentityStorage[]>;
@@ -246,6 +289,11 @@ export interface BrowserIdentityBridge {
   promptAnswer(promptId: string, choice: BrowserPasswordPromptChoice): Promise<void>;
   fill(offerId: string, loginId: string): Promise<void>;
   dismissOffer(offerId: string): Promise<void>;
+  /** 跨主机同步: each host's state and the pending local cleanups (main without sync: unsupported_operation). */
+  syncState(): Promise<BrowserIdentitySyncState>;
+  setHostSync(hostId: string, enabled: boolean): Promise<BrowserIdentitySyncState>;
+  /** 清除 of a remote deletion's local data; needs the owner's gesture in the app window. */
+  confirmCleanup(identityId: string, deletionRevision: number): Promise<BrowserIdentitySyncState>;
   subscribe(listener: (event: BrowserIdentityEvent) => void): () => void;
 }
 
@@ -292,6 +340,16 @@ export function parseBrowserIdentityRequest(raw: unknown): BrowserIdentityReques
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw bad();
   const o = raw as Record<string, unknown>;
   switch (o.op) {
+    case "syncState":
+      if (!keys(o, ["op"])) throw bad();
+      return { op: "syncState" };
+    case "setHostSync":
+      if (!keys(o, ["op", "hostId", "enabled"], ["hostId", "enabled"]) || !isHostId(o.hostId) || typeof o.enabled !== "boolean") throw bad();
+      return { op: "setHostSync", hostId: o.hostId, enabled: o.enabled };
+    case "confirmCleanup":
+      if (!keys(o, ["op", "identityId", "deletionRevision"], ["identityId", "deletionRevision"]) || !isBrowserIdentityId(o.identityId)
+        || o.identityId === DEFAULT_BROWSER_IDENTITY_ID || !Number.isSafeInteger(o.deletionRevision) || (o.deletionRevision as number) < 0) throw bad();
+      return { op: "confirmCleanup", identityId: o.identityId, deletionRevision: o.deletionRevision as number };
     case "state": case "passwordStatus":
       if (!keys(o, ["op"])) throw bad();
       return { op: o.op };
@@ -307,9 +365,9 @@ export function parseBrowserIdentityRequest(raw: unknown): BrowserIdentityReques
     case "setCurrent": case "signOut": case "remove": case "storage":
       if (!keys(o, ["op", "id"], ["id"]) || !isBrowserIdentityId(o.id)) throw bad();
       return { op: o.op, id: o.id };
-    case "signedInSites":
+    case "signedInSites": case "signOutHost": case "clearLeftover":
       if (!keys(o, ["op", "id", "hostId"], ["id", "hostId"]) || !isBrowserIdentityId(o.id) || !isHostId(o.hostId)) throw bad();
-      return { op: "signedInSites", id: o.id, hostId: o.hostId };
+      return { op: o.op, id: o.id, hostId: o.hostId };
     case "clearData": {
       const request = keys(o, ["op", "request"], ["request"]) ? parseClear(o.request) : null;
       if (!request) throw bad();

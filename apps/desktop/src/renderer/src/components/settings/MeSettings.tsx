@@ -28,6 +28,7 @@ import type { HostClaimView } from "../../../../shared/personIdentity";
 import { IdentitySection } from "./IdentitySettings";
 import { DeviceLineText, RoleLine } from "./MyHostLines";
 import { MyDevicesSection } from "./MyDevices";
+import { SettingsSyncSection } from "./SettingsSync";
 import { Button, Section, SettingsGroup } from "./Form";
 
 /** Settings → 你. */
@@ -35,6 +36,8 @@ export function MePage() {
   return (
     <>
       <IdentitySection />
+      {/* What follows you to your other computers (design 056 §12): right after who you are. */}
+      <SettingsSyncSection />
       <AccessSection />
       <MyDevicesSection />
     </>

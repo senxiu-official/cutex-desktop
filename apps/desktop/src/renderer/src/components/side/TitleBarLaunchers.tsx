@@ -11,9 +11,9 @@ import { useRef, type MouseEvent } from "react";
 import { PanelRight, PanelRightClose, Plus } from "lucide-react";
 import { useI18n } from "../../i18n";
 import { ICON_GHOST } from "../Button";
-import { preloadOnIntent } from "../../lib/lazyPage";
+import { preloadPage } from "../../lib/lazyPage";
 import { contextMenu, openMenuFrom } from "../../lib/contextMenu";
-import { useSideView } from "../../lib/sideComponents";
+import { sideRegistry, useSideView } from "../../lib/sideComponents";
 import { shownPages, visibleCards } from "../../lib/sideLayout";
 import { useSide } from "../../lib/sideLayoutStore";
 import { useLauncherFit, useLaunchers } from "../../lib/sideLauncherView";
@@ -48,8 +48,11 @@ function Launcher({ item, inView }: { item: Launchable; inView: boolean }) {
   const badges = kindBadges(layout, item.kind, ctx, (id) => tabInfo[id]);
   const press = (e: MouseEvent) => pressLauncher(item.kind, item.multi ? openModifiers(e) : PLAIN_OPEN);
   const Icon = item.Icon;
+  const preload = () => void preloadPage(sideRegistry().get(item.kind)?.item.Body);
   return (
     <button
+      onPointerEnter={preload}
+      onFocus={preload}
       onClick={press}
       onAuxClick={(e) => {
         if (e.button !== 1) return;
@@ -99,14 +102,14 @@ export function TitleBarLaunchers() {
   return (
     <>
       <span className="flex shrink-0 items-center">
-      <span ref={strip} data-side-launchers onPointerEnter={() => void preloadOnIntent()} className="flex shrink-0 items-center gap-0.5">
+      <span ref={strip} data-side-launchers className="flex shrink-0 items-center gap-0.5">
         {shown.map((item) => (
           <Launcher key={item.kind} item={item} inView={inView.has(item.kind)} />
         ))}
       </span>
       {multiInfo && <InfoMark text={multiInfo} className="hover-info px-0.5 [app-region:no-drag]" />}
       </span>
-      <button onClick={(e) => openMenuFrom(e.currentTarget, launcherMenu())} onPointerEnter={() => void preloadOnIntent()} data-tip={plusTip} aria-label={plusTip} aria-haspopup="menu" data-side-launcher-menu className={BTN}>
+      <button onClick={(e) => openMenuFrom(e.currentTarget, launcherMenu())} data-tip={plusTip} aria-label={plusTip} aria-haspopup="menu" data-side-launcher-menu className={BTN}>
         <Plus size={16} />
         {hidden > 0 && <span className="absolute top-1 right-1 h-[5px] w-[5px] rounded-full bg-subtle" />}
       </button>

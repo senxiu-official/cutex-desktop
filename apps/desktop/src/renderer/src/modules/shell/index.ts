@@ -2,13 +2,14 @@
 // 键盘快捷键, 关于); step 3: Settings itself as the `shell.settings` page (Aside = its nav) and the
 // sidebar footer ⚙ 设置. v1.2: the "bar" status surface; 状态 keeps the generic placement table (the
 // capsule's own geometry is a section of the `status-capsule` module on the same page).
-import { Activity, Blocks, Cpu, Info, Keyboard, Monitor, PanelBottom, PanelLeft, PanelRight, Palette, Settings as SettingsIcon, ShieldCheck, SlidersHorizontal, SquareStack, UserRound } from "lucide-react";
+import { Blocks, Cpu, Info, Keyboard, Monitor, PanelBottom, PanelLeft, PanelRight, Palette, Settings as SettingsIcon, ShieldCheck, SlidersHorizontal, SquareStack, UserRound } from "lucide-react";
 import { Settings, SettingsNav } from "../../components/Settings";
 import { openSideColumn } from "../../lib/sideActions";
 import { useOutdatedAgentCount } from "../../lib/runtimePackagesView";
 import { defineModule } from "../slots";
 import { getUiPrefs, setUiPref } from "../../lib/prefs";
-import { ABOUT_SEARCH, APPEARANCE_SEARCH, GENERAL_SEARCH, SHORTCUTS_SEARCH, SIDEBAR_SEARCH, SIDES_SEARCH, COMPOSER_SEARCH, STATUS_SEARCH, ME_SEARCH, ACCESS_SEARCH } from "./settingsSearch";
+import { AVATAR_SUB, AVATAR_SUB_ANCHORS } from "../../lib/portraitSettingsNav";
+import { ABOUT_SEARCH, APPEARANCE_SEARCH, GENERAL_SEARCH, SHORTCUTS_SEARCH, SIDEBAR_SEARCH, SIDES_SEARCH, COMPOSER_SEARCH, ME_SEARCH, ACCESS_SEARCH } from "./settingsSearch";
 import { toggleSettingsFromNav, useSettingsBadge, useSettingsShelfOpen, useSettingsTitle } from "./settingsNav";
 import { lazyPage } from "../../lib/lazyPage";
 
@@ -22,9 +23,9 @@ const SidesDefaultsSubPage = lazyPage(() => import("../../components/settings/Si
 const ShelfOnlySection = lazyPage(() => import("../../components/settings/PanelPages").then((m) => m.ShelfOnlySection));
 const GeneralPage = lazyPage(() => import("../../components/settings/AppSettings").then((m) => m.GeneralPage));
 const AppearancePage = lazyPage(() => import("../../components/settings/AppearanceSettings").then((m) => m.AppearancePage));
+const AvatarSubPage = lazyPage(() => import("../../components/settings/AvatarSubPage").then((m) => m.AvatarSubPage));
 const SidebarPage = lazyPage(() => import("../../components/settings/AppSettings").then((m) => m.SidebarPage));
 const SidesPage = lazyPage(() => import("../../components/settings/SidesSettings").then((m) => m.SidesPage));
-const StatusPage = lazyPage(() => import("../../components/settings/AppSettings").then((m) => m.StatusPage));
 const TrayPage = lazyPage(() => import("../../components/settings/PanelPages").then((m) => m.TrayPage));
 const DesktopPage = lazyPage(() => import("../../components/settings/PanelPages").then((m) => m.DesktopPage));
 const MePage = lazyPage(() => import("../../components/settings/MeSettings").then((m) => m.MePage));
@@ -68,7 +69,7 @@ export default defineModule({
       { id: "shell.imageBusy", page: "collab", order: 365, titleKey: "queue.imageBusy.section", keywords: ["queue.imageBusy", "queue.imageBusy.steer"], Section: ImageBusySection },
       // 会话 (design 006 v1, 「合面板」): its width (was 外观), the input area (was its own page 输入区, alias
       // `composer`), the margins (was 右侧栏与留白) and one line on 只看 Shelf; side chat (400 / 410) follows.
-      { id: "shell.convWidth", page: "conversation", order: 100, titleKey: "settings.panel.convWidth", keywords: ["workSurface.single", "appearance.readingWidth"], Section: ConversationWidthSection },
+      { id: "shell.convWidth", page: "conversation", order: 100, titleKey: "settings.panel.convWidth", keywords: ["workSurface.single", "appearance.readingWidth", "workspace.sideBySide", "workspace.threeColumns"], Section: ConversationWidthSection },
       { id: "shell.composer", page: "conversation", order: 200, titleKey: "shell.composer", ...COMPOSER_SEARCH, Section: ComposerPage },
       { id: "shell.gutter", page: "conversation", order: 300, titleKey: "shell.sides.gutter", keywords: ["shell.sides.gutterDocked", "shell.sides.gutterDockWidth"], Section: GutterSection },
       { id: "shell.shelfOnly", page: "conversation", order: 500, titleKey: "settings.panel.shelfOnly", keywords: ["settings.panel.shelfOnlyHint"], Section: ShelfOnlySection },
@@ -76,14 +77,15 @@ export default defineModule({
     "settings.page": [
       // 应用（本机）
       { id: "shell.general", page: "general", group: "app", order: 100, icon: SlidersHorizontal, titleKey: "shell.general", source: "local",  hintKey: "settings.pageHint.general", Page: GeneralPage, ...GENERAL_SEARCH },
-      { id: "shell.appearance", page: "appearance", group: "app", order: 200, icon: Palette, titleKey: "shell.appearance", source: null, hintKey: "settings.pageHint.appearance", Page: AppearancePage, ...APPEARANCE_SEARCH },
+      { id: "shell.appearance", page: "appearance", group: "app", order: 200, icon: Palette, titleKey: "shell.appearance", source: null, hintKey: "settings.pageHint.appearance", Page: AppearancePage, ...APPEARANCE_SEARCH,
+        // 头像 (owner 2026-11-27): every avatar setting on one sub-page (lib/portraitSettingsNav); old anchors land there.
+        subPages: { [AVATAR_SUB]: { titleKey: "avatarPage.title", hintKey: "avatarPage.hint", Page: AvatarSubPage, anchors: AVATAR_SUB_ANCHORS } } },
       // By screen region, left to right (owner 2026-10-18): 左侧栏 · 对话 (conversation module, 300) · 输入区 · 状态 · 右侧栏与留白.
       { id: "shell.sidebar", page: "sidebar", group: "app", order: 250, icon: PanelLeft, titleKey: "settings.panel.sidebar", source: "local",  hintKey: "settings.pageHint.sidebar", Page: SidebarPage, ...SIDEBAR_SEARCH },
       { id: "shell.sides", page: "sides", group: "app", order: 450, icon: PanelRight, titleKey: "settings.panel.shelf", source: "local", hintKey: "settings.pageHint.sides", Page: SidesPage, ...SIDES_SEARCH,
         subPages: { defaults: { titleKey: "shell.sides.defaults", hintKey: "shell.sides.defaultsHint", Page: SidesDefaultsSubPage, anchors: ["defaults-all"] } } },
-      { id: "shell.status", page: "status", group: "app", order: 400, icon: Activity, titleKey: "settings.panel.status", source: "local",  hintKey: "settings.pageHint.status", Page: StatusPage, ...STATUS_SEARCH },
       // 面板 (design 006 v1): 托盘 and 桌面, whose rows were in 外观 → 窗口与卡片 (the nav shows the panel pages as their own group).
-      { id: "shell.tray", page: "tray", group: "app", order: 460, icon: PanelBottom, titleKey: "settings.panel.tray", source: "local",  hintKey: "settings.pageHint.tray", Page: TrayPage, keywords: ["pane.tray.persistent", "pane.tray.edge", "workspace.threeColumns"] },
+      { id: "shell.tray", page: "tray", group: "app", order: 460, icon: PanelBottom, titleKey: "settings.panel.tray", source: "local",  hintKey: "settings.pageHint.tray", Page: TrayPage, keywords: ["pane.tray.persistent", "pane.tray.edge"] },
       { id: "shell.desktop", page: "desktop", group: "app", order: 470, icon: Monitor, titleKey: "settings.panel.desktop", source: "local",  hintKey: "settings.pageHint.desktop", Page: DesktopPage, keywords: ["workSurface.desk"] },
       // 连接 → 你 (local, every connection): 「你」 (name, picture, person identity) and the hosts you can
       // access with your role / permissions there (components/settings/MeSettings.tsx).

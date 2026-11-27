@@ -8,6 +8,8 @@ import { bridge } from "../../bridge";
 import { createElement } from "react";
 import { identityColor, useIdentity } from "./identities";
 import { Avatar } from "../../components/Avatar";
+import { useHostServices } from "../../lib/serviceLinkView";
+import { serviceSlugOf } from "../../lib/serviceLink";
 
 export function useBrowserEnabled(): boolean {
   return useSyncExternalStore(browserActivation.subscribe, browserActivation.get, browserActivation.get);
@@ -35,4 +37,13 @@ export function useBrowserTab({ instance, hostId }: SideTabProps<BrowserState>):
   const trailing = grantee ? createElement("span", { className: "shrink-0", title: t("browser.maid.granted", { name: grantee }), "data-side-tab-grantee": "" }, createElement(Avatar, { name: grantee, seed: grantee, size: 13 })) : undefined;
   const tooltip = [view?.url ?? instance.state.url, identity && !identity.isDefault ? t("browser.identity.tabTooltip", { name: identity.name }) : ""].filter(Boolean).join("\n");
   return { title: view?.title || instance.state.title || t("browser.title"), tooltip, busy: view?.loading || view?.control?.operating || undefined, ...(view?.favicon ? { favicon: view.favicon } : {}), ...(audio ? { audio } : {}), ...(tint ? { tint } : {}), ...(trailing ? { trailing } : {}) };
+}
+
+export function useServiceTab(props: SideTabProps<BrowserState>) {
+  const { t } = useI18n();
+  const info = useBrowserTab(props);
+  const list = useHostServices(props.hostId);
+  const slug = serviceSlugOf(props.instance.state.url);
+  const service = slug ? list?.find(s => s.slug === slug) : null;
+  return { ...info, title: service?.displayName || slug || (props.instance.state.url === "about:blank" ? t("browser.service.title") : info.title) };
 }

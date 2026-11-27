@@ -48,7 +48,7 @@ export const en: Record<keyof typeof zhCN, string> = {
   "side-chat.moduleOff": "The Side chat module is turned off.", "side-chat.summaryPrompt": "Note prompt",
   "side-chat.summaryHint": "Sent to the current side chat when you save a note; the main chat is unchanged",
   "side-chat.savePrompt": "Save", "side-chat.editPrompt": "Edit prompt…", "side-chat.collapsePrompt": "Hide", "side-chat.resetPrompt": "Restore default", "side-chat.noSummary": "No complete note response was received; nothing was saved.",
-  "side-chat.source": "Source turn: {turn}", "side-chat.reasoning": "Thinking",
+  "side-chat.sourceTitle": "Source turn", "side-chat.sourceAsk": "You: {text}", "side-chat.sourceOpened": "side chat opened {time}", "side-chat.turnId": "Turn ID: {id}", "side-chat.turnEarlier": "an earlier turn", "side-chat.turnThis": "this turn", "side-chat.reasoning": "Thinking",
   "side-chat.noteTooLong": "The response exceeds the note size limit and was not saved. Adjust the note prompt and try again, or copy out a note by hand.",
   "side-chat.resume": "Resume existing side chat", "side-chat.retrySend": "Retry send",
   "side-chat.mockReply": "Side chat is separate from the main conversation. Unpinned notes also appear in project and host collections; pins only help you find them.",

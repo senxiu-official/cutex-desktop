@@ -27,13 +27,13 @@ export const componentRequiresListProbe: AppModule = { id: "probe", titleKey: "j
 export const packEntryProbe: SDK.ModulePackEntry<SlotMap, ModuleServices, MessageKey> = { moduleApi: "^1.16", module: componentRequiresProbe, messages: { en: { "probe.title": "Probe" } } };
 // @ts-expect-error A pack entry must say which MODULE_API_VERSION range it was built for.
 export const packEntryNoRangeProbe: SDK.ModulePackEntry<SlotMap, ModuleServices, MessageKey> = { module: componentRequiresProbe };
-it("v1.16 pack ranges: ^ / ~ / comparator sets, and which side must update (through v1.31: additive, ^1.16 packs still load)", async () => {
+it("v1.16 pack ranges: ^ / ~ / comparator sets, and which side must update (through v1.33: additive, ^1.16 packs still load)", async () => {
   const { moduleApiSatisfies, moduleApiVerdict, MODULE_API_VERSION, MODULE_PACK_HOST_GLOBAL } = await import("@cutex-desktop/plugin-sdk");
-  expect(MODULE_API_VERSION).toBe("1.31");
+  expect(MODULE_API_VERSION).toBe("1.33");
   expect(MODULE_PACK_HOST_GLOBAL).toBe("__CUTEX_MODULE_HOST__");
   expect(moduleApiSatisfies(`^${MODULE_API_VERSION}`, MODULE_API_VERSION)).toBe(true);
   expect(moduleApiSatisfies("^1.16", MODULE_API_VERSION)).toBe(true);
-  expect(moduleApiVerdict("^1.32", MODULE_API_VERSION)).toBe("needsNewerApp");
+  expect(moduleApiVerdict("^1.34", MODULE_API_VERSION)).toBe("needsNewerApp");
   expect(moduleApiVerdict("~1.15", MODULE_API_VERSION)).toBe("needsNewerModule");
 });
 
@@ -286,6 +286,8 @@ it("pins the declared slot defaults and placement choices", () => {
     "timeline.intro": { unavailable: "hide" },
     // v1.14 (§22): actions in a reply's code-block toolbar.
     "timeline.codeBlockAction": { unavailable: "hide" },
+    // v1.32 (§31): actions in the conversation's input box.
+    "composer.action": { unavailable: "hide" },
     // v1.17 (§24): pane kinds (side.component / main.page items derive theirs).
     "pane.kind": { unavailable: "hide" },
     // v1.18 (§25): the desktop layer behind the panes.

@@ -1,6 +1,6 @@
 # Known issues
 
-Applies to **Cutex Desktop 0.2.9 — Beautiful World** with **cutex 0.2.6 — Beautiful World**,
+Applies to **Cutex Desktop 0.2.10 — Beautiful World** with **cutex 0.2.6 — Beautiful World**,
 unless an entry specifies an older host version. Update the desktop and each host separately.
 
 The application displays these entries in Settings → About → Known issues. Three Windows entries

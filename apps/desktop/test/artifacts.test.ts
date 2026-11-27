@@ -115,6 +115,10 @@ describe("artifact store wire (shared/artifactStore.ts)", () => {
     expect(() => artifactListQuery({ project: "a", kind: "poster" })).toThrow();
     expect(() => artifactListQuery({ project: "a", limit: 201 })).toThrow();
     expect(() => artifactListQuery({ project: "a", archived: "yes" })).toThrow();
+    // artifact-audience (cutex docs/artifact-audience.md): view / audience / purpose / fileKind, known values only.
+    expect(artifactListQuery({ project: "a", view: "forOwner", audience: "team", purpose: "evidence", fileKind: "slides" })).toEqual({ project: "a", view: "forOwner", audience: "team", purpose: "evidence", fileKind: "slides" });
+    expect(artifactListQuery({ project: "a", purpose: "unset" })).toEqual({ project: "a", purpose: "unset" });
+    for (const bad of [{ view: "mine" }, { audience: "public" }, { purpose: "notes" }, { fileKind: "video" }]) expect(() => artifactListQuery({ project: "a", ...bad })).toThrow();
   });
 
   it("ids, version selectors, content and diff queries, resolve bodies", () => {
@@ -142,6 +146,10 @@ describe("artifact store wire (shared/artifactStore.ts)", () => {
     expect(() => artifactPublishBody({ requestId: "r1", path: "  " })).toThrow();
     expect(() => artifactPublishBody({ path: "a.md" })).toThrow();
     expect(() => artifactPublishBody({ requestId: "r1", path: "a.md", kind: "poster" })).toThrow();
+    expect(artifactPublishBody({ requestId: "r1", path: "a.md", audience: "team", purpose: "deliverable" })).toEqual({ requestId: "r1", path: "a.md", audience: "team", purpose: "deliverable" });
+    expect(() => artifactPublishBody({ requestId: "r1", path: "a.md", purpose: "slides" })).toThrow();
+    // "unset" is a list filter, not a purpose to publish with.
+    expect(() => artifactPublishBody({ requestId: "r1", path: "a.md", purpose: "unset" })).toThrow();
     expect(artifactPatchBody({ expectedRevision: 7, starred: true, junk: 1 })).toEqual({ expectedRevision: 7, starred: true });
     expect(artifactPatchBody({ expectedRevision: 0, name: " b.md ", archived: false })).toEqual({ expectedRevision: 0, name: "b.md", archived: false });
     expect(() => artifactPatchBody({ expectedRevision: 7 })).toThrow();
@@ -289,6 +297,10 @@ describe("producers and auto-capture attribution", () => {
     expect(arrangeLibrary(items, { producer: "owner", sort: "updated" }).map((a) => a.name)).toEqual(["a.md"]);
     expect(restoreLibrary({ q: "x", kind: "poster", sort: "size", layout: "grid", archived: "all" })).toEqual({ ...DEFAULT_LIBRARY, q: "x", layout: "grid", archived: "all" });
     expect(restoreLibrary(null)).toEqual(DEFAULT_LIBRARY);
+    expect(DEFAULT_LIBRARY.view).toBe("forOwner");
+    expect(restoreLibrary({ view: "all", fileKind: "page", purpose: "evidence" })).toEqual({ ...DEFAULT_LIBRARY, view: "all", fileKind: "page", purpose: "evidence" });
+    expect(restoreLibrary({ view: "team", fileKind: "video", purpose: "x" })).toEqual(DEFAULT_LIBRARY);
+    expect(restoreLibrary({ purpose: "unset" }).purpose).toBe("unset");
   });
 });
 

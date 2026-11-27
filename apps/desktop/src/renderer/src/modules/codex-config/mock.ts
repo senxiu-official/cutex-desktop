@@ -3,6 +3,8 @@
 // cutex `codex-plugins`).
 import type { ModuleMock } from "../../dev/mockTypes";
 import type { SkillArchiveRecord } from "../../../../shared/skillsArchive";
+import type { CutexRefusal } from "../../../../shared/ipc";
+import type { CopyRuntime, RuntimeSkill, RuntimeSkillsAnswer, SkillCopyAnswer, SkillCopyPreview, SkillCopyPreviewAnswer, SkillCopyRequest, SkillCopySelection, SkillRuntime } from "../../../../shared/runtimeSkills";
 // Shapes follow the r207 codex-app-server answers captured by cutex's live_plugins_smoke.
 const HOME = "C:\\Users\\sam\\.cutex\\codex-home";
 
@@ -303,6 +305,7 @@ const SKILLS_DIR = `${HOME}\\skills`;
 const mockSkills: { name: string; description: string; scope: string; pluginId: string | null; body: string }[] = [
   { name: "pdf", description: "Read and fill PDFs", scope: "user", pluginId: null, body: "# PDF\n\nUse this skill to **read**, fill and merge PDF files.\n\n## Steps\n\n1. Extract the text with `pdftotext`.\n2. Fill form fields with `scripts/fill.py`.\n\n| Tool | Use |\n|---|---|\n| pdftotext | text |\n| qpdf | merge / split |\n" },
   { name: "xlsx", description: "Spreadsheets", scope: "user", pluginId: null, body: "# Spreadsheets\n\nOpen `.xlsx` files with openpyxl; keep formulas intact.\n" },
+  { name: "release-notes", description: "Write release notes from merged branches", scope: "user", pluginId: null, body: "# Release notes\n\nCollect the merged branches since the last tag and write one line each.\n" },
   { name: "github:review-pr", description: "Review a pull request", scope: "user", pluginId: "github@openai-curated", body: "# Review a PR\n\nFetch the diff, run the tests, comment inline.\n" },
   { name: "skill-creator", description: "Create new skills", scope: "system", pluginId: null, body: "# Skill creator\n\nScaffold a new skill folder with a `SKILL.md`.\n" },
 ];
@@ -324,12 +327,14 @@ const archivedSkills: { record: SkillArchiveRecord; skill: MockSkill }[] = [
 ];
 const refused = (code: string, message: string) => ({ ok: false as const, error: { code, message } });
 export const mock: ModuleMock = {
-  features: { new: ["skills-archive"] },
+  // runtime-skills-kimi left out on purpose: 运行时配置 → 技能 says why Kimi is not listed.
+  features: { new: ["skills-archive", "runtime-skills", "runtime-skill-copy", "runtime-skills-dsh"] },
   hostFile(path) {
     const s = mockSkills.find((x) => skillPath(x.name) === path);
     return s ? `---\nname: ${s.name}\ndescription: ${s.description}\n---\n\n${s.body}` : null;
   },
   api: () => ({
+    ...runtimeSkillsMockApi(),
     async codexRequest(method, params) {
       const p = (params ?? {}) as { keyPath?: string; value?: unknown; mergeStrategy?: string; path?: string; enabled?: boolean; edits?: { keyPath: string; value: unknown; mergeStrategy: string }[] };
       switch (method) {
@@ -427,3 +432,132 @@ export const mock: ModuleMock = {
     },
   }),
 };
+
+// ---- 运行时配置 → 技能 (cutex runtime-skills / runtime-skill-copy): Codex, Claude, read-only DSH (runtime-skills-dsh), no
+// Kimi flag (the page says why); 「复制到…」 skips a taken name by default, overwrites only when asked, replays an action id.
+
+const USER_HOME = "C:\\Users\\sam";
+const ROOT: Record<SkillRuntime, string> = {
+  codex: `${USER_HOME}\\.cutex\\codex-home\\skills`,
+  claude: `${USER_HOME}\\.cutex\\claude-skills`,
+  dsh: `${USER_HOME}\\.cutex\\dsh-home\\skills`,
+  kimi: `${USER_HOME}\\.cutex\\kimi-home\\skills`,
+};
+const SOURCE: Record<SkillRuntime, string> = { codex: "CODEX_HOME/skills", claude: "~/.cutex/claude-skills", dsh: "DSH_HOME/skills", kimi: "KIMI_CODE_HOME/skills" };
+
+type RtSkill = Omit<RuntimeSkill, "id" | "path"> & { files: { path: string; bytes: number; script: boolean }[]; frontmatter: SkillCopyPreview["frontmatter"]; blocked?: string };
+const rtPersonal = (name: string, description: string, runtime: SkillRuntime, extra: Partial<RtSkill> = {}): RtSkill => ({
+  name, description, origin: "personal", source: SOURCE[runtime], state: "enabled", copyable: runtime === "codex" || runtime === "claude",
+  compatibility: { status: "portable", fields: [] }, files: [{ path: "SKILL.md", bytes: 1840, script: false }], frontmatter: [{ key: "name", change: "preserve" }, { key: "description", change: "preserve" }], ...extra,
+});
+
+const rtSkills: Record<SkillRuntime, RtSkill[]> = {
+  codex: [
+    rtPersonal("pdf", "Read and fill PDFs", "codex", {
+      files: [{ path: "SKILL.md", bytes: 2310, script: false }, { path: "scripts/fill.py", bytes: 4120, script: true }, { path: "scripts/merge.sh", bytes: 612, script: true }, { path: "reference/forms.md", bytes: 1480, script: false }],
+      frontmatter: [{ key: "name", change: "preserve" }, { key: "description", change: "preserve" }, { key: "metadata", change: "preserve" }],
+    }),
+    rtPersonal("xlsx", "Spreadsheets", "codex", { state: "disabled" }),
+    rtPersonal("release-notes", "Write release notes from merged branches", "codex", {
+      compatibility: { status: "review", fields: ["agents/openai.yaml"] },
+      files: [{ path: "SKILL.md", bytes: 1960, script: false }, { path: "agents/openai.yaml", bytes: 220, script: false }],
+      frontmatter: [{ key: "name", change: "preserve" }, { key: "description", change: "preserve" }, { key: "agents/openai.yaml", change: "review" }],
+    }),
+    { ...rtPersonal("github:review-pr", "Review a pull request", "codex"), origin: "plugin", source: "github@openai-curated", copyable: false },
+    { ...rtPersonal("skill-creator", "Create new skills", "codex"), origin: "builtin", source: "codex", copyable: false, state: "default" },
+  ],
+  claude: [
+    rtPersonal("xlsx", "Edit spreadsheets with formulas intact", "claude"),
+    rtPersonal("paper-review", "Review a paper draft section by section", "claude", {
+      compatibility: { status: "review", fields: ["allowed-tools", "context"] },
+      files: [{ path: "SKILL.md", bytes: 2900, script: false }, { path: "checklist.md", bytes: 900, script: false }],
+      frontmatter: [{ key: "name", change: "preserve" }, { key: "description", change: "preserve" }, { key: "allowed-tools", change: "remove" }, { key: "context", change: "review" }],
+    }),
+    rtPersonal("deploy-hook", "Run the deploy hook after a merge", "claude", {
+      compatibility: { status: "review", fields: ["hooks"] },
+      files: [{ path: "SKILL.md", bytes: 1200, script: false }, { path: "hook.sh", bytes: 340, script: true }],
+      frontmatter: [{ key: "name", change: "preserve" }, { key: "hooks", change: "review" }],
+      blocked: "Its native hook declaration cannot travel to Codex; adapt it for Codex first.",
+    }),
+    { ...rtPersonal("frontend-design", "Distinctive frontend interfaces", "claude"), origin: "plugin", source: "frontend-design@claude-plugins-official", copyable: false, state: "unknown" },
+  ],
+  dsh: [
+    { ...rtPersonal("repo-map", "Map a repository before editing", "dsh"), copyable: false, state: "unknown" },
+    { ...rtPersonal("commit-style", "House commit message style", "dsh"), copyable: false, state: "unknown", origin: "other", source: ".agents/skills" },
+  ],
+  kimi: [],
+};
+
+const idOf = (runtime: SkillRuntime, name: string) => `${runtime}:${name}`;
+const pathOf = (runtime: SkillRuntime, name: string) => `${ROOT[runtime]}\\${name.replace(/[:]/g, "-")}\\SKILL.md`;
+const refusal = (code: string, message: string): { ok: false; error: CutexRefusal } => ({ ok: false, error: { code, message } });
+
+const rtTokens = new Map<string, { selection: SkillCopySelection; at: number }>();
+const rtDone = new Map<string, { request: string; result: SkillCopyAnswer }>();
+
+function findRtSkill(runtime: CopyRuntime, skillId: string): RtSkill | undefined {
+  return rtSkills[runtime].find((s) => idOf(runtime, s.name) === skillId);
+}
+
+function runtimeSkillsMockApi() {
+  return {
+    async runtimeSkills(runtime: SkillRuntime): Promise<RuntimeSkillsAnswer> {
+      await new Promise((r) => setTimeout(r, 120));
+      if (runtime === "kimi") return refusal("unsupported_runtime", "kimi is not installed on this host");
+      return {
+        ok: true,
+        list: {
+          runtime,
+          skills: rtSkills[runtime].map(({ files: _f, frontmatter: _m, blocked: _b, ...s }) => ({ ...s, id: idOf(runtime, s.name), path: pathOf(runtime, s.name) })),
+          coverage: runtime === "dsh" || runtime === "claude" ? "partial" : "complete",
+          limits: runtime === "claude" ? ["Plugin skills Claude Code discovers at runtime are not listed"] : runtime === "dsh" ? ["Only the filesystem provider's roots are read"] : [],
+          truncated: false,
+        },
+      };
+    },
+    async previewSkillCopy(selection: SkillCopySelection): Promise<SkillCopyPreviewAnswer> {
+      await new Promise((r) => setTimeout(r, 200));
+      const skill = findRtSkill(selection.sourceRuntime, selection.skillId);
+      if (!skill) return refusal("skill_not_found", "no such skill in the source inventory");
+      if (!skill.copyable) return refusal("skill_not_copyable", "only personal skills can be copied");
+      const exists = rtSkills[selection.targetRuntime].some((s) => s.name === skill.name);
+      const disposition = skill.blocked ? "blocked" : exists ? (selection.overwrite ? "overwrite" : "skip") : "copy";
+      const token = disposition === "blocked" ? null : `pt-${Math.random().toString(36).slice(2, 10)}`;
+      if (token) rtTokens.set(token, { selection, at: Date.now() });
+      const warnings = [
+        ...(skill.blocked ? [skill.blocked] : []),
+        ...(skill.files.some((f) => f.script) ? [`${skill.files.filter((f) => f.script).length} script file(s) are copied as files; the copy never runs them.`] : []),
+        ...(skill.compatibility.status === "review" ? [`Review ${skill.compatibility.fields.join(", ")} for ${selection.targetRuntime}.`] : []),
+      ];
+      return {
+        ok: true,
+        preview: {
+          name: skill.name, destination: pathOf(selection.targetRuntime, skill.name).replace(/\\SKILL\.md$/, ""), destinationExists: exists, disposition,
+          files: skill.files, frontmatter: skill.frontmatter, warnings, sourceDigest: `sha256:${(skill.name.length * 7919).toString(16).padStart(8, "0")}…`,
+          previewToken: token, confirmPhrase: disposition === "copy" || disposition === "overwrite" ? `${disposition === "overwrite" ? "overwrite" : "copy"} ${skill.name}` : null,
+        },
+      };
+    },
+    async copySkill(request: SkillCopyRequest): Promise<SkillCopyAnswer> {
+      await new Promise((r) => setTimeout(r, 300));
+      const key = JSON.stringify({ ...request, previewToken: undefined, confirmation: undefined });
+      const prior = rtDone.get(request.actionId);
+      if (prior) return prior.request === key && prior.result.ok ? { ok: true, result: { ...prior.result.result, replayed: true } } : refusal("skill_copy_action_conflict", "this action id was used for another request");
+      const token = rtTokens.get(request.previewToken);
+      if (!token || Date.now() - token.at > 5 * 60_000 || JSON.stringify(token.selection) !== JSON.stringify({ sourceRuntime: request.sourceRuntime, targetRuntime: request.targetRuntime, skillId: request.skillId, ...(request.overwrite ? { overwrite: true } : {}) })) return refusal("skill_copy_preview_stale", "preview again");
+      const skill = findRtSkill(request.sourceRuntime, request.skillId)!;
+      const exists = rtSkills[request.targetRuntime].some((s) => s.name === skill.name);
+      const outcome = exists ? (request.overwrite ? "overwritten" : "skipped") : "copied";
+      if (outcome !== "skipped") {
+        const phrase = `${outcome === "overwritten" ? "overwrite" : "copy"} ${skill.name}`;
+        if (request.confirmation !== phrase) return refusal("skill_copy_confirmation_required", `type “${phrase}” to confirm`);
+        const copy: RtSkill = { ...skill, source: SOURCE[request.targetRuntime] };
+        rtSkills[request.targetRuntime] = [...rtSkills[request.targetRuntime].filter((s) => s.name !== skill.name), copy];
+      }
+      rtTokens.delete(request.previewToken);
+      const result: SkillCopyAnswer = { ok: true, result: { actionId: request.actionId, outcome, name: skill.name, destination: pathOf(request.targetRuntime, skill.name).replace(/\\SKILL\.md$/, ""), replayed: false } };
+      rtDone.set(request.actionId, { request: key, result });
+      return result;
+    },
+  };
+}

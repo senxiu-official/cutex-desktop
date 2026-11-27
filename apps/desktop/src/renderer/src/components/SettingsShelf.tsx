@@ -21,7 +21,7 @@ import { ArrowLeftRight, ChevronRight, Maximize2, Minimize2, PanelLeftClose, Pan
 import { useI18n, type MessageKey } from "../i18n";
 import { resetDragonSize } from "../lib/aboutDragon";
 import { SETTINGS_NAV_UNTITLED, settingsNavGroups, settingsNavPage, settingsTab } from "../lib/settingsNav";
-import { setSettingsHost } from "../lib/settingsHost";
+import { useSettingsHostFollowsFocus } from "../lib/settingsHost";
 import { useSettingsAffectsHover } from "../lib/panelSettings";
 import {
   closeSettingsShelf,
@@ -342,9 +342,9 @@ function OpenShelf({ row, inSlot }: { row: HTMLElement; inSlot: boolean }) {
   // Live while an edge is dragged: its inner edge, or the sidebar's edge beside it (lib/settingsShelf, #38).
   const live = useSettingsShelfLive((s) => s.width);
   const setLive = setSettingsShelfLive;
-  // Leaving Settings: the 关于 dragon starts small next time; the host pages edit the focus host again.
+  // Leaving Settings: the 关于 app icon starts small next time; the host pages edit the focus host again.
   useEffect(() => resetDragonSize, []);
-  useEffect(() => () => setSettingsHost(null), []);
+  useSettingsHostFollowsFocus();
   // The window's work row (the App row holding PaneHost and the anchor) less the docked sidebar card: the
   // card keeps a conversation's width beside it.
   useLayoutEffect(() => {

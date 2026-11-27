@@ -112,6 +112,7 @@ export const trayZhCN = {
   "tray.close": "关闭",
   "workspace.threeColumns": "允许 3 个工作区",
   "workspace.threeColumnsHint": "最多并排 3 个工作区（缺省 2 个）；每个至少 400 px，窗口放不下就不会加",
+  "workspace.sideBySide": "并排工作区",
   "tray.closeTitle": "关闭 {name}（离开托盘）",
   "tray.needsYou": "需要你 {n}",
   "tray.needsYouTitle": "打开需要你的：{name}",

@@ -5,6 +5,8 @@
 
 import { cutexBuildChannelTag, cutexBuildLabel, type CutexBuild } from "@cutex-desktop/cutex-client";
 import type { SettingsTab } from "../store"; // type only (erased)
+import { FEATURE_PROFILES_OLD_PAGE, FEATURE_PROFILES_OLD_SUB, FEATURE_PROFILES_SECTION, FEATURE_PROFILES_SUB } from "./featureProfilesNav";
+import { INPUT_REFINEMENT_OLD_PAGE, INPUT_REFINEMENT_PAGE, INPUT_REFINEMENT_SECTION, INPUT_REFINEMENT_TEMPLATE_SUB } from "./inputRefinementNav";
 
 /** Where a setting lives; host/codex resolve to its actual target host. */
 export type SettingsSource = "local" | "host" | "codex" | "person";
@@ -27,7 +29,7 @@ export const SETTINGS_GROUP_ORDER: readonly SettingsGroupId[] = ["app", "connect
  * group of their own right after 应用 (near 外观). A display grouping only — the pages' modules still declare their
  * own `group` (contract unchanged); the shell picks them out by page id.
  */
-export const PANEL_PAGES: readonly string[] = ["sidebar", "conversation", "status", "sides", "tray", "desktop"];
+export const PANEL_PAGES: readonly string[] = ["sidebar", "conversation", "sides", "tray", "desktop"];
 
 /** A group of the settings nav: a module group, or one the shell makes (面板, 你, 帮助与关于). */
 export type SettingsNavGroupId = SettingsGroupId | "panels" | "you" | "help";
@@ -68,7 +70,40 @@ export function settingsNavGroups<T extends { item: { page: string; group: Setti
  * Old page ids (design 006 v1): 输入区 is a part of the 会话 page now. `openSettings("composer")`, saved params
  * and search results land there (its cards keep their anchors).
  */
-export const PAGE_ALIASES: Readonly<Record<string, SettingsTab>> = { composer: "conversation" };
+/** Settings → 自定义桌面 (onboarding v3, 2026-11-26) became part of the guide (module start); 外观 holds its settings. */
+export const CUSTOMIZE_OLD_PAGE = "customize-desktop";
+/**
+ * 状态显示 (owner 2026-11-28): the status row is part of the conversation, so which items it shows is on 会话 → 输入
+ * (「输入框上方」, anchor `aboveInput`); the capsule's settings are the status-capsule module's own page.
+ */
+export const STATUS_OLD_PAGE = "status";
+export const STATUS_ROW_ANCHOR = "aboveInput";
+/** 会话 → 布局 → 并排工作区 (owner 2026-11-28: 允许 3 个工作区 moved here from 托盘). */
+export const WORKSPACES_ANCHOR = "workspaces";
+export const PAGE_ALIASES: Readonly<Record<string, SettingsTab>> = { composer: "conversation", [FEATURE_PROFILES_OLD_PAGE]: "profiles", [INPUT_REFINEMENT_OLD_PAGE]: "conversation", [CUSTOMIZE_OLD_PAGE]: "appearance", [STATUS_OLD_PAGE]: "conversation" };
+
+
+/**
+ * Pages that became a card of another page (owner 2026-11-26: 功能 Profile is a card of 智能体 → Profile now;
+ * 输入优化 a card of 会话). `openSettings(old)` lands on the page with that card in view; an old sub-page key maps to
+ * the new page's own, or to a sub-page of another page (`{ tab, sub }`: 输入优化's template editor sits on its
+ * detail page under 会话).
+ */
+export const MOVED_PAGES: Readonly<Record<string, { tab: SettingsTab; anchor: string; subs: Readonly<Record<string, string | { tab: SettingsTab; sub: string }>> }>> = {
+  [FEATURE_PROFILES_OLD_PAGE]: { tab: "profiles", anchor: FEATURE_PROFILES_SECTION, subs: { [FEATURE_PROFILES_OLD_SUB]: FEATURE_PROFILES_SUB } },
+  [INPUT_REFINEMENT_OLD_PAGE]: { tab: "conversation", anchor: INPUT_REFINEMENT_SECTION, subs: { [INPUT_REFINEMENT_TEMPLATE_SUB]: { tab: INPUT_REFINEMENT_PAGE, sub: INPUT_REFINEMENT_TEMPLATE_SUB } } },
+  [STATUS_OLD_PAGE]: { tab: "conversation", anchor: STATUS_ROW_ANCHOR, subs: {} },
+};
+
+/** `openSettings(tab, focus)` for a page that moved: the new page, the card as the anchor (or the new sub-page). */
+export function movedSettingsRoute<F extends { anchor?: string; sub?: string }>(tab: SettingsTab, focus: F | undefined): { tab: SettingsTab; focus: F | undefined } {
+  const moved = MOVED_PAGES[tab];
+  if (!moved) return { tab, focus };
+  const target = focus?.sub ? moved.subs[focus.sub] ?? focus.sub : undefined;
+  if (typeof target === "object") return { tab: target.tab, focus: { ...focus, sub: target.sub, anchor: focus?.anchor } as F };
+  const sub = target;
+  return { tab: moved.tab, focus: { ...focus, sub, anchor: focus?.anchor ?? (sub ? undefined : moved.anchor) } as F };
+}
 
 /** The page the nav marks while `tab` shows (a detail page marks its parent). */
 export function settingsNavPage(pages: readonly { item: { page: string; navParent?: string } }[], tab: string): string {

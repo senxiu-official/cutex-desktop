@@ -12,12 +12,14 @@ import notes from "./notes";
 import remoteCopies from "./remote-copies";
 import baiduPan from "./baidu-pan";
 import onboarding from "./onboarding";
+import start from "./start";
 import bookmarks from "./bookmarks";
 import sideChat from "./side-chat";
 import backgroundTerminals from "./background-terminals";
 import claudeAccounts from "./claude-accounts";
 import kimiAccounts from "./kimi-accounts";
 import featureProfiles from "./feature-profiles";
+import inputRefinement from "./input-refinement";
 import profileImport from "./profile-import";
 import claudeScience from "./claude-science";
 import whatsapp from "./whatsapp";
@@ -152,6 +154,8 @@ export const MODULES: readonly AppModule[] = [
   about,
   // The one-time introduction and per-version 新功能 (its card on Settings → 关于).
   onboarding,
+  // 开始使用: the first-run steps, 接下来可以试试, 自定义桌面 and the sample project (onboarding v3).
+  start,
   // Settings → 后端更新 (cutex backend-upgrade, owner only): each host's cutex upgrades.
   backendUpgrade,
   runtimePackages,
@@ -159,8 +163,10 @@ export const MODULES: readonly AppModule[] = [
   claudeAccounts,
   // Kimi 账户 (cutex kimi-accounts, r266): a section of Settings → Profile after Claude 账户.
   kimiAccounts,
-  // 功能 Profile (cutex feature-profiles): Settings → 工具 → 功能 Profile, endpoints only app features use.
+  // 功能 Profile (cutex feature-profiles): a card of Settings → Profile, endpoints only app features use.
   featureProfiles,
+  // 输入优化 (owner 2026-11-26): the input box's rewrite action (composer.action) and its card in Settings → 会话.
+  inputRefinement,
   // 从 CC Switch 导入 (cutex profile-import-cc-switch): a section of Settings → Profile after Claude 账户.
   profileImport,
 ];

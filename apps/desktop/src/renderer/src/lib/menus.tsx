@@ -80,7 +80,7 @@ import { agentFeaturesFor } from "./agentFeaturesView";
 import { revertTexts } from "./runtimeWording";
 import type { StructuralOp } from "./structuralGate";
 import { structuralBlockFor, structuralBlockText, structuralErrorText } from "./structuralGateView";
-import { markSeenOn, turnMarksOn } from "./turnUnread";
+import { markReadOn, turnMarksOn } from "./turnUnread";
 import { parseUnsupported } from "../../../shared/unsupported";
 import { unsupportedNotice } from "../store";
 import { captureHostAction } from "./hostSwitch";
@@ -792,7 +792,7 @@ export function agentMenu(session: SessionResource, t: T, hostId?: string): Menu
   if (!isOwnerFeatures(features)) {
     return [
       !retired && { label: pinned ? t("menu.unpin") : t("menu.pin"), icon: pinned ? <PinOff size={ICON} /> : <Pin size={ICON} />, onSelect: () => app.togglePin(id, host) },
-      unread && { label: t("menu.markRead"), icon: <MailCheck size={ICON} />, onSelect: () => markSeenOn(host, id) },
+      unread && { label: t("menu.markRead"), icon: <MailCheck size={ICON} />, onSelect: () => markReadOn(host, id) },
       // One row here (打开所在项目): stays at the top level (openEntries' one-row rule).
       projectId && { label: t("menu.openProject"), icon: <FolderKanban size={ICON} />, onSelect: () => app.openPage("projects.page", { project: projectId, ...(focus ? {} : { host }) }) },
       {
@@ -814,7 +814,7 @@ export function agentMenu(session: SessionResource, t: T, hostId?: string): Menu
   return [
     // ── view (this device only) ──
     !retired && { label: pinned ? t("menu.unpin") : t("menu.pin"), icon: pinned ? <PinOff size={ICON} /> : <Pin size={ICON} />, onSelect: () => app.togglePin(id, host) },
-    unread && { label: t("menu.markRead"), icon: <MailCheck size={ICON} />, onSelect: () => markSeenOn(host, id) },
+    unread && { label: t("menu.markRead"), icon: <MailCheck size={ICON} />, onSelect: () => markReadOn(host, id) },
     // The modules' `ref.action` items for the agent (§19.8).
     ...refActionEntries(agentRef(host, id, session.displayName)),
     "separator",

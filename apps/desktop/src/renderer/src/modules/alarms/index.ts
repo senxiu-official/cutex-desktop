@@ -16,7 +16,7 @@ export default defineModule({
   activate: (ctx) => startAlarmSync(ctx),
   contributes: {
     "conversation.status": [
-      { id: "alarms.status", order: 650, titleKey: "alarms.statusTitle", defaultPlace: "capsule", useStatus: useAlarmsStatus, Meta: AlarmsMeta, Body: AlarmsBody, Bar: AlarmsStatusBar, icon: AlarmClock },
+      { id: "alarms.status", order: 650, titleKey: "alarms.statusTitle", defaultPlace: "both", useStatus: useAlarmsStatus, Meta: AlarmsMeta, Body: AlarmsBody, Bar: AlarmsStatusBar, icon: AlarmClock },
     ],
   },
 });

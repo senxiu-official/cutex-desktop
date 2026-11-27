@@ -9,6 +9,9 @@ import { confirmDialog, openMenuFrom } from "../../lib/contextMenu";
 import { Button, ListRow, ScopeChip, SettingsGroup } from "../../components/settings/Form";
 import { applyPackView, usePackRuntime, type PackRow } from "../packs";
 import type { ModuleFacts } from "../moduleTags";
+import { useSlot } from "../react";
+import { moduleSettingsRoute } from "../moduleSettingsRoute";
+import { useApp } from "../../store";
 import type { ModulePacksView, PackStep } from "../../../../shared/modulePacks";
 
 const STEPS: PackStep[] = ["download", "verify", "unpack"];
@@ -208,6 +211,23 @@ export function PackBelow({ row }: { row: PackRow }) {
       </div>
     );
   }
+  const note = migrationNote(row);
+  if (note) return <p className="pb-1 pl-[18px] text-xs text-subtle" data-pack-migration={row.migration ?? ""}>{t(note)}</p>;
+  return null;
+}
+
+/**
+ * Claude Science moving from the bundled copy to its signed pack (main, at start-up; docs/desktop-optional-collections.md):
+ * done once a signed copy is in use; the bundled copy still serving when no payload was usable; busy = try at next start.
+ * A signed copy the owner removed afterwards is not brought back, so then nothing is said; nor for a kept copy the owner
+ * installed from a file (kept covers both): its 本地安装 chip says what runs.
+ */
+function migrationNote(row: PackRow): MessageKey | null {
+  const m = row.migration;
+  if (!m) return null;
+  if ((m === "installed" || m === "kept" || m === "complete") && row.activeVersion && !row.installed?.local) return "modules.pack.migration.done";
+  if ((m === "seed_missing" || m === "seed_invalid") && row.bundled && !row.activeVersion) return "modules.pack.migration.bundled";
+  if (m === "busy" && !row.activeVersion) return "modules.pack.migration.busy";
   return null;
 }
 
@@ -229,21 +249,29 @@ export function ModuleTags({ facts, packable = false, bundled = false, dev = fal
     if (kind === "failed") return t(bundled ? "modules.tag.failed.bundled" : "modules.tag.failed.body", { error });
     return t(`modules.tag.${kind}.body` as MessageKey, { error });
   };
+  const optional = facts.tags.find((tag) => tag.kind === "optional")?.optional;
+  const chip = (tag: ModuleFacts["tags"][number]) => {
+    const key = tag.kind === "optional" && tag.optional ? `modules.tag.optional.${tag.optional}` : `modules.tag.${tag.kind}`;
+    return (
+      <span key={tag.kind} className="inline-flex" data-module-tag={tag.kind} data-module-optional={tag.optional}>
+        <ScopeChip tone={tag.tone} icon={null} label={t(key as MessageKey)} title={t(`${key}.title` as MessageKey, { version: tag.version ?? "" })} body={tag.kind === "optional" ? t(`${key}.body` as MessageKey) : body(tag.kind, tag.error)} />
+      </span>
+    );
+  };
   return (
     <span className="inline-flex min-w-0 flex-wrap items-center gap-1.5" data-module-tags="">
-      <span className="inline-flex" data-module-tag={o}>
-        <ScopeChip tone="plain" icon={null} label={t(`modules.tag.${o}` as MessageKey)} title={t(`modules.tag.${o}.title` as MessageKey)} body={originBody} />
-      </span>
+      {/* An optional module's chip (可选 · 随应用提供 / 可选 · 未下载) says where it comes from: the origin chip's place. */}
+      {optional ? chip(facts.tags.find((tag) => tag.kind === "optional")!) : (
+        <span className="inline-flex" data-module-tag={o}>
+          <ScopeChip tone="plain" icon={null} label={t(`modules.tag.${o}` as MessageKey)} title={t(`modules.tag.${o}.title` as MessageKey)} body={originBody} />
+        </span>
+      )}
       {facts.version && (
         <span className="shrink-0 text-caption text-subtle tabular-nums" data-module-version={facts.versionOf ?? ""} data-tip={t(facts.versionOf === "app" ? "modules.version.app" : "modules.version.module", { version: versionLabel(facts.version) })}>
           {versionLabel(facts.version)}
         </span>
       )}
-      {facts.tags.map((tag) => (
-        <span key={tag.kind} className="inline-flex" data-module-tag={tag.kind}>
-          <ScopeChip tone={tag.tone} icon={null} label={t(`modules.tag.${tag.kind}` as MessageKey)} title={t(`modules.tag.${tag.kind}.title` as MessageKey, { version: tag.version ?? "" })} body={body(tag.kind, tag.error)} />
-        </span>
-      ))}
+      {facts.tags.filter((tag) => !(optional && tag.kind === "optional")).map(chip)}
     </span>
   );
 }
@@ -254,6 +282,22 @@ const versionLabel = (v: string) => (/^\d+\.\d+/.test(v) ? `v${v}` : v);
 /** A module that exists only as a pack (in the index or installed, not built in and not loaded): its names. */
 export function packOnlyIds(view: ModulePacksView, known: ReadonlySet<string>): string[] {
   return [...new Set([...(view.index?.packs.map((p) => p.id) ?? []), ...view.installed.map((p) => p.id), ...view.broken.map((b) => b.id)])].filter((id) => !known.has(id)).sort();
+}
+
+/**
+ * 「设置」 on a module's row (docs/desktop-modules.md §5.1): opens the module's own settings while it contributes them
+ * (on, and the page available on this host). Nothing for a disabled module or a page without its capability.
+ */
+export function ModuleSettingsButton({ moduleId, name }: { moduleId: string; name: string }) {
+  const { t } = useI18n();
+  const route = moduleSettingsRoute(moduleId, useSlot("settings.page"), useSlot("settings.section"));
+  const openSettings = useApp((s) => s.openSettings);
+  if (!route) return null;
+  return (
+    <span data-module-settings={moduleId} className="inline-flex">
+      <Button title={t("modules.list.settings.label", { name })} onClick={() => openSettings(route.page, route.anchor ? { anchor: route.anchor } : undefined)}>{t("modules.list.settings")}</Button>
+    </span>
+  );
 }
 
 /** One pack-only row (no switch: nothing is loaded to turn on). */
@@ -269,7 +313,7 @@ export function PackOnlyRow({ row, name, detail, facts }: { row: PackRow; name: 
       }
       detail={detail}
       below={<PackBelow row={row} />}
-      actions={<PackActions row={row} name={name} />}
+      actions={<><ModuleSettingsButton moduleId={row.id} name={name} /><PackActions row={row} name={name} /></>}
     /></SettingsGroup>
   );
 }

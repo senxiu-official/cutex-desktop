@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // 批注追问 (harness survey Z4, owner 2026-11-25): a passage selected in an agent's text goes to the side chat as a quote
 // above the composer, with a link back to its turn; the owner adds a note and both go as one message. Select-to-ask is
-// general (owner 11-25, not 教学模式's): the menu is on Markdown and on any text wrapped in components/SelectionActions
+// general (owner 11-25): the menu is on Markdown and on any text wrapped in components/SelectionActions
 // (user bubbles, tool output, side-chat bubbles).
 import { act, createElement as h } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -35,7 +35,6 @@ vi.mock("../src/renderer/src/lib/hostLists", async (original) => ({ ...(await or
 const { Markdown } = await import("../src/renderer/src/components/Markdown");
 const { AgentMarkdownScope } = await import("../src/renderer/src/components/AgentMarkdownScope");
 const { SelectionActions } = await import("../src/renderer/src/components/SelectionActions");
-const { setUiPref } = await import("../src/renderer/src/lib/prefs");
 const { useApp } = await import("../src/renderer/src/store");
 const { BUILTIN_REF_KINDS } = await import("../src/renderer/src/lib/refs");
 const { refActionApplies } = await import("../src/renderer/src/lib/refActionApplies");
@@ -71,7 +70,7 @@ describe("the selection menu", () => {
     useApp.setState({ selectedId: "agent-1", selectedHost: "local", hosts: null } as never);
     node = document.createElement("div"); document.body.append(node); root = createRoot(node);
   });
-  afterEach(() => { act(() => root.unmount()); node.remove(); setUiPref("teachingMode", false); });
+  afterEach(() => { act(() => root.unmount()); node.remove(); });
 
   async function rightClickSelection(element: unknown = h("div", { "data-turn-id": "turn-7" }, h(Markdown, { text: "Ownership moves on assignment." })), selector = "p") {
     await act(async () => root.render(element as never));
@@ -84,15 +83,12 @@ describe("the selection menu", () => {
   }
   const labels = () => (fx.menu.mock.calls.at(-1)![2] as (string | { label?: string })[]).map((e) => (typeof e === "string" ? e : e.label));
 
-  it("Markdown, teaching switch off or on: the actions + Copy, from a `selection` ref of the agent, text and turn", async () => {
-    for (const teaching of [false, true]) {
-      setUiPref("teachingMode", teaching);
-      fx.menu.mockClear(); fx.actions.mockClear();
-      const event = await rightClickSelection();
-      expect(event.defaultPrevented).toBe(true);
-      expect(labels()).toEqual(["side-chat.explain", "side-chat.annotate", "separator", "Copy"]);
-      expect(fx.actions.mock.calls.map((c) => c[0])).toEqual([expect.objectContaining({ kind: "selection", hostId: "local", params: { sessionId: "agent-1", text: "Ownership moves on assignment.", turnId: "turn-7" } })]);
-    }
+  it("Markdown: the actions + Copy, from a `selection` ref of the agent, text and turn", async () => {
+    fx.menu.mockClear(); fx.actions.mockClear();
+    const event = await rightClickSelection();
+    expect(event.defaultPrevented).toBe(true);
+    expect(labels()).toEqual(["side-chat.explain", "side-chat.annotate", "separator", "Copy"]);
+    expect(fx.actions.mock.calls.map((c) => c[0])).toEqual([expect.objectContaining({ kind: "selection", hostId: "local", params: { sessionId: "agent-1", text: "Ownership moves on assignment.", turnId: "turn-7" } })]);
   });
   it("SelectionActions (a user bubble, tool output): the same menu; the row's turn when given; its own menu otherwise", async () => {
     const own = vi.fn();
@@ -245,7 +241,9 @@ describe("the side chat card", () => {
     render();
     const chip = node.querySelector<HTMLElement>("[data-side-quote]")!;
     expect(chip.textContent).toContain("Ownership moves on assignment.");
-    expect(chip.textContent).toContain("side-chat.quoteFrom");
+    // turn-7 is not in a loaded main timeline: the plain label, the turn id only in the tooltip (never as text).
+    expect(chip.textContent).toContain("side-chat.quoteLabel");
+    expect(chip.textContent).not.toContain("turn-7");
     expect(node.querySelector("textarea")!.placeholder).toBe("side-chat.annotatePlaceholder");
     expect(node.querySelector<HTMLButtonElement>("button[type=submit]")!.disabled).toBe(false);
     await act(async () => chip.querySelector<HTMLButtonElement>("[data-side-quote-jump]")!.click());

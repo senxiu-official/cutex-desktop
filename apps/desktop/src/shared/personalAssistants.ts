@@ -1,8 +1,9 @@
 // 个人助理 (Personal Assistants, cutex r295 `personal-assistants-local-v1`; updated recurring templates, qualified project
-// refs and owner views): the owner's Management contract (cutex src/management/v2/personal_assistants.rs, contract v4).
+// refs and owner views; r299 readiness): the owner's Management contract (cutex src/management/v2/personal_assistants.rs, contract v4).
 // Shared by main (paths, request bodies checked before they leave the app, replies checked before the renderer sees
 // them) and the renderer (types). The routes:
 //   GET  /v2/personal-assistants                       list (cursor = last id, limit 1–100; updated rows carry availability)
+//   GET  /v2/personal-assistants/create-options        r299 Profile/pin readiness, host capabilities
 //   POST /v2/personal-assistants                       create {actionId, config}
 //   GET  /v2/personal-assistants/{id}                  detail view
 //   PATCH /v2/personal-assistants/{id}                 {actionId, expectedRevision, change}
@@ -26,6 +27,22 @@ export const PA_RECURRING_FEATURE = "personal-assistants-recurring-v1";
 export const PA_QUALIFIED_REFS_FEATURE = "personal-assistants-qualified-project-refs-v1";
 /** updated notes, list rows with availability, newest-first requests, the owner request query and change events. */
 export const PA_OWNER_VIEWS_FEATURE = "personal-assistants-owner-views-v1";
+/** r299 create preflight, evaluated authority and agenda source metadata. */
+export const PA_READINESS_FEATURE = "personal-assistants-readiness-v1";
+export const PA_AGENT_FEATURE = "personal-assistants-agent-v1";
+export type PaPermissionMode = "auto" | "fullAccess";
+export interface PaRuntimePolicy {
+  version: 1;
+  initialPermissionMode: PaPermissionMode;
+  checkInFullAccess: boolean;
+  authorizedWriteProjects: PaProjectRef[];
+}
+export interface PaRuntime {
+  behavior: "agent" | "legacyRestricted";
+  permissionMode: PaPermissionMode | "custom" | null;
+  policy: PaRuntimePolicy | null;
+  workspace: string | null;
+}
 /**
  * Projects of other hosts in an assistant's set. Not advertised yet: updated sends only the boolean map entry
  * `personalAssistantsCrossHostScopeV1: false`; this list name follows the other features (to be confirmed with cutex).
@@ -97,8 +114,42 @@ export interface PaCapabilities {
   qualifiedProjectRefs?: boolean;
   crossHostProjectScope?: boolean;
 }
+export interface PaCapabilityDetail {
+  configured: boolean;
+  effective: boolean;
+  unsupported: boolean;
+  reason: string | null;
+}
+export type PaCapabilityDetails = Record<string, PaCapabilityDetail>;
+export interface PaProfileReadiness {
+  id: string;
+  name: string;
+  runtime: string;
+  eligible: boolean;
+  reason: string | null;
+  runtimePin: string | null;
+}
+export interface PaCreateOptions {
+  permissionModes?: PaPermissionMode[];
+  defaultPermissionMode?: PaPermissionMode;
+  homeInstanceId: string;
+  profiles: PaProfileReadiness[];
+  capabilities: PaCapabilities;
+  observedAt: string;
+  hostTimezone: string | null;
+}
+/** A source observation. Calendar is an imported snapshot, not a live read. */
+export interface PaAgendaSource {
+  instanceId: string;
+  timezone: string | null;
+  observedAt: string | null;
+  status: "ready" | "unknown" | "snapshot" | "disconnected" | string;
+  reason: string | null;
+}
+export type PaAgendaSources = Record<string, PaAgendaSource>;
 /** Detail / create / update reply. */
 export interface PaView {
+  runtime?: PaRuntime | null;
   assistant: PaAssistant;
   overlaps: PaOverlap[];
   moreOverlaps: boolean;
@@ -106,11 +157,14 @@ export interface PaView {
   availability: PaAvailability | string;
   activeProfile: string | null;
   capabilities: PaCapabilities;
+  capabilityDetails?: PaCapabilityDetails | null;
   /** Renderer only: built from an updated list row (no overlaps; capabilities from the host's features) until the detail is read. */
   fromList?: boolean;
 }
 /** updated list rows also carry the availability and the session's current Profile. */
 export interface PaRowStatus {
+  runtime?: PaRuntime | null;
+  capabilityDetails?: PaCapabilityDetails | null;
   availability: PaAvailability | string;
   activeProfile: string | null;
 }
@@ -206,6 +260,11 @@ export interface PaAgendaCalendar extends PaCalendarInfo {
   nextCursor: string | null;
 }
 export interface PaAgenda {
+  /** r299 metadata; absent/null on older hosts. */
+  displayTimezone?: string | null;
+  hostTimezone?: string | null;
+  observedAt?: string | null;
+  sources?: PaAgendaSources | null;
   date: string;
   timezone: string;
   items: PaRequest[];
@@ -235,12 +294,14 @@ export interface PaAuditPage {
 }
 
 export type PaChange =
+  | { kind: "runtime"; policy: PaRuntimePolicy }
   | { kind: "settings"; name: string; projectIds: string[] }
   | { kind: "scopedSettings"; name: string; projectRefs: PaProjectRef[] }
   | { kind: "grants"; grants: PaGrants }
   | { kind: "enabled"; enabled: boolean };
 
 export interface PaCreateInput {
+  permissionMode?: PaPermissionMode;
   actionId: string;
   config: PaConfig;
 }
@@ -260,6 +321,8 @@ export interface PaCancelInput {
   expectedRevision: number;
 }
 export interface PaAgendaQuery {
+  /** IANA zone used for all day filters; only send to readiness-capable hosts. */
+  displayTimezone?: string;
   date?: string;
   cursor?: number;
   reminderCursor?: string;
@@ -473,10 +536,22 @@ export function paCreateBody(input: PaCreateInput): PaCreateInput {
     if (home.length !== config.projectIds.length || home.some((p) => !config.projectIds.includes(p))) throw new Error("invalid project set");
     config.projectRefs = refs;
   }
-  return { actionId: text(input?.actionId, 128, "action id"), config };
+  return { actionId: text(input?.actionId, 128, "action id"), config,
+    ...(input.permissionMode === undefined ? {} : { permissionMode: permissionMode(input.permissionMode) }) };
+}
+function permissionMode(value: unknown): PaPermissionMode {
+  if (value !== "auto" && value !== "fullAccess") throw new Error("invalid permission mode");
+  return value;
+}
+function runtimePolicy(value: PaRuntimePolicy): PaRuntimePolicy {
+  if (!value || value.version !== 1 || typeof value.checkInFullAccess !== "boolean") throw new Error("invalid runtime policy");
+  return { version: 1, initialPermissionMode: permissionMode(value.initialPermissionMode),
+    checkInFullAccess: value.checkInFullAccess, authorizedWriteProjects: projectRefs(value.authorizedWriteProjects) };
 }
 export function paChange(change: PaChange): PaChange {
   switch (change?.kind) {
+    case "runtime":
+      return { kind: "runtime", policy: runtimePolicy(change.policy) };
     case "settings":
       return { kind: "settings", name: text(change.name, PA_NAME_MAX * 4, "name"), projectIds: projectIds(change.projectIds) };
     case "scopedSettings":
@@ -503,6 +578,7 @@ export function paAgendaQuery(q: PaAgendaQuery = {}): Record<string, string | nu
   if (q.date !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(q.date)) throw new Error("invalid date");
   return {
     date: q.date,
+    displayTimezone: q.displayTimezone === undefined ? undefined : text(q.displayTimezone, 128, "display timezone"),
     cursor: seqCursor(q.cursor),
     reminderCursor: textCursor(q.reminderCursor, 160),
     scheduleCursor: textCursor(q.scheduleCursor, 100),
@@ -667,25 +743,63 @@ function readAssistant(v: unknown): PaAssistant {
     enabled: v.enabled,
   };
 }
+function readCapabilityDetails(v: unknown): PaCapabilityDetails | null {
+  if (v == null) return null;
+  if (!obj(v)) bad("capability details");
+  return Object.fromEntries(Object.entries(v).map(([key, d]) => {
+    if (!obj(d) || typeof d.configured !== "boolean" || typeof d.effective !== "boolean" || typeof d.unsupported !== "boolean" || !(d.reason === null || typeof d.reason === "string")) bad("capability detail");
+    if (d.effective && (!d.configured || d.unsupported || d.reason !== null)) bad("effective capability");
+    return [key, { configured: d.configured, effective: d.effective, unsupported: d.unsupported, reason: d.reason }];
+  }));
+}
+function readRuntime(v: unknown): PaRuntime | null {
+  if (v == null) return null;
+  if (!obj(v) || !["agent", "legacyRestricted"].includes(String(v.behavior)) ||
+      ![null, "auto", "fullAccess", "custom"].includes(v.permissionMode as string | null)) bad("runtime");
+  const policy = v.policy == null ? null : runtimePolicy(v.policy as PaRuntimePolicy);
+  if ((v.behavior === "agent") !== (policy !== null)) bad("runtime policy");
+  return { behavior: v.behavior as PaRuntime["behavior"], permissionMode: v.permissionMode as PaRuntime["permissionMode"], policy, workspace: str(v.workspace) };
+}
+export function readPaCreateOptions(v: unknown): PaCreateOptions {
+  if (!obj(v) || typeof v.homeInstanceId !== "string" || !Array.isArray(v.profiles) || !obj(v.capabilities) || typeof v.observedAt !== "string") bad("create options");
+  const profiles = v.profiles.map((p): PaProfileReadiness => {
+    if (!obj(p) || typeof p.id !== "string" || typeof p.name !== "string" || typeof p.runtime !== "string" || typeof p.eligible !== "boolean" || !(p.reason === null || typeof p.reason === "string") || !(p.runtimePin === null || typeof p.runtimePin === "string")) bad("profile readiness");
+    if (p.eligible && p.reason !== null) bad("eligible profile");
+    return { id: p.id, name: p.name, runtime: p.runtime, eligible: p.eligible, reason: p.reason, runtimePin: p.runtimePin };
+  });
+  return { homeInstanceId: v.homeInstanceId, profiles, capabilities: v.capabilities as PaCapabilities, observedAt: v.observedAt, hostTimezone: str(v.hostTimezone),
+    ...(v.permissionModes === undefined ? {} : { permissionModes: Array.isArray(v.permissionModes) ? v.permissionModes.map(permissionMode) : bad("permission modes") }),
+    ...(v.defaultPermissionMode === undefined ? {} : { defaultPermissionMode: permissionMode(v.defaultPermissionMode) }) };
+}
+function readAgendaSources(v: unknown): PaAgendaSources | null {
+  if (v == null) return null;
+  if (!obj(v)) bad("agenda sources");
+  return Object.fromEntries(Object.entries(v).map(([key, source]) => {
+    if (!obj(source) || typeof source.instanceId !== "string" || typeof source.status !== "string") bad("agenda source");
+    return [key, { instanceId: source.instanceId, timezone: str(source.timezone), observedAt: str(source.observedAt), status: source.status, reason: str(source.reason) }];
+  }));
+}
 export function readPaList(v: unknown): PaList {
   if (!obj(v) || !Array.isArray(v.items)) bad("list");
   const items = v.items.map(readAssistant);
   // updated rows are the assistant's fields plus availability / activeProfile.
   const rows = v.items as Record<string, unknown>[];
   const status = rows.some((r) => typeof r.availability === "string")
-    ? Object.fromEntries(items.map((a, i) => [a.id, { availability: str(rows[i]!.availability) ?? "provisioning", activeProfile: str(rows[i]!.activeProfile) }]))
+    ? Object.fromEntries(items.map((a, i) => [a.id, { availability: str(rows[i]!.availability) ?? "provisioning", activeProfile: str(rows[i]!.activeProfile), ...(rows[i]!.runtime === undefined ? {} : { runtime: readRuntime(rows[i]!.runtime) }), ...(rows[i]!.capabilityDetails === undefined ? {} : { capabilityDetails: readCapabilityDetails(rows[i]!.capabilityDetails) }) }]))
     : null;
   return { homeInstanceId: String(v.homeInstanceId ?? ""), items, status, nextCursor: typeof v.nextCursor === "string" ? v.nextCursor : null };
 }
 export function readPaView(v: unknown): PaView {
   if (!obj(v)) bad("view");
   return {
+    ...(v.runtime === undefined ? {} : { runtime: readRuntime(v.runtime) }),
     assistant: readAssistant(v.assistant),
     overlaps: Array.isArray(v.overlaps) ? v.overlaps.filter(obj).map((o) => ({ assistantId: String(o.assistantId), name: String(o.name ?? ""), projectId: String(o.projectId) })) : [],
     moreOverlaps: v.moreOverlaps === true,
     availability: typeof v.availability === "string" ? v.availability : "provisioning",
     activeProfile: typeof v.activeProfile === "string" ? v.activeProfile : null,
     capabilities: obj(v.capabilities) ? (v.capabilities as PaCapabilities) : {},
+    capabilityDetails: readCapabilityDetails(v.capabilityDetails),
   };
 }
 function readOccurrence(v: unknown): PaOccurrence | null {
@@ -747,11 +861,15 @@ function readAgendaProject(v: Record<string, unknown>): PaAgendaProject | null {
   return { projectRef: ref, director: readSeat(v.director), lifecycle: str(v.lifecycle), issue: str(v.issue) };
 }
 export function readPaAgenda(v: unknown): PaAgenda {
-  if (!obj(v)) bad("agenda");
+  if (!obj(v) || typeof v.date !== "string" || !Array.isArray(v.items) || !Array.isArray(v.reminders) || !Array.isArray(v.schedules)) bad("agenda");
   const cal = obj(v.calendar) ? v.calendar : null;
   return {
     date: String(v.date ?? ""),
     timezone: String(v.timezone ?? "host"),
+    displayTimezone: str(v.displayTimezone),
+    hostTimezone: str(v.hostTimezone),
+    observedAt: str(v.observedAt),
+    sources: readAgendaSources(v.sources),
     items: Array.isArray(v.items) ? v.items.map(readRequest) : [],
     nextCursor: seqOrNull(v.nextCursor),
     reminders: Array.isArray(v.reminders) ? v.reminders.filter(obj).map((r) => ({ alarmId: String(r.alarmId), at: String(r.at ?? ""), message: String(r.message ?? ""), state: String(r.state ?? "") })) : [],

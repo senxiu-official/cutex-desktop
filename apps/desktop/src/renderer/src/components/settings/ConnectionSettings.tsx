@@ -588,7 +588,7 @@ export function HostConnectionSection({ hostId }: { hostId: string }) {
   );
 }
 
-function AddHostForm({ onDone }: { onDone(): void }) {
+export function AddHostForm({ onDone }: { onDone(): void }) {
   const { t } = useI18n();
   const [aliases, setAliases] = useState<string[]>([]);
   const [target, setTarget] = useState("");

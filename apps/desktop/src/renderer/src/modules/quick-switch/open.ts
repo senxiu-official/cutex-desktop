@@ -8,7 +8,7 @@ import type { OpenPlan } from "./model";
 export interface OpenDeps {
   panesOpen(kind: string, params: Json, opts: PaneOpenOptions): PaneOpenResult;
   refsOpen(ref: CutexRef): Promise<RefOpenResult>;
-  openServiceExternal(slug: string, hostId: string): Promise<void>;
+  openServiceTab(slug: string, hostId: string): Promise<void>;
   /** False: the page is gone. */
   openShelfPage(pageId: string): boolean;
   /** lib/workspaces openRef (beside for services / artifacts / pages); false = nothing opened. */
@@ -27,8 +27,8 @@ export async function runOpen(plan: OpenPlan, deps: OpenDeps): Promise<OpenOutco
         if (plan.fallback) return runOpen(plan.fallback, deps);
         return { ok: false, reason: result.status === "stale" ? "stale" : result.reason };
       }
-      case "serviceExternal":
-        await deps.openServiceExternal(plan.slug, plan.hostId);
+      case "serviceTab":
+        await deps.openServiceTab(plan.slug, plan.hostId);
         return { ok: true };
       case "ref": {
         const result = await deps.refsOpen(plan.ref);

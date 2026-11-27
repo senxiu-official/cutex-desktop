@@ -3,12 +3,16 @@
 // now, or why it could not be read), the requests due today and the imported read-only calendar (with 导入 / 替换 /
 // 清除: CalendarImport). Each source pages on its own cursor, merged by stable id (a filtered page may be empty: its
 // cursor is still followed on 加载更多); a calendar replaced meanwhile (`calendar_changed`) reads today again. A request
-// row opens its card on the 请求 tab. Shows what was read last and when.
+// row opens its card on the 请求 tab. Shows what was read last and when. r299 hosts: the day is the owner's (this
+// device's zone, `displayTimezone`), and each source says how it was read (read at / snapshot / unknown / not
+// connected) — a source that could not be read says so instead of 「没有…」. A failed read keeps what was read before,
+// marked as old (never an empty day).
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Bell, CalendarClock, CalendarDays, FolderKanban, NotebookPen, Timer } from "lucide-react";
 import { useI18n } from "../../i18n";
 import { Section } from "../../components/settings/Form";
-import type { PaAgenda, PaAgendaCalendar, PaAgendaProject, PaCalendarEvent, PaReminder, PaRequest, PaSchedule, PaSeat, PaView } from "../../../../shared/personalAssistants";
+import type { PaAgenda, PaAgendaCalendar, PaAgendaProject, PaAgendaSource, PaAgendaSources, PaCalendarEvent, PaReminder, PaRequest, PaSchedule, PaSeat, PaView } from "../../../../shared/personalAssistants";
+import { localTimeZone } from "../../lib/dateText";
 import { hostApi } from "../../lib/hostLists";
 import { paErrorCode } from "../../lib/personalAssistants";
 import { formatAbsolute } from "../../lib/time";
@@ -28,6 +32,19 @@ interface Agenda {
   calendar: PaAgendaCalendar | null;
   next: { items: number | null; reminders: string | null; schedules: string | null; projects: string | null; due: string | null; calendar: string | null };
   readAt: number;
+  /** r299: how each source was read (null: an older host, which does not say). */
+  sources: PaAgendaSources | null;
+  zone: string | null;
+  hostZone: string | null;
+}
+
+/** A later page's source states: a source only becomes worse for a real reason (an empty page of a paged source says
+ * `not_observed_on_page`, which says nothing about the day). */
+function mergeSources(cur: PaAgendaSources | null, next: PaAgendaSources | null | undefined): PaAgendaSources | null {
+  if (!cur || !next) return cur ?? next ?? null;
+  const out = { ...cur };
+  for (const [key, src] of Object.entries(next)) if (src.reason !== "not_observed_on_page" || !out[key]) out[key] = src;
+  return out;
 }
 
 const scheduleId = (s: PaSchedule) => String(s.id ?? s.scheduleId ?? JSON.stringify(s));
@@ -46,6 +63,9 @@ const fromPage = (a: PaAgenda): Agenda => ({
   date: a.date, items: a.items, reminders: a.reminders, schedules: a.schedules, projects: a.projects, due: a.dueRequests, calendar: a.calendar,
   next: { items: a.nextCursor, reminders: a.nextReminderCursor, schedules: a.nextScheduleCursor, projects: a.nextProjectCursor, due: a.nextDueCursor, calendar: a.calendar?.nextCursor ?? null },
   readAt: Date.now(),
+  sources: a.sources ?? null,
+  zone: a.displayTimezone ?? null,
+  hostZone: a.hostTimezone ?? null,
 });
 
 export function AgendaCard({ hostId, view, host, refreshKey, readOnly, onOpenRequest }: { hostId: string; view: PaView; host: PaHost | undefined; /** Changes when the host or this assistant's agenda sources change. */ refreshKey: unknown; readOnly: boolean; onOpenRequest(requestId: string): void }) {
@@ -55,15 +75,17 @@ export function AgendaCard({ hostId, view, host, refreshKey, readOnly, onOpenReq
   const [error, setError] = useState<string | null>(null);
   const [more, setMore] = useState(false);
   const usable = !!view.assistant.sessionId && view.capabilities.agenda !== false;
+  // r299: the owner's day (this device's zone); older hosts don't take it.
+  const zone = host?.features.readiness ? localTimeZone() : undefined;
   const first = useCallback(async () => {
     if (!usable) return;
     try {
-      setAgenda(fromPage(await hostApi(hostId).paAgenda(id, { limit: PAGE })));
+      setAgenda(fromPage(await hostApi(hostId).paAgenda(id, { limit: PAGE, ...(zone ? { displayTimezone: zone } : {}) })));
       setError(null);
     } catch (e) {
       setError(paErrorText(e, t));
     }
-  }, [hostId, id, usable, t]);
+  }, [hostId, id, usable, zone, t]);
   useEffect(() => {
     void first();
   }, [first, refreshKey]);
@@ -75,6 +97,7 @@ export function AgendaCard({ hostId, view, host, refreshKey, readOnly, onOpenReq
       const a: PaAgenda = await hostApi(hostId).paAgenda(id, {
         date: agenda.date,
         limit: PAGE,
+        ...(zone ? { displayTimezone: zone } : {}),
         ...(n.items !== null ? { cursor: n.items } : {}),
         ...(n.reminders ? { reminderCursor: n.reminders } : {}),
         ...(n.schedules ? { scheduleCursor: n.schedules } : {}),
@@ -102,6 +125,7 @@ export function AgendaCard({ hostId, view, host, refreshKey, readOnly, onOpenReq
             calendar: c.calendar ? (a.calendar?.nextCursor ?? null) : null,
           },
           readAt: Date.now(),
+          sources: mergeSources(cur.sources, a.sources),
         };
       });
     } catch (e) {
@@ -113,12 +137,36 @@ export function AgendaCard({ hostId, view, host, refreshKey, readOnly, onOpenReq
     }
   };
   const hasMore = !!agenda && Object.values(agenda.next).some((c) => c !== null && c !== "");
-  const heading = (icon: ReactNode, text: string) => (
+  const heading = (icon: ReactNode, text: string, extra: ReactNode = null) => (
     <div className="mt-3 mb-1 flex items-center gap-1.5 text-caption/[inherit] font-semibold text-subtle first:mt-0">
       {icon}
       {text}
+      {extra}
     </div>
   );
+  /** A source's state after its heading (r299), and whether its list can be called empty. */
+  const source = (key: string): PaAgendaSource | undefined => agenda?.sources?.[key];
+  const readable = (key: string) => {
+    const src = source(key);
+    return !src || src.status === "ready" || src.status === "snapshot";
+  };
+  const note = (key: string) => {
+    const src = source(key);
+    if (!src) return null;
+    const ms = src.observedAt ? Date.parse(src.observedAt) : NaN;
+    const at = Number.isFinite(ms) ? formatAbsolute(Math.floor(ms / 1000)) : null;
+    // A source read with the page says nothing more; one read clearly earlier says when.
+    const older = Number.isFinite(ms) && !!agenda && agenda.readAt - ms > 120_000;
+    const text = src.status === "ready" ? (at && older ? t("personal-assistants.today.source.ready", { at }) : null)
+      : src.status === "snapshot" ? t("personal-assistants.today.source.snapshot", { at: at ?? "—" })
+      : src.status === "disconnected" ? t("personal-assistants.today.source.disconnected")
+      : t("personal-assistants.today.source.unknown", { reason: src.reason ?? src.status });
+    return text ? <span className={`ml-auto font-normal ${readable(key) ? "" : "text-warn"}`} data-pa-source={key} data-pa-source-status={src.status}>{text}</span> : null;
+  };
+  const none = (key: string, text: string) => (readable(key) ? <div className="text-ui/[inherit] text-subtle">{text}</div> : null);
+  const zoneText = agenda?.zone
+    ? agenda.hostZone && agenda.hostZone !== agenda.zone ? t("personal-assistants.today.zoneHost", { zone: agenda.zone, host: agenda.hostZone }) : t("personal-assistants.today.zone", { zone: agenda.zone })
+    : t("personal-assistants.today.hostTime");
   const seatText = (s: PaSeat | null) => (s?.sessionId ? t("personal-assistants.card.seat", { name: sessionName(host, s.sessionId) ?? s.sessionId, epoch: s.epoch }) : t("personal-assistants.card.vacant"));
   const requestRow = (r: PaRequest, attr: string) => (
     <li key={r.id}>
@@ -134,13 +182,20 @@ export function AgendaCard({ hostId, view, host, refreshKey, readOnly, onOpenReq
     <div data-pa-agenda="">
       <Section
         title={t("personal-assistants.today.title", { date: agenda?.date ?? "—" })}
-        hint={agenda ? `${t("personal-assistants.today.hostTime")} · ${t("personal-assistants.refreshed", { at: formatAbsolute(Math.floor(agenda.readAt / 1000)) })}` : t("personal-assistants.today.hostTime")}
+        hint={agenda ? `${zoneText} · ${t("personal-assistants.refreshed", { at: formatAbsolute(Math.floor(agenda.readAt / 1000)) })}` : zoneText}
       >
-        {error && <div className="mb-2 text-caption/[inherit] text-danger" role="alert">{t("personal-assistants.today.loadFailed", { error })}</div>}
-        {agenda?.projects && (
+        {error && !agenda && <div className="mb-2 text-caption/[inherit] text-danger" role="alert">{t("personal-assistants.today.loadFailed", { error })}</div>}
+        {error && agenda && (
+          <div className="mb-2 rounded-md bg-warn/10 px-2 py-1 text-caption/[inherit] text-warn" role="alert" data-pa-agenda-stale="">
+            {t("personal-assistants.today.stale", { at: formatAbsolute(Math.floor(agenda.readAt / 1000)), error })}
+          </div>
+        )}
+        {!agenda && !error && usable && <div className="text-ui/[inherit] text-subtle" role="status">{t("personal-assistants.rail.loading")}</div>}
+        {agenda && (<>
+        {agenda.projects && (
           <>
-            {heading(<FolderKanban size={12} aria-hidden />, t("personal-assistants.today.projects"))}
-            {agenda.projects.length === 0 && <div className="text-ui/[inherit] text-subtle">{t("personal-assistants.today.projectsNone")}</div>}
+            {heading(<FolderKanban size={12} aria-hidden />, t("personal-assistants.today.projects"), note("projects"))}
+            {agenda.projects.length === 0 && none("projects", t("personal-assistants.today.projectsNone"))}
             <ul data-pa-agenda-projects="">
               {agenda.projects.map((p) => (
                 <li key={`${p.projectRef.instanceId}\n${p.projectRef.projectId}`} className="flex min-w-0 items-baseline gap-2 px-1 py-0.5" data-pa-agenda-project={p.projectRef.projectId}>
@@ -158,37 +213,37 @@ export function AgendaCard({ hostId, view, host, refreshKey, readOnly, onOpenReq
             </ul>
           </>
         )}
-        {heading(null, t("personal-assistants.today.items"))}
-        {agenda && agenda.items.length === 0 && <div className="text-ui/[inherit] text-subtle">{t("personal-assistants.today.itemsNone")}</div>}
-        <ul data-pa-agenda-items="">{agenda?.items.map((r) => requestRow(r, "data-pa-agenda-item"))}</ul>
-        {agenda?.due && (
+        {heading(null, t("personal-assistants.today.items"), note("requests"))}
+        {agenda.items.length === 0 && none("requests", t("personal-assistants.today.itemsNone"))}
+        <ul data-pa-agenda-items="">{agenda.items.map((r) => requestRow(r, "data-pa-agenda-item"))}</ul>
+        {agenda.due && (
           <>
-            {heading(<Timer size={12} aria-hidden />, t("personal-assistants.today.due"))}
-            {agenda.due.length === 0 && <div className="text-ui/[inherit] text-subtle">{t("personal-assistants.today.dueNone")}</div>}
+            {heading(<Timer size={12} aria-hidden />, t("personal-assistants.today.due"), note("dueRequests"))}
+            {agenda.due.length === 0 && none("dueRequests", t("personal-assistants.today.dueNone"))}
             <ul data-pa-agenda-due-list="">{agenda.due.map((r) => requestRow(r, "data-pa-agenda-due"))}</ul>
           </>
         )}
-        {agenda?.calendar && (
+        {agenda.calendar && (
           <>
-            {heading(<CalendarDays size={12} aria-hidden />, t("personal-assistants.today.calendar"))}
+            {heading(<CalendarDays size={12} aria-hidden />, t("personal-assistants.today.calendar"), note("calendar"))}
             <CalendarDay calendar={agenda.calendar} />
             <CalendarImport hostId={hostId} assistantId={id} info={agenda.calendar} readOnly={readOnly} onChanged={() => void first()} />
           </>
         )}
-        {heading(<Bell size={12} aria-hidden />, t("personal-assistants.today.reminders"))}
-        {agenda && agenda.reminders.length === 0 && <div className="text-ui/[inherit] text-subtle">{t("personal-assistants.today.remindersNone")}</div>}
+        {heading(<Bell size={12} aria-hidden />, t("personal-assistants.today.reminders"), note("reminders"))}
+        {agenda.reminders.length === 0 && none("reminders", t("personal-assistants.today.remindersNone"))}
         <ul data-pa-agenda-reminders="">
-          {agenda?.reminders.map((r) => (
+          {agenda.reminders.map((r) => (
             <li key={r.alarmId} className="flex min-w-0 items-baseline gap-2 px-1 py-0.5" data-pa-reminder={r.alarmId} title={r.state}>
               <span className="w-11 shrink-0 font-mono text-caption/[inherit] text-subtle">{time(r.at)}</span>
               <span className="min-w-0 flex-1 text-ui/[inherit] break-words">{r.message}</span>
             </li>
           ))}
         </ul>
-        {heading(<CalendarClock size={12} aria-hidden />, t("personal-assistants.today.schedules"))}
-        {agenda && agenda.schedules.length === 0 && <div className="text-ui/[inherit] text-subtle">{t("personal-assistants.today.schedulesNone")}</div>}
+        {heading(<CalendarClock size={12} aria-hidden />, t("personal-assistants.today.schedules"), note("schedules"))}
+        {agenda.schedules.length === 0 && none("schedules", t("personal-assistants.today.schedulesNone"))}
         <ul data-pa-agenda-schedules="">
-          {agenda?.schedules.map((s) => (
+          {agenda.schedules.map((s) => (
             <li key={scheduleId(s)} className="flex min-w-0 items-baseline gap-2 px-1 py-0.5">
               <span className="w-11 shrink-0 font-mono text-caption/[inherit] text-subtle">{time(typeof s.nextRunAt === "string" ? s.nextRunAt : null)}</span>
               <span className="min-w-0 flex-1 truncate text-ui/[inherit]">{String(s.name ?? s.title ?? scheduleId(s))}</span>
@@ -200,6 +255,7 @@ export function AgendaCard({ hostId, view, host, refreshKey, readOnly, onOpenReq
             {t("personal-assistants.today.more")}
           </button>
         )}
+        </>)}
         {!host?.features.ownerViews && (
           <>
             {heading(<NotebookPen size={12} aria-hidden />, t("personal-assistants.today.notes"))}

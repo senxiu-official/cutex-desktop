@@ -168,7 +168,8 @@ describe("renderer model (updated)", async () => {
 
   it("features gate: cross-host only when advertised, and never when the detail says false", () => {
     const f = m.paFeatures(new Set(["personal-assistants-recurring-v1", "personal-assistants-owner-views-v1"]));
-    expect(f).toEqual({ recurring: true, qualifiedRefs: false, ownerViews: true, crossHost: false });
+    expect(f).toEqual({ recurring: true, qualifiedRefs: false, ownerViews: true, crossHost: false, readiness: false });
+    expect(m.paFeatures(new Set(["personal-assistants-readiness-v1"])).readiness).toBe(true);
     expect(m.remoteProjectsSupported(f)).toBe(false);
     const cross = m.paFeatures(new Set(["personal-assistants-cross-host-scope-v1"]));
     expect(m.remoteProjectsSupported(cross)).toBe(true);

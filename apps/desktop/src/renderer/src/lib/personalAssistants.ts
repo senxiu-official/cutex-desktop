@@ -6,7 +6,7 @@
 // note. A host is paired with an instance only by what it reports (its connection's / list's instance id), never by a
 // project's name or id.
 import {
-  PA_CROSS_HOST_FEATURE, PA_OWNER_VIEWS_FEATURE, PA_QUALIFIED_REFS_FEATURE, PA_RECURRING_FEATURE,
+  PA_CROSS_HOST_FEATURE, PA_OWNER_VIEWS_FEATURE, PA_QUALIFIED_REFS_FEATURE, PA_READINESS_FEATURE, PA_RECURRING_FEATURE,
   type PaAssistant, type PaAvailability, type PaCapabilities, type PaOverlap, type PaProjectRef, type PaRequest, type PaRequestState, type PaRule, type PaRun, type PaSeat, type PaTemplate,
 } from "../../../shared/personalAssistants";
 
@@ -24,10 +24,12 @@ export interface PaHostFeatures {
   ownerViews: boolean;
   /** Projects of other hosts (not advertised by r296). */
   crossHost: boolean;
+  /** r299 create-options, evaluated `capabilityDetails`, agenda display zone and source observations. */
+  readiness: boolean;
 }
 export function paFeatures(features: ReadonlySet<string> | null | undefined): PaHostFeatures {
   const has = (f: string) => !!features?.has(f);
-  return { recurring: has(PA_RECURRING_FEATURE), qualifiedRefs: has(PA_QUALIFIED_REFS_FEATURE), ownerViews: has(PA_OWNER_VIEWS_FEATURE), crossHost: has(PA_CROSS_HOST_FEATURE) };
+  return { recurring: has(PA_RECURRING_FEATURE), qualifiedRefs: has(PA_QUALIFIED_REFS_FEATURE), ownerViews: has(PA_OWNER_VIEWS_FEATURE), crossHost: has(PA_CROSS_HOST_FEATURE), readiness: has(PA_READINESS_FEATURE) };
 }
 /** The capabilities a host with these features reports in its detail view (used until the detail itself is read). */
 export function capabilitiesOf(f: PaHostFeatures): PaCapabilities {

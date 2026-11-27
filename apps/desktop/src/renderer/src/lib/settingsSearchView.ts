@@ -179,6 +179,8 @@ export function useSettingsReveal(): void {
       if (el) {
         flashElement(el);
         useReveal.setState({ anchor: null });
+        // Not stopped with this effect (clearing the anchor re-runs it): it ends by itself.
+        followIntoView(win, el);
         return;
       }
       if (Date.now() - started < REVEAL_TIMEOUT_MS) frame = win.requestAnimationFrame(tick);
@@ -187,4 +189,29 @@ export function useSettingsReveal(): void {
     frame = win.requestAnimationFrame(tick);
     return () => win.cancelAnimationFrame(frame);
   }, [anchor, nonce, win]);
+}
+
+const FOLLOW_MS = 1500;
+
+/**
+ * Keeps a revealed card in view while the page above it is still filling in (a card mounts before the cards above
+ * it have their data: 功能 Profile under the Profile cards, owner 2026-11-26), for a moment, until the owner scrolls.
+ */
+function followIntoView(win: Window, el: Element): void {
+  const until = Date.now() + FOLLOW_MS;
+  let top = el.getBoundingClientRect().top;
+  let frame = 0;
+  const stop = () => {
+    win.cancelAnimationFrame(frame);
+    for (const type of ["wheel", "pointerdown", "keydown", "touchstart"]) win.removeEventListener(type, stop, true);
+  };
+  const tick = () => {
+    if (!el.isConnected || Date.now() > until) return stop();
+    const now = el.getBoundingClientRect().top;
+    if (Math.abs(now - top) > 1) el.scrollIntoView({ block: "center" });
+    top = el.getBoundingClientRect().top;
+    frame = win.requestAnimationFrame(tick);
+  };
+  for (const type of ["wheel", "pointerdown", "keydown", "touchstart"]) win.addEventListener(type, stop, { capture: true, passive: true });
+  frame = win.requestAnimationFrame(tick);
 }

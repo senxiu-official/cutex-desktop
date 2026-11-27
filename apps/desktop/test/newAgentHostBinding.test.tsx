@@ -3,7 +3,7 @@ import { act, createElement as h, isValidElement, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vitest";
 
-const fx = vi.hoisted(() => ({ focus: "host-a", calls: [] as string[], created: false, release: null as null | (() => void), profiles: null as any, catalog: null as any, catalogState: "ready", validateModel: false, submit: null as null | (() => void) }));
+const fx = vi.hoisted(() => ({ focus: "host-a", calls: [] as string[], created: false, release: null as null | (() => void), profiles: null as any, catalog: null as any, catalogState: "ready", validateModel: false, submit: null as null | (() => void), dock: false, draftProject: "proj", lastCreate: null as any }));
 const snapshot = () => ({
   active: fx.created ? [{ cutexSessionId: "new-agent", displayName: "New", revision: 3, avatar: null, avatarMode: null, runtime: { status: "offline", runtimeGeneration: 7 } }] : [],
   retired: [], hostRows: {},
@@ -15,6 +15,7 @@ function hostApi(id: string) {
     profileModels: async () => { if (fx.catalogState === "pending") return new Promise(() => {}); if (fx.catalogState === "failed") throw new Error("offline"); return fx.catalog; },
     sidebar: async () => { fx.calls.push(`${id}:sidebar`); return snapshot(); },
     createAgent: async (request: { start: boolean }) => {
+      fx.lastCreate = request;
       fx.calls.push(`${id}:create:${request.start}`);
       await new Promise<void>((resolve) => { fx.release = resolve; });
       fx.created = true;
@@ -37,14 +38,14 @@ vi.mock("../src/renderer/src/lib/targetHost", async (original) => ({
 }));
 const target = { hostId: "host-a", look: { label: "A", indicator: { status: "online" } }, mode: "all", setHostId: () => {} };
 vi.mock("../src/renderer/src/lib/useCreateHost", () => ({ useCreateHost: () => target, rememberCreateHost: () => {} }));
-vi.mock("../src/renderer/src/lib/useHostScope", () => ({ useHostScope: () => ({ focus: fx.focus, hosts: [{ connected: true }, { connected: true }] }) }));
+vi.mock("../src/renderer/src/lib/useHostScope", () => ({ useHostScope: () => ({ focus: fx.focus, hosts: [{ connected: true }, { connected: true }], host: () => null }) }));
 vi.mock("../src/renderer/src/lib/profileSnapshot", async (original) => ({ ...await original<object>(), cachedProfileList: () => fx.profiles ?? ({ profiles: [], defaultProfile: null }), loadProfileList: async () => fx.profiles ?? ({ profiles: [], defaultProfile: null }) }));
-vi.mock("../src/renderer/src/lib/avatarStyleAssign", () => ({ newAgentStyleAvatar: () => null }));
+vi.mock("../src/renderer/src/lib/avatarStyleAssign", async (original) => ({ ...await original<object>(), newAgentStyleAvatar: () => null }));
 vi.mock("../src/renderer/src/lib/componentView", () => ({ useComponentState: () => ({ state: { kind: "body" } }) }));
 vi.mock("../src/renderer/src/lib/newAgentReturn", () => ({
   draftFits: () => true, dropNewAgentDraft: () => {}, keepNewAgentDraft: () => {},
   keptNewAgentDraft: () => ({ hostId: "host-a", params: {}, form: {
-    name: "New", task: "first task", profile: "", project: "proj", cwd: "/work", cwdTouched: true,
+    name: "New", task: "first task", profile: "", project: fx.draftProject, cwd: "/work", cwdTouched: true,
     avatar: { kind: "emoji", value: "🌱" }, picture: null, asDirector: true, start: true,
     ...(fx.validateModel ? { launch: { model: "unlisted-model", reasoningEffort: "" }, launchTouched: true } : {}),
   } }),
@@ -61,9 +62,13 @@ vi.mock("../src/renderer/src/components/LaunchPage", () => {
     LaunchPage: ({ children }: { children: ReactNode }) => {
       const props = submitProps(children);
       fx.submit = props?.onSubmit ?? null;
-      return h("button", { "data-create": "", onClick: props?.onSubmit, disabled: props?.disabled }, "Create");
+      const create = h("button", { "data-create": "", onClick: props?.onSubmit, disabled: props?.disabled }, "Create");
+      // fx.dock: also render the dock (its launch options and their panels).
+      return fx.dock ? h("div", null, children, create) : create;
     },
-    LaunchComposer: empty, LaunchAttachments: empty, LaunchDock: empty, LaunchFieldsBox: empty, LaunchIntro: empty,
+    LaunchComposer: empty, LaunchAttachments: empty, LaunchIntro: empty,
+    LaunchDock: ({ children }: { children: ReactNode }) => (fx.dock ? h("div", null, children) : null),
+    LaunchFieldsBox: ({ children }: { children: ReactNode }) => (fx.dock ? h("div", null, children) : null),
   };
 });
 
@@ -114,4 +119,35 @@ it.each(["ready", "empty", "failed", "pending", "stale"])("creation checks an un
     expect(host.querySelector<HTMLButtonElement>("[data-create]")!.disabled).toBe(state === "ready");
     if (state === "ready") { fx.calls.length = 0; await act(async () => fx.submit?.()); expect(fx.calls.some(c => c.includes(":create:"))).toBe(false); }
   } finally { act(() => root.unmount()); host.remove(); useApp.setState(initial, true); fx.validateModel = false; fx.profiles = null; fx.catalog = null; }
+});
+
+// 303c48e3a: the project list is a portalled EntitySelect popover (5a29fcb09). The launch panel's outside-mousedown
+// handler closed the panel before the option's click ran, so every new agent went to the temporary project.
+it("a project picked in the launch panel's portalled list sticks, the panel stays open, and create sends it", async () => {
+  fx.dock = true; fx.draftProject = "";
+  const initial = useApp.getState(); const host = document.createElement("div"); document.body.append(host); const root = createRoot(host);
+  useApp.setState({ sidebar: snapshot() as never, byHost: {}, openAgent: vi.fn(async () => {}), sessionAction: vi.fn(async () => {}), refreshHostSidebar: vi.fn(async () => {}) });
+  try {
+    await act(async () => root.render(h(NewAgentPage, { params: { host: "host-a" } })));
+    await act(async () => host.querySelector<HTMLButtonElement>('[data-launch-option="project"]')!.click());
+    const panel = () => document.getElementById("agent-launch-options");
+    const select = () => panel()!.querySelector<HTMLButtonElement>("[data-entity-select]")!;
+    expect(select().getAttribute("data-value")).toBe("");
+    await act(async () => select().click());
+    const option = document.body.querySelector<HTMLButtonElement>('button[role=option][data-value="proj"]')!;
+    expect(panel()!.contains(option)).toBe(false);
+    await act(async () => {
+      option.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+      option.click();
+    });
+    expect(panel()).not.toBeNull();
+    expect(select().getAttribute("data-value")).toBe("proj");
+    fx.calls.length = 0;
+    await act(async () => { fx.submit?.(); });
+    expect(fx.lastCreate?.projectId).toBe("proj");
+    await act(async () => { fx.release?.(); });
+  } finally {
+    act(() => root.unmount()); host.remove(); useApp.setState(initial, true);
+    fx.dock = false; fx.draftProject = "proj"; fx.lastCreate = null; fx.created = false;
+  }
 });

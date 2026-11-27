@@ -1,27 +1,27 @@
-// The onboarding host (owner 2026-10-19; state in lib/onboarding, strings in modules/onboarding/i18n.ts — draft copy,
-// the wording is the owner's). Opens by itself once at start (`automaticView`) or from Settings → 关于 / 新功能. The
-// introduction and a version's illustrated tour (0.2.0, lib/tour) are ONE flow (components/OnboardingFlow, owner
-// 2026-10-24): a first run gets the setup and then what is in 0.2; an upgrade from 0.1.x only the 0.2 part. Later
-// versions without a tour keep the text 新功能 dialog below.
+// The onboarding host (owner 2026-10-19; onboarding v3 2026-11-26; state in lib/onboarding). At start, once: a first run
+// on this device asks 「要看引导和提示吗？」 with the language (components/GuidesAsk); the three steps themselves are not a
+// dialog but the 开始使用 card in the main area (modules/start). After an update: that version's notes (the same as
+// Settings → 新功能, lib/releaseNotes), the first few with 查看全部.
 import { useEffect, useMemo, useRef, type ReactNode } from "react";
 import { X } from "lucide-react";
 import { changelogText, type ChangelogRelease } from "../../../shared/changelog";
 import { useI18n } from "../i18n";
-import { automaticView, bundledReleases, closeOnboarding, getOnboarding, openOnboarding, testView, useOnboardingView, type OnboardingView } from "../lib/onboarding";
+import { automaticView, loadBundledReleases, useBundledReleases, closeOnboarding, getOnboarding, openOnboarding, testView, useOnboardingView, type OnboardingView } from "../lib/onboarding";
 import { useTrackOverlay } from "../lib/openOverlays";
-import { TOUR_VERSIONS, hasTour } from "../lib/tour";
 import { useUpdateStatus } from "../lib/update";
 import { useApp } from "../store";
 import { Button } from "./settings/Form";
-import { Prose } from "./OnboardingProse";
-import { OnboardingFlow } from "./OnboardingFlow";
-import { GuideActionButton, OnboardingAsidePill } from "./GuideActionButton";
+import { GuideActionButton } from "./GuideActionButton";
 import { GUIDE_ACTIONS } from "../lib/guideActions";
 import { GuidesAsk } from "./GuidesAsk";
 import { useGuideState, useGuidesHostPending } from "../lib/guides";
 import { useOwnerWindow } from "../lib/ownerContext";
+import { releaseItems } from "../lib/releaseNotes";
 
-/** One fixed size for every step (owner 2026-10-19: the box must not change size between steps); a long body scrolls inside. */
+/** Items the update dialog lists before 查看全部. */
+export const DIALOG_ITEMS = 5;
+
+/** One fixed size (owner 2026-10-19: the box must not change size); a long body scrolls inside. */
 function Frame({ label, onClose, children, footer }: { label: string; onClose(): void; children: ReactNode; footer: ReactNode }) {
   const win = useOwnerWindow();
   const { t } = useI18n();
@@ -54,18 +54,23 @@ function Frame({ label, onClose, children, footer }: { label: string; onClose():
 function WhatsNew({ version, release }: { version: string; release: ChangelogRelease | null }) {
   const { t, locale } = useI18n();
   const close = () => closeOnboarding(null);
-  const summary = release?.blocks.find((b) => b.kind === "text");
-  // Group headings are English in CHANGELOG.md: a Chinese UI shows only those with a Chinese text.
-  const headings = release?.blocks.filter((b) => b.kind === "heading" && (!locale.startsWith("zh") || !!b.zh)) ?? [];
+  // Without internal build names (lib/releaseNotes; the same notes as 新功能).
+  const items = useMemo(() => (release ? releaseItems(release) : []), [release]);
   return (
     <Frame
       label={t("onboarding.whatsNew.title", { version })}
       onClose={close}
       footer={
         <>
-          <GuideActionButton id="whatsNew.more" action={GUIDE_ACTIONS["whatsNew.more"]} before={close} className="text-xs text-subtle hover:text-foreground">
-            {t("onboarding.whatsNew.more")}
-          </GuideActionButton>
+          {items.length > DIALOG_ITEMS ? (
+            <GuideActionButton id="help.features" action={GUIDE_ACTIONS["help.features"]} before={close} className="text-xs text-accent hover:underline">
+              {t("start.whatsNew.all", { n: items.length })}
+            </GuideActionButton>
+          ) : (
+            <GuideActionButton id="whatsNew.more" action={GUIDE_ACTIONS["whatsNew.more"]} before={close} className="text-xs text-subtle hover:text-foreground">
+              {t("onboarding.whatsNew.more")}
+            </GuideActionButton>
+          )}
           <div className="ml-auto" />
           <Button primary onClick={close}>{t("onboarding.close")}</Button>
         </>
@@ -75,16 +80,20 @@ function WhatsNew({ version, release }: { version: string; release: ChangelogRel
         {t("onboarding.whatsNew.title", { version })}
         {release?.title && <span className="ml-2 text-sm font-normal text-subtle">“{release.title}”</span>}
       </h2>
-      {summary ? <Prose text={changelogText(summary, locale)} /> : <p className="text-sm text-muted">{t("onboarding.whatsNew.empty")}</p>}
-      {headings.length > 0 && (
-        <div className="mt-3 flex flex-wrap gap-1.5">
-          {headings.map((h, i) => (
-            <span key={i} className="rounded-full border border-border px-2.5 py-0.5 text-xs text-muted">{changelogText(h, locale)}</span>
-          ))}
-        </div>
+      {items.length ? (
+        <ul className="list-disc space-y-1 pl-5 text-sm text-muted" data-whats-new-items="">
+          {items.slice(0, DIALOG_ITEMS).map((b, i) => <li key={i}>{changelogText(b, locale)}</li>)}
+        </ul>
+      ) : (
+        <p className="text-sm text-muted">{t("onboarding.whatsNew.empty")}</p>
       )}
     </Frame>
   );
+}
+
+function WhatsNewRelease({ version }: { version: string }) {
+  const release = useBundledReleases().find((r) => r.version === version) ?? null;
+  return <WhatsNew version={version} release={release} />;
 }
 
 /** Mounted once in App: shows what lib/onboarding has open, and opens the automatic view once per start. */
@@ -98,37 +107,43 @@ export function OnboardingHost() {
   const build = status?.current ? `${status.current.version ?? ""}@${status.current.commit}` : null;
   const daemonKind = useApp((s) => s.daemon.kind);
   const decided = useRef(false);
-  const listed = useMemo(() => bundledReleases().map((r) => r.version), []);
   useEffect(() => {
-    // Once per start, after the first host state is known. The introduction does not need the version
+    // Once per start, after the first host state is known. The question does not need the version
     // (a first run without cutex gets it too); a version's 新功能 waits for the installed version.
     if (view && !view.auto) { decided.current = true; return; }
     if (decided.current || daemonKind === "connecting") return;
-    const test = testView(getOnboarding(), build, listed);
-    if (test) {
-      decided.current = true;
-      const timer = setTimeout(() => openOnboarding(test), 1200);
-      return () => clearTimeout(timer);
-    }
-    if (getOnboarding().testEveryBuild && !build) return; // wait for the build before deciding
-    const needsIntro = automaticView(getOnboarding(), null, listed)?.kind === "intro";
-    if (!needsIntro && !installed) return;
-    const timer = setTimeout(() => {
+    const state = getOnboarding();
+    if (state.testEveryBuild && !build) return;
+    const candidates = installed ? [installed] : [];
+    const possible = automaticView(state, installed, candidates);
+    if (possible?.kind !== "intro" && !installed && !testView(state, build, [])) return;
+    const needsNotes = (s: typeof state) => !!testView(s, build, []) || automaticView(s, installed, candidates)?.kind === "whatsNew";
+    const warming = needsNotes(state) ? loadBundledReleases().catch(() => []) : null;
+    let live = true;
+    const timer = setTimeout(async () => {
       if (decided.current) return;
+      const state = getOnboarding();
+      const notes = needsNotes(state) ? await (warming ?? loadBundledReleases().catch(() => [])) : [];
+      if (!live || decided.current) return;
       decided.current = true;
-      const auto: OnboardingView | null = automaticView(getOnboarding(), installed, listed);
+      const listed = notes.map((r) => r.version);
+      const test = testView(state, build, listed);
+      if (test) { openOnboarding(test); return; }
+      const auto = automaticView(state, installed, listed);
       if (auto) openOnboarding({ ...auto, auto: true });
     }, 1200);
-    return () => clearTimeout(timer);
-  }, [daemonKind, installed, build, listed, view]);
-  // After a card's action: the way back to the flow.
-  if (!view) return <OnboardingAsidePill />;
+    return () => { live = false; clearTimeout(timer); };
+  }, [daemonKind, installed, build, view]);
+  // The introduction is the question only: once answered (or a replay), it is done — 开始使用 is the main area's card.
+  const introDone = view?.kind === "intro" && (!view.auto || guides.asked);
+  useEffect(() => {
+    if (!introDone) return;
+    closeOnboarding(installed);
+    if (view && !view.auto) useApp.getState().openPage("start.page");
+  }, [introDone, installed, view]);
+  if (!view) return null;
   // The first guide on this device asks first whether to see guides at all (lib/guides).
   if (view.auto && !guides.asked) return hostPending ? null : <GuidesAsk version={installed} />;
-  // The whole flow (a first run, or once for everyone at 0.2.0); its 0.2 part from the newest version with a tour.
-  if (view.kind === "intro") return <OnboardingFlow mode="full" version={TOUR_VERSIONS[TOUR_VERSIONS.length - 1]!} closeVersion={installed} startAt={view.at} />;
-  // 0.2.0's 新功能 is the flow's 0.2 part (lib/tour; later versions keep the text summary).
-  if (hasTour(view.version)) return <OnboardingFlow mode="whatsNew" version={view.version} startAt={view.at} />;
-  const release = bundledReleases().find((r) => r.version === view.version) ?? null;
-  return <WhatsNew version={view.version} release={release} />;
+  if (view.kind === "intro") return null;
+  return <WhatsNewRelease version={view.version} />;
 }

@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 // Settings page header on a host page whose rows live in several places and take effect at different times
-// (owner screenshot 2026-10-26: 「[混合设置][● remote ⌄] [混合设置]」). The scope chip says 混合设置 once; the timing
-// chip says its own thing (生效时机不同), and a multi-place scope keeps the host picker.
+// (owner screenshot 2026-10-26: 「[混合设置][● remote ⌄] [混合设置]」). The timing chip says its own thing (生效时机不同);
+// the host picker comes first and states the host, so the places after it never repeat the host's name (owner
+// 2026-11-28, docs/design/settings-rules.md §1–2).
 import { act, createElement as h } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -34,15 +35,19 @@ const picker = h("button", { type: "button", "data-test-picker": "" }, "● remo
 const header = () => host.querySelector("[data-settings-scope]")!;
 const count = (text: string) => header().textContent!.split(text).length - 1;
 
-it("a host page with mixed places and mixed timing says 混合设置 once, next to the picker", () => {
-  act(() => root.render(h(SettingsPage, { host: picker, children: h(Section, { title: "Card", children: [
+it("a host page whose places on the picked host differ: picker first, then its main place without the host, no 混合设置", () => {
+  act(() => root.render(h(SettingsPage, { host: picker, hostId: "remote", children: h(Section, { title: "Card", children: [
     h(SettingRow, { key: "a", label: "A", agents: "now", source: "host" }),
     h(SettingRow, { key: "b", label: "B", agents: "next", source: "codex" }),
+    h(SettingRow, { key: "c", label: "C", agents: "next", source: "codex" }),
   ] }) })));
   expect(header().getAttribute("data-settings-scope")).toBe("mixed");
-  expect(count(zhCN["settings.scope.mixedTag"])).toBe(1);
+  expect(count(zhCN["settings.scope.mixedTag"])).toBe(0);
   expect(header().querySelector('[data-settings-agents="mixed"]')?.textContent).toBe("生效时机不同");
   expect(header().querySelectorAll("[data-test-picker]")).toHaveLength(1);
+  const texts = [...header().querySelectorAll("button")].map(button => button.textContent).slice(0, 2);
+  expect(texts).toEqual(["● remote", zhCN["settings.scope.codex.short"]]);
+  expect(header().textContent).not.toContain("remote ·");
 });
 
 it("a multi-place scope keeps the host picker and never falls back to 混合设置", () => {
@@ -52,11 +57,10 @@ it("a multi-place scope keeps the host picker and never falls back to 混合设�
   expect(count(zhCN["settings.scope.mixedTag"])).toBe(0);
 });
 
-it("a local + host page: local first, then the host place as the picker's left half", () => {
-  act(() => root.render(h(SettingsPage, { host: picker, children: h(SettingRow, { label: "A", agents: "none", source: ["local", "host"] }) })));
-  const marker = header().querySelector("[data-effect-scope-marker]")!;
-  const texts = [...marker.querySelectorAll("button")].map(button => button.textContent);
-  expect(texts).toEqual([zhCN["settings.scope.local.label"], `${zhCN["settings.scope.host.short"]} ·`, "● remote"]);
+it("a local + host page: the picker, then each place (the host one beside it, without the host's name)", () => {
+  act(() => root.render(h(SettingsPage, { host: picker, hostId: "remote", children: h(SettingRow, { label: "A", agents: "none", source: ["local", "host"] }) })));
+  const texts = [...header().querySelectorAll("button")].map(button => button.textContent);
+  expect(texts).toEqual(["● remote", zhCN["settings.scope.host.short"], zhCN["settings.scope.local.label"]]);
 });
 
 it("the mixed-timing chip never reads like the mixed-scope chip in any catalog", () => {

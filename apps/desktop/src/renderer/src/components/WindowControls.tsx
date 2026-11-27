@@ -4,6 +4,8 @@
 import { Minus, Square, X } from "lucide-react";
 import { bridge } from "../bridge";
 import { useI18n } from "../i18n";
+import { TITLEBAR_HEIGHT } from "../../../shared/ipc";
+import { getAppearance } from "../lib/appearance";
 
 const win = bridge.window;
 
@@ -34,4 +36,16 @@ export function LinuxControls({ deskId }: { deskId?: string } = {}) {
  */
 export function CaptionSpace() {
   return win?.nativeControls === "right" ? <div className="w-[138px] shrink-0" /> : null;
+}
+
+/**
+ * The top band a full-window overlay (the enlarged image) leaves to the window's own buttons (owner 2026-11-28: the
+ * viewer's × sat on the window's ×). Where the OS draws them over the page — Windows' caption buttons on the right,
+ * macOS' traffic lights on the left — it is the window bar's height, the one main gives the caption overlay
+ * (TITLEBAR_HEIGHT), maximised or not. Linux (null): the drawn buttons are page content the overlay covers, so 0.
+ * In CSS px: main's band is TITLEBAR_HEIGHT device-independent px, the page is zoomed by the app's 缩放 (`zoom`, 1 =
+ * 100 %): at 80 % the band is 50 CSS px — 40 left the viewer's × under the window's × (owner 2026-11-28).
+ */
+export function captionBand(controls: "right" | "left" | null | undefined = bridge.window?.nativeControls, zoom = getAppearance().zoom / 100): number {
+  return controls ? Math.ceil(TITLEBAR_HEIGHT / (zoom > 0 ? zoom : 1)) : 0;
 }

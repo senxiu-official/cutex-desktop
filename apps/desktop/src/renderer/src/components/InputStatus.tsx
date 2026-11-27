@@ -7,7 +7,7 @@ import {
   DISABLED_REASONS, NEXT_UP_DETAILS, buttonsFor, rowIdentity, NEXT_UP_EFFECTS, NEXT_UP_STATES, REGISTRY_VERSION, fill, langOf, projectNextUp, rowButtons, stateLabelKey,
   type AfterWorkVariant, type Lang, type NextUpStateDef, type NextUpButton, type NextUpContext, type NextUpEffectId, type NextUpStateId,
 } from "../lib/inputLedger/nextUpRegistry";
-import { REFUSAL_TEXT, type InputActionResult } from "../lib/inputLedger/actionResult";
+import { REFUSAL_TEXT, failureReason, type InputActionResult } from "../lib/inputLedger/actionResult";
 import { addTombstone, hasTombstone, tombstoneKey, unknownWhat, useTombstones } from "../lib/inputLedger/nextUpTombstones";
 import { agentState, featuresOf, useApp } from "../store";
 import { usesInputDisposal } from "../lib/deliveryMode";
@@ -22,7 +22,7 @@ import { openDelegationDetail } from "../lib/delegationOpen";
 import { MESSAGES_WAKE_METHOD } from "../../../shared/ipc";
 import { decisionInput } from "../lib/approvals";
 import { AnchoredPanel } from "./AnchoredPanel";
-import { hasNoteDiagnostics, noteActionCode, readNowParams, readNowResult, readsSelectedNotes, releaseLiftsPauseOnly, reportsPreTurnNotes } from "../lib/inputLedger/noteDelivery";
+import { hasNoteDiagnostics, noteActionCode, noteDiagnostics, readNowParams, readNowResult, readsSelectedNotes, releaseLiftsPauseOnly, reportsPreTurnNotes } from "../lib/inputLedger/noteDelivery";
 import { reportLines, useNoteDeliveryLines } from "../lib/inputLedger/noteDeliveryView";
 import { INTERRUPT_SEND_MAX, TooManyToInterrupt, interruptSelection, sendsManyAtOnce } from "../lib/inputLedger/interruptSelection";
 import { batchRetryTip, interruptBatchLines } from "../lib/inputLedger/interruptBatchView";
@@ -40,8 +40,11 @@ export interface NextUpOverride {
   tip?: string;
 }
 
-/** Registered words of a failed action (the raw code goes to the details panel and the log, never the toast). */
+/** Registered words of a failed action (the raw code goes to the details panel and the log, never the toast). Only
+ *  on a row that has 查看详情 / 查看原因; any other row says the reason itself (ACTION_FAILED_REASON, owner 2026-11-28). */
 const ACTION_FAILED = { zh: "未能完成，这一行还在；「查看详情」/「查看原因」里有原因", en: "Could not complete; the row stays. “View details” / “View reason” has the cause" } as const;
+const ACTION_FAILED_REASON = { zh: "未能完成，这一行还在：{reason}", en: "Could not complete; the row stays: {reason}" } as const;
+const ACTION_FAILED_PLAIN = { zh: "未能完成，这一行还在", en: "Could not complete; the row stays" } as const;
 
 const TONE: Record<string, string> = { neutral: "", warn: "text-warn-text", danger: "text-danger-text" };
 const BUTTON = "press h-5 shrink-0 rounded px-1 hover:bg-surface-2 disabled:cursor-default disabled:opacity-50 disabled:hover:bg-transparent";
@@ -129,6 +132,8 @@ export function InputStatus({ record, sessionId, hostId, readOnly = false, timel
     canResume: delivery?.state === "held" && (delivery.reason === "paused" || delivery.reason === "stopHold"),
     canStart: delivery?.state === "offline",
     canReadNow: delivery?.state === "idle",
+    // The host refuses 现在读取 for a note an automatic delivery batch holds (cutex agent_bus_wake ordered_batch_pending).
+    readNowBlock: (() => { const b = noteDiagnostics(record)?.readNowBlocked; return b ? (b === "other" ? "other" : "auto") : null; })(),
     idle: delivery?.state === "idle",
     hasText: !!ownerDraft?.text,
     disposal,
@@ -157,6 +162,8 @@ export function InputStatus({ record, sessionId, hostId, readOnly = false, timel
     const code = found && (readCode ? selectedRead : diagnosticsOn || manyOn) ? found : null;
     const say = (key: MessageKey, tone: "error" | "info") => useApp.getState().notify(t(key), tone, { hostId: host, sessionId });
     // More unread 插话 than one interrupt takes: refused whole before any request (the rest would be dropped).
+    // 现在读取 on a note an automatic delivery batch holds (the row had not been re-read yet): say so, re-read.
+    if (found === "ordered_batch_pending") { say("noteDelivery.readNow.ordered", "info"); void app().refreshInputs(sessionId, host); return; }
     if (error instanceof TooManyToInterrupt) { useApp.getState().notify(error.message, "error", { hostId: host, sessionId }); return; }
     // An older runtime pin refuses a batch before interrupting: nothing happened, and no one-at-a-time fallback.
     if (manyOn && /(^|[^_\w])interrupt_send_many_unsupported\b/.test(raw)) { say("interruptSend.manyUnsupported", "error"); return; }
@@ -165,7 +172,10 @@ export function InputStatus({ record, sessionId, hostId, readOnly = false, timel
     if (code === "read_notes_unavailable") { say("noteDelivery.readNow.unavailable", "info"); void app().refreshInputs(sessionId, host); return; }
     if (code === "request_outcome_unknown") { say("noteDelivery.readNow.outcomeUnknown", "error"); void app().refreshInputs(sessionId, host); return; }
     if (code === "revision_conflict" || code === "input_not_holdable" || code === "input_not_found") { tell(REFUSAL_TEXT[code === "input_not_found" ? "gone" : "changed"]); void app().refreshInputs(sessionId, host); return; }
-    tell(ACTION_FAILED, "error");
+    // Point at 查看详情 / 查看原因 only when this row has one; otherwise the toast carries the reason itself.
+    if (buttons.some(b => b.effect === "viewDetails" || b.effect === "viewReason")) { tell(ACTION_FAILED, "error"); return; }
+    const reason = failureReason(error);
+    tell(reason ? { zh: fill(ACTION_FAILED_REASON.zh, { reason }), en: fill(ACTION_FAILED_REASON.en, { reason }) } : ACTION_FAILED_PLAIN, "error");
   };
   const app = () => useApp.getState();
   const builtIn: Partial<Record<NextUpEffectId, (event: React.MouseEvent) => unknown>> = {
@@ -230,6 +240,9 @@ export function InputStatus({ record, sessionId, hostId, readOnly = false, timel
     {!silentLabel && <span className={`flex min-w-0 items-center gap-1 ${TONE[def.tone]}`} data-tip={def.meaning[lang] + detailLines} data-testid="next-up-label" data-variant={variant}>{overlay?.symbol}<span className="min-w-0 truncate tabular-nums">{label}</span></span>}
     {!silentLabel && info && <span className="inline-flex shrink-0 cursor-help text-subtle" data-tip={info + detailLines} aria-label={info + detailLines} role="img" data-testid="next-up-info"><Info aria-hidden className="size-3" /></span>}
     {overlay?.addOn}
+    {/* An idle agent's unread note with 现在读取 offered: say it waits for the agent's next work, so 现在读取 is the
+        obvious action (owner-approved proposal, 2026-11-28). */}
+    {!silentLabel && ctx.idle && buttons.some(b => b.effect === "readNow" && b.enabled) && <span className="min-w-0 shrink truncate text-subtle" data-testid="next-up-idle-hint" data-tip={t("noteDelivery.readNow.idleHint")}>· {t("noteDelivery.readNow.idleHint")}</span>}
     {Number.isFinite(coalescing) && <span className="shrink-0 tabular-nums" data-testid="next-up-coalescing">{fill(NEXT_UP_DETAILS.coalescing[lang], { n: Math.max(0, Math.ceil((coalescing - now) / 1000)) })}</span>}
     {record.stalled && !history && <span className="shrink-0 truncate text-warn-text" data-testid="next-up-stalled">{fill(NEXT_UP_DETAILS.stalled[lang], { n: minutes })}</span>}
     {(() => {

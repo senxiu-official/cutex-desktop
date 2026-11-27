@@ -10,7 +10,7 @@ vi.mock("../src/renderer/src/modules/react", () => ({ useModuleEnabled: () => tr
 vi.mock("../src/renderer/src/lib/prefs", () => ({ useUiPrefs: () => ({ timelineIntro: true }) }));
 vi.mock("../src/renderer/src/lib/providerGreetings", () => ({ providerGreetings: () => [] }));
 vi.mock("../src/renderer/src/lib/launchArt", () => ({ useLaunchArtView: () => ({ art: {}, imported: {}, ready: true }) }));
-vi.mock("../src/renderer/src/components/LaunchPortraits", () => ({ LaunchPortraits: () => null }));
+vi.mock("../src/renderer/src/components/LaunchPortraits", () => ({ PortraitImage: () => null }));
 vi.mock("../src/renderer/src/lib/fileThumbnails", () => ({ useThumbnail: () => ({ ref: () => {}, state: fx.loaded ? { status: "ok", src: "data:image/png;base64,YQ==" } : { status: "error" } }) }));
 vi.mock("../src/renderer/src/lib/historyMedia", () => ({ parseMediaRef: () => null, useMediaAuthority: () => "", captureMediaAuthority: () => () => true }));
 vi.mock("../src/renderer/src/store", () => ({ useApp: (select: (s: object) => unknown) => select({}), featuresOf: () => new Set(), hostApi: () => ({}) }));

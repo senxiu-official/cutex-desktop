@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 import { expect, it, vi } from "vitest";
 const state = vi.hoisted(() => ({ nav: [] as any[], registry: new Map<string, any>() }));
 vi.mock("../src/renderer/src/i18n", async orig => ({ ...await orig<object>(), translate: (key: string) => key }));

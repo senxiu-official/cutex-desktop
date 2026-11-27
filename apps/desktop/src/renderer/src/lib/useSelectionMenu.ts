@@ -1,5 +1,5 @@
-// The selection menu on any surface showing an agent's text (owner 2026-11-25: select-to-ask is a general feature, not
-// 教学模式's): right-click on selected text offers the modules' `selection` actions (the side chat's 解释这段 and
+// The selection menu on any surface showing an agent's text (owner 2026-11-25: select-to-ask is a general feature):
+// right-click on selected text offers the modules' `selection` actions (the side chat's 解释这段 and
 // 批注追问) for the agent the text belongs to. Markdown uses it itself; other text (a user bubble, tool output, a card)
 // wraps in components/SelectionActions. Shift+F10 / the ContextMenu key open the same menu (lib/selectionMenu).
 // Shell file: no module names.

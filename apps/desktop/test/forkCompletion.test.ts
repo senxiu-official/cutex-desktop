@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { forkResult } from "../src/main/sessionFork";
 const mock = vi.hoisted(() => ({ fork: vi.fn(), select: vi.fn(), refresh: vi.fn(), notify: vi.fn() }));

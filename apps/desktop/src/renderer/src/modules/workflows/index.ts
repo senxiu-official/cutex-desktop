@@ -7,7 +7,10 @@ import { pageTitle } from "../react";
 import { defineModule } from "../slots";
 import { startWorkflowSync } from "./store";
 import { useWorkflowsBadge } from "./useWorkflowsBadge";
-import { WorkflowsPage } from "./WorkflowsPage";
+
+import { lazyPage } from "../../lib/lazyPage";
+
+const WorkflowsPage = lazyPage(() => import("./WorkflowsPage").then((m) => m.WorkflowsPage));
 
 export default defineModule({
   id: "workflows",

@@ -4,7 +4,7 @@
 import { act, createElement as h } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { featureProfileCreateBody, featureProfilePatchBody, parseFeatureProfileList, parseFeatureProfileReply, type FeatureProfile } from "../src/shared/featureProfiles";
+import { featureProfileCreateBody, featureProfilePatchBody, featureProfileTestBody, parseFeatureProfileList, parseFeatureProfileReply, parseFeatureProfileTestResult, type FeatureProfile, type FeatureProfileTestResult } from "../src/shared/featureProfiles";
 import { textRewriteBody } from "../src/shared/textRewrite";
 import { DaemonService } from "../src/main/daemon";
 
@@ -13,6 +13,8 @@ const env = vi.hoisted(() => ({
   damaged: [] as string[],
   calls: [] as { method: string; args: unknown[] }[],
   failNext: null as string | null,
+  features: ["feature-profiles"] as string[],
+  testReply: null as FeatureProfileTestResult | null,
 }));
 const fakeApi = {
   featureProfiles: async () => ({ profiles: structuredClone(env.rows), damaged: [...env.damaged] }),
@@ -31,6 +33,10 @@ const fakeApi = {
     env.rows[i] = { ...env.rows[i]!, ...meta };
     return structuredClone(env.rows[i]!);
   },
+  testFeatureProfile: async (request: unknown) => {
+    env.calls.push({ method: "test", args: [request] });
+    return env.testReply ?? { ok: true, latencyMs: 640, model: "gpt-6.2-mini-2026-10-01", error: null };
+  },
   deleteFeatureProfile: async (id: string) => {
     env.calls.push({ method: "delete", args: [id] });
     env.rows = env.rows.filter((p) => p.id !== id);
@@ -38,7 +44,7 @@ const fakeApi = {
   },
 };
 vi.mock("../src/renderer/src/bridge", async (importOriginal) => ({ ...(await importOriginal<object>()), apiFor: () => fakeApi }));
-vi.mock("../src/renderer/src/lib/targetHost", () => ({ useTargetHostId: () => "local", useTargetApi: () => fakeApi, useTargetFeatures: () => new Set(["feature-profiles"]) }));
+vi.mock("../src/renderer/src/lib/targetHost", () => ({ useTargetHostId: () => "local", useTargetApi: () => fakeApi, useTargetFeatures: () => new Set(env.features) }));
 vi.mock("../src/renderer/src/store", async (importOriginal) => ({ ...(await importOriginal<object>()), useApp: (select: (s: unknown) => unknown) => select({ openSettings: () => {} }) }));
 vi.mock("../src/renderer/src/i18n", async (importOriginal) => ({
   ...(await importOriginal<object>()),
@@ -84,6 +90,27 @@ describe("contract helpers", () => {
   });
 });
 
+describe("测试连接 contract", () => {
+  it("the body is a saved row by ID or a draft of known fields with its key", () => {
+    expect(featureProfileTestBody({ profileId: "fp-a", junk: 1 })).toEqual({ profileId: "fp-a" });
+    expect(featureProfileTestBody({ draft: { protocol: "anthropicMessages", baseUrl: " https://api.anthropic.com ", model: "m", apiKey: " sk-1 ", name: "x" } }))
+      .toEqual({ draft: { protocol: "anthropicMessages", baseUrl: "https://api.anthropic.com", model: "m", apiKey: "sk-1" } });
+    expect(() => featureProfileTestBody({ profileId: "../x" })).toThrow();
+    expect(() => featureProfileTestBody({ draft: { protocol: "openaiResponses", baseUrl: "https://x", model: "m", apiKey: "" } })).toThrow();
+    expect(() => featureProfileTestBody({ draft: { protocol: "chatCompletions", baseUrl: "https://x", model: "m", apiKey: "k" } })).toThrow();
+  });
+
+  it("the result keeps known fields; an unknown class reads as other; a failure never carries a model", () => {
+    expect(parseFeatureProfileTestResult({ contractVersion: 2, ok: true, latencyMs: 812.4, model: "gpt-6.2-mini", error: null, text: "LEAK" }))
+      .toEqual({ ok: true, latencyMs: 812, model: "gpt-6.2-mini", error: null });
+    expect(parseFeatureProfileTestResult({ ok: false, latencyMs: 15000, model: "m", error: { class: "auth", message: "rejected (401)", raw: "LEAK" } }))
+      .toEqual({ ok: false, latencyMs: 15000, model: null, error: { class: "auth", message: "rejected (401)" } });
+    expect(parseFeatureProfileTestResult({ ok: false, latencyMs: null, model: null, error: { class: "dnsFailure", message: "x" } }).error!.class).toBe("other");
+    expect(parseFeatureProfileTestResult({ ok: false }).error).toEqual({ class: "other", message: "" });
+    expect(() => parseFeatureProfileTestResult({ latencyMs: 1 })).toThrow();
+  });
+});
+
 describe("main", () => {
   it("calls /v2/feature-profiles with rebuilt bodies and returns only the parsed view", async () => {
     const replies: unknown[] = [
@@ -110,6 +137,19 @@ describe("main", () => {
     await expect(p.deleteFeatureProfile.call(self, "../x y")).rejects.toThrow();
   });
 
+  it("测试连接 posts a rebuilt body to /v2/feature-profiles/test and returns only the parsed result", async () => {
+    const request = vi.fn(async () => ({ contractVersion: 2, ok: false, latencyMs: 30, model: null, error: { class: "auth", message: "rejected", apiKey: "LEAK" } }));
+    const self = { requireClient: () => ({ request }) } as unknown as DaemonService;
+    const result = await DaemonService.prototype.testFeatureProfile.call(self, { draft: { protocol: "openaiResponses", baseUrl: "https://x/v1", model: "m", apiKey: "sk-secret", name: "n" } } as never);
+    expect(result).toEqual({ ok: false, latencyMs: 30, model: null, error: { class: "auth", message: "rejected" } });
+    await DaemonService.prototype.testFeatureProfile.call(self, { profileId: "fp-a" });
+    expect(request.mock.calls).toEqual([
+      ["POST", "/v2/feature-profiles/test", { body: { draft: { protocol: "openaiResponses", baseUrl: "https://x/v1", model: "m", apiKey: "sk-secret" } } }],
+      ["POST", "/v2/feature-profiles/test", { body: { profileId: "fp-a" } }],
+    ]);
+    await expect(DaemonService.prototype.testFeatureProfile.call(self, { profileId: "x y" })).rejects.toThrow();
+  });
+
   it("text rewrite routes: featureProfiles, and agent with backup 功能 Profiles (never mixed with ordinary backups)", () => {
     const base = { requestId: "req-12345678", text: "fix it" };
     expect(textRewriteBody({ ...base, route: { mode: "featureProfiles", featureProfileIds: ["fp-a", "fp-a", "fp-b"] } }).route).toEqual({ mode: "featureProfiles", featureProfileIds: ["fp-a", "fp-b"] });
@@ -125,7 +165,7 @@ describe("Settings → 功能 Profile", () => {
   beforeEach(() => {
     resetFeatureProfilesForTests();
     env.rows = [row("fp-a", "便宜的小模型"), row("fp-b", "Haiku 改写", { protocol: "anthropicMessages", baseUrl: "https://api.anthropic.com", model: "claude-haiku-5-5", quotaType: "balance" })];
-    env.calls = []; env.failNext = null; env.damaged = [];
+    env.calls = []; env.failNext = null; env.damaged = []; env.features = ["feature-profiles"]; env.testReply = null;
     node = document.createElement("div"); document.body.append(node); root = createRoot(node);
   });
   afterEach(() => { act(() => root.unmount()); node.remove(); });
@@ -138,12 +178,33 @@ describe("Settings → 功能 Profile", () => {
   const editor = () => node.querySelector<HTMLElement>("[data-feature-profile-editor]");
   const inputs = () => [...editor()!.querySelectorAll<HTMLInputElement>("input")];
 
-  it("lists the host's rows (name, model · API type · host · quota type)", async () => {
+  it("lists the host's rows (name, API type · model · host · quota type), each a host setting no agent reads", async () => {
     act(() => root.render(h(FeatureProfilesSection)));
     await settle();
     expect([...node.querySelectorAll("[data-feature-profile]")].map((e) => e.textContent)).toEqual(["便宜的小模型", "Haiku 改写"]);
-    expect(node.textContent).toContain("gpt-6.2-mini · OpenAI Responses · api.openai.com · feature-profiles.quota.payAsYouGo");
+    expect(node.textContent).toContain("OpenAI Responses · gpt-6.2-mini · api.openai.com · feature-profiles.quota.payAsYouGo");
     expect(node.textContent).toContain("feature-profiles.sectionHint");
+    // The rows declare host / no agents (the page header's host picker and the card's chips come from them).
+    const declared = [...node.querySelectorAll<HTMLElement>("[data-setting-row]")].filter((e) => e.querySelector("[data-feature-profile]"));
+    expect(declared.map((e) => [e.dataset.effectTiming, e.dataset.effectSource])).toEqual([["none", "host"], ["none", "host"]]);
+    expect(node.querySelector("[data-feature-profile-key-missing]")).toBeNull();
+  });
+
+  it("a row without a key says so beside its name, as a Profile card does; an empty list is an EmptyState", async () => {
+    env.rows = [row("fp-a", "便宜的小模型", { keyPresent: false })];
+    act(() => root.render(h(FeatureProfilesSection)));
+    await settle();
+    const missing = node.querySelector("[data-feature-profile-key-missing]")!;
+    expect(missing.textContent).toBe("⚠ feature-profiles.key.missing");
+    expect(missing.closest("[data-list-row-title]")!.textContent).toContain("便宜的小模型");
+    act(() => root.unmount());
+    resetFeatureProfilesForTests();
+    env.rows = [];
+    root = createRoot(node);
+    act(() => root.render(h(FeatureProfilesSection)));
+    await settle();
+    expect(node.textContent).toContain("feature-profiles.empty");
+    expect(node.querySelector("p.py-2")).toBeNull();
   });
 
   it("add: every field and the key are sent once; the form (and the key in it) is gone after saving", async () => {
@@ -272,5 +333,92 @@ describe("Settings → 功能 Profile", () => {
     await settle();
     expect(env.calls).toEqual([{ method: "delete", args: ["fp-b"] }]);
     expect(node.querySelector('[data-feature-profile="fp-b"]')).toBeNull();
+  });
+
+  const testButtons = () => [...node.querySelectorAll<HTMLButtonElement>("button")].filter((b) => b.textContent === "feature-profiles.test.run");
+  const outcome = (scope: ParentNode = node) => scope.querySelector<HTMLElement>("[data-feature-profile-test]");
+
+  it("测试连接 is hidden on a host without feature-profile-test-v1", async () => {
+    act(() => root.render(h(FeatureProfilesSection)));
+    await settle();
+    expect(testButtons()).toEqual([]);
+    act(() => button("feature-profiles.add").click());
+    expect(node.querySelector("[data-feature-profile-test-form]")).toBeNull();
+  });
+
+  it("a saved row tests with its stored key: ✓ 可以连上 · ms · model, or the plain reason of its error class", async () => {
+    env.features = ["feature-profiles", "feature-profile-test-v1"];
+    env.rows.push(row("fp-c", "无 key", { keyPresent: false }));
+    act(() => root.render(h(FeatureProfilesSection)));
+    await settle();
+    const [a, b, c] = testButtons();
+    expect(c!.disabled).toBe(true);
+    expect(c!.title).toBe("feature-profiles.test.noKey");
+    await act(async () => a!.click());
+    await settle();
+    expect(env.calls).toEqual([{ method: "test", args: [{ profileId: "fp-a" }] }]);
+    const okRow = node.querySelector<HTMLElement>('[data-feature-profile-test-row="fp-a"]')!;
+    expect(outcome(okRow)!.dataset.featureProfileTest).toBe("ok");
+    expect(okRow.textContent).toBe('feature-profiles.test.ok · feature-profiles.test.ms {"n":640} · gpt-6.2-mini-2026-10-01');
+    env.testReply = { ok: false, latencyMs: 120, model: null, error: { class: "auth", message: "provider rejected the credential (401)" } };
+    await act(async () => b!.click());
+    await settle();
+    const failRow = node.querySelector<HTMLElement>('[data-feature-profile-test-row="fp-b"]')!;
+    expect(outcome(failRow)!.dataset.featureProfileTest).toBe("auth");
+    expect(failRow.textContent).toBe("feature-profiles.test.fail.auth");
+    expect(outcome(failRow)!.title).toBe("provider rejected the credential (401)");
+    // Opening the form drops the row's result (it belonged to the saved settings).
+    act(() => node.querySelectorAll<HTMLButtonElement>('[aria-label="feature-profiles.edit"]')[0]!.click());
+    expect(node.querySelector('[data-feature-profile-test-row="fp-a"]')).toBeNull();
+  });
+
+  it("the new-Profile form tests the typed draft with its key (nothing saved); without a key it cannot", async () => {
+    env.features = ["feature-profiles", "feature-profile-test-v1"];
+    act(() => root.render(h(FeatureProfilesSection)));
+    await settle();
+    act(() => button("feature-profiles.add").click());
+    const formTest = () => editor()!.querySelector<HTMLButtonElement>("[data-feature-profile-test-form] button")!;
+    expect(formTest().disabled).toBe(true);
+    const [name, base, model, key] = inputs();
+    type(name!, "x"); type(base!, "https://gw.example.com/v1"); type(model!, "gpt-6.2-mini"); type(key!, "sk-typed");
+    expect(formTest().disabled).toBe(false);
+    env.testReply = { ok: false, latencyMs: 15000, model: null, error: { class: "timeout", message: "no response" } };
+    await act(async () => formTest().click());
+    await settle();
+    expect(env.calls).toEqual([{ method: "test", args: [{ draft: { protocol: "openaiResponses", baseUrl: "https://gw.example.com/v1", model: "gpt-6.2-mini", apiKey: "sk-typed" } }] }]);
+    expect(outcome(editor()!)!.dataset.featureProfileTest).toBe("timeout");
+    expect(editor()).not.toBeNull();
+    // The key stays in its password field only; no result or hint repeats it.
+    expect(node.textContent).not.toContain("sk-typed");
+    expect([...node.querySelectorAll("[title]")].map((e) => e.getAttribute("title")).join()).not.toContain("sk-typed");
+    // Changing a field drops the stale result.
+    type(model!, "gpt-6.2-nano");
+    expect(outcome(editor()!)).toBeNull();
+    // A bad address is caught before anything is sent.
+    type(base!, "http://gw.example.com/v1");
+    await act(async () => formTest().click());
+    expect(node.querySelector("[data-feature-profile-problem]")!.textContent).toContain("feature-profiles.form.badBaseUrl");
+    expect(env.calls.length).toBe(1);
+  });
+
+  it("edit: unchanged settings test the saved row; a changed endpoint needs the key typed again", async () => {
+    env.features = ["feature-profiles", "feature-profile-test-v1"];
+    act(() => root.render(h(FeatureProfilesSection)));
+    await settle();
+    act(() => node.querySelector<HTMLButtonElement>('[aria-label="feature-profiles.edit"]')!.click());
+    const formTest = () => editor()!.querySelector<HTMLButtonElement>("[data-feature-profile-test-form] button")!;
+    type(inputs()[0]!, "新名字");
+    await act(async () => formTest().click());
+    await settle();
+    expect(env.calls).toEqual([{ method: "test", args: [{ profileId: "fp-a" }] }]);
+    type(inputs()[2]!, "gpt-6.2-nano");
+    expect(formTest().disabled).toBe(true);
+    expect(editor()!.querySelector("[data-feature-profile-test-form]")!.textContent).toContain("feature-profiles.test.needKey");
+    act(() => button("feature-profiles.key.replace").click());
+    type(editor()!.querySelector<HTMLInputElement>("input[type=password]")!, "sk-new");
+    await act(async () => formTest().click());
+    await settle();
+    expect(env.calls.at(-1)).toEqual({ method: "test", args: [{ draft: { protocol: "openaiResponses", baseUrl: "https://api.openai.com/v1", model: "gpt-6.2-nano", apiKey: "sk-new" } }] });
+    expect(env.calls.filter((c) => c.method === "patch")).toEqual([]);
   });
 });

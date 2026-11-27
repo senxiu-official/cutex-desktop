@@ -98,6 +98,7 @@ export const zhCN = {
   // ---- the side agent view (conversation.agent, docs/research/side-agent-view-20261018.md) ----
   "conversation.agent": "{{agent}}",
   "conversation.agent.openSide": "并排打开",
+  "conversation.agent.openSideInfo": "在侧栏里按住 Ctrl（Mac 上是 ⌘）左键点击，或用中键点击一个{{agent}}，也是并排打开。窗口放不下第二栏时，会在当前这一栏打开，替换正在看的{{agent}}。",
   "conversation.agent.openMain": "在主区打开",
   "conversation.agent.openMainHint": "在主区打开这个{{agent}}，主区原来的{{agent}}换到这里",
   "conversation.agent.inMain": "{name} 已在主区打开",

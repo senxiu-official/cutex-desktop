@@ -5,10 +5,10 @@ import { useI18n } from "../i18n";
 import { resolveTerms, useTermOverrides } from "../lib/terms";
 import { resolveLaunchGreeting, type LaunchGreeting } from "../lib/launchGreeting";
 import { providerGreetings } from "../lib/providerGreetings";
-import type { Provider } from "../lib/provider";
+import { profileProvider as profileProviderOf, type Provider } from "../lib/provider";
 import type { ProfileItem } from "../../../shared/ipc";
-import { portraitChoices, portraitProvider } from "../lib/launchPortraits";
-import { LaunchPortraits } from "./LaunchPortraits";
+import { portraitProvider } from "../lib/launchPortraits";
+import { LaunchProviderColumns, type ProviderColumnsProps } from "./LaunchProviderColumns";
 import { useLaunchArtView } from "../lib/launchArt";
 import { useUiPrefs } from "../lib/prefs";
 import { useModuleEnabled } from "../modules/react";
@@ -124,12 +124,15 @@ export function LaunchComposer({ textarea, attachments, status, hint, label, dis
   </div>;
 }
 
-export function LaunchIntro({ icon, title, hint, greeting, provider, portraits, showArtGreeting = false }: { icon: ReactNode; title: string; hint: string; greeting?: LaunchGreeting; provider?: Provider | null; showArtGreeting?: boolean; portraits?: { /** null = still loading. */ profiles: ProfileItem[] | null; profileId?: string; selected: boolean; disabled: boolean; onSelect(id: string): void } }) {
+export function LaunchIntro({ icon, title, hint, greeting, provider, columns, showArtGreeting = false }: {
+  icon: ReactNode; title: string; hint: string; greeting?: LaunchGreeting; provider?: Provider | null; showArtGreeting?: boolean;
+  /** New Agent and Quick chat (owner 2026-11-27): provider columns with Profile chips; `profiles` null = still loading. */
+  columns?: Omit<ProviderColumnsProps, "art" | "profiles"> & { profiles: ProfileItem[] | null } }) {
   const { locale } = useI18n();
   const terms = useTermOverrides();
   const [sample] = useState(() => Math.random());
   const [minute] = useState(() => { const now = new Date(); return now.getHours() * 60 + now.getMinutes(); });
-  // The portraits and greeting are the same entrance as the conversation opening: turning off the
+  // The columns and greeting are the same entrance as the conversation opening: turning off the
   // 开场 module or 显示会话开场 also gives the launcher its plain icon intro, titled by the page itself
   // (no provider or module greeting).
   const introModule = useModuleEnabled("intro");
@@ -138,25 +141,26 @@ export function LaunchIntro({ icon, title, hint, greeting, provider, portraits, 
   const copy = !introOn ? undefined : greeting ?? (provider !== undefined ? { messages: providerGreetings(provider, locale, minute) } : undefined);
   const welcome = resolveLaunchGreeting(copy, title, resolveTerms(terms, locale).owner.one, sample);
   const longGreeting = copy && welcome.length > (locale === "en" ? 56 : 26);
-  // Only providers with artwork, bundled or imported (lib/launchArt); none = icon intro.
+  // Provider artwork, bundled or imported (lib/launchArt), tops the columns that have it.
   const { art, ready: artReady } = useLaunchArtView();
-  const choices = introOn ? portraitChoices(portraits?.profiles ?? []).filter((c) => art[c.provider]) : [];
-  const selectedProvider = portraits?.selected ? portraitProvider(provider) : null;
-  const selected = selectedProvider && art[selectedProvider] ? selectedProvider : null;
-  const hasArt = introOn && portraits && (portraits.selected ? !!selected : choices.length > 0);
-  // While the profile list or the imported art loads, art may be about to show: hold the frame empty
-  // rather than paint the icon intro and swap it for the portraits a moment later (the flicker on
-  // entering a launcher).
-  if (introOn && portraits && (!artReady || (!portraits.profiles && Object.keys(art).length > 0))) return null;
+  if (introOn && columns) {
+    // Hold the frame until the list and the art are known (no icon intro flashing before the columns).
+    if (!artReady || !columns.profiles) return null;
+    if (columns.profiles.length > 0) {
+      const withArt = columns.profiles.some((p) => { const k = portraitProvider(profileProviderOf(p)); return !!k && !!art[k]; });
+      // Quick chat keeps its greeting under the artwork (showArtGreeting).
+      const greet = withArt && showArtGreeting;
+      return <div className={`launch-intro launch-intro-columns${withArt ? " launch-intro-with-art" : ""}${greet ? " launch-intro-with-greeting" : ""}`}>
+        <LaunchProviderColumns {...columns} profiles={columns.profiles} art={art} />
+        {greet && <div className="launch-art-greeting">{welcome}</div>}
+      </div>;
+    }
+  }
   return (
-    <div className={`launch-intro flex flex-col items-center px-6 text-center${hasArt ? " launch-intro-with-art" : ""}${hasArt && showArtGreeting ? " launch-intro-with-greeting" : ""}`}>
-      {hasArt ? <LaunchPortraits choices={choices} selected={selected} profileId={portraits.profileId} disabled={portraits.disabled} onSelect={portraits.onSelect} /> :
-        <div className="launch-intro-icon mb-5 flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-accent/8 text-accent">{icon}</div>}
-      {hasArt && showArtGreeting && <div className="launch-art-greeting">{welcome}</div>}
-      {!hasArt && <>
-        <h1 className={`launch-intro-title font-medium tracking-tight text-foreground${longGreeting ? " launch-intro-title-long" : ""}`} title={welcome}>{welcome}</h1>
-        <p className="mt-3 max-w-md text-sm leading-relaxed text-subtle">{hint}</p>
-      </>}
+    <div className="launch-intro flex flex-col items-center px-6 text-center">
+      <div className="launch-intro-icon mb-5 flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-accent/8 text-accent">{icon}</div>
+      <h1 className={`launch-intro-title font-medium tracking-tight text-foreground${longGreeting ? " launch-intro-title-long" : ""}`} title={welcome}>{welcome}</h1>
+      <p className="mt-3 max-w-md text-sm leading-relaxed text-subtle">{hint}</p>
     </div>
   );
 }

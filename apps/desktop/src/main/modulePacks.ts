@@ -18,10 +18,12 @@ import { join } from "node:path";
 import { gunzipSync } from "node:zlib";
 import { parseReleaseInfo } from "../shared/update";
 import { download } from "./binaryUpdate";
+import { writeFileAtomic } from "./fileWrites";
 import { parsePublicKey, releaseKeyring, verifyData, type MinisignPublicKey } from "./minisign";
 import { ProxyAuthError, type Transport, type TransportResponse } from "./updateTransport";
 import { downloadUrlAllowed, githubRepoOf, GITHUB_WEB } from "../shared/binaryUpdate";
 import {
+  UPGRADE_PACK_BASELINES, type PackMigration, type UpgradePackId,
   comparePackVersions,
   DEFAULT_MODULES_REPO,
   isPackModuleId,
@@ -162,6 +164,19 @@ export function readTar(buf: Buffer, maxFiles: number = LIMITS.filesPerPack): Ma
 
 const sha256 = (data: Uint8Array) => createHash("sha256").update(data).digest("hex");
 
+function verifiedPackFiles(archive: Buffer, pack: ModuleIndexPack): Map<string, Buffer> {
+  if (archive.length !== pack.archive.size || sha256(archive) !== pack.archive.sha256) throw new Error(`${pack.archive.name} does not match the signed sha256`);
+  const files = readTar(gunzipSync(archive, { maxOutputLength: LIMITS.packBytes + 512 * (LIMITS.filesPerPack + 4) }));
+  const listed = new Map(pack.files.map(f => [f.path, f]));
+  for (const path of files.keys()) if (!listed.has(path)) throw new Error(`the archive has an unlisted file ${path}`);
+  for (const f of pack.files) {
+    const data = files.get(f.path);
+    if (!data) throw new Error(`the archive lacks ${f.path}`);
+    if (data.length !== f.size || sha256(data) !== f.sha256) throw new Error(`${f.path} does not match the signed sha256`);
+  }
+  return files;
+}
+
 // ---- the service ----
 
 interface PackState {
@@ -265,6 +280,7 @@ export interface ModulePackServiceOptions {
   source: ModulePackSource;
   transport: Transport;
   appModuleApi: string;
+  upgradePayload?: string;
   /** Absent: this service never installs or loads a local module. */
   local?: LocalPacksOptions;
   onChange?: (view: ModulePacksView) => void;
@@ -282,6 +298,7 @@ export class ModulePackService {
   private readonly verified = new Map<string, Verified>();
   private broken: { id: string; version: string; error: string }[] = [];
   private checked: CheckedIndex | null = null;
+  private readonly migrations: Partial<Record<UpgradePackId, PackMigration>> = {};
   private checkError: ModulePacksView["check"] = null;
   private checking: Promise<ModulePacksView> | null = null;
   private operation: ModulePacksView["operation"] = null;
@@ -469,6 +486,7 @@ export class ModulePackService {
     return {
       appModuleApi: api,
       testKey: this.opts.source.testKey,
+      ...(Object.keys(this.migrations).length ? { migrations: { ...this.migrations } } : {}),
       installed,
       broken: [...this.broken],
       index: c
@@ -535,6 +553,57 @@ export class ModulePackService {
 
   // ---- install / remove ----
 
+  /** First-party upgrade payload; IPC admits only the fixed upgrade module ids. */
+  seedBundled(id: UpgradePackId): ModulePacksView {
+    this.load();
+    const dir = this.opts.upgradePayload;
+    const root = this.opts.root;
+    const baseline = UPGRADE_PACK_BASELINES[id];
+    const marker = join(root, `.${id}-seeded`);
+    const answer = (state: PackMigration) => {
+      this.migrations[id] = state;
+      this.emit();
+      return this.view();
+    };
+    if (this.operation || this.localBusy) return answer("busy");
+    if (this.localState.trust[id]) return answer("kept");
+    if (exists(marker)) return answer("complete");
+    const current = this.verified.get(id);
+    if (current && !current.local && packCompat(current.pack.moduleApi, this.opts.appModuleApi) === "ok"
+        && comparePackVersions(current.pack.version, baseline) > 0) {
+      try {
+        writeFileAtomic(marker, "1");
+        return answer("kept");
+      } catch { return answer("seed_invalid"); }
+    }
+    if (!dir || !isPlainDir(dir)) return answer("seed_missing");
+    const nonce = randomBytes(8).toString("hex");
+    const staging = join(root, `.staging-seed-${nonce}`);
+    const trash = join(root, `.trash-seed-${nonce}`);
+    try {
+      const bytes = readCapped(join(dir, MODULES_INDEX_FILE), LIMITS.indexBytes);
+      const signature = readCapped(join(dir, MODULES_INDEX_FILE + ".minisig"), LIMITS.signatureBytes).toString("utf8");
+      verifyData(bytes, signature, this.opts.source.keys, MODULES_INDEX_FILE);
+      const index = parseModuleIndex(JSON.parse(bytes.toString("utf8")), url => downloadUrlAllowed(url, this.opts.source.extraOrigins));
+      const pack = index.packs.filter(row => row.id === id && comparePackVersions(row.version, baseline) > 0
+        && packCompat(row.moduleApi, this.opts.appModuleApi) === "ok").sort((a, b) => comparePackVersions(b.version, a.version))[0];
+      if (!pack) return answer("seed_missing");
+      if (pack.archive.name !== `${id}-${pack.version}.tar.gz`) throw Error("invalid seed archive name");
+      if (!exists(join(dir, pack.archive.name))) return answer("seed_missing");
+      const files = verifiedPackFiles(readCapped(join(dir, pack.archive.name), LIMITS.archiveBytes), pack);
+      mkdirSync(root, { recursive: true });
+      this.place(id, pack.version, files, staging, trash, { index: { index, bytes, signature, checkedAt: 0 } });
+      writeFileAtomic(marker, "1");
+      return answer("installed");
+    } catch (error) {
+      this.opts.log?.(`${id} seed failed: ${errorText(error)}`);
+      return answer("seed_invalid");
+    } finally {
+      rmSync(staging, { recursive: true, force: true });
+      rmSync(trash, { recursive: true, force: true });
+    }
+  }
+
   async install(req: { id: string; version?: string; allowOlder?: boolean }): Promise<ModulePacksView> {
     this.load();
     if (this.operation) throw new PackError("busy", `busy with ${this.operation.id}`);
@@ -575,16 +644,7 @@ export class ModulePackService {
       this.step({ id, action: "install", version: pack.version, step: "verify" });
       let files: Map<string, Buffer>;
       try {
-        const archive = readFileSync(downloadPath);
-        if (archive.length !== pack.archive.size || sha256(archive) !== pack.archive.sha256) throw new Error(`${pack.archive.name} does not match the signed sha256`);
-        files = readTar(gunzipSync(archive, { maxOutputLength: LIMITS.packBytes + 512 * (LIMITS.filesPerPack + 4) }));
-        const listed = new Map(pack.files.map((f) => [f.path, f]));
-        for (const path of files.keys()) if (!listed.has(path)) throw new Error(`the archive has an unlisted file ${path}`);
-        for (const f of pack.files) {
-          const data = files.get(f.path);
-          if (!data) throw new Error(`the archive lacks ${f.path}`);
-          if (data.length !== f.size || sha256(data) !== f.sha256) throw new Error(`${f.path} does not match the signed sha256`);
-        }
+        files = verifiedPackFiles(readFileSync(downloadPath), pack);
       } catch (error) {
         throw new PackError("verify_failed", errorText(error));
       } finally {
@@ -974,7 +1034,7 @@ function readCapped(path: string, max: number): Buffer {
 }
 
 /** GET a small file into memory, following redirects to allowed hosts only; classified errors. */
-async function fetchCapped(transport: Transport, url: string, max: number, extraOrigins: readonly string[]): Promise<Buffer> {
+export async function fetchCapped(transport: Transport, url: string, max: number, extraOrigins: readonly string[]): Promise<Buffer> {
   let href = url;
   for (let hop = 0; ; hop++) {
     if (!downloadUrlAllowed(href, extraOrigins)) throw new FetchError("invalid", `refusing to download from ${new URL(href).origin}`);

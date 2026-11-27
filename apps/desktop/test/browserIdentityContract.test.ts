@@ -13,6 +13,9 @@ describe("parseBrowserIdentityRequest", () => {
     expect(parseBrowserIdentityRequest({ op: "create", name: " 工作 Outlook ", color: "teal" })).toEqual({ op: "create", name: "工作 Outlook", color: "teal" });
     expect(parseBrowserIdentityRequest({ op: "update", id: ID, expectedRevision: 3, initial: "工" })).toEqual({ op: "update", id: ID, expectedRevision: 3, initial: "工" });
     expect(parseBrowserIdentityRequest({ op: "remove", id: "1a2b3c4d" })).toEqual({ op: "remove", id: "1a2b3c4d" });
+    expect(parseBrowserIdentityRequest({ op: "signOutHost", id: ID, hostId: "ssh-hostb" })).toEqual({ op: "signOutHost", id: ID, hostId: "ssh-hostb" });
+    expect(parseBrowserIdentityRequest({ op: "clearLeftover", id: ID, hostId: "ssh-b79c33a8" })).toEqual({ op: "clearLeftover", id: ID, hostId: "ssh-b79c33a8" });
+    expect(parseBrowserIdentityRequest({ op: "clearData", request: { identityId: ID, hostId: "ssh-hostb", types: ["cache"] } })).toMatchObject({ op: "clearData", request: { hostId: "ssh-hostb" } });
     expect(parseBrowserIdentityRequest({ op: "clearData", request: { identityId: ID, hostId: "all", types: ["siteData", "history"], historyRange: "day" } }).op).toBe("clearData");
     expect(parseBrowserIdentityRequest({ op: "history", query: { identityId: ID, hostId: "ssh-hostb", text: "outlook", limit: 50 } }).op).toBe("history");
     expect(parseBrowserIdentityRequest({ op: "historyDelete", target: { identityId: ID, hostId: "local", origin: "https://outlook.office.com" } }).op).toBe("historyDelete");
@@ -30,6 +33,12 @@ describe("parseBrowserIdentityRequest", () => {
     [{ op: "update", id: ID, expectedRevision: 1 }],
     [{ op: "remove", id: "../etc" }],
     [{ op: "remove", id: "ABCDEF12" }],
+    [{ op: "signOutHost", id: ID }],
+    [{ op: "signOutHost", id: ID, hostId: "all" }],
+    [{ op: "signOutHost", id: ID, hostId: "../x" }],
+    [{ op: "signOutHost", id: ID, hostId: "local", extra: 1 }],
+    [{ op: "clearLeftover", id: "../etc", hostId: "ssh-x" }],
+    [{ op: "clearLeftover", id: ID, hostId: "hostb" }],
     [{ op: "clearData", request: { identityId: ID, hostId: "all", types: [] } }],
     [{ op: "clearData", request: { identityId: ID, hostId: "all", types: ["cookies"] } }],
     [{ op: "clearData", request: { identityId: ID, hostId: "all", types: ["cache"], origins: ["javascript:alert(1)"] } }],

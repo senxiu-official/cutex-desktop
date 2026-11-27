@@ -2,7 +2,7 @@ import { isImeComposing } from "../lib/ime";
 // Thread goal (`/goal`). GoalCard is the detail card (objective, status, pause / resume / edit /
 // clear), shared by the status capsule (StatusCapsule: display + 暂停 / 继续 only) and the
 // status row above the input (GoalBar: one line expanding to the card). Editing always happens in
-// GoalBar, next to the input — also when the goal's line is not shown there (Settings → 状态显示).
+// GoalBar, next to the input — also when the goal's line is not shown there (会话 → 输入 → 状态行里显示).
 // The goal module (modules/goal) mounts GoalBar as its status-row part.
 // Live from thread/goal/updated|cleared.
 import { useEffect, useRef, useState } from "react";

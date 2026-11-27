@@ -56,6 +56,8 @@ export function HostSwitcher() {
       .filter(Boolean)
       .join("\n");
   const outliers = useMemo(() => versionOutliers(scope.hosts), [scope.hosts]);
+  // The row's version: the release (r298), else 开发构建 + the short commit; none while not online or unknown.
+  const shownVersion = (h: HostLook) => (h.connected && h.indicator.status === "online" && h.version ? (h.build?.release ?? `${versionText.dev} ${h.version}`) : null);
   // Groups with at least one known member (empty ones are not offered, RFC §7.5).
   const groups = switcherGroups(hostsState);
 
@@ -115,13 +117,23 @@ export function HostSwitcher() {
             <span className="min-w-0 flex-1 truncate" data-tip={hostTip(h)}>
               <ScriptText text={h.label} />
               {h.local && <span className="text-subtle"> · {t("titlebar.local")}</span>}
+              {/* The cutex version, always (owner 2026-11-28: 「SAMPLEHOSTA · 本机 · r298」); a host whose version differs from the
+                  others in view keeps the attention tag in the same place (RFC §7.2). Online hosts only, as the tooltip. */}
+              {shownVersion(h) && (
+                <span className="text-subtle" data-host-version={h.id} data-version-differs={outliers.has(h.id) ? "" : undefined}>
+                  {" · "}
+                  {outliers.has(h.id) ? (
+                    <Tag tone="attention" data-tip={`${t("hostSwitcher.versionDiffers")}
+cutex ${hostVersionTitle(h.build, versionText)}`} className="font-mono">
+                      {shownVersion(h)}
+                    </Tag>
+                  ) : (
+                    <span className="font-mono" data-tip={`cutex ${hostVersionTitle(h.build, versionText)}`}>{shownVersion(h)}</span>
+                  )}
+                </span>
+              )}
             </span>
             {statusText(h) && <span className={`shrink-0 text-xs ${h.indicator.status === "error" ? "text-danger" : h.indicator.status === "disconnected" || h.indicator.status === "offline" ? "text-subtle" : "text-warn"}`}>{statusText(h)}</span>}
-            {h.version && outliers.has(h.id) && (
-              <Tag tone="attention" data-tip={t("hostSwitcher.versionDiffers")} className="font-mono">
-                {h.version}
-              </Tag>
-            )}
             {tick(sameScope(scope.scope, singleHostScope(h.id)))}
             {!h.connected && (
               <button

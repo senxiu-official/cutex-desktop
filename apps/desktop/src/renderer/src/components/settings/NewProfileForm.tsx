@@ -14,7 +14,7 @@ import type { ProfileCreateKind, ProfileDetail } from "../../../../shared/ipc";
 import { useI18n, type MessageKey } from "../../i18n";
 import { markGuideSeen } from "../../lib/guides";
 import { useSettingsCard } from "../../lib/settingsDrafts";
-import { choiceFor, choiceForPreset, createKindOf, createPlanOf, defaultChoice, needsClaudeAccount, providerCards, resolveChoice, RUNTIME_LABEL, takesKey, type NewProfileChoice } from "../../lib/newProfileModel";
+import { cardChoice, choiceFor, choiceForPreset, choiceForStart, createKindOf, createPlanOf, defaultChoice, needsClaudeAccount, providerCards, resolveChoice, RUNTIME_LABEL, takesKey, type NewProfileChoice, type NewProfileStart } from "../../lib/newProfileModel";
 import { summaryLine } from "../../lib/newProfileText";
 import { useTargetApi, useTargetFeatures, useTargetHostId } from "../../lib/targetHost";
 import { useProfilePresets } from "../../lib/useProfilePresets";
@@ -29,14 +29,15 @@ import { StepTitle } from "./newProfile/StepTitle";
 import { NewClaudeAccountRow } from "./ProfileClaudeAccount";
 
 /** Existing Profile kinds suppress their guide; 「用这个服务商新建」 (editor) preselects its preset. */
-export function NewProfileForm({ existing, haveKinds, onCreated, onCancel, initialPreset }: { existing: string[]; haveKinds?: ReadonlySet<ProfileCreateKind> | null; onCreated(detail: ProfileDetail): void; onCancel(): void; initialPreset?: string }) {
+export function NewProfileForm({ existing, haveKinds, onCreated, onCancel, initialPreset, initialKind }: { existing: string[]; haveKinds?: ReadonlySet<ProfileCreateKind> | null; onCreated(detail: ProfileDetail): void; onCancel(): void; initialPreset?: string; /** 引导's Profile card pick. */ initialKind?: NewProfileStart }) {
   const api = useTargetApi();
   const { t } = useI18n();
   const features = useTargetFeatures();
   const hostId = useTargetHostId();
   const presets = useProfilePresets();
   const cards = useMemo(() => providerCards(presets, features), [presets, features]);
-  const [choice, setChoice] = useState<NewProfileChoice | null>(() => (initialPreset ? choiceForPreset(cards, initialPreset) : null));
+  const initialChoice = () => (initialPreset ? choiceForPreset(cards, initialPreset) : initialKind ? choiceForStart(cards, initialKind) : null);
+  const [choice, setChoice] = useState<NewProfileChoice | null>(initialChoice);
   const [address, setAddress] = useState<string | null>(null);
   const [apiKey, setApiKey] = useState("");
   const [model, setModel] = useState("");
@@ -52,8 +53,9 @@ export function NewProfileForm({ existing, haveKinds, onCreated, onCancel, initi
   // 「用这个服务商新建」 before the host's presets arrived: pick it once they do (unless the owner chose already).
   const touched = useRef(false);
   useEffect(() => {
-    if (initialPreset && !touched.current && !choice) setChoice(choiceForPreset(cards, initialPreset));
-  }, [cards, initialPreset, choice]);
+    if ((initialPreset || initialKind) && !touched.current && !choice) setChoice(initialChoice());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cards, initialPreset, initialKind, choice]);
 
   /** Another provider / method / key kind / region: its own address and key (keys don't carry over). */
   const choose = (next: NewProfileChoice | null) => {
@@ -123,7 +125,7 @@ export function NewProfileForm({ existing, haveKinds, onCreated, onCancel, initi
         <>
           <SettingsGroup navigation agents="none" source="host">
             <div>
-              <ProviderCards cards={cards} disabled={saving} onPick={(card) => choose(defaultChoice(card))} />
+              <ProviderCards cards={cards} disabled={saving} onPick={(card) => choose(cardChoice(card, initialKind))} />
             </div>
           </SettingsGroup>
           <p className="pb-1 text-xs text-subtle">{t("newProfile.cardsHint")}</p>

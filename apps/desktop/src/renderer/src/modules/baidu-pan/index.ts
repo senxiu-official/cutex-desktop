@@ -24,6 +24,7 @@ export default defineModule({
   id: "baidu-pan",
   titleKey: "baidu-pan.title",
   descriptionKey: "baidu-pan.description",
+  defaultEnabled: false,
   requires: { capabilities: [BAIDU_PAN_FEATURE] },
   contributes: {
     "side.component": [{

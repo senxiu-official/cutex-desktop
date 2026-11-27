@@ -1,6 +1,6 @@
 // The 面板 group's pages and cards the shell adds (design 006 v1, owner 2026-10-22: 「合面板」): 托盘 and 桌面 (their
 // rows were in 外观 → 窗口与卡片), and on 会话 the 宽度 card and the one line on 只看 {{shelf}}. The other panel pages
-// (侧栏, 会话, 状态显示, {{shelf}}) are the pages that were there, regrouped and renamed (lib/settingsNav PANEL_PAGES).
+// (侧栏, 会话, {{shelf}}; 状态显示 retired 2026-11-28) are the pages that were there, regrouped and renamed (lib/settingsNav PANEL_PAGES).
 import { useI18n } from "../../i18n";
 import { SettingsSections } from "../../modules/Outlet";
 import { settingsAnchorId } from "../../lib/settingsNav";

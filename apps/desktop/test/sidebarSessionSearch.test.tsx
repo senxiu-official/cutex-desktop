@@ -79,6 +79,7 @@ function setup({ localSearch = true, alphaSearch = false, scope = "all" as "all"
 const names = () => [...container.querySelectorAll<HTMLElement>("[data-row-selectable]")].map((r) => r.textContent ?? "");
 const has = (name: string) => names().some((n) => n.includes(name));
 const $ = (sel: string) => container.querySelector<HTMLElement>(sel);
+const $$ = (sel: string) => [...container.querySelectorAll<HTMLElement>(sel)];
 const settle = () => act(async () => { for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 0)); });
 async function render() {
   await act(async () => root.render(h(I18nProvider, null, h(Sidebar))));
@@ -90,6 +91,11 @@ async function type(sel: string, value: string) {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(el, value);
     el.dispatchEvent(new Event("input", { bubbles: true }));
   });
+}
+/** 筛选 → 含已归档 (design A: the checkbox lives in the 筛选 panel). */
+async function toggleArchived() {
+  if (!$("[data-search-filters]")) await click("[data-search-filters-toggle]");
+  await click("[data-search-filter-archived] input");
 }
 async function click(sel: string) {
   await act(async () => $(sel)!.click());
@@ -124,7 +130,7 @@ describe("sidebar session search", () => {
   it("without the capability the search stays name / preview only", async () => {
     setup({ localSearch: false, alphaSearch: false });
     await render();
-    expect($("[data-sidebar-dir-toggle]")).toBeNull();
+    expect($("[data-search-filters-toggle]")).toBeNull();
     await type("[data-sidebar-search]", "Lum");
     expect(has("Lumen")).toBe(true);
     expect(has("Zeta")).toBe(false);
@@ -141,8 +147,9 @@ describe("sidebar session search", () => {
     await render();
     await type("[data-sidebar-search]", "flush");
     expect($("[data-old-tasks-start]")?.textContent).toContain("flush");
-    // Owner connection: 已归档 is offered.
-    expect($("[data-old-tasks-archived]")).not.toBeNull();
+    // Owner connection: 含已归档 is offered in 筛选's 消息记录 group.
+    await click("[data-search-filters-toggle]");
+    expect($('[data-search-filter-group="history"] [data-search-filter-archived]')).not.toBeNull();
     await click("[data-old-tasks-start]");
     expect(calls).toEqual([{ hostId: "local", query: { mode: "tasks", q: "flush" } }]);
     const row = $("[data-old-task]")!;
@@ -162,7 +169,7 @@ describe("sidebar session search", () => {
     noteHostAccess("alpha", { user: { id: "u-guest", kind: "user", displayName: "Guest" } });
     await render();
     await type("[data-sidebar-search]", "old");
-    await click("[data-old-tasks-archived]");
+    await toggleArchived();
     await click("[data-old-tasks-start]");
     expect(calls).toEqual([{ hostId: "local", query: { mode: "tasks", q: "old", lifecycle: "retired" } }]);
     noteHostAccess("alpha", null);
@@ -175,7 +182,7 @@ describe("sidebar session search", () => {
       : { contractVersion: 2, hostId: "HOST-A", mode: "tasks", nextCursor: null, more: false, partial: false, items: [] });
     await render();
     expect(has("Moss") && has("Zeta")).toBe(true);
-    await click("[data-sidebar-dir-toggle]");
+    await click("[data-search-filters-toggle]");
     // Several hosts in scope, one capable: the filter names its host.
     expect($("[data-sidebar-dir-host]")?.textContent).toBe("This PC");
     await type("[data-sidebar-dir-path]", "D:\\Work\\app");
@@ -213,6 +220,36 @@ describe("sidebar session search", () => {
     expect($("[data-old-tasks-results]")).toBeNull();
   });
 
+  it("design A: at most 5 message-history results inline, then 在页面中看全部 N 条; 继续查找 moves to the page", async () => {
+    setup({ localSearch: true });
+    const many = Array.from({ length: 7 }, (_, i) => ({ hostId: "HOST-A", cutexSessionId: "l1", displayName: "Lumen", cwd: "", lifecycle: "active" as const, updatedAt: "", turnId: `t${i}`, title: `hit ${i}`, snippet: "", turnStatus: "completed" as const }));
+    reply = () => ({ contractVersion: 2, hostId: "HOST-A", mode: "tasks", nextCursor: null, more: false, partial: false, items: many });
+    await render();
+    await type("[data-sidebar-search]", "hit");
+    // The action row says what it searches; the names below have their own heading.
+    expect($("[data-old-tasks-hint]")).not.toBeNull();
+    expect($('[data-search-section="names"]')).not.toBeNull();
+    await click("[data-old-tasks-start]");
+    expect($$("[data-old-task]")).toHaveLength(5);
+    expect($("[data-old-tasks-all]")!.textContent).toContain("7");
+    expect($("[data-old-tasks-more]")).toBeNull();
+  });
+
+  it("筛选: one button with a count; closing the panel leaves removable chips", async () => {
+    setup({ localSearch: true });
+    await render();
+    expect($("[data-search-filters-count]")).toBeNull();
+    await toggleArchived();
+    expect($$("[data-search-filter-group]").map((x) => x.getAttribute("data-search-filter-group"))).toEqual(["dir", "history"]);
+    await click("[data-search-filters-done]");
+    expect($("[data-search-filters]")).toBeNull();
+    expect($("[data-search-filters-count]")!.textContent).toBe("1");
+    expect($$("[data-search-chip]").map((x) => x.getAttribute("data-search-chip"))).toEqual(["archived"]);
+    await click('[data-search-chip="archived"] button');
+    expect($("[data-search-chips]")).toBeNull();
+    expect($("[data-search-filters-count]")).toBeNull();
+  });
+
   const hit = (sessionId: string, turnId: string) => ({ hostId: "HOST-A", cutexSessionId: sessionId, displayName: sessionId, cwd: "", lifecycle: "active" as const, updatedAt: "", turnId, title: turnId, snippet: "", turnStatus: "completed" as const });
 
   it("changing or clearing the text, or 已归档, drops the search: a late reply is discarded and 继续查找 goes", async () => {
@@ -235,7 +272,7 @@ describe("sidebar session search", () => {
     await act(async () => pending.shift()!({ contractVersion: 2, hostId: "HOST-A", mode: "tasks", nextCursor: null, more: false, partial: false, items: [hit("l1", "t2")] }));
     await settle();
     expect($("[data-old-task]")).not.toBeNull();
-    await click("[data-old-tasks-archived]");
+    await toggleArchived();
     expect($("[data-old-tasks-results]")).toBeNull();
     await type("[data-sidebar-search]", "");
     await settle();
@@ -245,7 +282,7 @@ describe("sidebar session search", () => {
   it("a directory filter whose host left the scope is suspended: searches go to the hosts in view, blur asks nothing", async () => {
     setup({ localSearch: true, alphaSearch: true });
     await render();
-    await click("[data-sidebar-dir-toggle]");
+    await click("[data-search-filters-toggle]");
     const picker = $("[data-sidebar-dir-host]") as HTMLSelectElement;
     await act(async () => { picker.value = "alpha"; picker.dispatchEvent(new Event("change", { bubbles: true })); });
     await type("[data-sidebar-dir-path]", "/srv/far");

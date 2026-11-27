@@ -4,11 +4,32 @@ import { applyEvent, emptyTimeline, orderedEntries } from "../../lib/timeline";
 
 export const SUMMARY_PROMPT = "Summarize the user's questions and the resulting discussion in this side conversation as a concise standalone note. Use the user's language. Give a short heading, the confirmed conclusions, and any unresolved questions. Treat inherited main-thread history only as background; do not summarize it wholesale. Do not execute tasks or use tools for this request. Return only the note in Markdown.";
 
+const TEXT_DELTAS = new Set(["item/agentMessage/delta", "item/reasoning/summaryTextDelta", "item/reasoning/textDelta", "item/reasoning/summaryPartAdded", "item/plan/delta"]);
+type ItemParams = { item?: { id?: unknown; type?: unknown; [k: string]: unknown } };
+
+/**
+ * An `item/started` whose text the later deltas stream: its text is the deltas' starting point, so it starts empty.
+ * The Claude adapter (claude-runtime side_chats.py, through claude-r24) records Side events by reference, so a read
+ * mid-stream returned `item/started` already holding everything streamed so far, and the deltas after it added the
+ * same text again (思考 / the answer twice until `item/completed` replaced it). Native's own started text is empty.
+ */
+function startedWithoutStreamedText(events: SideChat["events"]): SideChat["events"] {
+  const streamed = new Set<string>();
+  for (const e of events) if (TEXT_DELTAS.has(e.method)) { const id = (e.params as { itemId?: unknown } | undefined)?.itemId; if (typeof id === "string") streamed.add(id); }
+  if (!streamed.size) return events;
+  return events.map(e => {
+    const item = e.method === "item/started" ? (e.params as ItemParams | undefined)?.item : undefined;
+    if (!item || typeof item.id !== "string" || !streamed.has(item.id)) return e;
+    const blank = item.type === "reasoning" ? { summary: [], content: [] } : item.type === "agentMessage" || item.type === "plan" ? { text: "" } : null;
+    return blank ? { ...e, params: { ...(e.params as object), item: { ...item, ...blank } } } : e;
+  });
+}
+
 /** Local rendering only: these envelopes are NEVER submitted to the parent's store or feed. */
 export function sideTimeline(chat: SideChat) {
   const timeline = emptyTimeline();
   timeline.threadId = chat.threadId;
-  for (const event of chat.events) {
+  for (const event of startedWithoutStreamedText(chat.events)) {
     const envelope: EventEnvelope = {
       contractVersion: 2, eventId: String(event.seq), cursor: String(event.seq), streamId: chat.id,
       sequence: event.seq, receivedAt: chat.updatedAt, cutexSessionId: chat.sessionId,

@@ -685,6 +685,9 @@ export class Updater {
     }
   }
 
+  /** A consumer migrating data out of old releases may finish before archive/delete moves them. */
+  beforeMaintenance?: () => Promise<void>;
+
   /** The renderer committed its first frame: a pending update is good; old releases are tidied up. */
   confirmReady(): void {
     if (this.readyTimer) clearTimeout(this.readyTimer);
@@ -710,6 +713,7 @@ export class Updater {
     // Not while an update builds / switches (it relaunches; the next start tidies up). A check may run.
     if (!m || this.status.state === "updating" || this.status.state === "ready") return Promise.resolve();
     return this.serialized(async () => {
+      await this.beforeMaintenance?.();
       if (MAC && this.layout) {
         try {
           m.syncLauncher();
@@ -732,6 +736,7 @@ export class Updater {
     const m = this.maintenance;
     if (!m) throw new Error("this install has no old releases");
     await this.serialized(async () => {
+      await this.beforeMaintenance?.();
       await m.deleteOld(true);
       await this.measureOld();
     });

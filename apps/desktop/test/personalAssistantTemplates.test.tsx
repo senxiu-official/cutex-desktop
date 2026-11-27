@@ -44,7 +44,7 @@ const assistant: PaAssistant = {
 };
 const host: PaHost = {
   hostId: "local", look: null, label: "This PC", online: true, instanceId: "inst-a", supported: true,
-  features: { recurring: true, qualifiedRefs: true, ownerViews: true, crossHost: false },
+  features: { recurring: true, qualifiedRefs: true, ownerViews: true, crossHost: false, readiness: false },
   projects: [{ project_id: "desktop", authority_epoch: 3, director_cutex_session_id: "nova", presentation: { display_name: "cutex-desktop", badge_label: "CD", color: "cyan" }, active_member_count: 3, lifecycle: "active" }],
   names: new Map([["eva", "Eva"], ["nova", "Nova"]]),
 };

@@ -16,6 +16,10 @@ import { pendingByAgent, type AgentRow } from "./sidebar";
 import { useSidebarModel } from "./sidebarView";
 import { getTurnMarks, markSeen, markSeenOn, pruneTurnMarks, settleStartedTurnsOn, subscribeTurnMarks, turnMarksOn, useTurnMarks, type TurnMarks } from "./turnUnread";
 import { onEveryAppWindow } from "./appWindowSet";
+import { bridge } from "../bridge";
+import { attentionChangedOn, attentionFeedOn, pruneHostAttention, refreshHostAttention, syncHostAttention } from "./hostAttention";
+import { ATTENTION_FEATURE } from "../../../shared/attention";
+import { hostEpoch } from "../../../shared/hosts";
 
 export interface Attention {
   /** Every agent row of the sidebar (groups + quick chats). */
@@ -153,6 +157,40 @@ export function useTurnMarkUpkeep(): void {
     };
     prune(useApp.getState());
     return useApp.subscribe(prune);
+  }, []);
+}
+
+/**
+ * Design 061: follow every connected host with cross-device read state (`attention-state-v1`): its snapshot is read
+ * when it connects (again on a new connection or daemon instance), and again on its `attentionChanged` events and feed
+ * resyncs. Hosts without it, or not connected, use the device-local marks.
+ */
+export function useHostAttentionUpkeep(): void {
+  useEffect(() => {
+    const sync = (state: ReturnType<typeof useApp.getState>) => {
+      const focus = state.hosts?.active ?? "local";
+      const hosts: [string, ReturnType<typeof useApp.getState>["daemon"], ReadonlySet<string>, boolean][] = [[focus, state.daemon, state.features, state.featuresKnown]];
+      for (const [id, slice] of Object.entries(state.byHost)) if (id !== focus) hosts.push([id, slice.daemon, slice.features, slice.featuresKnown]);
+      // Hosts taken off the list go (a host merely away keeps its state below).
+      if (state.hosts) pruneHostAttention(new Set([focus, ...state.hosts.hosts.map((h) => h.id)]));
+      for (const [id, daemon, features, known] of hosts) {
+        // Away or its capabilities still loading: keep whatever state the host had (no flicker to local marks).
+        if (daemon.kind !== "connected" || !known) continue;
+        syncHostAttention(id, features.has(ATTENTION_FEATURE), `${hostEpoch(state.hosts, id) ?? ""}|${daemon.instanceId ?? daemon.baseUrl}`);
+      }
+    };
+    sync(useApp.getState());
+    const offStore = useApp.subscribe(sync);
+    const offChanged = bridge.on("attentionChanged", ({ hostId }) => attentionChangedOn(hostId));
+    const offResync = bridge.on("hostResync", ({ hostId }) => refreshHostAttention(hostId));
+    // While main's feed is live no slow re-read runs (lib/hostAttention).
+    const offFeed = bridge.on("attentionFeed", ({ hostId, live }) => attentionFeedOn(hostId, live));
+    return () => {
+      offStore();
+      offChanged();
+      offResync();
+      offFeed();
+    };
   }, []);
 }
 

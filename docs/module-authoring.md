@@ -62,7 +62,7 @@ my-thing/
 `pack.json` has only these fields:
 
 ```json
-{ "id": "my-thing", "version": "0.1.0", "moduleApi": "^1.31", "author": "you" }
+{ "id": "my-thing", "version": "0.1.0", "moduleApi": "^1.33", "author": "you" }
 ```
 
 - `id` is the same as the `id` in `defineModule`. Never change it after you publish: the owner's settings for your module are stored under it. It cannot be the id of a module built into the app.
@@ -331,6 +331,8 @@ The `/experimental` entry has no such promise. Settings marks a module that impo
 ### Changes to the experimental entry
 
 - 1.29: first version.
+- 1.33: a `timeline.tool` item may set `gather(item)`, a key: the items of one turn with the same key render as one
+  row where the first is, and its `Row` gets all of them as `items` (project memory edits). Without it nothing changes.
 
 ## Reference
 

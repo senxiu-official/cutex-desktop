@@ -176,6 +176,8 @@ export interface RefActionItem extends SlotItemBase {
   excludeKinds?: readonly string[];
   icon: Icon;
   titleKey: MessageKey;
+  /** v1.33. What the item does, in a sentence: a menu row's small ⓘ. Menus only. */
+  infoKey?: MessageKey;
   /** Hook. Live state for this ref, such as "already bookmarked". */
   useState?(ref: CutexRef): { active?: boolean; titleKey?: MessageKey; tooltip?: string; disabledReason?: string } | null;
   /** Always an icon on a message's hover bar. Otherwise a row of its menu. */

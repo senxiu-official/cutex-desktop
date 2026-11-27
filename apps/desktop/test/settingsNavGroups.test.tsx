@@ -38,6 +38,8 @@ describe("settings nav groups (owner 2026-11-11)", () => {
     expect(byGroup.you).toEqual(["me"]);
     expect(byGroup.app!.at(-1)).toBe("shortcuts");
     expect(byGroup.app!.slice(0, 2)).toEqual(["general", "appearance"]);
+    // 自定义桌面 is part of the guide (module start), not a page of its own (owner 2026-11-26).
+    expect(groups.flatMap((g) => g.entries.map((e) => e.item.page))).not.toContain("customize-desktop");
     expect(byGroup.connection).not.toContain("me");
     expect(byGroup.connection).toContain("hosts");
     expect(byGroup.system).toContain("modules");

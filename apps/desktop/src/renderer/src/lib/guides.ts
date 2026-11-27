@@ -59,7 +59,6 @@ const V02 = "0.2.0";
 
 export const GUIDES: readonly Guide[] = [
   { id: "onboarding", kind: "onboarding", since: "0.1.0", title: "onboarding.guide.onboarding.title", text: "onboarding.guide.onboarding.text", replay: () => openOnboarding({ kind: "intro" }) },
-  { id: "onboarding.v02", kind: "onboarding", since: V02, title: "onboarding.guide.v02.title", text: "onboarding.guide.v02.text", replay: () => openOnboarding({ kind: "whatsNew", version: V02 }) },
   // Inline panels (components/InlineGuide): the new-Profile form, one per type, until a Profile of that type exists.
   { id: "inline.profile.apiKey", kind: "inline", since: V02, title: "onboarding.guide.profile.apiKey.title", text: "onboarding.guide.profile.apiKey.text", settings: "profiles" },
   { id: "inline.profile.chatgpt", kind: "inline", since: V02, title: "onboarding.guide.profile.chatgpt.title", text: "onboarding.guide.profile.chatgpt.text", settings: "profiles" },
@@ -171,6 +170,15 @@ function save(next: GuideState): void {
 function subscribe(l: () => void): () => void {
   listeners.add(l);
   return () => listeners.delete(l);
+}
+
+/** Settings sync (lib/settingsSync): the guides seen / answered on another device. */
+export function replaceGuideState(next: { seen: readonly string[]; asked: boolean }): void {
+  save({ schema: SCHEMA, seen: next.seen.filter((v): v is string => typeof v === "string"), asked: next.asked === true });
+}
+
+export function subscribeGuides(listener: () => void): () => void {
+  return subscribe(listener);
 }
 
 export function getGuides(): GuideState {

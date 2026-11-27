@@ -31,7 +31,7 @@
 // package so the in-app updater signs the next release with it too. On Windows cutex.exe also gets the app icon and "Cutex"
 // version strings (resedit, pure JS — the `rcedit` npm package is deprecated) instead of
 // Electron's, so Explorer and the taskbar show the dragon.
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join, relative, resolve } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -91,9 +91,28 @@ if (process.platform === "win32") await stampExe(join(dest, "cutex.exe"), join(a
 const target = bundle ? join(bundle, "Contents", "Resources", "app") : join(dest, "resources/app");
 mkdirSync(target, { recursive: true });
 cpSync(join(app, "out"), join(target, "out"), { recursive: true });
+const moduleUpgrade = process.env.CUTEX_DESKTOP_MODULE_UPGRADE_DIR;
+if (moduleUpgrade) {
+  const entries = readdirSync(resolve(moduleUpgrade), { withFileTypes: true });
+  const names = entries.map(entry => entry.name);
+  const archives = names.filter(name => name !== "modules.json" && name !== "modules.json.minisig");
+  const ids = archives.map(name => /^(claude-science|nci|baidu-pan)-\d+\.\d+\.\d+\.tar\.gz$/.exec(name)?.[1]);
+  if (entries.some(entry => !entry.isFile() || entry.isSymbolicLink()) ||
+      !names.includes("modules.json") || !names.includes("modules.json.minisig") || !ids.length ||
+      ids.some(id => !id) || new Set(ids).size !== ids.length) {
+    throw Error("module-upgrade requires the signed index, signature and at most one archive per supported upgrade module");
+  }
+  mkdirSync(join(target, "module-upgrade"));
+  for (const name of names) cpSync(join(resolve(moduleUpgrade), name), join(target, "module-upgrade", name));
+}
 // Main references resources/icons as ../../resources/icons from out/main (electron-vite leaves
 // resources/ in place), so ship the icon set next to out/; the source logo stays behind.
 cpSync(join(app, "resources/icons"), join(target, "resources/icons"), { recursive: true });
+// 外观 → 应用图标 styles (shared/appIcons.ts; built by scripts/make-app-icons.mjs): main reads them at run time from
+// resources/app-icons/<id>; the owner's masters (src/) stay behind.
+if (existsSync(join(app, "resources/app-icons"))) {
+  cpSync(join(app, "resources/app-icons"), join(target, "resources/app-icons"), { recursive: true, filter: (from) => !/[\\/]app-icons[\\/]src([\\/]|$)/.test(from) });
+}
 // koffi, the one native dependency (saved browser passwords on Windows: Credential Manager + Windows Hello; docs/DESIGN.md
 // browser contract). The main bundle keeps `import("koffi")` external, so ship it as resources/app/node_modules: koffi's
 // JS loader (no C sources, docs or vendored headers) and the platform's prebuilt @koromix/koffi-<platform>-<arch> (the

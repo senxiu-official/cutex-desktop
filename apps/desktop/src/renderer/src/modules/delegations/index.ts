@@ -34,7 +34,7 @@ export default defineModule({
         id: "delegations.status",
         order: 500,
         titleKey: "delegations.statusTitle",
-        defaultPlace: "capsule",
+        defaultPlace: "both",
         useStatus: useDelegationsStatus,
         Meta: DelegationsMeta,
         Body: DelegationsBody,

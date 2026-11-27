@@ -15,6 +15,8 @@ const zhHantCN: Partial<Record<keyof typeof zhCN, string>> = {
   "approvals.kind.browser_claim": "申請瀏覽器分頁控制",
   "approvals.kind.browser_open": "在智能體瀏覽器開啟網頁",
   "approvals.kind.workflow_run": "執行工作流",
+  "approvals.kind.personal_assistant_write": "個人助理跨專案寫入",
+  "approvals.reason.personal_assistant_write": "個人助理要修改其他專案裡的檔案；核准只放行這一次修改，之後它會重試這次修改",
   "approvals.kind.service_lifetime": "保持服務常駐",
   "approvals.kind.static_root": "發佈工作區外目錄",
   "approvals.title.managedService": "以你的身分執行託管服務 {slug}",

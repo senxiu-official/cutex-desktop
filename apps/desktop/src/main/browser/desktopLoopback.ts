@@ -46,8 +46,9 @@ export class BrowserDesktopLoopbackStore {
     this.save(hosts);
     return { enabled };
   }
-  forgetIdentity(identityId: string): void {
-    const hosts = new Set([...this.read()].filter(key => !key.startsWith(`${identityId} `)));
+  /** Every host of the identity, or one. */
+  forgetIdentity(identityId: string, hostId?: string): void {
+    const hosts = new Set([...this.read()].filter(key => hostId === undefined ? !key.startsWith(`${identityId} `) : key !== `${identityId} ${hostId}`));
     if (hosts.size !== this.read().size) { this.hosts = hosts; this.save(hosts); }
   }
   retain(hostIds: Iterable<string>): void {

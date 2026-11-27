@@ -6,7 +6,7 @@ import { create } from "zustand";
 import { bridge } from "../../bridge";
 import {
   DEFAULT_BROWSER_IDENTITY_ID, DEFAULT_BROWSER_IDENTITY_PREFS,
-  type BrowserIdentityBridge, type BrowserIdentityEvent, type BrowserIdentityPrefs, type BrowserIdentityState, type BrowserIdentityView,
+  type BrowserIdentityBridge, type BrowserIdentityEvent, type BrowserIdentityPrefs, type BrowserIdentityState, type BrowserIdentitySyncState, type BrowserIdentityView,
 } from "../../../../shared/browserIdentity";
 
 interface IdentityStore {
@@ -15,9 +15,17 @@ interface IdentityStore {
   prefs: BrowserIdentityPrefs;
   /** Last request error code (shown inline where the request was made). */
   error: string | null;
+  /** 跨主机同步 (cutex r297); null: this main has no sync (Settings shows nothing for it). */
+  sync: BrowserIdentitySyncState | null;
 }
 
-export const useBrowserIdentities = create<IdentityStore>(() => ({ supported: false, state: null, prefs: { ...DEFAULT_BROWSER_IDENTITY_PREFS }, error: null }));
+export const useBrowserIdentities = create<IdentityStore>(() => ({ supported: false, state: null, prefs: { ...DEFAULT_BROWSER_IDENTITY_PREFS }, error: null, sync: null }));
+
+/** 暂不 on a remote deletion's cleanup question: folded for this run of the app; the item stays pending in main. */
+export const useCleanupLater = create<{ keys: ReadonlySet<string>; later(key: string): void }>((set, get) => ({
+  keys: new Set(),
+  later: (key) => set({ keys: new Set([...get().keys, key]) }),
+}));
 
 /** Which identity the Settings sub-pages (identity / passwords) show; null = the default one. */
 export const useIdentityPage = create<{ id: string | null }>(() => ({ id: null }));
@@ -41,8 +49,10 @@ export function watchBrowserIdentities(): () => void {
     if (live) useBrowserIdentities.setState({ supported: true, state });
   }, () => { if (live) useBrowserIdentities.setState({ supported: false, state: null }); });
   void ids.prefs().then((prefs) => { if (live) useBrowserIdentities.setState({ prefs }); }, () => {});
+  if (ids.syncState) void ids.syncState().then((sync) => { if (live) useBrowserIdentities.setState({ sync }); }, () => { if (live) useBrowserIdentities.setState({ sync: null }); });
   const off = ids.subscribe((event: BrowserIdentityEvent) => {
     if (event.kind === "identities") useBrowserIdentities.setState({ supported: true, state: event.state });
+    if (event.kind === "sync") useBrowserIdentities.setState({ sync: event.state });
     for (const listener of extra) listener(event);
   });
   return () => { live = false; off(); };
@@ -67,6 +77,18 @@ export async function identityRequest<T>(run: (ids: BrowserIdentityBridge) => Pr
     useBrowserIdentities.setState({ error: errorCode(e) });
     throw e;
   }
+}
+
+/** One host's 跨主机同步 switch (PUT on that host's daemon). */
+export async function setHostSync(hostId: string, enabled: boolean): Promise<void> {
+  const sync = await identityRequest((ids) => ids.setHostSync(hostId, enabled));
+  useBrowserIdentities.setState({ sync });
+}
+
+/** 清除 of a remote deletion's local data (main checks the owner's click and the pending item). */
+export async function confirmIdentityCleanup(identityId: string, deletionRevision: number): Promise<void> {
+  const sync = await identityRequest((ids) => ids.confirmCleanup(identityId, deletionRevision));
+  useBrowserIdentities.setState({ sync });
 }
 
 export async function setBrowserPrefs(patch: Partial<BrowserIdentityPrefs>): Promise<void> {

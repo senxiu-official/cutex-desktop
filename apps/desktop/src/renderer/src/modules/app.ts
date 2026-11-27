@@ -14,7 +14,8 @@ import { panesOpen, sideOpenAlias } from "../lib/paneServices";
 import { showShelfToast } from "../lib/shelves";
 import { checkStatusContributions } from "../lib/statusSurfaces";
 import { useApp } from "../store";
-import { pinFlippedDefaults } from "./defaultFlips";
+import { pinFlippedDefaults, pinnedBundledFallbacks } from "./defaultFlips";
+import { ON_DEMAND_UPGRADE_PACKS } from "../../../shared/modulePacks";
 import { syncWhatsAppModule } from "./whatsappSync";
 import { createModuleHost } from "./host";
 import { subscribeActivity, subscribeUsage } from "../lib/activityFeed";
@@ -119,10 +120,13 @@ let instance: AppModuleHost | null = null;
 
 export function startAppModules(modules: readonly AppModule[]): AppModuleHost {
   if (instance) return instance;
-  // Modules whose default flipped to on stay off on installs that already saved module choices.
+  // Keep previous defaults on existing installations before constructing the module host.
   pinFlippedDefaults(storage);
+  // The browser mock keeps the bundled definitions so its existing preview scenes can render them.
+  const retained = bridge.modulePacks?.seedBundled ? pinnedBundledFallbacks(storage) : null;
+  const onDemandIds = new Set<string>(ON_DEMAND_UPGRADE_PACKS);
   const host = createModuleHost<SlotMap, ModuleServices, MessageKey>({
-    modules,
+    modules: retained ? modules.filter(module => !onDemandIds.has(module.id) || retained.has(module.id)) : modules,
     slots: SLOT_SPECS,
     host: hostInput(useApp.getState()),
     hosts: hostsInput(useApp.getState()),

@@ -4,8 +4,12 @@
 // agent, persisted in localStorage; opening the agent clears its mark. Turns that end while the
 // desktop isn't running are not known (cutex gap, see PROGRESS.md). Persisted per host (host keys,
 // lib/hostKeys); readers see the focus host's marks by agent id.
+// Hosts with cross-device read state (design 061, lib/hostAttention): their marks are the host's (the person's unread
+// replies on every device); nothing is recorded or cleared here for them — opening an agent is not reading it (a reply
+// is read once it was on screen, lib/readOnSight), and the device-local marks of such a host go when its state comes in.
 import { useSyncExternalStore } from "react";
 import { hostKey, keyFocus, onKeyFocus, parseHostKey, projectRecord, registerHostKeyed } from "./hostKeys";
+import { attentionOn, marksOf, onAttentionReady, readReplies, readReply, subscribeHostAttention, type HostAttention } from "./hostAttention";
 
 export interface TurnMark {
   /** When the turn ended (ms). */
@@ -111,7 +115,19 @@ const KEY = "cutex-desktop.turnMarks";
 const listeners = new Set<() => void>();
 /** Persisted marks by host key (legacy bare agent ids until claimed); `current`: the focus host's by agent id. */
 let stored: TurnMarks = load();
-let current: TurnMarks = projectRecord(stored);
+/** Marks of a host's state (by state object: the same object while the state is the same). */
+const overlayMarks = new WeakMap<HostAttention, TurnMarks>();
+function marksOfState(state: HostAttention): TurnMarks {
+  let marks = overlayMarks.get(state);
+  if (!marks) overlayMarks.set(state, (marks = marksOf(state)));
+  return marks;
+}
+
+function focusMarks(): TurnMarks {
+  const state = attentionOn(keyFocus());
+  return state ? marksOfState(state) : projectRecord(stored);
+}
+let current: TurnMarks = focusMarks();
 
 function load(): TurnMarks {
   try {
@@ -127,7 +143,7 @@ function load(): TurnMarks {
 function save(next: TurnMarks): void {
   if (next === stored) return;
   stored = next;
-  current = projectRecord(stored);
+  current = focusMarks();
   try {
     localStorage.setItem(KEY, JSON.stringify(stored));
   } catch {
@@ -175,9 +191,33 @@ registerHostKeyed({
   },
 });
 onKeyFocus(() => {
-  current = projectRecord(stored);
+  focusState = attentionOn(keyFocus());
+  current = focusMarks();
   for (const l of listeners) l();
 });
+let focusState = attentionOn(keyFocus());
+subscribeHostAttention(() => {
+  // The focus host's marks change with its state; other hosts' are read on demand (turnMarksOn), listeners hear every change.
+  const state = attentionOn(keyFocus());
+  if (state !== focusState) {
+    focusState = state;
+    current = focusMarks();
+  }
+  for (const l of listeners) l();
+});
+// The one-time clean start of a host with cross-device read state: its device-local marks go.
+onAttentionReady((hostId) => dropHost(hostId));
+
+/** Forget every device-local mark of `hostId` (its host keys; legacy bare entries only when it is the focus host). */
+function dropHost(hostId: string): void {
+  const out: Record<string, TurnMark> = {};
+  for (const [entry, mark] of Object.entries(stored)) {
+    const key = parseHostKey(entry);
+    if (key ? key[0] === hostId : hostId === keyFocus()) continue;
+    out[entry] = mark;
+  }
+  if (Object.keys(out).length !== Object.keys(stored).length) save(out);
+}
 
 /** The focus host's marks by agent id. */
 export function getTurnMarks(): TurnMarks {
@@ -191,35 +231,56 @@ export function recordTurnEnd(id: string, end: TurnEnd, viewing: boolean, at = D
 
 /** A turn of `hostId`'s agent `id` ended (hosts outside the scope keep their marks too). */
 export function recordTurnEndOn(hostId: string, id: string, end: TurnEnd, viewing: boolean, at = Date.now()): void {
+  if (attentionOn(hostId)) return; // the host keeps the person's unread replies
   if (!viewing && end.status === "interrupted") return; // marks stay as they were
   updateHost(hostId, (marks) => applyTurnEnd(marks, id, end, at, viewing), [id]);
 }
 
 /** A turn of `hostId`'s agent `id` started. */
 export function recordTurnStartOn(hostId: string, id: string, turnId: string): void {
+  if (attentionOn(hostId)) return;
   updateHost(hostId, (marks) => applyTurnStart(marks, id, turnId), [id]);
 }
 
 /** `hostId`'s agents in a sidebar snapshot: failed marks of those already running a later turn settle. */
 export function settleStartedTurnsOn(hostId: string, sessions: readonly RunningTurn[]): void {
+  if (attentionOn(hostId)) return;
   updateHost(hostId, (marks) => settleStartedTurns(marks, sessions));
 }
 
-/** The owner opened / is looking at the focus host's agent. */
+/** The owner opened / is looking at the focus host's agent (a host with cross-device read state: nothing, see readOnSight). */
 export function markSeen(id: string): void {
-  if (!(id in current)) return;
+  if (attentionOn(keyFocus()) || !(id in current)) return;
   updateHost(keyFocus(), (marks) => clearMark(marks, id), [id]);
 }
 
 /** The owner opened / is looking at `hostId`'s agent (multi-host: an agent of another host in the scope). */
 export function markSeenOn(hostId: string, id: string): void {
   if (hostId === keyFocus()) return markSeen(id);
-  if (!(hostKey(hostId, id) in stored)) return;
+  if (attentionOn(hostId) || !(hostKey(hostId, id) in stored)) return;
   updateHost(hostId, (marks) => clearMark(marks, id), [id]);
+}
+
+/**
+ * The owner marks `hostId`'s agent read on purpose (menu 标为已读, × on its 出错 item): on a host with cross-device
+ * read state, its newest reply as the host's state holds it (that exact reply, on every device); else markSeenOn.
+ */
+export function markReadOn(hostId: string, id: string): void {
+  if (attentionOn(hostId)) readReply(hostId, id);
+  else markSeenOn(hostId, id);
+}
+
+/** markReadOn for several agents of `hostId` (a project's 标为已读): one batched read on a host with cross-device read state. */
+export function markReadManyOn(hostId: string, ids: readonly string[]): void {
+  if (attentionOn(hostId)) readReplies(hostId, ids);
+  else for (const id of ids) markSeenOn(hostId, id);
 }
 
 /** `hostId`'s marks by agent id (the focus host's = getTurnMarks; legacy entries only for the focus). */
 export function turnMarksOn(hostId: string): TurnMarks {
+  if (hostId === keyFocus()) return current;
+  const state = attentionOn(hostId);
+  if (state) return marksOfState(state);
   return hostId === keyFocus() ? current : projectRecord(Object.fromEntries(Object.entries(stored).filter(([entry]) => parseHostKey(entry) !== null)), hostId);
 }
 

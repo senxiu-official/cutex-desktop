@@ -22,6 +22,8 @@ const TOOLS_BY_KIND: Readonly<Record<ApprovalKind, readonly string[]>> = {
   browser_claim: ["browser_claim"],
   browser_open: ["browser_open"],
   workflow_run: ["workflow_start"],
+  // 个人助理跨项目写入 (r299): one exact edit per approval, never a rule — so not in APPROVAL_RULE_KINDS.
+  personal_assistant_write: [],
 };
 
 type SchemaCapabilities = { cutexTools?: unknown; features?: unknown };

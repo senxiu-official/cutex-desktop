@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.2.10 "Beautiful World" (2026-11-28)
+
+- Edit images attached to a message or opened in the viewer. Crop, rotate, annotate or redact parts of an image. The viewer's controls stay accessible while zoomed in.
+  编辑消息附件或查看器中打开的图片，可裁剪、旋转、标注和遮盖。放大图片时仍可使用查看器工具栏。
+- Input refinement opens above the composer and keeps the conversation in place. You can choose a template and its model from the refinement button.
+  输入优化浮在输入区上方，不会挪动会话内容。可从输入优化按钮选择模板及其模型。
+- Choose from 16 app icon styles. Luodian (mother-of-pearl) is the default, including in the installer. Download full portrait themes from Appearance when you need them.
+  可在 16 种应用图标间切换，默认使用螺钿，安装包也使用此图标。可在外观中按需下载完整头像主题。
+- On supported hosts, Artifacts opens to For you. Switch to All, filter by file type or purpose, or star an item to move it into For you.
+  支持此功能的主机上，成果页默认打开「呈阅」。可切换到「全部」，按文件类型和用途筛选，或为条目标星以移入「呈阅」。
+- Manage skills by runtime in Runtime configuration. Settings share one host picker, detail pages return to the previous row, and avatar controls are under Appearance. The optional status capsule is managed in Modules and status-row controls are under Conversation → Input.
+  在「运行时配置」中按运行时管理技能。设置共用一个主机选择器，子页返回时回到原来的位置，头像控制集中在「外观」。状态胶囊可在「模块」中启用，状态行设置移到「会话 → 输入」。
+- Project memory changes have their own timeline entry. Next Up explains why Read now is unavailable and clarifies how long a busy host may keep an item waiting.
+  项目记忆的增删改在时间线中单独显示。「接下来」会说明「现在读取」不可用的原因，并明确主机繁忙时最多还要等待多久。
+- Sidebar search combines filters in one menu and links to the full history results. Pin frequently used turn actions. Side chat keeps one streaming reply and shows an excerpt and time for the source message.
+  侧栏搜索将筛选集中在一个菜单中，并可打开完整的历史结果。常用回合操作可以固定。侧边对话只显示一份流式回复，并显示来源消息的摘要与时间。
+- The host picker shows the backend version for each online host. Browser identity sign-out and data clearing apply to the selected host, and services can open in the app again when another host is selected.
+  主机选择器显示每台在线主机的后端版本。浏览器身份的退出登录和清理数据按主机生效。查看另一台主机时，服务也可以在应用内打开。
+- The New agent page groups profiles by provider. On supported hosts, the desktop uses host-backed unread and attention state and shows personal assistant briefs and reminders.
+  新建智能体页面按服务商分组显示配置。在支持的主机上，桌面使用主机同步的未读和待处理状态，并显示个人助理简报与提醒。
+
 ## 0.2.9 "Beautiful World" (2026-11-26)
 
 - Fixed: choosing a project or model on the New agent page had no effect.

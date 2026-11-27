@@ -55,6 +55,7 @@ export const en: Record<keyof typeof zhCN, string> = {
   "services.remote.otherHost": "{name} is on {host}: {host} has no {{agent}} to open right now (not connected, or none), so it can't open in the app.",
   "services.remote.needsBrowser": "{name} is on {host}: turn on the Browser module to open it in the app.",
   "services.remote.noSystemBrowser": "Another device's services open only in the app",
+  "services.browserOff": "The Browser module is off, so {name} opened in the system browser.",
   "services.start": "Start",
   "services.stop": "Stop",
   "services.restart": "Restart",
